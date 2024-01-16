@@ -57,7 +57,7 @@ def main():
                     writer.writeheader()
         
             with open(log_file_path, mode='a', newline='') as csvfile:
-                fieldnames = ['time_stamp', 'user_name', 'ip_address']
+                fieldnames = ['time_stamp', 'user_name', 'ip_address', 'access', 'server']
                 writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
                 row = {'time_stamp': str(datetime.datetime.now()), 'user_name': user, 'ip_address': ip_address, 'access': access, 'server': server}
                 writer.writerow(row)
