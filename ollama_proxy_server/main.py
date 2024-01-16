@@ -46,7 +46,7 @@ def main():
 
     class RequestHandler(BaseHTTPRequestHandler):
         def add_access_log_entry(self, user, ip_address, access, server):
-            log_file_path = Path(sys.argv[1])
+            log_file_path = args.log_path
         
             if not log_file_path.exists():
                 with open(log_file_path, mode='w', newline='') as csvfile:
