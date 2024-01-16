@@ -20,8 +20,11 @@ def add_user(users_list=None):
         f.write(f'{user_name}: {key}\n')
     print(f'User {user_name} added to the authorized users list')
 
-if __name__ == '__main__':
+def main():
     if len(sys.argv) > 1 and sys.argv[1] == '--users_list':
         add_user(Path(sys.argv[2]))
     else:
         add_user()
+
+if __name__ == '__main__':
+    main()
