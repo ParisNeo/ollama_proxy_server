@@ -93,7 +93,7 @@ def main():
             if not self._validate_user_and_key():
                 ASCIIColors.red(f'User is not authorized')
                 client_ip, client_port = self.client_address
-                self.add_access_log_entry(user="unknown", ip_address=client_ip, "Denied", "None")
+                self.add_access_log_entry(user="unknown", ip_address=client_ip, access="Denied", server="None")
                 self.send_response(403)
                 self.end_headers()
                 return            
@@ -120,7 +120,7 @@ def main():
             # Apply the queuing mechanism only for a specific endpoint.
             if path == '/api/generate':
                 que = min_queued_server[1]['queue']
-                self.add_access_log_entry(user=self.user, ip_address=client_ip, "Authorized", min_queued_server[0])
+                self.add_access_log_entry(user=self.user, ip_address=client_ip, access="Authorized", server=min_queued_server[0])
                 que.put_nowait(1)
                 try:
                     response = requests.request(self.command, min_queued_server[1]['url'] + path, params=get_params, data=post_params)
