@@ -17,7 +17,7 @@ def add_user(users_list=None):
         users_list = Path(users_list) if users_list else Path('authorized_users.txt')
         users_list.touch(exist_ok=True)
     with open(users_list, 'a') as f:
-        f.write(f'{user_name},{key}\n')
+        f.write(f'{user_name}:{key}\n')
     print(f'User {user_name} added to the authorized users list')
 
 def main():
