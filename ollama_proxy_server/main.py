@@ -117,7 +117,6 @@ def main():
                 try:
                     response = requests.request(self.command, min_queued_server[1]['url'] + path, params=get_params, data=post_params)
                     self._send_response(response)
-                    self.wfile.write(response.content)
                 finally:
                     que.get_nowait()
             else:
