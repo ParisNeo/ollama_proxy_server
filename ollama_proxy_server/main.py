@@ -27,7 +27,7 @@ def get_authorized_users(filename):
         lines = f.readlines()
     authorized_users = {}
     for line in lines:
-        user, key = line.strip().split(',')
+        user, key = line.strip().split(':')
         authorized_users[user] = key
     return authorized_users
 
