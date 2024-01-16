@@ -44,19 +44,19 @@ def main():
     authorized_users = get_authorized_users(args.users_list)
 
     class RequestHandler(BaseHTTPRequestHandler):
-        def add_access_log_entry(user, ip_address):
+        def add_access_log_entry(self, user, ip_address, access):
             log_file_path = Path(sys.argv[1])
         
             if not log_file_path.exists():
                 with open(log_file_path, mode='w', newline='') as csvfile:
-                    fieldnames = ['time_stamp', 'user_name', 'ip_address']
+                    fieldnames = ['time_stamp', 'user_name', 'ip_address','access']
                     writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
                     writer.writeheader()
         
             with open(log_file_path, mode='a', newline='') as csvfile:
                 fieldnames = ['time_stamp', 'user_name', 'ip_address']
                 writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-                row = {'time_stamp': str(datetime.datetime.now()), 'user_name': user, 'ip_address': ip_address}
+                row = {'time_stamp': str(datetime.datetime.now()), 'user_name': user, 'ip_address': ip_address, 'access': access}
                 writer.writerow(row)
                 
         def _send_response(self, response):
@@ -87,6 +87,7 @@ def main():
         def proxy(self):
             if not self._validate_user_and_key():
                 ASCIIColors.red(f'User is not authorized')
+                # self.add_access_log_entry("unknown")
                 self.send_response(403)
                 self.end_headers()
                 return            
