@@ -15,6 +15,7 @@ import threading
 import argparse
 import base64
 from ascii_colors import ASCIIColors
+from pathlib import Path
 
 def get_config(filename):
     config = configparser.ConfigParser()
