@@ -28,11 +28,15 @@ Replace `http://localhost:11434/` with the URL and port of the first server. The
 
 ### Authorized users (authorized_users.txt)
 Create a file named `authorized_users.txt` in the same directory as your script, containing a list of user:key pairs, separated by commas and each on a new line:
-```makefile
+```text
 user1,key1
 user2,key2
 ```
 Replace `user1`, `key1`, `user2`, and `key2` with the desired username and API key for each user.
+You can also use the `ollama_proxy_add_user` utility to add user and generate a key automatically: 
+```makefile
+ollama_proxy_add_user --users_list [path to the authorized `authorized_users.txt` file]
+```
 
 ## Usage
 ### Starting the server
