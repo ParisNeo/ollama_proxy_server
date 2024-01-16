@@ -120,6 +120,7 @@ def main():
             # Apply the queuing mechanism only for a specific endpoint.
             if path == '/api/generate':
                 que = min_queued_server[1]['queue']
+                client_ip, client_port = self.client_address
                 self.add_access_log_entry(user=self.user, ip_address=client_ip, access="Authorized", server=min_queued_server[0])
                 que.put_nowait(1)
                 try:
