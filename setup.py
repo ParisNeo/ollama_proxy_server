@@ -31,6 +31,7 @@ setuptools.setup(
     entry_points={
         'console_scripts': [
             'ollama_proxy_server = ollama_proxy_server.main:main',
+            'ollama_proxy_add_user = ollama_proxy_server.add_user:main',
         ],
     },
     extras_require={"dev": requirements_dev},
