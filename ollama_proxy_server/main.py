@@ -35,7 +35,8 @@ def get_authorized_users(filename):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--config',default="config.ini", help='Path to the authorized users list')
+    parser.add_argument('--config', default="config.ini", help='Path to the authorized users list')
+    parser.add_argument('--log_path', default="access_log.txt", help='Path to the access log file')
     parser.add_argument('--users_list', default="authorized_users.txt", help='Path to the config file')
     parser.add_argument('--port', type=int, default=8000, help='Port number for the server')
     args = parser.parse_args()
@@ -43,7 +44,21 @@ def main():
     authorized_users = get_authorized_users(args.users_list)
 
     class RequestHandler(BaseHTTPRequestHandler):
-
+        def add_access_log_entry(user, ip_address):
+            log_file_path = Path(sys.argv[1])
+        
+            if not log_file_path.exists():
+                with open(log_file_path, mode='w', newline='') as csvfile:
+                    fieldnames = ['time_stamp', 'user_name', 'ip_address']
+                    writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                    writer.writeheader()
+        
+            with open(log_file_path, mode='a', newline='') as csvfile:
+                fieldnames = ['time_stamp', 'user_name', 'ip_address']
+                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                row = {'time_stamp': str(datetime.datetime.now()), 'user_name': user, 'ip_address': ip_address}
+                writer.writerow(row)
+                
         def _send_response(self, response):
             self.send_response(response.status_code)
             self.send_header('Content-type', response.headers['content-type'])
