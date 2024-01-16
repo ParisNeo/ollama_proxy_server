@@ -38,7 +38,7 @@ Replace `user1`, `key1`, `user2`, and `key2` with the desired username and API k
 ### Starting the server
 Start the Ollama Proxy Server by running the following command in your terminal:
 ```bash
-ollama_proxy_server
+ollama_proxy_server --config [configuration file path] --users_list [users list file path] --port [port number to access the proxy]
 ```
 The server will listen on port 808x, with x being the number of available ports starting from 0 (e.g., 8080, 8081, etc.). The first available port will be automatically selected if no other instance is running.
 
