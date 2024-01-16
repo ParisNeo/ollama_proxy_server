@@ -1,0 +1,5 @@
+configparser
+queues
+requests
+urllib3
+requests
