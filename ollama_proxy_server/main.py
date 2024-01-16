@@ -2,7 +2,7 @@
 project: ollama_proxy_server
 file: main.py
 author: ParisNeo
-description: This is a proxy server that adds a security layet to one or multiple ollama servers and routes the requests to the right server in order to minimize the charge of the server.
+description: This is a proxy server that adds a security layer to one or multiple ollama servers and routes the requests to the right server in order to minimize the charge of the server.
 """
 
 import configparser
