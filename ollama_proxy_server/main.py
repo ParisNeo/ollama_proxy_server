@@ -17,6 +17,7 @@ import base64
 from ascii_colors import ASCIIColors
 from pathlib import Path
 import csv
+import datetime
 
 def get_config(filename):
     config = configparser.ConfigParser()
