@@ -5,4 +5,3 @@ socketserver==3.5.0
 urllib3==1.26.8
 requests
 ascii_colors
-csv
