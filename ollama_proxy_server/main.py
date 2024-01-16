@@ -6,21 +6,34 @@ from queue import Queue
 import requests
 import threading
 import argparse
-
+import base64
+from ascii_colors import ASCIIColors
 
 def get_config(filename):
     config = configparser.ConfigParser()
     config.read(filename)
     return [(name, {'url': config[name]['url'], 'queue': Queue()}) for name in config.sections()]
 
+# Read the authorized users and their keys from a file
+def get_authorized_users(filename):
+    with open(filename, 'r') as f:
+        lines = f.readlines()
+    authorized_users = {}
+    for line in lines:
+        user, key = line.strip().split(',')
+        authorized_users[user] = key
+    return authorized_users
+
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--config',default="config.ini", help='Path to the config file') # , required=True
+    parser.add_argument('--config',default="config.ini", help='Path to the authorized users list')
+    parser.add_argument('--users_list', default="authorized_users.txt", help='Path to the config file')
     parser.add_argument('--port', type=int, default=8000, help='Port number for the server')
     args = parser.parse_args()
     servers = get_config(args.config)  
+    authorized_users = get_authorized_users(args.users_list)
 
     class RequestHandler(BaseHTTPRequestHandler):
 
@@ -31,15 +44,34 @@ def main():
             self.wfile.write(response.content)
 
         def do_GET(self):
+            self.log_request()
             self.proxy()
 
         def do_POST(self):
+            self.log_request()
             self.proxy()
 
+        def _validate_user_and_key(self):
+            # Extract the bearer token from the headers
+            auth_header = self.headers.get('Authorization')
+            if not auth_header or not auth_header.startswith('Bearer '):
+                return False
+            token = auth_header.split(' ')[1]
+            user, key = token.split(':')
+            
+            # Check if the user and key are in the list of authorized users
+            return authorized_users.get(user) == key
+        
         def proxy(self):
+            if not self._validate_user_and_key():
+                ASCIIColors.red(f'User is not authorized')
+                self.send_response(403)
+                self.end_headers()
+                return            
             url = urlparse(self.path)
             path = url.path
             get_params = parse_qs(url.query) or {}
+
 
             if self.command == "POST":
                 content_length = int(self.headers['Content-Length'])

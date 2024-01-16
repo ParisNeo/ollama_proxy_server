@@ -1,63 +1,108 @@
-# 🌺 **Petals Server**
+# Ollama Proxy Server
 
-![Petals Logo](<INSERT_IMAGE_PLACEHOLDER_HERE>.png)
+Ollama Proxy Server is a lightweight reverse proxy server designed for load balancing and rate limiting. It is licensed under the Apache 2.0 license and can be installed using pip. This README covers setting up, installing, and using the Ollama Proxy Server.
 
-**One decentralized tool for text generation and community collaboration**
+## Prerequisites
+Make sure you have Python (>=3.8) and Apache installed on your system before proceeding.
 
-## Table of Contents
-1. [Introduction](#intro)
-2. [Requirements](#requirements)
-3. [Installation](#installation)
-4. [Usage](#usage)
-5. [License](#license)
-6. [Contact](#contact)
-7. [Endpoints](#endpoints)
+## Installation
+1. Clone or download the `ollama_proxy_server` repository from GitHub: https://github.com/ParisNeo/ollama_proxy_server
+2. Navigate to the cloned directory in the terminal and run `pip install -e .`
 
----
+## Configuration
 
-## 🌺 **Introduction** (<span id="intro">)</span>
+### Servers configuration (config.ini)
+Create a file named `config.ini` in the same directory as your script, containing server configurations:
+```makefile
+[Server1]
+url = http://localhost:8080/
+queue_size = 5
 
-Petals is a decentralized text generation network designed to connect users with large language models, allowing them to harness the power of the community for efficient and collaborative text generation. With Petals Server, you can share your hardware resources (CPU and GPU) to contribute to the network while also utilizing it to generate text on demand.
+[Server2]
+url = http://localhost:8081/
+queue_size = 3
 
----
+# Add as many servers as needed, in the same format as [Server1] and [Server2].
+```
+Replace `http://localhost:8080/` with the URL and port of the first server. The `queue_size` value indicates the maximum number of requests that can be queued at a given time for this server.
 
-## 🌺 **Requirements** (<span id="requirements">)</span>
+### Authorized users (authorized_users.txt)
+Create a file named `authorized_users.txt` in the same directory as your script, containing a list of user:key pairs, separated by commas and each on a new line:
+```makefile
+user1,key1
+user2,key2
+```
+Replace `user1`, `key1`, `user2`, and `key2` with the desired username and API key for each user.
 
-To get started with Petals Server, ensure you have the following prerequisites:
-- Git for cloning the repository
-- Python 3.11 or higher
-- Operating system: Linux, macOS, or Windows with WSL (Windows Subsystem for Linux)
+## Usage
+### Starting the server
+Start the Ollama Proxy Server by running the following command in your terminal:
+```bash
+python ollama_proxy_server.py
+```
+The server will listen on port 808x, with x being the number of available ports starting from 0 (e.g., 8080, 8081, etc.). The first available port will be automatically selected if no other instance is running.
 
----
+### Client requests
+To send a request to the server, use the following command:
+```bash
+curl -X <METHOD> -H "Authorization: Bearer <USER_KEY>" http://localhost:<PORT>/<PATH> [--data <POST_DATA>]
+```
+Replace `<METHOD>` with the HTTP method (GET or POST), `<USER_KEY>` with a valid user:key pair from your `authorized_users.txt`, `<PORT>` with the port number of your running Ollama Proxy Server, and `<PATH>` with the target endpoint URL (e.g., "/api/generate"). If you are making a POST request, include the `--data <POST_DATA>` option to send data in the body.
 
-## 🌺 **Installation** (<span id="installation">)</span>
+For example:
+```bash
+curl -X POST -H "Authorization: Bearer user1:key1" http://localhost:8080/api/generate --data '{"data": "Hello, World!"}'
+``` # Ollama Proxy Server
 
-Follow these steps to install Petals Server on your local machine:
-1. Clone the Git repository using `git clone https://github.com/ParisNeo/petals_server.git`
-2. Navigate into the cloned directory (`cd petals_server`)
-3. Install dependencies with pip by running `pip install -e .`
-4. Launch the server with `petals_server`
+Ollama Proxy Server is a lightweight reverse proxy server designed for load balancing and rate limiting. It is licensed under the Apache 2.0 license and can be installed using pip. This README covers setting up, installing, and using the Ollama Proxy Server.
 
----
+## Prerequisites
+Make sure you have Python (>=3.8) and Apache installed on your system before proceeding.
 
-## 🌺 **Usage** (<span id="usage">)</span>
+## Installation
+1. Clone or download the `ollama_proxy_server` repository from GitHub: https://github.com/ParisNeo/ollama_proxy_server
+2. Navigate to the cloned directory in the terminal and run `pip install -e .`
 
-Once installed, you can use Petals Server as a decentralized text generation client and contribute your hardware resources to the network.
+## Configuration
 
----
+### Servers configuration (config.ini)
+Create a file named `config.ini` in the same directory as your script, containing server configurations:
+```makefile
+[Server1]
+url = http://localhost:8080/
+queue_size = 5
 
-## 🌺 **License** (<span id="license">)</span>
+[Server2]
+url = http://localhost:8081/
+queue_size = 3
 
-Petals Server is licensed under the [Apache License v2.0](https://www.apache.org/licenses/LICENSE-2.0).
+# Add as many servers as needed, in the same format as [Server1] and [Server2].
+```
+Replace `http://localhost:8080/` with the URL and port of the first server. The `queue_size` value indicates the maximum number of requests that can be queued at a given time for this server.
 
----
+### Authorized users (authorized_users.txt)
+Create a file named `authorized_users.txt` in the same directory as your script, containing a list of user:key pairs, separated by commas and each on a new line:
+```makefile
+user1:key1, user2:key2
+```
+Replace `user1`, `key1`, `user2`, and `key2` with the desired username and API key for each user.
 
-## 🌺 **Contact** (<span id="contact">)</span>
+## Usage
+### Starting the server
+Start the Ollama Proxy Server by running the following command in your terminal:
+```bash
+python ollama_proxy_server.py
+```
+The server will listen on port 808x, with x being the number of available ports starting from 0 (e.g., 8080, 8081, etc.). The first available port will be automatically selected if no other instance is running.
 
-For any queries or feedback, reach out to ParisNeo on Twitter (@SpaceNerduino), Discord (https://discord.gg/BDxacQmv), or subscribe to the r/lollms Subreddit for community updates and discussions.
+### Client requests
+To send a request to the server, use the following command:
+```bash
+curl -X <METHOD> -H "Authorization: Bearer <USER_KEY>" http://localhost:<PORT>/<PATH> [--data <POST_DATA>]
+```
+Replace `<METHOD>` with the HTTP method (GET or POST), `<USER_KEY>` with a valid user:key pair from your `authorized_users.txt`, `<PORT>` with the port number of your running Ollama Proxy Server, and `<PATH>` with the target endpoint URL (e.g., "/api/generate"). If you are making a POST request, include the `--data <POST_DATA>` option to send data in the body.
 
----
-
-## 🌺 **Endpoints** (<span id="endpoints">)</span>
-
-To explore all available endpoints, navigate to `http://localhost:8000/docs`.
+For example:
+```bash
+curl -X POST -H "Authorization: Bearer user1:key1" http://localhost:8080/api/generate --data '{"data": "Hello, World!"}'
+```
