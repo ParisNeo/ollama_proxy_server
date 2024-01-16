@@ -12,7 +12,7 @@ def add_user(users_list=None):
     """Add a new user to the users list file"""
     user_name = input('Enter your username: ')
     key = generate_key()
-    print(f'Your key is: {key}')
+    print(f'Your key is: {user_name}:{key}')
     if not users_list or not users_list.exists():
         users_list = Path(users_list) if users_list else Path('authorized_users.txt')
         users_list.touch(exist_ok=True)
