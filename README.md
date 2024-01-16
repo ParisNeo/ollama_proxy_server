@@ -14,17 +14,17 @@ Make sure you have Python (>=3.8) and Apache installed on your system before pro
 ### Servers configuration (config.ini)
 Create a file named `config.ini` in the same directory as your script, containing server configurations:
 ```makefile
-[Server1]
-url = http://localhost:8080/
+[DefaultServer]
+url = http://localhost:11434
 queue_size = 5
 
-[Server2]
-url = http://localhost:8081/
+[SecondaryServer]
+url = http://localhost:3002
 queue_size = 3
 
-# Add as many servers as needed, in the same format as [Server1] and [Server2].
+# Add as many servers as needed, in the same format as [DefaultServer] and [SecondaryServer].
 ```
-Replace `http://localhost:8080/` with the URL and port of the first server. The `queue_size` value indicates the maximum number of requests that can be queued at a given time for this server.
+Replace `http://localhost:11434/` with the URL and port of the first server. The `queue_size` value indicates the maximum number of requests that can be queued at a given time for this server.
 
 ### Authorized users (authorized_users.txt)
 Create a file named `authorized_users.txt` in the same directory as your script, containing a list of user:key pairs, separated by commas and each on a new line:
