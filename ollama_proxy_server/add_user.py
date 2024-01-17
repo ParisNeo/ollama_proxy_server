@@ -5,7 +5,7 @@ from pathlib import Path
 
 def generate_key(length=10):
     """Generate a random key of given length"""
-    chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()-_=+[]{}|;:,.<>?/~'
+    chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()-_=+[]{}|;,.<>?/~'
     return ''.join(random.choice(chars) for _ in range(length))
 
 def add_user(users_list=None):
