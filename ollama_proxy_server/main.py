@@ -77,21 +77,23 @@ def main():
             self.proxy()
 
         def _validate_user_and_key(self):
-            # Extract the bearer token from the headers
-            auth_header = self.headers.get('Authorization')
-            if not auth_header or not auth_header.startswith('Bearer '):
+            try:
+                # Extract the bearer token from the headers
+                auth_header = self.headers.get('Authorization')
+                if not auth_header or not auth_header.startswith('Bearer '):
+                    return False
+                token = auth_header.split(' ')[1]
+                user, key = token.split(':')
+                
+                # Check if the user and key are in the list of authorized users
+                if authorized_users.get(user) == key:
+                    self.user = user
+                    return True
+                else:
+                    self.user = "unknown"
                 return False
-            token = auth_header.split(' ')[1]
-            user, key = token.split(':')
-            
-            # Check if the user and key are in the list of authorized users
-            if authorized_users.get(user) == key:
-                self.user = user
-                return True
-            else:
-                self.user = "unknown"
+            except:
                 return False
-        
         def proxy(self):
             if not self._validate_user_and_key():
                 ASCIIColors.red(f'User is not authorized')
