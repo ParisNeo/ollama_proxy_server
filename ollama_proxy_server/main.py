@@ -96,7 +96,7 @@ def main():
             if not self._validate_user_and_key():
                 ASCIIColors.red(f'User is not authorized')
                 client_ip, client_port = self.client_address
-                self.add_access_log_entry(user="unknown", ip_address=client_ip, access="Denied", server="None", -1)
+                self.add_access_log_entry(event='rejected', user="unknown", ip_address=client_ip, access="Denied", server="None", nb_queued_requests_on_server=-1, error="Authentication failed")
                 self.send_response(403)
                 self.end_headers()
                 return            
