@@ -48,6 +48,8 @@ def main():
     args = parser.parse_args()
     servers = get_config(args.config)  
     authorized_users = get_authorized_users(args.users_list)
+    print("Ollama Proxy server")
+    print("Author: ParisNeo")
 
     class RequestHandler(BaseHTTPRequestHandler):
         def add_access_log_entry(self, event, user, ip_address, access, server, nb_queued_requests_on_server, error=""):
