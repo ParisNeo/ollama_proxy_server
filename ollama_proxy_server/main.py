@@ -30,8 +30,11 @@ def get_authorized_users(filename):
         lines = f.readlines()
     authorized_users = {}
     for line in lines:
-        user, key = line.strip().split(':')
-        authorized_users[user] = key
+        try:
+            user, key = line.strip().split(':')
+            authorized_users[user] = key
+        except:
+            ASCIIColors.red(f"User entry broken:{line.strip()}")
     return authorized_users
 
 
@@ -98,7 +101,13 @@ def main():
             if not self._validate_user_and_key():
                 ASCIIColors.red(f'User is not authorized')
                 client_ip, client_port = self.client_address
-                self.add_access_log_entry(event='rejected', user="unknown", ip_address=client_ip, access="Denied", server="None", nb_queued_requests_on_server=-1, error="Authentication failed")
+                # Extract the bearer token from the headers
+                auth_header = self.headers.get('Authorization')
+                if not auth_header or not auth_header.startswith('Bearer '):
+                    self.add_access_log_entry(event='rejected', user="unknown", ip_address=client_ip, access="Denied", server="None", nb_queued_requests_on_server=-1, error="Authentication failed")
+                else:
+                    token = auth_header.split(' ')[1]                
+                    self.add_access_log_entry(event='rejected', user=token, ip_address=client_ip, access="Denied", server="None", nb_queued_requests_on_server=-1, error="Authentication failed")
                 self.send_response(403)
                 self.end_headers()
                 return            
