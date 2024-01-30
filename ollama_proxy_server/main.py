@@ -47,9 +47,11 @@ def main():
     parser.add_argument('--log_path', default="access_log.txt", help='Path to the access log file')
     parser.add_argument('--users_list', default="authorized_users.txt", help='Path to the config file')
     parser.add_argument('--port', type=int, default=8000, help='Port number for the server')
+    parser.add_argument('-d', '--deactivate_security', action='store_true', const=True, default=False, help='Deactivates security')
     args = parser.parse_args()
     servers = get_config(args.config)  
     authorized_users = get_authorized_users(args.users_list)
+    deactivate_security = args.deactivate_security
     print("Ollama Proxy server")
     print("Author: ParisNeo")
 
@@ -102,7 +104,7 @@ def main():
             except:
                 return False
         def proxy(self):
-            if not self._validate_user_and_key():
+            if not deactivate_security and not self._validate_user_and_key():
                 ASCIIColors.red(f'User is not authorized')
                 client_ip, client_port = self.client_address
                 # Extract the bearer token from the headers
