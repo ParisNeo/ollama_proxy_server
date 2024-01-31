@@ -9,6 +9,18 @@ Make sure you have Python (>=3.8) and Apache installed on your system before pro
 1. Clone or download the `ollama_proxy_server` repository from GitHub: https://github.com/ParisNeo/ollama_proxy_server
 2. Navigate to the cloned directory in the terminal and run `pip install -e .`
 
+## Installation using Dockerfile
+1. Clone this repository as described above.
+2. Build your Container-Image with the Dockerfile provided by this repository
+
+### Podman
+`cd ollama_proxy_server`  
+`podman build -t ollama_proxy_server:latest .`
+
+### Docker
+`cd ollama_proxy_server`  
+`docker build -t ollama_proxy_server:latest .`
+
 ## Configuration
 
 ### Servers configuration (config.ini)
@@ -57,3 +69,7 @@ For example:
 ```bash
 curl -X POST -H "Authorization: Bearer user1:key1" http://localhost:8080/api/generate --data '{"data": "Hello, World!"}'
 ``` 
+### Starting the server using the created Container-Image
+To start the proxy in background with the above created image, you can use either   
+1) docker: `docker run -d --name ollama-proxy-server -p 8080:8080 ollama_proxy_server:latest`
+2) podman: `podman run -d --name ollama-proxy-server -p 8080:8080 ollama_proxy_server:latest`
