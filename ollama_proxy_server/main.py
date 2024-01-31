@@ -47,7 +47,7 @@ def main():
     parser.add_argument('--log_path', default="access_log.txt", help='Path to the access log file')
     parser.add_argument('--users_list', default="authorized_users.txt", help='Path to the config file')
     parser.add_argument('--port', type=int, default=8000, help='Port number for the server')
-    parser.add_argument('-d', '--deactivate_security', action='store_true', const=True, default=False, help='Deactivates security')
+    parser.add_argument('-d', '--deactivate_security', action='store_true', help='Deactivates security')
     args = parser.parse_args()
     servers = get_config(args.config)  
     authorized_users = get_authorized_users(args.users_list)
