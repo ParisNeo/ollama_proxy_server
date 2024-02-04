@@ -52,8 +52,8 @@ def main():
     servers = get_config(args.config)  
     authorized_users = get_authorized_users(args.users_list)
     deactivate_security = args.deactivate_security
-    print("Ollama Proxy server")
-    print("Author: ParisNeo")
+    ASCIIColors.red("Ollama Proxy server")
+    ASCIIColors.red("Author: ParisNeo")
 
     class RequestHandler(BaseHTTPRequestHandler):
         def add_access_log_entry(self, event, user, ip_address, access, server, nb_queued_requests_on_server, error=""):
@@ -91,8 +91,8 @@ def main():
                 auth_header = self.headers.get('Authorization')
                 if not auth_header or not auth_header.startswith('Bearer '):
                     return False
-                token = auth_header.split(' ')[1]
-                user, key = token.split(':')
+                token       = auth_header.split(' ')[1]
+                user, key   = token.split(':')
                 
                 # Check if the user and key are in the list of authorized users
                 if authorized_users.get(user) == key:
@@ -103,6 +103,7 @@ def main():
                 return False
             except:
                 return False
+                
         def proxy(self):
             if not deactivate_security and not self._validate_user_and_key():
                 ASCIIColors.red(f'User is not authorized')
