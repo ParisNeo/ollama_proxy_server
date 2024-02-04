@@ -67,7 +67,7 @@ Replace `<METHOD>` with the HTTP method (GET or POST), `<USER_KEY>` with a valid
 
 For example:
 ```bash
-curl -X POST -H "Authorization: Bearer user1:key1" http://localhost:8080/api/generate --data '{"data": "Hello, World!"}'
+curl -X POST -H "Authorization: Bearer user1:key1" http://localhost:8080/api/generate --data '{'model':'mixtral:latest,'prompt': "Once apon a time,","stream":false,"temperature": 0.3,"max_tokens": 1024}'
 ``` 
 ### Starting the server using the created Container-Image
 To start the proxy in background with the above created image, you can use either   
