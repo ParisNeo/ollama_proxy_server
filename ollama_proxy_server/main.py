@@ -139,7 +139,7 @@ def main():
                     min_queued_server = server
 
             # Apply the queuing mechanism only for a specific endpoint.
-            if path == '/api/generate':
+            if path == '/api/generate' or path == '/api/chat':
                 que = min_queued_server[1]['queue']
                 client_ip, client_port = self.client_address
                 self.add_access_log_entry(event="gen_request", user=self.user, ip_address=client_ip, access="Authorized", server=min_queued_server[0], nb_queued_requests_on_server=que.qsize())
