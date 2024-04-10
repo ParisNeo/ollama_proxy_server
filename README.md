@@ -54,7 +54,7 @@ ollama_proxy_add_user --users_list [path to the authorized `authorized_users.txt
 ### Starting the server
 Start the Ollama Proxy Server by running the following command in your terminal:
 ```bash
-ollama_proxy_server --config [configuration file path] --users_list [users list file path] --port [port number to access the proxy]
+python3 ollama_proxy_server/main.py --config [configuration file path] --users_list [users list file path] --port [port number to access the proxy]
 ```
 The server will listen on port 808x, with x being the number of available ports starting from 0 (e.g., 8080, 8081, etc.). The first available port will be automatically selected if no other instance is running.
 

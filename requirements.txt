@@ -1,6 +1,8 @@
-configparser
-queues
-requests
-urllib3
-requests
-ascii_colors
+ascii-colors==0.2.2
+certifi==2024.2.2
+charset-normalizer==3.3.2
+configparser==6.0.1
+idna==3.6
+queues==0.6.3
+requests==2.31.0
+urllib3==2.2.1
