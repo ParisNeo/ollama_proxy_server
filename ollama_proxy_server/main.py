@@ -84,7 +84,6 @@ def main():
             self.end_headers()
             for line in response.iter_lines():
                 if line:
-                    print(line)
                     chunk = line.decode('utf-8') + '\r\n'
                     self.wfile.write(chunk.encode('utf-8'))
                     self.wfile.flush()
