@@ -77,6 +77,17 @@ def main():
             self.end_headers()
             self.wfile.write(response.content)
 
+        def _send_response_stream(self, response):
+            self.send_response(response.status_code)
+            self.send_header('Content-type', response.headers['content-type'])
+            self.send_header('Stream', True)
+            self.end_headers()
+            for line in response.iter_lines():
+                if line:
+                    chunk = line.decode('utf-8') + '\r\n'
+                    self.wfile.write(chunk.encode('utf-8'))
+                    self.wfile.flush()
+
         def do_GET(self):
             self.log_request()
             self.proxy()
@@ -146,8 +157,8 @@ def main():
                 self.add_access_log_entry(event="gen_request", user=self.user, ip_address=client_ip, access="Authorized", server=min_queued_server[0], nb_queued_requests_on_server=que.qsize())
                 que.put_nowait(1)
                 try:
-                    response = requests.request(self.command, min_queued_server[1]['url'] + path, params=get_params, data=post_params)
-                    self._send_response(response)
+                    response = requests.request(self.command, min_queued_server[1]['url'] + path, params=get_params, data=post_params, stream=True)
+                    self._send_response_stream(response)
                 except Exception as ex:
                     self.add_access_log_entry(event="gen_error",user=self.user, ip_address=client_ip, access="Authorized", server=min_queued_server[0], nb_queued_requests_on_server=que.qsize(),error=ex)                    
                 finally:
