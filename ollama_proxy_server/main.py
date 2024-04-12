@@ -85,7 +85,7 @@ def main():
                         self.wfile.flush()
                 self.wfile.write(b"0\r\n\r\n")
             except BrokenPipeError:
-                pass 
+                pass
 
         def do_GET(self):
             self.log_request()
