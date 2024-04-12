@@ -7,13 +7,12 @@ description: This is a proxy server that adds a security layer to one or multipl
 
 import configparser
 from http.server import BaseHTTPRequestHandler, HTTPServer
+import json
 from socketserver import ThreadingMixIn
 from urllib.parse import urlparse, parse_qs
 from queue import Queue
 import requests
-import threading
 import argparse
-import base64
 from ascii_colors import ASCIIColors
 from pathlib import Path
 import csv
@@ -70,23 +69,23 @@ def main():
                 writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
                 row = {'time_stamp': str(datetime.datetime.now()), 'event':event, 'user_name': user, 'ip_address': ip_address, 'access': access, 'server': server, 'nb_queued_requests_on_server': nb_queued_requests_on_server, 'error': error}
                 writer.writerow(row)
-                
+
         def _send_response(self, response):
             self.send_response(response.status_code)
-            self.send_header('Content-type', response.headers['content-type'])
+            for key, value in response.headers.items():
+                if key.lower() not in ['content-length', 'transfer-encoding', 'content-encoding']:
+                    self.send_header(key, value)
+            self.send_header('Transfer-Encoding', 'chunked')
             self.end_headers()
-            self.wfile.write(response.content)
 
-        def _send_response_stream(self, response):
-            self.send_response(response.status_code)
-            self.send_header('Content-type', response.headers['content-type'])
-            self.send_header('Stream', True)
-            self.end_headers()
-            for line in response.iter_lines():
-                if line:
-                    chunk = line.decode('utf-8') + '\r\n'
-                    self.wfile.write(chunk.encode('utf-8'))
-                    self.wfile.flush()
+            try:
+                for chunk in response.iter_content(chunk_size=1024):
+                    if chunk:
+                        self.wfile.write(b"%X\r\n%s\r\n" % (len(chunk), chunk))
+                        self.wfile.flush()
+                self.wfile.write(b"0\r\n\r\n")
+            except BrokenPipeError:
+                pass
 
         def do_GET(self):
             self.log_request()
@@ -157,8 +156,14 @@ def main():
                 self.add_access_log_entry(event="gen_request", user=self.user, ip_address=client_ip, access="Authorized", server=min_queued_server[0], nb_queued_requests_on_server=que.qsize())
                 que.put_nowait(1)
                 try:
-                    response = requests.request(self.command, min_queued_server[1]['url'] + path, params=get_params, data=post_params, stream=True)
-                    self._send_response_stream(response)
+                    post_data_dict = {}
+
+                    if isinstance(post_data, bytes):
+                        post_data_str = post_data.decode('utf-8')
+                        post_data_dict = json.loads(post_data_str)
+
+                    response = requests.request(self.command, min_queued_server[1]['url'] + path, params=get_params, data=post_params, stream=post_data_dict.get("stream", False))
+                    self._send_response(response)
                 except Exception as ex:
                     self.add_access_log_entry(event="gen_error",user=self.user, ip_address=client_ip, access="Authorized", server=min_queued_server[0], nb_queued_requests_on_server=que.qsize(),error=ex)                    
                 finally:
