@@ -15,9 +15,8 @@ WORKDIR ollama_proxy_server
 RUN pip3 install -e .
 
 # Copy config.ini and authorized_users.txt into project working directory
-#COPY config.ini .
-#COPY authorized_users.txt .
-COPY . .
+COPY config.ini .
+COPY authorized_users.txt .
 # Start the proxy server as entrypoint
 ENTRYPOINT ["ollama_proxy_server"]
 
