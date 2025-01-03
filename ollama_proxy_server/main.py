@@ -87,6 +87,10 @@ def main():
             except BrokenPipeError:
                 pass
 
+        def do_HEAD(self):
+            self.log_request()
+            self.proxy()
+
         def do_GET(self):
             self.log_request()
             self.proxy()
