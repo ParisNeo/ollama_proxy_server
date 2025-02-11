@@ -76,7 +76,7 @@ def main():
                 if key.lower() not in ['content-length', 'transfer-encoding', 'content-encoding']:
                     self.send_header(key, value)
             self.end_headers()
-        
+
             try:
                 # Read the full content to avoid chunking issues
                 content = response.content
@@ -84,7 +84,6 @@ def main():
                 self.wfile.flush()
             except BrokenPipeError:
                 pass
-
 
         def do_HEAD(self):
             self.log_request()
