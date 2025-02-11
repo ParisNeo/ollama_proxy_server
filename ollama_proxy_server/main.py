@@ -75,15 +75,13 @@ def main():
             for key, value in response.headers.items():
                 if key.lower() not in ['content-length', 'transfer-encoding', 'content-encoding']:
                     self.send_header(key, value)
-            self.send_header('Transfer-Encoding', 'chunked')
             self.end_headers()
 
             try:
-                for chunk in response.iter_content(chunk_size=1024):
-                    if chunk:
-                        self.wfile.write(b"%X\r\n%s\r\n" % (len(chunk), chunk))
-                        self.wfile.flush()
-                self.wfile.write(b"0\r\n\r\n")
+                # Read the full content to avoid chunking issues
+                content = response.content
+                self.wfile.write(content)
+                self.wfile.flush()
             except BrokenPipeError:
                 pass
 
@@ -154,7 +152,7 @@ def main():
                     min_queued_server = server
 
             # Apply the queuing mechanism only for a specific endpoint.
-            if path == '/api/generate' or path == '/api/chat':
+            if path == '/api/generate' or path == '/api/chat' or path == '/v1/chat/completions':
                 que = min_queued_server[1]['queue']
                 client_ip, client_port = self.client_address
                 self.add_access_log_entry(event="gen_request", user=self.user, ip_address=client_ip, access="Authorized", server=min_queued_server[0], nb_queued_requests_on_server=que.qsize())
