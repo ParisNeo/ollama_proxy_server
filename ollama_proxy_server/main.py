@@ -75,15 +75,13 @@ def main():
             for key, value in response.headers.items():
                 if key.lower() not in ['content-length', 'transfer-encoding', 'content-encoding']:
                     self.send_header(key, value)
-            self.send_header('Transfer-Encoding', 'chunked')
             self.end_headers()
-
+        
             try:
-                for chunk in response.iter_content(chunk_size=1024):
-                    if chunk:
-                        self.wfile.write(b"%X\r\n%s\r\n" % (len(chunk), chunk))
-                        self.wfile.flush()
-                self.wfile.write(b"0\r\n\r\n")
+                # Read the full content to avoid chunking issues
+                content = response.content
+                self.wfile.write(content)
+                self.wfile.flush()
             except BrokenPipeError:
                 pass
 
