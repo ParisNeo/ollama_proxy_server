@@ -1,6 +1,14 @@
+"""
+project: ollama_proxy_server
+file: add_user.py
+author: ParisNeo (Saifeddine ALOUI)
+description: A utility to add users to the authorized_users.txt file for the Ollama Proxy Server.
+license: Apache 2.0
+repository: https://github.com/ParisNeo/ollama_proxy_server
+"""
+
 import sys
 import random
-from getpass import getuser
 from pathlib import Path
 
 def generate_key(length=10):
