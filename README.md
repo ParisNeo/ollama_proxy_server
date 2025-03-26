@@ -2,7 +2,7 @@
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Python Version](https://img.shields.io/badge/python-3.11-green.svg)](https://www.python.org/downloads/release/python-311/)
-[![GitHub Stars](https://img.shields.io/github/stars/ParisNeo/olllama_proxy_server?style=social)](https://github.com/ParisNeo/olllama_proxy_server)
+[![GitHub Stars](https://img.shields.io/github/stars/ParisNeo/ollama_proxy_server?style=social)](https://github.com/ParisNeo/ollama_proxy_server)
 
 Ollama Proxy Server is a lightweight, secure proxy server designed to add a security layer to one or multiple Ollama servers. It routes incoming requests to the backend server with the lowest load, minimizing server strain and improving responsiveness. Built with Python, this project is ideal for managing distributed Ollama instances with authentication and logging capabilities.
 
