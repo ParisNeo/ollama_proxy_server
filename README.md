@@ -1,75 +1,156 @@
-# Ollama Proxy Server
+## Ollama Proxy Server
 
-Ollama Proxy Server is a lightweight reverse proxy server designed for load balancing and rate limiting. It is licensed under the Apache 2.0 license and can be installed using pip. This README covers setting up, installing, and using the Ollama Proxy Server.
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+[![Python Version](https://img.shields.io/badge/python-3.11-green.svg)](https://www.python.org/downloads/release/python-311/)
+[![GitHub Stars](https://img.shields.io/github/stars/ParisNeo/olllama_proxy_server?style=social)](https://github.com/ParisNeo/olllama_proxy_server)
 
-## Prerequisites
-Make sure you have Python (>=3.8) and Apache installed on your system before proceeding.
+Ollama Proxy Server is a lightweight, secure proxy server designed to add a security layer to one or multiple Ollama servers. It routes incoming requests to the backend server with the lowest load, minimizing server strain and improving responsiveness. Built with Python, this project is ideal for managing distributed Ollama instances with authentication and logging capabilities.
+
+**Author:** ParisNeo
+
+**License:** Apache 2.0
+
+**Repository:** [https://github.com/ParisNeo/olllama_proxy_server](https://github.com/ParisNeo/olllama_proxy_server)
+
+## Features
+
+*   **Load Balancing:** Routes requests to the Ollama server with the fewest ongoing requests.
+*   **Security:** Implements bearer token authentication using a `user:key` format.
+*   **Asynchronous Logging:** Logs access and errors to a CSV file without blocking request handling.
+*   **Connection Pooling:** Uses persistent HTTP connections for faster backend communication.
+*   **Streaming Support:** Properly forwards streaming responses from Ollama servers.
+*   **Command-Line Tools:** Includes utilities to run the server and manage users.
+*   **Cross-Platform:** Runs on any OS supporting Python 3.11.
+
+## Project Structure
+
+```
+olllama_proxy_server/
+  |- add_user.py               # Script to add users to the authorized list
+  |- authorized_users.txt.example # Example authorized users file
+  |- config.ini.example        # Example configuration file
+  |- main.py                   # Main proxy server script
+  .gitignore                    # Git ignore file
+  Dockerfile                    # Docker configuration
+  LICENSE                       # Apache 2.0 license text
+  requirements.txt              # Runtime dependencies
+  requirements_dev.txt          # Development dependencies
+  setup.py                      # Setup script for installation
+  README.md                     # This file
+```
 
 ## Installation
-1. Clone or download the `ollama_proxy_server` repository from GitHub: https://github.com/ParisNeo/ollama_proxy_server
-2. Navigate to the cloned directory in the terminal and run `pip install -e .`
 
-## Installation using Dockerfile
-1. Clone this repository as described above.
-2. Build your Container-Image with the Dockerfile provided by this repository
+### Prerequisites
 
-### Podman
-`cd ollama_proxy_server`  
-`podman build -t ollama_proxy_server:latest .`
+*   Python 3.11 or higher
+*   Git (optional, for cloning the repository)
 
-### Docker
-`cd ollama_proxy_server`  
-`docker build -t ollama_proxy_server:latest .`
+### Option 1: Install from PyPI (Not Yet Published)
+
+Once published, install using pip:
+
+```bash
+pip install ollama_proxy_server
+```
+
+### Option 2: Install from Source
+
+Clone the repository:
+
+```bash
+git clone https://github.com/ParisNeo/olllama_proxy_server.git
+cd ollama_proxy_server
+```
+
+Install dependencies:
+
+```bash
+pip install -r requirements.txt
+```
+
+Install the package:
+
+```bash
+pip install .
+```
+
+### Option 3: Use Docker
+
+Build the Docker image:
+
+```bash
+docker build -t ollama_proxy_server .
+```
+
+Run the container:
+
+```bash
+docker run -p 8000:8000 -v $(pwd)/config.ini:/app/config.ini -v $(pwd)/authorized_users.txt:/app/authorized_users.txt ollama_proxy_server
+```
 
 ## Configuration
 
-### Servers configuration (config.ini)
-Create a file named `config.ini` in the same directory as your script, containing server configurations:
-```makefile
-[DefaultServer]
-url = http://localhost:11434
-queue_size = 5
+1.  **`config.ini`**
 
-[SecondaryServer]
-url = http://localhost:3002
-queue_size = 3
+    Copy `config.ini.example` to `config.ini` and edit it:
 
-# Add as many servers as needed, in the same format as [DefaultServer] and [SecondaryServer].
-```
-Replace `http://localhost:11434/` with the URL and port of the first server. The `queue_size` value indicates the maximum number of requests that can be queued at a given time for this server.
+    ```ini
+    [server0]
+    url = http://localhost:11434
 
-### Authorized users (authorized_users.txt)
-Create a file named `authorized_users.txt` in the same directory as your script, containing a list of user:key pairs, separated by commas and each on a new line:
-```text
-user1:key1
-user2:key2
-```
-Replace `user1`, `key1`, `user2`, and `key2` with the desired username and API key for each user.
-You can also use the `ollama_proxy_add_user` utility to add user and generate a key automatically: 
-```makefile
-ollama_proxy_add_user --users_list [path to the authorized `authorized_users.txt` file]
-```
+    # Add more servers as needed
+    # [server1]
+    # url = http://another-server:11434
+    ```
+
+    *   `url`: The URL of an Ollama backend server.
+
+2.  **`authorized_users.txt`**
+
+    Copy `authorized_users.txt.example` to `authorized_users.txt` and edit it:
+
+    ```
+    user:key
+    another_user:another_key
+    ```
 
 ## Usage
-### Starting the server
-Start the Ollama Proxy Server by running the following command in your terminal:
-```bash
-python3 ollama_proxy_server/main.py --config [configuration file path] --users_list [users list file path] --port [port number to access the proxy]
-```
-The server will listen on port 808x, with x being the number of available ports starting from 0 (e.g., 8080, 8081, etc.). The first available port will be automatically selected if no other instance is running.
 
-### Client requests
-To send a request to the server, use the following command:
-```bash
-curl -X <METHOD> -H "Authorization: Bearer <USER_KEY>" http://localhost:<PORT>/<PATH> [--data <POST_DATA>]
-```
-Replace `<METHOD>` with the HTTP method (GET or POST), `<USER_KEY>` with a valid user:key pair from your `authorized_users.txt`, `<PORT>` with the port number of your running Ollama Proxy Server, and `<PATH>` with the target endpoint URL (e.g., "/api/generate"). If you are making a POST request, include the `--data <POST_DATA>` option to send data in the body.
+### Running the Server
 
-For example:
 ```bash
-curl -X POST -H "Authorization: Bearer user1:key1" http://localhost:8080/api/generate --data '{'model':'mixtral:latest,'prompt': "Once apon a time,","stream":false,"temperature": 0.3,"max_tokens": 1024}'
-``` 
-### Starting the server using the created Container-Image
-To start the proxy in background with the above created image, you can use either   
-1) docker: `docker run -d --name ollama-proxy-server -p 8080:8080 ollama_proxy_server:latest`
-2) podman: `podman run -d --name ollama-proxy-server -p 8080:8080 ollama_proxy_server:latest`
+python main.py --config config.ini
+```
+
+### Managing Users
+
+Use the `add_user.py` script to add new users.
+
+```bash
+python add_user.py <username> <key>
+```
+
+## Contributing
+
+Contributions are welcome! Please follow these steps:
+
+1.  Fork the repository.
+2.  Create a feature branch (git checkout -b feature/your-feature).
+3.  Commit your changes (git commit -am 'Add your feature').
+4.  Push to the branch (git push origin feature/your-feature).
+5.  Open a Pull Request.
+
+See `CONTRIBUTING.md` for more details (to be added).
+
+## License
+
+This project is licensed under the Apache License 2.0. See the `LICENSE` file for details.
+
+## Acknowledgments
+
+Built by ParisNeo.
+
+Thanks to the open-source community for tools like `requests` and `ascii_colors`.
+
+See you soon!
