@@ -120,7 +120,7 @@ docker run -p 8000:8000 -v $(pwd)/config.ini:/app/config.ini -v $(pwd)/authorize
 ### Running the Server
 
 ```bash
-python main.py --config config.ini
+python main.py --config config.ini --users_list authorized_users.txt
 ```
 
 ### Managing Users
