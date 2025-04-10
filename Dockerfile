@@ -21,5 +21,8 @@ COPY authorized_users.txt .
 # Start the proxy server as entrypoint
 ENTRYPOINT ["ollama_proxy_server"]
 
+# Do not buffer output, e.g. logs to stdout
+ENV PYTHONUNBUFFERED=1
+
 # Set command line parameters
 CMD ["--config", "./config.ini", "--users_list", "./authorized_users.txt", "--port", "8080"]

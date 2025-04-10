@@ -86,7 +86,13 @@ docker build -t ollama_proxy_server .
 Run the container:
 
 ```bash
-docker run -p 8000:8000 -v $(pwd)/config.ini:/app/config.ini -v $(pwd)/authorized_users.txt:/app/authorized_users.txt ollama_proxy_server
+docker run -p 8080:8080 -v $(pwd)/config.ini:/app/config.ini -v $(pwd)/authorized_users.txt:/app/authorized_users.txt ollama_proxy_server
+```
+
+Test that it works:
+
+```bash
+curl localhost:8080 -H "Authorization: Bearer user1:0XAXAXAQX5A1F"
 ```
 
 ## Configuration
