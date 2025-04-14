@@ -6,26 +6,23 @@ import setuptools
 with open("README.md", "r") as fh:
     long_description = fh.read()
 
-
 def read_requirements(path: Union[str, Path]):
     with open(path, "r") as file:
         return file.read().splitlines()
 
-
 requirements = read_requirements("requirements.txt")
 requirements_dev = read_requirements("requirements_dev.txt")
-
 
 setuptools.setup(
     name="ollama_proxy_server",
     version="7.1.0",
     author="Saifeddine ALOUI (ParisNeo)",
     author_email="aloui.saifeddine@gmail.com",
-    description="A fastapi server for petals decentralized text generation",
+    description="A proxy server adding a security layer to Ollama servers, routing requests to minimize server load",
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/ParisNeo/ollama_proxy_server",
-    packages=setuptools.find_packages(),  
+    packages=setuptools.find_packages(),
     include_package_data=True,
     install_requires=requirements,
     entry_points={

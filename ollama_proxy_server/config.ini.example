@@ -1,0 +1,22 @@
+# Example configuration file for Ollama Proxy Server
+# Copy this file to config.ini and edit the values to match your environment.
+
+# Section for backend server URLs
+# Each server should have its own section, e.g., [server0], [server1], etc.
+# The 'url' key specifies the URL of the backend Ollama server.
+[server0]
+url = http://localhost:11434
+
+# Add additional servers as needed, e.g.:
+# [server1]
+# url = http://another-server:11434
+
+# Section for logging configuration
+[Logging]
+# log_path: the path to the access log file (ensure the application has write permissions)
+log_path = access_log.txt
+
+# Section for user management
+[Users]
+# users_list: the path to the file containing authorized users and their keys
+users_list = authorized_users.txt
