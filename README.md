@@ -10,7 +10,7 @@ Ollama Proxy Server is a lightweight, secure proxy server designed to add a secu
 
 **License:** Apache 2.0
 
-**Repository:** [https://github.com/ParisNeo/olllama_proxy_server](https://github.com/ParisNeo/olllama_proxy_server)
+**Repository:** [https://github.com/ParisNeo/ollama_proxy_server](https://github.com/ParisNeo/ollama_proxy_server)
 
 ## Features
 
@@ -25,7 +25,7 @@ Ollama Proxy Server is a lightweight, secure proxy server designed to add a secu
 ## Project Structure
 
 ```
-olllama_proxy_server/
+ollama_proxy_server/
   |- add_user.py               # Script to add users to the authorized list
   |- authorized_users.txt.example # Example authorized users file
   |- config.ini.example        # Example configuration file
@@ -59,7 +59,7 @@ pip install ollama_proxy_server
 Clone the repository:
 
 ```bash
-git clone https://github.com/ParisNeo/olllama_proxy_server.git
+git clone https://github.com/ParisNeo/ollama_proxy_server.git
 cd ollama_proxy_server
 ```
 
