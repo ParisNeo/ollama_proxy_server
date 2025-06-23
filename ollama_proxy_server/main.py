@@ -150,7 +150,7 @@ def main():
 
         def proxy(self):
             self.user = "unknown"
-            if not deactivate_security and not self._validate_user_and_key():
+            if not args.deactivate_security and not self._validate_user_and_key():
                 ASCIIColors.red(f'User is not authorized')
                 client_ip, client_port = self.client_address
                 # Extract the bearer token from the headers
