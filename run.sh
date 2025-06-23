@@ -4,4 +4,4 @@
 source ./venv/bin/activate
 
 # Run the Python script with all passed arguments
-python ollama-proxy-server/main.py "$@"
+python ollama_proxy_server/main.py "$@"
