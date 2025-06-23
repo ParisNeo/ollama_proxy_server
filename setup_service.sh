@@ -15,6 +15,10 @@ SCRIPT_PATH="$WORKING_DIR/ollama-proxy-server/main.py"
 CONFIG_FILE="/etc/ops/config.ini"
 AUTHORIZED_USERS_FILE="/etc/ops/authorized_users.txt"
 
+# Default port and log path; these can be customized by the user
+DEFAULT_PORT=11534
+DEFAULT_LOG_PATH="$LOG_DIR/server.log"
+
 echo "Setting up Ollama Proxy Server..."
 
 # Create dedicated user if it doesn't exist already
@@ -36,6 +40,13 @@ sudo chown -R "$USER:$USER" "$LOG_DIR"
 
 # Create systemd service file
 echo "Creating systemd service..."
+
+read -p "Enter the port number (default: $DEFAULT_PORT): " PORT
+PORT=${PORT:-$DEFAULT_PORT}
+
+read -p "Enter the log path (default: $DEFAULT_LOG_PATH): " LOG_PATH
+LOG_PATH=${LOG_PATH:-$DEFAULT_LOG_PATH}
+
 sudo tee /etc/systemd/system/$SERVICE_NAME.service > /dev/null << EOF
 [Unit]
 Description=Ollama Proxy Server
@@ -47,7 +58,7 @@ Type=simple
 User=$USER
 Group=$USER
 WorkingDirectory=$WORKING_DIR
-ExecStart=/bin/bash $WORKING_DIR/run.sh --log_path $LOG_DIR/server.log --port 11534 --config $CONFIG_FILE --users_list $AUTHORIZED_USERS_FILE
+ExecStart=/bin/bash $WORKING_DIR/run.sh --log_path $LOG_PATH --port $PORT --config $CONFIG_FILE --users_list $AUTHORIZED_USERS_FILE
 Restart=always
 RestartSec=10
 StandardOutput=journal
