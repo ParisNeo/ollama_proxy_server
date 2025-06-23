@@ -12,6 +12,8 @@ fi
 WORKING_DIR=$1
 LOG_DIR="$WORKING_DIR/logs"
 SCRIPT_PATH="$WORKING_DIR/ollama-proxy-server/main.py"
+CONFIG_FILE="/etc/ops/config.ini"
+AUTHORIZED_USERS_FILE="/etc/ops/authorized_users.txt"
 
 echo "Setting up Ollama Proxy Server..."
 
@@ -45,7 +47,7 @@ Type=simple
 User=$USER
 Group=$USER
 WorkingDirectory=$WORKING_DIR
-ExecStart=/bin/bash $WORKING_DIR/run.sh
+ExecStart=/bin/bash $WORKING_DIR/run.sh --log_path $LOG_DIR/server.log --port 11534 --config $CONFIG_FILE --users_list $AUTHORIZED_USERS_FILE
 Restart=always
 RestartSec=10
 StandardOutput=journal
@@ -93,6 +95,27 @@ $LOG_DIR/*.log {
     endscript
 }
 EOF
+
+# Create and populate config.ini and authorized_users.txt files
+echo "Creating configuration files..."
+sudo mkdir -p /etc/ops
+sudo tee $CONFIG_FILE > /dev/null << EOF
+[DefaultServer]
+url = http://localhost:11434
+EOF
+sudo chown $USER:$USER $CONFIG_FILE
+
+echo "Adding authorized users to the list. Type 'done' when finished."
+while true; do
+    read -p "Enter user:password or type 'done': " input
+    if [ "$input" == "done" ]; then
+        break
+    fi
+    echo "$input" | sudo tee -a $AUTHORIZED_USERS_FILE > /dev/null
+    sudo chown $USER:$USER $AUTHORIZED_USERS_FILE
+done
+
+echo "You can add more users to the authorized_users.txt file if needed."
 
 # Reload systemd and enable service
 echo "Enabling service..."
