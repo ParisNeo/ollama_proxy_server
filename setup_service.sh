@@ -128,6 +128,51 @@ done
 
 echo "You can add more users to the authorized_users.txt file if needed."
 
+# Create ops command script
+echo "Creating 'ops' command..."
+sudo tee /usr/local/bin/ops > /dev/null << 'EOF'
+#!/bin/bash
+
+# Define usage function to display help message
+usage() {
+    echo "Usage: $0 add_user username:password"
+    exit 1
+}
+
+# Check if exactly one argument is provided and it's 'add_user'
+if [ "$#" -ne 2 ] || [ "$1" != "add_user" ]; then
+    usage
+fi
+
+USER_PAIR="$2"
+
+# Extract the user and password from the input
+IFS=':' read -r USER PASSWORD <<< "$USER_PAIR"
+if [ -z "$USER" ] || [ -z "$PASSWORD" ]; then
+    echo "Invalid username:password format."
+    usage
+fi
+
+AUTHORIZED_USERS_FILE="/etc/ops/authorized_users.txt"
+
+# Check if the authorized_users file exists, create it otherwise
+sudo mkdir -p /etc/ops
+if [ ! -f "$AUTHORIZED_USERS_FILE" ]; then
+    sudo touch $AUTHORIZED_USERS_FILE
+fi
+
+# Append the new user:password pair to the file
+echo "$USER:$PASSWORD" | sudo tee -a $AUTHORIZED_USERS_FILE > /dev/null
+
+# Ensure correct permissions for the file
+sudo chown ops:ops $AUTHORIZED_USERS_FILE
+
+echo "User '$USER' added successfully."
+EOF
+
+# Make ops command executable
+sudo chmod +x /usr/local/bin/ops
+
 # Reload systemd and enable service
 echo "Enabling service..."
 sudo systemctl daemon-reload
@@ -141,3 +186,7 @@ echo "  Stop:    sudo systemctl stop $SERVICE_NAME"
 echo "  Status:  sudo journalctl -u $SERVICE_NAME -f"
 echo "  Logs:    sudo journalctl -u $SERVICE_NAME -f"
 echo "  Reports: ls $WORKING_DIR/reports/"
+
+echo ""
+echo "How to use the new 'ops' command:"
+echo "  To add a user, run: ops add_user username:password"
