@@ -61,7 +61,7 @@ def display_config(args, servers, authorized_users):
     # Additional config details
     if servers:
         print("\n🌐 Servers Configuration:")
-        for server in servers.items():
+        for server in servers:
             ASCIIColors.green(f"  {server[0]}: {server[1]}")
 
     print("\n🔑 Authorized Users:")
