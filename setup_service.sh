@@ -2,7 +2,7 @@
 
 # Configuration with parameters
 SERVICE_NAME="ollama-proxy-server"
-USER="ollama-proxy-server"
+USER="ops"
 
 if [ "$#" -ne 1 ]; then
     echo "Usage: $0 <working_directory>"
