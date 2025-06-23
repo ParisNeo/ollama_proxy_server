@@ -18,7 +18,7 @@ echo "Setting up Ollama Proxy Server..."
 # Create dedicated user if it doesn't exist already
 if ! id "$USER" &>/dev/null; then
     echo "Creating user $USER..."
-    sudo useradd -r -s /bin/false "/home/$USER"
+    sudo useradd -r -s /bin/false "$USER"
 fi
 
 # Ensure the working directory is writable by the dedicated user
