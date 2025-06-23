@@ -29,7 +29,7 @@ ollama_proxy_server/
   |- add_user.py               # Script to add users to the authorized list
   |- main.py                   # Main proxy server script
   example.authorized_users.txt # Example authorized users file
-  example.config.ini        # Example configuration file
+  example.config.ini           # Example configuration file
   .gitignore                    # Git ignore file
   Dockerfile                    # Docker configuration
   LICENSE                       # Apache 2.0 license text
@@ -138,6 +138,63 @@ python add_user.py <username> <key>
 ```
 
 Alternatively, you can use the newly created `ops` command:
+
+```bash
+sudo ops add_user username:password
+```
+
+## Setup as a Service
+
+### Using `setup_service.sh`
+
+The repository includes a script called `setup_service.sh` to set up Ollama Proxy Server as a systemd service. This allows it to run in the background and start on boot.
+
+1. **Download the Repository:**
+
+   ```bash
+   git clone https://github.com/ParisNeo/ollama_proxy_server.git
+   cd ollama_proxy_server
+   ```
+
+2. **Make `setup_service.sh` Executable:**
+
+   ```bash
+   chmod +x setup_service.sh
+   ```
+
+3. **Run the Script with sudo Privileges:**
+
+   ```bash
+   sudo ./setup_service.sh /path/to/working/directory
+   ```
+
+   Replace `/path/to/working/directory` with the path where you want to set up your proxy server.
+
+4. **Follow Prompts:**
+   - You will be prompted to provide a port number (default is 11534) and log path.
+   - You'll also add users and their passwords which will populate `/etc/ops/authorized_users.txt`.
+
+5. **Start the Service:**
+
+   ```bash
+   sudo systemctl start ollama-proxy-server
+   ```
+
+6. **Enable the Service to Start on Boot:**
+
+   ```bash
+   sudo systemctl enable ollama-proxy-server
+   ```
+
+7. **Check the Status of the Service:**
+
+   ```bash
+   sudo journalctl -u ollama-proxy-server -f
+   ```
+
+### Managing Users with `ops` Command
+
+After setting up the service, you can add more users using the new `ops` command:
 
 ```bash
 sudo ops add_user username:password
