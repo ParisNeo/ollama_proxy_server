@@ -1,4 +1,4 @@
-## Ollama Proxy Server
+# Ollama Proxy Server
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Python Version](https://img.shields.io/badge/python-3.11-green.svg)](https://www.python.org/downloads/release/python-311/)
@@ -24,7 +24,7 @@ Ollama Proxy Server is a lightweight, secure proxy server designed to add a secu
 
 ## Project Structure
 
-```
+```plaintext
 ollama_proxy_server/
   |- add_user.py               # Script to add users to the authorized list
   |- authorized_users.txt.example # Example authorized users file
@@ -97,29 +97,29 @@ curl localhost:8080 -H "Authorization: Bearer user1:0XAXAXAQX5A1F"
 
 ## Configuration
 
-1.  **`config.ini`**
+### `config.ini`
 
-    Copy `config.ini.example` to `config.ini` and edit it:
+Copy `config.ini.example` to `config.ini` and edit it:
 
-    ```ini
-    [server0]
-    url = http://localhost:11434
+```ini
+[server0]
+url = http://localhost:11434
 
-    # Add more servers as needed
-    # [server1]
-    # url = http://another-server:11434
-    ```
+# Add more servers as needed
+# [server1]
+# url = http://another-server:11434
+```
 
-    *   `url`: The URL of an Ollama backend server.
+*   `url`: The URL of an Ollama backend server.
 
-2.  **`authorized_users.txt`**
+### `authorized_users.txt`
 
-    Copy `authorized_users.txt.example` to `authorized_users.txt` and edit it:
+Copy `authorized_users.txt.example` to `authorized_users.txt` and edit it:
 
-    ```
-    user:key
-    another_user:another_key
-    ```
+```plaintext
+user:key
+another_user:another_key
+```
 
 ## Usage
 
@@ -137,15 +137,21 @@ Use the `add_user.py` script to add new users.
 python add_user.py <username> <key>
 ```
 
+Alternatively, you can use the newly created `ops` command:
+
+```bash
+sudo ops add_user username:password
+```
+
 ## Contributing
 
 Contributions are welcome! Please follow these steps:
 
-1.  Fork the repository.
-2.  Create a feature branch (git checkout -b feature/your-feature).
-3.  Commit your changes (git commit -am 'Add your feature').
-4.  Push to the branch (git push origin feature/your-feature).
-5.  Open a Pull Request.
+1. Fork the repository.
+2. Create a feature branch (`git checkout -b feature/your-feature`).
+3. Commit your changes (`git commit -am 'Add your feature'`).
+4. Push to the branch (`git push origin feature/your-feature`).
+5. Open a Pull Request.
 
 See `CONTRIBUTING.md` for more details (to be added).
 
