@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ollama_proxy_server"
+version = "7.1.0"
+description = "A fastapi server for petals decentralized text generation"
+readme = { file = "README.md", content-type = "text/markdown" }
+authors = [
+    { name = "ParisNeo", email = "parisneoai@gmail.com" },
+]
+dependencies = [
+    "ascii-colors>=0.11.3",
+    "certifi==2024.7.4",
+    "charset-normalizer==3.3.2",
+    "configparser==6.0.1",
+    "idna==3.6",
+    "queues==0.6.3",
+    "requests==2.31.0",
+    "urllib3==2.2.1"
+]
+requires-python = ">=3.11"
+keywords = ["fastapi", "petals"]
+classifiers = [
+    "Programming Language :: Python :: 3.11",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+]
+
+[project.urls]
+Homepage = "https://github.com/ParisNeo/ollama_proxy_server"
+
+[tool.setuptools.package-data]
+"*" = ["*"]  # Include all package data
+
+[project.scripts]
+ollama_proxy_server = "ollama_proxy_server.main:main"
+ollama_proxy_add_user = "ollama_proxy_server.add_user:main"
+
+[project.optional-dependencies]
+dev = [
+]
