@@ -27,9 +27,9 @@ Ollama Proxy Server is a lightweight, secure proxy server designed to add a secu
 ```plaintext
 ollama_proxy_server/
   |- add_user.py               # Script to add users to the authorized list
-  |- authorized_users.txt.example # Example authorized users file
-  |- config.ini.example        # Example configuration file
   |- main.py                   # Main proxy server script
+  example.authorized_users.txt # Example authorized users file
+  example.config.ini        # Example configuration file
   .gitignore                    # Git ignore file
   Dockerfile                    # Docker configuration
   LICENSE                       # Apache 2.0 license text
