@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Configuration with parameters
-SERVICE_NAME="ollama-proxy-server"
+SERVICE_NAME="ops"
 USER="ops"
 
 if [ "$#" -ne 1 ]; then
