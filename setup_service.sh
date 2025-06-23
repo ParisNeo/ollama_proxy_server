@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Configuration with parameters
-SERVICE_NAME="ops"
+SERVICE_NAME="ollama-proxy-server"
 USER="ops"
 
 if [ "$#" -ne 1 ]; then
@@ -13,12 +13,12 @@ WORKING_DIR=$1
 LOG_DIR="$WORKING_DIR/logs"
 SCRIPT_PATH="$WORKING_DIR/ollama-proxy-server/main.py"
 
-echo "Setting up System Monitor service..."
+echo "Setting up Ollama Proxy Server..."
 
 # Create dedicated user if it doesn't exist already
 if ! id "$USER" &>/dev/null; then
     echo "Creating user $USER..."
-    sudo useradd -r -s /bin/false "/home/$SERVICE_NAME"
+    sudo useradd -r -s /bin/false "/home/$USER"
 fi
 
 # Ensure the working directory is writable by the dedicated user
@@ -36,7 +36,7 @@ sudo chown -R "$USER:$USER" "$LOG_DIR"
 echo "Creating systemd service..."
 sudo tee /etc/systemd/system/$SERVICE_NAME.service > /dev/null << EOF
 [Unit]
-Description=GPU and Ollama Monitor
+Description=Ollama Proxy Server
 After=network.target
 Wants=network.target
 
@@ -45,7 +45,7 @@ Type=simple
 User=$USER
 Group=$USER
 WorkingDirectory=$WORKING_DIR
-ExecStart=/bin/bash $WORKING_DIR/run.sh --interval 10 --db-path $WORKING_DIR/gpu_stats.db --log-dir $LOG_DIR
+ExecStart=/bin/bash $WORKING_DIR/run.sh
 Restart=always
 RestartSec=10
 StandardOutput=journal
