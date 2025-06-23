@@ -55,7 +55,7 @@ def main():
     parser.add_argument('--config', default="config.ini", help='Path to the authorized users list')
     parser.add_argument('--log_path', default="access_log.txt", help='Path to the access log file')
     parser.add_argument('--users_list', default="authorized_users.txt", help='Path to the config file')
-    parser.add_argument('--port', type=int, default=8000, help='Port number for the server')
+    parser.add_argument('--port', type=int, default=11534, help='Port number for the server (default is 100 + default ollama port number)')
     parser.add_argument('-d', '--deactivate_security', action='store_true', help='Deactivates security')
     args = parser.parse_args()
     servers = get_config(args.config)
