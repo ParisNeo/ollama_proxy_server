@@ -192,13 +192,44 @@ The repository includes a script called `setup_service.sh` to set up Ollama Prox
    sudo journalctl -u ollama-proxy-server -f
    ```
 
-### Managing Users with `ops` Command
 
-After setting up the service, you can add more users using the new `ops` command:
+### 🔐 Managing Users with the `ops` Command
+
+Once the `ops` CLI tool is installed, you can easily manage access by adding authorized users. Each user is stored in `/etc/ops/authorized_users.txt` in the format `username:password`.
+
+#### ➕ Add a User with a Specific Password
+
+To add a user with a password you choose:
 
 ```bash
 sudo ops add_user username:password
 ```
+
+#### 🎲 Add a User with a Random Password
+
+If you omit the password, a secure 12-character password will be generated automatically:
+
+```bash
+sudo ops add_user username
+```
+
+Example output:
+
+```
+Generated password: x8D1qf7rZa2L
+User 'username' added successfully with password 'x8D1qf7rZa2L'.
+```
+
+#### 🔐 Where Users Are Stored
+
+All users are stored in:
+
+```
+/etc/ops/authorized_users.txt
+```
+
+The file is protected with appropriate permissions (`ops:ops`) to prevent unauthorized access.
+
 
 ## Contributing
 
