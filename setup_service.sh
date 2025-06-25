@@ -223,12 +223,12 @@ case $COMMAND in
         sudo awk '
             /^\[.*\]/ {
                 if (in_section) print "";
-                print substr(\$0, 2, length(\$0) - 2) ":";
+                print substr($0, 2, length($0) - 2) ":";
                 in_section = 1;
                 next
             }
             NF && in_section {
-                print "  " \$0
+                print "  " $0
             }
         ' "$CONFIG_FILE"
         ;;
