@@ -220,7 +220,7 @@ case $COMMAND in
         CONFIG_FILE="/etc/ops/config.ini"
 
         # Edit the server parameter in the config file
-        sudo sed -i "/\[$SERVER_NAME\]/,/^\[.*\]/ s/^\($PARAMETER\s*=\s*\).*\$/\\1$VALUE/" $CONFIG_FILE
+        sudo sed -i "/^\[$SERVER_NAME\]/,/^\[.*\]/ s/^\([^[]\+\)/  \1/" "$CONFIG_FILE" | grep -A 50 "^\s*$SERVER_NAME" | head -n 3
 
         echo "Parameter '$PARAMETER' for server '$SERVER_NAME' updated to '$VALUE'."
         ;;
