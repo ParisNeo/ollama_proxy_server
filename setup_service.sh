@@ -233,7 +233,7 @@ case $COMMAND in
             SERVER_NAME="${SERVER_SECTION#*[}"
             SERVER_NAME="${SERVER_NAME%]"
             echo "$SERVER_NAME:"
-            sudo sed -i "/^\[$SERVER_NAME\]/,/^\[.*\]/ s/^\([^[]\+\)/  \\1/" $CONFIG_FILE | grep -A 50 "^\s*$SERVER_NAME" | head -n 3
+            sudo sed -i "/^\[$SERVER_NAME\]/,/^\[.*\]/ s/^\([^[]\+\)/  \1/" "$CONFIG_FILE" | grep -A 50 "^\s*\$SERVER_NAME" | head -n 3
         done
         ;;
     *)
