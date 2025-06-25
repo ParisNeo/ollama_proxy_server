@@ -134,7 +134,7 @@ echo "You can add more users to the authorized_users.txt file if needed."
 
 # Create ops command script
 echo "Creating 'ops' command..."
-sudo tee /usr/local/bin/ops > /dev/null << 'EOF'
+sudo cat << 'EOF' | sudo tee /usr/local/bin/ops > /dev/null
 #!/bin/bash
 
 # Define usage function to display help message
