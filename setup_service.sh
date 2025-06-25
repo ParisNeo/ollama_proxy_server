@@ -143,7 +143,6 @@ usage() {
     exit 1
 }
 
-# Check if exactly one argument is provided and it's 'add_user'
 if [ "$#" -lt 1 ]; then
     usage
 fi
@@ -155,86 +154,83 @@ case $COMMAND in
     help)
         echo "ops command usage:"
         echo ""
-        echo "  ops help                Display this help message"
-        echo "  ops add_user username[:password]  Add a user with optional password generation if only username is provided"
-        echo "  ops add_server server_name url [max_parallel_connections queue_size]  Add a new server configuration"
-        echo "  ops edit_server server_name parameter value  Edit an existing server's parameter"
-        echo "  ops list_servers         List all configured servers and their parameters"
+        echo "  ops help                                Display this help message"
+        echo "  ops add_user username[:password]        Add a user with optional password generation"
+        echo "  ops add_server name url [max queue]     Add a new server configuration"
+        echo "  ops edit_server name param value        Edit a server's parameter"
+        echo "  ops list_servers                        List all configured servers"
         ;;
     add_user)
         USER_PAIR="$1"
-
-        # Extract the user and password from the input
         IFS=':' read -r USER PASSWORD <<< "$USER_PAIR"
 
         if [ -z "$PASSWORD" ]; then
-            # Generate a random password if only username is provided
             PASSWORD=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 12)
             echo "Generated password: $PASSWORD"
         fi
 
         AUTHORIZED_USERS_FILE="/etc/ops/authorized_users.txt"
-
-        # Check if the authorized_users file exists, create it otherwise
         sudo mkdir -p /etc/ops
-        if [ ! -f "$AUTHORIZED_USERS_FILE" ]; then
-            sudo touch $AUTHORIZED_USERS_FILE
-        fi
+        [ ! -f "$AUTHORIZED_USERS_FILE" ] && sudo touch "$AUTHORIZED_USERS_FILE"
 
-        # Append the new user:password pair to the file
-        echo "$USER:$PASSWORD" | sudo tee -a $AUTHORIZED_USERS_FILE > /dev/null
-
-        # Ensure correct permissions for the file
-        sudo chown ops:ops $AUTHORIZED_USERS_FILE
-
+        echo "$USER:$PASSWORD" | sudo tee -a "$AUTHORIZED_USERS_FILE" > /dev/null
+        sudo chown ops:ops "$AUTHORIZED_USERS_FILE"
         echo "User '$USER' added successfully with password '$PASSWORD'."
         ;;
     add_server)
-        if [ "$#" -lt 2 ]; then
-            usage
-        fi
+        [ "$#" -lt 2 ] && usage
 
         SERVER_NAME="$1"
         URL="$2"
         MAX_PARALLEL_CONNECTIONS="${3:-4}"
         QUEUE_SIZE="${4:-100}"
-
         CONFIG_FILE="/etc/ops/config.ini"
 
-        # Add the server to the config file
-        sudo bash -c "echo \"[$SERVER_NAME]\" >> $CONFIG_FILE"
-        sudo bash -c "echo \"url = $URL\" >> $CONFIG_FILE"
-        sudo bash -c "echo \"max_parallel_connections = $MAX_PARALLEL_CONNECTIONS\" >> $CONFIG_FILE"
-        sudo bash -c "echo \"queue_size = $QUEUE_SIZE\" >> $CONFIG_FILE"
+        {
+            echo "[$SERVER_NAME]"
+            echo "url = $URL"
+            echo "max_parallel_connections = $MAX_PARALLEL_CONNECTIONS"
+            echo "queue_size = $QUEUE_SIZE"
+        } | sudo tee -a "$CONFIG_FILE" > /dev/null
 
         echo "Server '$SERVER_NAME' added successfully."
         ;;
     edit_server)
-        if [ "$#" -ne 3 ]; then
-            usage
-        fi
+        [ "$#" -ne 3 ] && usage
 
         SERVER_NAME="$1"
         PARAMETER="$2"
         VALUE="$3"
         CONFIG_FILE="/etc/ops/config.ini"
 
-        # Edit the server parameter in the config file
-        sudo sed -i "/^\[$SERVER_NAME\]/,/^\[.*\]/ s/^\([^[]\+\)/  \1/" "$CONFIG_FILE" | grep -A 50 "^\s*$SERVER_NAME" | head -n 3
+        TMP_FILE=$(mktemp)
+        sudo awk -v section="[$SERVER_NAME]" -v param="$PARAMETER" -v value="$VALUE" '
+            $0 == section { in_section = 1; print; next }
+            /^\[.*\]/ { in_section = 0 }
+            in_section && $0 ~ "^" param "[[:space:]]*=" {
+                print param " = " value
+                next
+            }
+            { print }
+        ' "$CONFIG_FILE" > "$TMP_FILE" && sudo mv "$TMP_FILE" "$CONFIG_FILE"
 
         echo "Parameter '$PARAMETER' for server '$SERVER_NAME' updated to '$VALUE'."
         ;;
     list_servers)
         CONFIG_FILE="/etc/ops/config.ini"
-
-        # List all servers and their parameters
         echo "Listing servers and their configuration:"
-        sudo grep -E '^\[.*\]' $CONFIG_FILE | while read -r SERVER_SECTION; do
-            SERVER_NAME="${SERVER_SECTION#*[}"
-            SERVER_NAME="${SERVER_NAME%]"
-            echo "$SERVER_NAME:"
-            sudo sed -i "/^\[$SERVER_NAME\]/,/^\[.*\]/ s/^\([^[]\+\)/  \1/" "$CONFIG_FILE" | grep -A 50 "^\s*\$SERVER_NAME" | head -n 3
-        done
+
+        sudo awk '
+            /^\[.*\]/ {
+                if (in_section) print "";
+                print substr(\$0, 2, length(\$0) - 2) ":";
+                in_section = 1;
+                next
+            }
+            NF && in_section {
+                print "  " \$0
+            }
+        ' "$CONFIG_FILE"
         ;;
     *)
         usage
@@ -244,6 +240,7 @@ EOF
 
 # Make ops command executable
 sudo chmod +x /usr/local/bin/ops
+
 
 # Reload systemd and enable service
 echo "Enabling service..."
