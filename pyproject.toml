@@ -4,14 +4,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ollama_proxy_server"
-version = "7.1.0"
+version = "7.1.1"
 description = "A fastapi server for petals decentralized text generation"
 readme = { file = "README.md", content-type = "text/markdown" }
 authors = [
     { name = "ParisNeo", email = "parisneoai@gmail.com" },
 ]
 dependencies = [
-    "ascii-colors>=0.11.3",
+    "ascii-colors>=0.10.0",
     "certifi==2024.7.4",
     "charset-normalizer==3.3.2",
     "configparser==6.0.1",
