@@ -28,13 +28,13 @@ if ! id "$USER" &>/dev/null; then
 fi
 
 # Ensure the working directory is writable by the dedicated user
-sudo mkdir -p "$WORKING_DIR"
-sudo cp -r * "$WORKING_DIR/"
+mkdir -p "$WORKING_DIR"
+cp -r * "$WORKING_DIR/"
 
 # Set permissions for logs and reports directories
 echo "Setting up directories and files..."
-sudo mkdir -p "$LOG_DIR"
-sudo mkdir -p "$WORKING_DIR/reports"
+mkdir -p "$LOG_DIR"
+mkdir -p "$WORKING_DIR/reports"
 
 # Create systemd service file
 echo "Creating systemd service..."
@@ -83,7 +83,7 @@ python3 -m venv $WORKING_DIR/venv
 
 # Activate the virtual environment and install dependencies as user without --user flag
 echo "Activating virtualenv and installing Python packages..."
-source $WORKING_DIR/venv/bin/activate && sudo pip install --no-cache-dir $WORKING_DIR
+source $WORKING_DIR/venv/bin/activate && pip install --no-cache-dir $WORKING_DIR
 
 
 
@@ -115,7 +115,7 @@ queue_size = 100
 
 # Additional servers can be added here with similar format
 EOF
-sudo chown $USER:$USER $CONFIG_FILE
+
 
 echo "Adding authorized users to the list. Type 'done' when finished."
 while true; do
@@ -124,7 +124,6 @@ while true; do
         break
     fi
     echo "$input" | sudo tee -a $AUTHORIZED_USERS_FILE > /dev/null
-    sudo chown $USER:$USER $AUTHORIZED_USERS_FILE
 done
 
 echo "You can add more users to the authorized_users.txt file if needed."
@@ -241,7 +240,8 @@ sudo chmod +x /usr/local/bin/ops
 sudo chown -R "$USER:$USER" "$LOG_DIR"
 sudo chown -R "$USER:$USER" "$WORKING_DIR"
 sudo chown -R "$USER:$USER" $WORKING_DIR/venv
-
+sudo chown $USER:$USER $CONFIG_FILE
+sudo chown $USER:$USER $AUTHORIZED_USERS_FILE
 
 # Reload systemd and enable service
 echo "Enabling service..."
