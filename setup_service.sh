@@ -30,13 +30,11 @@ fi
 # Ensure the working directory is writable by the dedicated user
 sudo mkdir -p "$WORKING_DIR"
 sudo cp -r * "$WORKING_DIR/"
-sudo chown -R "$USER:$USER" "$WORKING_DIR"
 
 # Set permissions for logs and reports directories
 echo "Setting up directories and files..."
 sudo mkdir -p "$LOG_DIR"
 sudo mkdir -p "$WORKING_DIR/reports"
-sudo chown -R "$USER:$USER" "$LOG_DIR"
 
 # Create systemd service file
 echo "Creating systemd service..."
@@ -81,14 +79,13 @@ EOF
 
 # Install Python dependencies with proper permissions and environment variables preserved
 echo "Installing Python dependencies..."
-sudo -u "$USER" python3 -m venv $WORKING_DIR/venv
-sudo chown -R "$USER:$USER" $WORKING_DIR/venv
+python3 -m venv $WORKING_DIR/venv
 
 # Activate the virtual environment and install dependencies as user without --user flag
 echo "Activating virtualenv and installing Python packages..."
-sudo -H -u "$USER" bash << EOF
 source $WORKING_DIR/venv/bin/activate && pip install --no-cache-dir $WORKING_DIR
-EOF
+
+
 
 # Create logrotate config
 echo "Setting up log rotation..."
@@ -240,6 +237,10 @@ EOF
 
 # Make ops command executable
 sudo chmod +x /usr/local/bin/ops
+
+sudo chown -R "$USER:$USER" "$LOG_DIR"
+sudo chown -R "$USER:$USER" "$WORKING_DIR"
+sudo chown -R "$USER:$USER" $WORKING_DIR/venv
 
 
 # Reload systemd and enable service
