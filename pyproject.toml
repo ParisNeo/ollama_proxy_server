@@ -20,7 +20,7 @@ dependencies = [
     "requests==2.31.0",
     "urllib3==2.2.1"
 ]
-requires-python = ">=3.11"
+requires-python = ">=3.10"
 keywords = ["fastapi", "petals"]
 classifiers = [
     "Programming Language :: Python :: 3.11",
