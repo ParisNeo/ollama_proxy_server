@@ -83,7 +83,7 @@ python3 -m venv $WORKING_DIR/venv
 
 # Activate the virtual environment and install dependencies as user without --user flag
 echo "Activating virtualenv and installing Python packages..."
-source $WORKING_DIR/venv/bin/activate && pip install --no-cache-dir $WORKING_DIR
+source $WORKING_DIR/venv/bin/activate && sudo pip install --no-cache-dir $WORKING_DIR
 
 
 
