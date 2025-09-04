@@ -30,7 +30,7 @@ async def create_initial_admin_user():
         if not admin_user:
             logger.info("Admin user not found, creating one.")
             user_in = UserCreate(username=settings.ADMIN_USER, password=settings.ADMIN_PASSWORD)
-            await create_user(db, user=user_in, is_admin=True)
+            await user_crud.create_user(db, user=user_in, is_admin=True)
             logger.info("Admin user created successfully.")
         else:
             logger.info("Admin user already exists.")
@@ -54,11 +54,9 @@ async def create_initial_servers():
 async def lifespan(app: FastAPI):
     # On startup
     logger.info("Starting up Ollama Proxy Server...")
-    # Initialize the database
-    async with engine.begin() as conn:
-        # This is commented out as Alembic now handles migrations.
-        # await conn.run_sync(Base.metadata.create_all)
-        pass
+    
+    # Database initialization is now handled exclusively by Alembic in the setup scripts.
+    # We no longer call `create_all` here.
 
     await create_initial_admin_user()
     await create_initial_servers()
