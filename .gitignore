@@ -95,3 +95,4 @@ docker-compose.yml
 
 # Database
 ollama_proxy.db
+*.db-journal

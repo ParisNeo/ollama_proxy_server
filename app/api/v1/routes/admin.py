@@ -13,7 +13,7 @@ from app.core.security import verify_password, get_password_hash
 from app.database.session import get_db
 from app.database.models import User
 from app.crud import user_crud, apikey_crud, log_crud
-from app.schemas.user import UserCreate
+from app.schema.user import UserCreate
 
 logger = logging.getLogger(__name__)
 router = APIRouter()

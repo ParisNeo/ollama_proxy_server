@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
+from starlette.responses import RedirectResponse
 
 from app.core.config import settings
 from app.core.logging_config import setup_logging
@@ -15,7 +16,7 @@ from app.api.v1.routes.admin import router as admin_router
 from app.database.session import AsyncSessionLocal, engine
 from app.database.base import Base
 from app.crud.user_crud import get_user_by_username, create_user
-from app.schemas.user import UserCreate
+from app.schema.user import UserCreate
 
 # Setup structured logging
 setup_logging(settings.LOG_LEVEL)

@@ -1,101 +1,119 @@
-# Ollama Proxy Server v8
+# Ollama Proxy Fortress: Your Personal AI Security Gateway 🛡️
 
-[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
-[![Python Version](https://img.shields.io/badge/python-3.11+-green.svg)](https://www.python.org/downloads/)
-[![Framework](https://img.shields.io/badge/Framework-FastAPI-blueviolet)](https://fastapi.tiangolo.com/)
-[![GitHub Stars](https://img.shields.io/github/stars/ParisNeo/ollama_proxy_server?style=social)](https://github.com/ParisNeo/ollama_proxy_server)
+Stop exposing your local AI to the world. **Ollama Proxy Fortress** is the ultimate security and management layer for your Ollama instances, designed to be set up in **60 seconds** by anyone, on any operating system.
 
-Ollama Proxy Server is a secure, high-performance proxy and load balancer for Ollama, rebuilt from the ground up using FastAPI. It is designed to act as a security gateway, protecting your Ollama instances from vulnerabilities while providing robust user management, rate limiting, IP filtering, usage tracking, and centralized control.
+![GIF placeholder: A quick tour of the Admin Dashboard, showing user creation and key generation.](https://your-gif-hosting.com/admin_tour.gif)
 
-**This new version is a complete architectural overhaul and is not backward-compatible with the previous version.**
+Whether you're a developer, a researcher, or just an AI enthusiast running models on your personal machine, this tool transforms your setup from a vulnerable open port into a managed, secure, and powerful AI hub.
 
-**Author:** ParisNeo
+---
 
-**License:** Apache 2.0
+## The Threat: Why Your PC Could Be at Risk
 
-**Repository:** [https://github.com/ParisNeo/ollama_proxy_server](https://github.com/ParisNeo/ollama_proxy_server)
+Recently, a critical vulnerability named **"Probllama" (CVE-2024-37032)** was discovered in Ollama. This wasn't a minor bug; it was a **Remote Code Execution (RCE)** vulnerability.
 
-## Core Features
+**What does that mean in plain English?** It means an attacker from anywhere on the internet could have sent a malicious request to your Ollama server and potentially:
+*   💻 **Take full control of your computer.**
+*   훔 **Steal your personal files, documents, and private keys.**
+*   🗑️ **Delete your data or install ransomware.**
+*   🤫 **Use your computer for malicious activities without your knowledge.**
 
-*   **Modern & Fast:** Built on FastAPI for high performance and asynchronous request handling.
-*   **Database-Backed User Management:** Manages users and API keys via a robust database (SQLite by default).
-*   **Secure API Key Authentication:** All requests require a valid `Bearer` token.
-*   **Admin UI:** A simple, secure web interface for managing users, keys, and viewing usage statistics.
-*   **Rate Limiting:** Protects backend servers from abuse using a Redis-backed rate limiter.
-*   **IP Filtering:** Configure IP allow/deny lists for network-level access control.
-*   **Model Federation:** The `/api/tags` endpoint aggregates models from all connected Ollama backends into a single list.
-*   **Containerized:** A production-ready, multi-stage `Dockerfile` for secure and efficient deployment.
-*   **Structured Logging:** Outputs JSON logs for easy integration with modern monitoring systems like ELK Stack, Datadog, or Splunk.
+While the core Ollama team impressively patched this vulnerability in version `0.1.34`, the incident highlighted a crucial need for a dedicated security layer. Running an AI model should not mean opening a backdoor to your digital life.
 
-## Admin Interface
+### So, Why Do You Still Need This?
 
-The server includes a web-based admin interface available at `/admin`. To log in, use the `ADMIN_USER` and `ADMIN_PASSWORD` credentials specified in your `.env` file.
+Ollama Proxy Fortress is **more than just a patch**. It's a permanent solution that offers layers of security and powerful features that core Ollama doesn't provide:
 
-From the admin dashboard, you can:
-*   Create and delete users.
-*   Create and revoke API keys for any user.
-*   View a dashboard of API usage statistics per key.
+*   🛡️ **Ironclad Security Gateway:** Enforce API key authentication for every single request. Add rate limiting to prevent abuse and filter access by IP address.
+*   👤 **Centralized User Management:** Create different "users" for your different apps or family members, each with their own unique, revocable API keys.
+*   🌐 **Multi-Server Federation:** Have Ollama running on a few different machines? The proxy unifies them! See and use models from all your servers as if they were one.
+*   📊 **Usage Insights:** A beautiful admin dashboard shows you exactly which keys are being used and how often.
+*   🚀 **Effortless 1-Click Setup:** No Docker, no `pip install`, no command-line wizardry required. Just download and run a single script.
 
-## API Authentication
+---
 
-To use the proxy, you must include an `Authorization` header with a valid API key.
+## Get Started in 60 Seconds (Yes, Really!)
 
-```bash
-curl http://localhost:8080/api/tags \
-  -H "Authorization: Bearer <your_api_key>"
-```
+This is the easiest way to secure your AI setup, period.
 
-API keys must be generated via the admin interface.
+### 1. Download the Project
 
-## Getting Started
+Download the source code from the repository, either by using `git` or by downloading the ZIP file and extracting it.
 
-### Prerequisites
-
-*   Python 3.11+
-*   Poetry for dependency management
-*   Docker and Docker Compose (recommended for deployment)
-*   An active Redis instance (required for rate limiting)
-
-### 1. Local Development
-
-**Clone the repository:**
 ```bash
 git clone https://github.com/ParisNeo/ollama_proxy_server.git
 cd ollama_proxy_server
 ```
 
-**Install dependencies:**
+### 2. Run the Installer
+
+Based on your operating system, run the appropriate script. The first time you run it, it will guide you through a simple setup wizard. Every time after that, it will just start the server.
+
+**On Windows:**
+Simply double-click `run_windows.bat`.
+
+**On macOS or Linux:**
+Open your terminal, navigate to the project folder, and run:
 ```bash
-poetry install
+chmod +x run.sh
+./run.sh
 ```
 
-**Configure the server:**
-Copy `.env.example` to `.env` and customize the settings.
+![GIF placeholder: The setup wizard in action on Windows or macOS, showing the user answering the prompts.](https://your-gif-hosting.com/setup_wizard.gif)
+
+**That's it!** The server is now running. To stop it, just close the terminal window or press `Ctrl+C`.
+
+---
+
+## A Visual Walkthrough
+
+### Step 1: Log In to Your Fortress
+
+Once the server is running, open your web browser and go to the admin panel (e.g., `http://127.0.0.1:8080/admin`). Log in with the admin credentials you created during setup.
+
+![Screenshot: The beautiful and clean Admin Login page.](https://your-image-hosting.com/login_page.png)
+
+### Step 2: Manage Your Users
+
+From the dashboard, you can create new users. These aren't system users; they are virtual users within the proxy, perfect for organizing access.
+
+![Screenshot: The main Admin Dashboard showing a list of created users.](https://your-image-hosting.com/dashboard.png)
+
+### Step 3: Create & Revoke API Keys
+
+Click "Manage" on any user to create unique API keys for them. Give a key a name (e.g., "My Chatbot App"), and a new, secure key will be generated. **Copy this key—it will only be shown once!** If a key is ever compromised, you can revoke it with a single click.
+
+![Screenshot: The User Details page, highlighting the "Create Key" form and the list of active/revoked keys.](https://your-image-hosting.com/user_details.png)
+
+### Step 4: Make Secure API Calls
+
+Now, instead of accessing Ollama directly, you access the proxy. Configure your applications to use the proxy URL and provide the API key as a Bearer token in the `Authorization` header.
+
 ```bash
-cp .env.example .env
+curl http://127.0.0.1:8080/api/generate \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer op_xxxxxxxx_xxxxxxxxxxxxxxxxxxxxxxxx" \
+  -d '{
+    "model": "llama3",
+    "prompt": "Why is the sky blue?"
+  }'
 ```
-You must configure your `OLLAMA_SERVERS`, `SECRET_KEY`, and `REDIS_URL`.
 
-**Initialize and upgrade the database:**
-```bash
-poetry run alembic upgrade head
-```
+Your request is now authenticated, rate-limited, and logged. Your Ollama instance is completely shielded from the internet.
 
-**Run the development server:**
-```bash
-poetry run uvicorn app.main:app --reload
-```
-The server is now available at `http://127.0.0.1:8000`.
+---
 
-### 2. Deployment with Docker
+## For the Power Users: Docker Deployment
 
-**Build the Docker image:**
+If you prefer a container-based workflow, we've got you covered.
+
+**1. Build the Docker image:**
 ```bash
 docker build -t ollama-proxy-server .
 ```
 
-**Run the container:**
-Create a `.env` file on your host machine with your production configuration. Then, run the container.
+**2. Run the container:**
+Create a `.env` file on your host machine, then run:
 ```bash
 docker run -d --name ollama-proxy \
   -p 8080:8080 \
@@ -103,16 +121,9 @@ docker run -d --name ollama-proxy \
   -v ./ollama_proxy.db:/home/app/ollama_proxy.db \
   ollama-proxy-server
 ```
-This command mounts a local SQLite database file for persistence. The container will automatically run database migrations on startup.
 
-## Configuration
-
-Configuration is managed via environment variables, documented in `.env.example`. Key settings include `OLLAMA_SERVERS`, `DATABASE_URL`, `REDIS_URL`, `RATE_LIMIT_REQUESTS`, and `ALLOWED_IPS`/`DENIED_IPS`.
-
-## Contributing
-
-Contributions are welcome! Please fork the repository, create a feature branch, and open a pull request.
+---
 
 ## License
 
-This project is licensed under the Apache License 2.0. See the `LICENSE` file for details.
+This project is licensed under the Apache License 2.0. Feel free to use, modify, and distribute.

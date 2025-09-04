@@ -16,7 +16,8 @@ class CustomJsonFormatter(jsonlogger.JsonFormatter):
 
 def setup_logging(log_level=LOG_LEVEL):
     logger = logging.getLogger()
-    logger.setLevel(log_level)
+    # Ensure the log level is uppercase
+    logger.setLevel(log_level.upper())
     
     # Prevent duplicate logs in Uvicorn
     for handler in logger.handlers:

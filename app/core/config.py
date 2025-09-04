@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     APP_VERSION: str = "8.0.0"
     LOG_LEVEL: str = "info"
     SECRET_KEY: str
+    PROXY_PORT: int = 8080
 
     # --- Ollama Backend Servers ---
     OLLAMA_SERVERS: Union[List[AnyHttpUrl], str]
