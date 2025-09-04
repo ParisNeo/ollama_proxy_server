@@ -1,21 +1,33 @@
 import asyncio
 import logging
-from fastapi import APIRouter, Depends, Request, Response
+from typing import List
+from fastapi import APIRouter, Depends, Request, Response, HTTPException, status
 from fastapi.responses import StreamingResponse
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import settings
 from app.database.session import get_db
 from app.api.v1.dependencies import get_valid_api_key, rate_limiter, ip_filter
-from app.database.models import APIKey
-from app.crud import log_crud
+from app.database.models import APIKey, OllamaServer
+from app.crud import log_crud, server_crud
 
 logger = logging.getLogger(__name__)
 router = APIRouter(dependencies=[Depends(ip_filter), Depends(rate_limiter)])
 
+# --- New Dependency to get active servers ---
+async def get_active_servers(db: AsyncSession = Depends(get_db)) -> List[OllamaServer]:
+    servers = await server_crud.get_servers(db)
+    active_servers = [s for s in servers if s.is_active]
+    if not active_servers:
+        logger.error("No active Ollama backend servers are configured in the database.")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="No active backend servers available."
+        )
+    return active_servers
 
-async def _reverse_proxy(request: Request, path: str):
+
+async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer]):
     """
     Core reverse proxy logic. Forwards the request to a backend Ollama server
     and streams the response back.
@@ -27,10 +39,10 @@ async def _reverse_proxy(request: Request, path: str):
         request.app.state.backend_server_index = 0
     
     index = request.app.state.backend_server_index
-    backend_url_base = settings.OLLAMA_SERVERS[index]
-    request.app.state.backend_server_index = (index + 1) % len(settings.OLLAMA_SERVERS)
+    backend_server = servers[index]
+    request.app.state.backend_server_index = (index + 1) % len(servers)
 
-    backend_url = f"{backend_url_base}/{path}"
+    backend_url = f"{backend_server.url}/{path}"
 
     url = http_client.build_request(
         method=request.method,
@@ -49,7 +61,12 @@ async def _reverse_proxy(request: Request, path: str):
         content=request.stream()
     )
 
-    backend_response = await http_client.send(backend_request, stream=True)
+    try:
+        backend_response = await http_client.send(backend_request, stream=True)
+    except Exception as e:
+        logger.error(f"Error connecting to backend server {backend_server.url}: {e}")
+        raise HTTPException(status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail="Could not connect to backend server.")
+
 
     return StreamingResponse(
         backend_response.aiter_raw(),
@@ -62,6 +79,7 @@ async def federate_models(
     request: Request,
     api_key: APIKey = Depends(get_valid_api_key),
     db: AsyncSession = Depends(get_db),
+    servers: List[OllamaServer] = Depends(get_active_servers),
 ):
     """
     Aggregates models from all configured Ollama backends.
@@ -77,7 +95,7 @@ async def federate_models(
             logger.error(f"Failed to fetch models from {url}: {e}")
             return []
 
-    tasks = [fetch_models(server) for server in settings.OLLAMA_SERVERS]
+    tasks = [fetch_models(server.url) for server in servers]
     results = await asyncio.gather(*tasks)
 
     all_models = {}
@@ -98,11 +116,12 @@ async def proxy_ollama(
     path: str,
     api_key: APIKey = Depends(get_valid_api_key),
     db: AsyncSession = Depends(get_db),
+    servers: List[OllamaServer] = Depends(get_active_servers),
 ):
     """
     A catch-all route that proxies all other requests to the Ollama backend.
     """
-    response = await _reverse_proxy(request, path)
+    response = await _reverse_proxy(request, path, servers)
     
     await log_crud.create_usage_log(
         db=db, api_key_id=api_key.id, endpoint=f"/{path}", status_code=response.status_code

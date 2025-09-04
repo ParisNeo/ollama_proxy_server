@@ -53,3 +53,13 @@ class UsageLog(Base):
     request_timestamp = Column(DateTime, default=datetime.datetime.utcnow)
 
     api_key = relationship("APIKey", back_populates="usage_logs")
+
+
+class OllamaServer(Base):
+    __tablename__ = "ollama_servers"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    url = Column(String, unique=True, nullable=False)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)

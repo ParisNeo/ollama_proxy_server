@@ -11,8 +11,9 @@ from app.core.config import settings
 from app.core.security import verify_password, get_password_hash
 from app.database.session import get_db
 from app.database.models import User
-from app.crud import user_crud, apikey_crud, log_crud
+from app.crud import user_crud, apikey_crud, log_crud, server_crud
 from app.schema.user import UserCreate
+from app.schema.server import ServerCreate
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -103,6 +104,50 @@ async def admin_stats(
 ):
     stats = await log_crud.get_usage_statistics(db)
     return templates.TemplateResponse("admin/statistics.html", {"request": request, "stats": stats})
+
+
+# --- New Server Management Routes ---
+@router.get("/servers", response_class=HTMLResponse, name="admin_servers")
+async def admin_server_management(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    admin_user: User = Depends(require_admin_user),
+):
+    servers = await server_crud.get_servers(db)
+    return templates.TemplateResponse("admin/servers.html", {"request": request, "servers": servers})
+
+@router.post("/servers/add", name="admin_add_server")
+async def admin_add_server(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    admin_user: User = Depends(require_admin_user),
+    server_name: str = Form(...),
+    server_url: str = Form(...),
+):
+    existing_server = await server_crud.get_server_by_url(db, url=server_url)
+    if existing_server:
+        flash(request, f"Server with URL '{server_url}' already exists.", "error")
+    else:
+        try:
+            server_in = ServerCreate(name=server_name, url=server_url)
+            await server_crud.create_server(db, server=server_in)
+            flash(request, f"Server '{server_name}' added successfully.", "success")
+        except Exception:
+            flash(request, "Invalid URL format.", "error")
+
+    return RedirectResponse(url=request.url_for("admin_servers"), status_code=status.HTTP_303_SEE_OTHER)
+
+@router.post("/servers/{server_id}/delete", name="admin_delete_server")
+async def admin_delete_server(
+    request: Request,
+    server_id: int,
+    db: AsyncSession = Depends(get_db),
+    admin_user: User = Depends(require_admin_user),
+):
+    await server_crud.delete_server(db, server_id=server_id)
+    flash(request, "Server deleted successfully.", "success")
+    return RedirectResponse(url=request.url_for("admin_servers"), status_code=status.HTTP_303_SEE_OTHER)
+# --- End Server Management Routes ---
 
 
 @router.post("/users", name="create_new_user")
