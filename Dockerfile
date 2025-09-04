@@ -1,28 +1,39 @@
-FROM python:3.11
+# --- Build Stage ---
+FROM python:3.11-slim as builder
 
-# Update packagtes, install necessary tools into the base image, clean up and clone git repository
-RUN apt update \
-    && apt install -y --no-install-recommends --no-install-suggests git apache2 \
-    && apt autoremove -y --purge \
-    && apt clean \
-    && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* \
-    && git clone https://github.com/ParisNeo/ollama_proxy_server.git
+# Set working directory
+WORKDIR /app
 
-# Change working directory to cloned git repository
-WORKDIR ollama_proxy_server
+# Install poetry
+RUN pip install poetry
 
-# Install all needed requirements
-RUN pip3 install -e .
+# Copy only dependency-defining files
+COPY poetry.lock pyproject.toml ./
 
-# Copy config.ini and authorized_users.txt into project working directory
-COPY config.ini .
-COPY authorized_users.txt .
+# Install dependencies, without dev dependencies, into a virtual environment
+RUN poetry config virtualenvs.create false && \
+    poetry install --no-dev --no-interaction --no-ansi
 
-# Start the proxy server as entrypoint
-ENTRYPOINT ["ollama_proxy_server"]
+# --- Final Stage ---
+FROM python:3.11-slim
 
-# Do not buffer output, e.g. logs to stdout
-ENV PYTHONUNBUFFERED=1
+# Set a non-root user
+RUN addgroup --system app && adduser --system --group app
+USER app
 
-# Set command line parameters
-CMD ["--config", "./config.ini", "--users_list", "./authorized_users.txt", "--port", "8080"]
+# Set working directory
+WORKDIR /home/app
+
+# Copy virtual environment from builder stage
+COPY --from=builder /app ./
+
+# Copy application code
+COPY ./app ./app
+COPY gunicorn_conf.py .
+
+# Expose the port the app runs on
+EXPOSE 8080
+
+# Command to run the application using our custom Gunicorn config file.
+# This ensures structured JSON logging is used in production.
+CMD ["gunicorn", "-c", "./gunicorn_conf.py", "app.main:app"]

@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Ollama Proxy Admin{% endblock %}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="flex flex-col min-h-screen">
+        <header class="bg-white shadow-md">
+            <nav class="container mx-auto px-6 py-3">
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center space-x-4">
+                        <a href="{{ url_for('admin_dashboard') }}" class="text-xl font-semibold text-gray-700">Ollama Proxy Admin</a>
+                         {% if request.state.user %}
+                        <a href="{{ url_for('admin_dashboard') }}" class="text-gray-600 hover:text-indigo-600">User Management</a>
+                        <a href="{{ url_for('admin_stats') }}" class="text-gray-600 hover:text-indigo-600">Usage Stats</a>
+                        {% endif %}
+                    </div>
+                    <div>
+                        {% if request.state.user %}
+                            <span class="text-gray-600 mr-4">Welcome, {{ request.state.user.username }}</span>
+                            <a href="{{ url_for('admin_logout') }}" class="px-3 py-2 bg-red-500 text-white rounded hover:bg-red-600">Logout</a>
+                        {% endif %}
+                    </div>
+                </div>
+            </nav>
+        </header>
+
+        <main class="flex-grow container mx-auto px-6 py-8">
+            {% block content %}{% endblock %}
+        </main>
+
+        <footer class="bg-white mt-8 py-4">
+            <div class="container mx-auto px-6 text-center text-gray-500">
+                Ollama Proxy Server v{{ request.app.version }}
+            </div>
+        </footer>
+    </div>
+</body>
+</html>
