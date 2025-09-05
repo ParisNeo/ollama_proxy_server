@@ -4,7 +4,7 @@ set -euo pipefail   # fail on error, undefined vars, and pipe failures
 # ====================================================================
 #
 #   Ollama Proxy Fortress - Professional Installer & Runner
-#   Version: 3.0 (with Linux Service Installer)
+#   Version: 3.1 (with Pydantic .env fix)
 #   For: macOS & Linux
 #
 # ====================================================================
@@ -98,6 +98,8 @@ if [[ "$CURRENT_STATE" -lt 4 ]]; then
         read -p "   -> Denied IPs (comma-separated, leave empty for none): " DENIED_IPS
         print_info "Generating .env configuration file..."
         SECRET_KEY=$(openssl rand -hex 32)
+        
+        # --- CRITICAL FIX: Conditionally write ALLOWED_IPS and DENIED_IPS ---
         (
             echo "APP_NAME=\"Ollama Proxy Fortress\""; echo "APP_VERSION=\"8.0.0\""; echo "LOG_LEVEL=\"info\""
             echo "PROXY_PORT=\"${PROXY_PORT:-8080}\""
@@ -107,8 +109,16 @@ if [[ "$CURRENT_STATE" -lt 4 ]]; then
             echo "SECRET_KEY=\"${SECRET_KEY}\""
             echo "REDIS_URL=\"${REDIS_URL:-redis://localhost:6379/0}\""
             echo "RATE_LIMIT_REQUESTS=\"100\""; echo "RATE_LIMIT_WINDOW_MINUTES=\"1\""
-            echo "ALLOWED_IPS=\"${ALLOWED_IPS}\""; echo "DENIED_IPS=\"${DENIED_IPS}\""
+            
+            # Only write the IP list variables if they are not empty
+            if [[ -n "${ALLOWED_IPS}" ]]; then
+                echo "ALLOWED_IPS=\"${ALLOWED_IPS}\""
+            fi
+            if [[ -n "${DENIED_IPS}" ]]; then
+                echo "DENIED_IPS=\"${DENIED_IPS}\""
+            fi
         ) > .env
+
         echo "3" > "$STATE_FILE"
         print_success ".env file created."
     fi
@@ -123,7 +133,7 @@ if [[ "$CURRENT_STATE" -lt 4 ]]; then
     ADMIN_USER_FINAL=$(grep -E '^ADMIN_USER=' .env | cut -d '=' -f2 | tr -d '"')
     PORT_FINAL=$(grep -E '^PROXY_PORT=' .env | cut -d '=' -f2 | tr -d '"')
     print_success "Your Ollama Proxy Fortress is ready."
-    print_info "Admin Dashboard: http://127.0.0.1:${PORT_FINAL}/admin"
+    print_info "Admin Dashboard: http://12v7.0.0.1:${PORT_FINAL}/admin"
     print_info "Admin Username:  ${ADMIN_USER_FINAL}"
 fi
 
@@ -139,7 +149,6 @@ if [[ "$(uname)" == "Linux" ]] && command -v systemctl &>/dev/null; then
         SERVICE_FILE_PATH="/etc/systemd/system/${SERVICE_NAME}.service"
         print_info "Creating systemd service file..."
 
-        # Using a 'here document' to create the service file content
         SERVICE_FILE_CONTENT=$(cat << EOF
 [Unit]
 Description=Ollama Proxy Fortress Service
