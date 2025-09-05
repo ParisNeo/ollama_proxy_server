@@ -1,3 +1,4 @@
+# app/api/v1/routes/admin.py
 import logging
 from typing import Union
 
@@ -5,7 +6,6 @@ from fastapi import APIRouter, Depends, Request, Form, HTTPException, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession
-from starlette.requests import Request
 
 from app.core.config import settings
 from app.core.security import verify_password, get_password_hash
@@ -19,7 +19,9 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 templates = Jinja2Templates(directory="app/templates")
 
-# Simple flash messaging
+# ----------------------------------------------------------------------
+# Flash‑message helpers (unchanged)
+# ----------------------------------------------------------------------
 def flash(request: Request, message: str, category: str = "info"):
     if "_messages" not in request.session:
         request.session["_messages"] = []
@@ -30,8 +32,9 @@ def get_flashed_messages(request: Request):
 
 templates.env.globals["get_flashed_messages"] = get_flashed_messages
 
-
-# --- Admin Authentication Dependencies ---
+# ----------------------------------------------------------------------
+# Admin authentication helpers (unchanged)
+# ----------------------------------------------------------------------
 async def get_current_user_from_cookie(
     request: Request, db: AsyncSession = Depends(get_db)
 ) -> User | None:
@@ -44,23 +47,18 @@ async def get_current_user_from_cookie(
 async def require_admin_user(
     request: Request, current_user: Union[User, None] = Depends(get_current_user_from_cookie)
 ) -> User:
-    """
-    Dependency that ensures a user is logged in and is an admin.
-    If not, it raises an HTTPException that triggers a redirect to the login page.
-    This is the sole point of enforcement for all protected admin routes.
-    """
     if not current_user or not current_user.is_admin:
         raise HTTPException(
             status_code=status.HTTP_303_SEE_OTHER,
             detail="Not authorized",
             headers={"Location": str(request.url_for("admin_login"))},
         )
-    # Attach user to request state for use in templates (`request.state.user`)
     request.state.user = current_user
     return current_user
 
-
-# --- Admin Routes ---
+# ----------------------------------------------------------------------
+# Admin UI routes (unchanged up to the key‑creation endpoint)
+# ----------------------------------------------------------------------
 @router.get("/login", response_class=HTMLResponse, name="admin_login")
 async def admin_login_form(request: Request):
     return templates.TemplateResponse("admin/login.html", {"request": request})
@@ -85,7 +83,6 @@ async def admin_logout(request: Request):
     request.session.clear()
     return RedirectResponse(url=request.url_for("admin_login"), status_code=status.HTTP_303_SEE_OTHER)
 
-
 @router.get("/dashboard", response_class=HTMLResponse, name="admin_dashboard")
 async def admin_dashboard(
     request: Request,
@@ -94,7 +91,6 @@ async def admin_dashboard(
 ):
     users = await user_crud.get_users(db)
     return templates.TemplateResponse("admin/dashboard.html", {"request": request, "users": users})
-
 
 @router.get("/stats", response_class=HTMLResponse, name="admin_stats")
 async def admin_stats(
@@ -105,8 +101,9 @@ async def admin_stats(
     stats = await log_crud.get_usage_statistics(db)
     return templates.TemplateResponse("admin/statistics.html", {"request": request, "stats": stats})
 
-
-# --- New Server Management Routes ---
+# ----------------------------------------------------------------------
+# Server management routes (unchanged)
+# ----------------------------------------------------------------------
 @router.get("/servers", response_class=HTMLResponse, name="admin_servers")
 async def admin_server_management(
     request: Request,
@@ -134,7 +131,6 @@ async def admin_add_server(
             flash(request, f"Server '{server_name}' added successfully.", "success")
         except Exception:
             flash(request, "Invalid URL format.", "error")
-
     return RedirectResponse(url=request.url_for("admin_servers"), status_code=status.HTTP_303_SEE_OTHER)
 
 @router.post("/servers/{server_id}/delete", name="admin_delete_server")
@@ -147,9 +143,10 @@ async def admin_delete_server(
     await server_crud.delete_server(db, server_id=server_id)
     flash(request, "Server deleted successfully.", "success")
     return RedirectResponse(url=request.url_for("admin_servers"), status_code=status.HTTP_303_SEE_OTHER)
-# --- End Server Management Routes ---
 
-
+# ----------------------------------------------------------------------
+# USER MANAGEMENT (unchanged up to API‑key creation)
+# ----------------------------------------------------------------------
 @router.post("/users", name="create_new_user")
 async def create_new_user(
     request: Request,
@@ -180,6 +177,9 @@ async def get_user_details(
     api_keys = await apikey_crud.get_api_keys_for_user(db, user_id=user_id)
     return templates.TemplateResponse("admin/user_details.html", {"request": request, "user": user, "api_keys": api_keys})
 
+# ----------------------------------------------------------------------
+# *** NEW: Show the generated key with a copy button ***
+# ----------------------------------------------------------------------
 @router.post("/users/{user_id}/keys", name="create_user_api_key")
 async def create_user_api_key(
     request: Request,
@@ -188,10 +188,23 @@ async def create_user_api_key(
     admin_user: User = Depends(require_admin_user),
     key_name: str = Form(...),
 ):
+    """
+    Creates a new API key for the given user.
+    Instead of flashing the key (which would be lost on a redirect),
+    we render a dedicated page that displays the **full plain key**
+    exactly once and offers a “Copy to clipboard” button.
+    """
     plain_key, _ = await apikey_crud.create_api_key(db, user_id=user_id, key_name=key_name)
-    flash(request, f"New API key created: {plain_key}. This is the only time you will see the full key.", "success")
-    return RedirectResponse(url=request.url_for("get_user_details", user_id=user_id), status_code=status.HTTP_303_SEE_OTHER)
 
+    # Render a page that shows the key and a copy button.
+    return templates.TemplateResponse(
+        "admin/key_created.html",
+        {
+            "request": request,
+            "plain_key": plain_key,
+            "user_id": user_id,
+        },
+    )
 
 @router.post("/keys/{key_id}/revoke", name="revoke_user_api_key")
 async def revoke_user_api_key(
@@ -207,7 +220,6 @@ async def revoke_user_api_key(
     await apikey_crud.revoke_api_key(db, key_id=key_id)
     flash(request, f"API Key '{key.key_name}' has been revoked.", "success")
     return RedirectResponse(url=request.url_for("get_user_details", user_id=key.user_id), status_code=status.HTTP_303_SEE_OTHER)
-
 
 @router.post("/users/{user_id}/delete", name="delete_user_account")
 async def delete_user_account(
