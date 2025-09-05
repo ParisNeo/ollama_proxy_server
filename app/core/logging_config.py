@@ -1,6 +1,6 @@
 # app/core/logging_config.py
 """
-Centralised logging configuration.
+Centralised logging configuration for the Ollama Proxy Server.
 
 Features
 --------
@@ -15,11 +15,11 @@ import logging
 import logging.config
 import os
 import sys
-from pythonjsonlogger import jsonlogger
 from datetime import datetime
+from pythonjsonlogger import jsonlogger
 
 # ----------------------------------------------------------------------
-# Formatter definitions
+# Human‑readable formatter
 # ----------------------------------------------------------------------
 class HumanReadableFormatter(logging.Formatter):
     """
@@ -30,16 +30,19 @@ class HumanReadableFormatter(logging.Formatter):
     DEFAULT_DATEFMT = "%Y-%m-%d %H:%M:%S,%f"
 
     def __init__(self):
+        # ``asctime`` already includes microseconds; we trim to milliseconds
         super().__init__(self.DEFAULT_FORMAT, self.DEFAULT_DATEFMT)
 
+# ----------------------------------------------------------------------
+# JSON formatter – kept for compatibility
+# ----------------------------------------------------------------------
 class JsonFormatter(jsonlogger.JsonFormatter):
     """
-    JSON formatter – kept for compatibility.
-    The same fields as the old config are emitted.
+    Emits the same fields that the original configuration emitted.
     """
     def add_fields(self, log_record, record, message_dict):
         super().add_fields(log_record, record, message_dict)
-        # Ensure timestamp is a float (epoch) like before
+        # Ensure a numeric epoch timestamp like the previous version
         if not log_record.get("timestamp"):
             log_record["timestamp"] = record.created
         # Normalise level name to upper‑case
@@ -48,14 +51,14 @@ class JsonFormatter(jsonlogger.JsonFormatter):
 # ----------------------------------------------------------------------
 # Build the dictConfig – selects formatter based on LOG_FORMAT env‑var
 # ----------------------------------------------------------------------
-def _build_logging_config(log_level: str = "INFO"):
+def _build_logging_config(log_level: str = "INFO") -> dict:
     """
-    Returns a dict compatible with ``logging.config.dictConfig``.
+    Returns a ``dict`` compatible with ``logging.config.dictConfig``.
     ``log_level`` can be any standard level name (case‑insensitive).
     """
     level = log_level.upper()
 
-    # Choose formatter: human‑readable (default) or JSON
+    # Choose which formatter to use (human‑readable is default)
     fmt_type = os.getenv("LOG_FORMAT", "human").lower()
     if fmt_type == "json":
         formatter_name = "json"
@@ -83,9 +86,13 @@ def _build_logging_config(log_level: str = "INFO"):
                 "stream": "ext://sys.stdout",
             },
         },
+        # ---------- ROOT LOGGER ----------
+        "root": {
+            "level": level,
+            "handlers": ["default"],
+        },
+        # ---------- OTHER LOGGERS ----------
         "loggers": {
-            # Root logger – everything falls back to this
-            "": {"handlers": ["default"], "level": level, "propagate": True},
             # Explicitly configure the popular libraries so they don’t add extra handlers
             "uvicorn.error": {"handlers": ["default"], "level": level, "propagate": False},
             "uvicorn.access": {"handlers": ["default"], "level": level, "propagate": False},
@@ -97,7 +104,7 @@ def _build_logging_config(log_level: str = "INFO"):
 # ----------------------------------------------------------------------
 # Public objects used by the rest of the codebase
 # ----------------------------------------------------------------------
-# Default config used by Gunicorn (imported in gunicorn_conf.py)
+# Default config imported by gunicorn_conf.py
 LOGGING_CONFIG = _build_logging_config()
 
 def setup_logging(log_level: str = "INFO") -> None:
@@ -108,7 +115,5 @@ def setup_logging(log_level: str = "INFO") -> None:
     config = _build_logging_config(log_level)
     logging.config.dictConfig(config)
 
-# ----------------------------------------------------------------------
-# Convenience: expose the human‑readable formatter for external use
-# ----------------------------------------------------------------------
+# Exported names for ``from app.core.logging_config import …``
 __all__ = ["setup_logging", "LOGGING_CONFIG", "HumanReadableFormatter", "JsonFormatter"]
