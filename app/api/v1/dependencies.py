@@ -17,7 +17,7 @@ api_key_header = APIKeyHeader(name="Authorization", auto_error=False)
 # --- IP Filtering Dependency ---
 async def ip_filter(request: Request):
     client_ip = request.client.host
-    if settings.ALLOWED_IPS and client_ip not in settings.ALLOWED_IPS:
+    if not "*" in settings.ALLOWED_IPS and settings.ALLOWED_IPS and client_ip not in settings.ALLOWED_IPS:
         logger.warning(f"IP address {client_ip} denied by allow-list.")
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="IP address not allowed")
     if settings.DENIED_IPS and client_ip in settings.DENIED_IPS:
