@@ -10,7 +10,7 @@ Whether you're a developer, a researcher, or just an AI enthusiast running model
 
 ## The Threat: Why Your PC Could Be at Risk
 
-Recently, a critical vulnerability named **"Probllama" (CVE-2024-37032)** was discovered in Ollama. This wasn't a minor bug; it was a **Remote Code Execution (RCE)** vulnerability.
+Last year, a critical vulnerability named **"Probllama" (CVE-2024-37032)** was discovered in Ollama. This wasn't a minor bug; it was a **Remote Code Execution (RCE)** vulnerability.
 
 **What does that mean in plain English?** It means an attacker from anywhere on the internet could have sent a malicious request to your Ollama server and potentially:
 *   💻 **Take full control of your computer.**
