@@ -8,7 +8,7 @@ Jinja2==3.1.4
 pydantic==2.7.4
 pydantic-settings==2.3.4
 python-json-logger==2.0.7
-python-multipart==0.0.9
+python-multipart==0.0.18
 redis==5.0.7
 SQLAlchemy==2.0.31
 uvicorn==0.30.1
