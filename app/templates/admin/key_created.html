@@ -1,0 +1,56 @@
+{% extends "admin/base.html" %}
+
+{% block title %}New API Key{% endblock %}
+{% block header_title %}New API Key{% endblock %}
+
+{% block content %}
+<div class="max-w-2xl mx-auto bg-white p-8 rounded-lg shadow-md">
+    <h2 class="text-2xl font-bold mb-4 text-gray-800">API Key Created</h2>
+
+    <p class="mb-2 text-gray-700">
+        This is the <strong>only time</strong> the full key will be shown.
+        Please copy it now and store it securely.
+    </p>
+
+    <div class="flex items-center bg-gray-100 rounded-md p-3 mb-4">
+        <code id="plain-key" class="flex-1 break-all text-sm text-gray-900">{{ plain_key }}</code>
+        <button id="copy-btn"
+                class="ml-3 px-3 py-1 bg-indigo-600 text-white rounded hover:bg-indigo-700 focus:outline-none">
+            Copy
+        </button>
+    </div>
+
+    <p class="text-sm text-gray-600 mb-6">
+        After you close this page you will not be able to see the key again.
+        If you lose it, create a new one and revoke the old key.
+    </p>
+
+    <a href="{{ url_for('get_user_details', user_id=user_id) }}"
+       class="inline-block px-4 py-2 bg-gray-200 text-gray-800 rounded hover:bg-gray-300">
+        Back to User Details
+    </a>
+</div>
+
+<script>
+    // Simple clipboard copy logic – works in all modern browsers
+    document.getElementById('copy-btn').addEventListener('click', function () {
+        const keyEl = document.getElementById('plain-key');
+        const range = document.createRange();
+        range.selectNodeContents(keyEl);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+        try {
+            document.execCommand('copy');
+            // Show a quick visual feedback
+            const original = this.textContent;
+            this.textContent = 'Copied!';
+            setTimeout(() => { this.textContent = original; }, 1500);
+        } catch (err) {
+            console.error('Copy failed', err);
+        }
+        // Cleanup selection
+        sel.removeAllRanges();
+    });
+</script>
+{% endblock %}
