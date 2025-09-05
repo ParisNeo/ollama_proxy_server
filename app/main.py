@@ -28,7 +28,9 @@ from app.database.session import AsyncSessionLocal
 from app.crud import user_crud, server_crud
 from app.schema.user import UserCreate
 from app.schema.server import ServerCreate
+import os
 
+os.environ.setdefault("PASSLIB_DISABLE_WARNINGS", "1")
 # ----------------------------------------------------------------------
 # Logging
 # ----------------------------------------------------------------------

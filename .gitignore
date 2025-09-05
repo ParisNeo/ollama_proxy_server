@@ -96,3 +96,6 @@ docker-compose.yml
 # Database
 ollama_proxy.db
 *.db-journal
+
+# setup state
+.setup_state
