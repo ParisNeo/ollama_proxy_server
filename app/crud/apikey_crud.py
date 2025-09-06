@@ -34,9 +34,14 @@ async def create_api_key(
     Generates a new API key, stores its hash, and returns the plain key and the DB object.
     The plain key is only available at creation time.
     """
-    prefix = f"op_{secrets.token_urlsafe(8)}"
-    secret = secrets.token_urlsafe(32)
+    # --- CRITICAL FIX: Use token_hex to guarantee no underscores in random parts ---
+    # This makes the '_' a reliable delimiter.
+    prefix_random_part = secrets.token_hex(8)
+    prefix = f"op_{prefix_random_part}"
+    
+    secret = secrets.token_hex(24)
     plain_key = f"{prefix}_{secret}"
+    # --- END FIX ---
 
     hashed_key = get_api_key_hash(secret)
 
@@ -65,7 +70,6 @@ async def revoke_api_key(db: AsyncSession, key_id: int) -> APIKey | None:
     await db.commit()
     return result.scalars().first()
 
-# --- NEW FUNCTION ---
 async def toggle_api_key_active(db: AsyncSession, key_id: int) -> APIKey | None:
     """Toggles the is_active status of an API key."""
     key = await get_api_key_by_id(db, key_id)
