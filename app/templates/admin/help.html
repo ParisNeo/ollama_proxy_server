@@ -1,0 +1,59 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Help & Credits{% endblock %}
+{% block header_title %}Help & Credits{% endblock %}
+
+{% block content %}
+<div class="max-w-4xl mx-auto space-y-8">
+
+    <!-- How to Use Section -->
+    <div class="bg-white p-6 rounded-lg shadow-md">
+        <h2 class="text-2xl font-bold mb-4 border-b pb-2">How to Use Ollama Proxy Fortress</h2>
+        
+        <div class="space-y-4 text-gray-700">
+            <p>This proxy server acts as a secure gateway to your Ollama instances. The workflow is simple:</p>
+            <ol class="list-decimal list-inside space-y-2 pl-4">
+                <li><strong>Create a User:</strong> From the <a href="{{ url_for('admin_dashboard') }}" class="text-indigo-600 hover:underline">Dashboard</a>, create a virtual user. This helps you organize API keys (e.g., one user for each application).</li>
+                <li><strong>Generate an API Key:</strong> Click "Manage" next to a user and create a new API key. Give it a descriptive name.</li>
+                <li><strong>Copy the Key:</strong> The full API key is shown only once upon creation. Copy it and store it securely in your application's configuration.</li>
+                <li><strong>Make Secure API Calls:</strong> Use the proxy's URL (e.g., `http://127.0.0.1:8080`) instead of your direct Ollama URL. Provide the API key in the `Authorization` header as a Bearer token.</li>
+            </ol>
+        </div>
+
+        <h3 class="text-xl font-semibold mt-6 mb-2">Example `curl` Request</h3>
+        <p class="text-sm text-gray-600 mb-2">Replace `op_..._...` with your generated API key.</p>
+        <div class="bg-gray-800 text-white rounded-lg p-4 font-mono text-sm overflow-x-auto">
+            <code class="whitespace-pre">
+curl http://127.0.0.1:8080/api/generate \
+  -H "Authorization: Bearer op_prefix_secret" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "llama3",
+    "prompt": "Why is the sky blue?"
+  }'</code>
+        </div>
+    </div>
+
+    <!-- Credits Section -->
+    <div class="bg-white p-6 rounded-lg shadow-md">
+        <h2 class="text-2xl font-bold mb-4 border-b pb-2">Credits & Acknowledgements</h2>
+        <div class="space-y-4 text-gray-700">
+            <p>This application was developed with passion by the open-source community. It stands on the shoulders of giants and wouldn't be possible without the following incredible projects:</p>
+            <ul class="list-disc list-inside space-y-2 pl-4">
+                <li><strong><a href="https://fastapi.tiangolo.com/" target="_blank" class="text-indigo-600 hover:underline">FastAPI</a>:</strong> For the high-performance, easy-to-use web framework.</li>
+                <li><strong><a href="https://www.sqlalchemy.org/" target="_blank" class="text-indigo-600 hover:underline">SQLAlchemy</a>:</strong> For providing a powerful and Pythonic SQL toolkit and ORM.</li>
+                <li><strong><a href="https://alembic.sqlalchemy.org/" target="_blank" class="text-indigo-600 hover:underline">Alembic</a>:</strong> For lightweight and effective database migrations.</li>
+                <li><strong><a href="https://jinja.palletsprojects.com/" target="_blank" class="text-indigo-600 hover:underline">Jinja2</a>:</strong> For fast and expressive server-side templating.</li>
+                <li><strong><a href="https://tailwindcss.com/" target="_blank" class="text-indigo-600 hover:underline">Tailwind CSS</a>:</strong> For the utility-first CSS framework that makes the UI beautiful.</li>
+            </ul>
+            <p class="pt-4">
+                A special thank you to **Saifeddine ALOUI (ParisNeo)** for creating and maintaining this project.
+            </p>
+            <p>
+                Visit the project on <a href="https://github.com/ParisNeo/ollama_proxy_server" target="_blank" class="text-indigo-600 hover:underline">GitHub</a> to contribute, report issues, or star the repository!
+            </p>
+        </div>
+    </div>
+
+</div>
+{% endblock %}

@@ -101,6 +101,15 @@ async def admin_stats(
     stats = await log_crud.get_usage_statistics(db)
     return templates.TemplateResponse("admin/statistics.html", {"request": request, "stats": stats})
 
+# --- NEW HELP PAGE ROUTE ---
+@router.get("/help", response_class=HTMLResponse, name="admin_help")
+async def admin_help_page(
+    request: Request,
+    admin_user: User = Depends(require_admin_user),
+):
+    return templates.TemplateResponse("admin/help.html", {"request": request})
+# --- END NEW ROUTE ---
+
 # ----------------------------------------------------------------------
 # Server management routes
 # ----------------------------------------------------------------------
@@ -178,7 +187,7 @@ async def get_user_details(
     return templates.TemplateResponse("admin/user_details.html", {"request": request, "user": user, "api_keys": api_keys})
 
 # ----------------------------------------------------------------------
-# API KEY MANAGEMENT (REVISED)
+# API KEY MANAGEMENT
 # ----------------------------------------------------------------------
 @router.post("/users/{user_id}/keys/create", name="admin_create_key")
 async def create_user_api_key(
@@ -191,13 +200,8 @@ async def create_user_api_key(
     """
     Creates a new API key for the given user.
     """
-    # --- CRITICAL FIX: Extract the ID *before* any await calls ---
     current_admin_id = admin_user.id
-
-    # This await call will expire the 'admin_user' object from the dependency
     plain_key, _ = await apikey_crud.create_api_key(db, user_id=user_id, key_name=key_name)
-    
-    # Now, refresh the user object on the request state using the safe, saved ID
     request.state.user = await db.get(User, current_admin_id)
     
     return templates.TemplateResponse(
