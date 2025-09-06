@@ -28,10 +28,11 @@ While the core Ollama team impressively patched this vulnerability, the incident
 
 Ollama Proxy Fortress is **more than just a patch**. It's a permanent solution that offers layers of security and powerful features that core Ollama doesn't provide:
 
-*   🛡️ **Ironclad Security Gateway:** Enforce API key authentication for every single request. Add rate limiting to prevent abuse and filter access by IP address.
-*   👤 **Centralized User Management:** Create different "users" for your different apps or family members, each with their own unique, revocable API keys.
-*   🌐 **Multi-Server Management & Federation:** Centrally manage all your Ollama backend servers. The proxy unifies them, allowing you to see and use models from all your servers as if they were one.
-*   📊 **Usage Insights:** A beautiful admin dashboard shows you exactly which keys are being used and how often.
+*   🛡️ **Ironclad Security Gateway:** Enforce API key authentication for every single request. Add global rate limiting to prevent abuse and filter access by IP address.
+*   👤 **Centralized User Management:** Create different "users" for your different apps or family members, each with their own unique API keys.
+*   🔑 **Fine-Grained Key Controls:** Set optional, **per-key rate limits** (e.g., 100 requests every 5 minutes) that override the global settings. Temporarily **disable or re-enable keys** on the fly without having to revoke them permanently.
+*   🌐 **Multi-Server Management & Federation:** Centrally manage all your Ollama backend servers. The proxy load-balances requests and provides a unified view of all available models.
+*   📊 **Graphical Usage Insights:** A beautiful analytics dashboard with interactive charts shows you usage over time, peak hours, and server load distribution, with options to export data.
 *   🚀 **Effortless 1-Click Setup:** No Docker, no `pip install`, no command-line wizardry required. Just download and run a single script.
 
 ---
@@ -51,7 +52,7 @@ cd ollama_proxy_server
 
 ### 2. Run the Installer
 
-Based on your operating system, run the appropriate script. The first time you run it, it will guide you through a simple setup wizard. Every time after that, it will just start the server.
+Based on your operating system, run the appropriate script. The first time you run it, it will guide you through a simple setup wizard. The database is created automatically when the server starts.
 
 **On Windows:**
 Simply double-click `run_windows.bat`.
@@ -76,7 +77,7 @@ Once the server is running, go to the admin panel (e.g., `http://127.0.0.1:8080/
 
 ### Step 2: Manage Users and API Keys
 
-The main dashboard is your central hub for creating virtual users. This allows you to generate and organize unique API keys for different applications or individuals. Click "Manage" to create, view, and revoke keys for any user.
+The main dashboard is your central hub for creating virtual users. Click "Manage" to access the user details page where you can create, view, **enable/disable**, and revoke keys. You can also set **custom rate limits** for each new key, overriding the global settings.
 
 ![User Management Dashboard](assets/dashboard.png)
 
@@ -88,7 +89,7 @@ The "Server Management" page lets you add and remove all your backend Ollama ins
 
 ### Step 4: Monitor Usage Statistics
 
-Get a clear overview of your API usage. The "Usage Stats" page shows a breakdown of total requests per user and per API key, helping you understand which services are most active.
+The "Usage Stats" page features interactive charts showing requests per day, peak usage hours, and server load distribution. All data and charts can be exported for reports.
 
 ![API Usage Statistics](assets/stats.png)
 
@@ -108,7 +109,7 @@ curl http://127.0.0.1:8080/api/generate \
 
 ### Step 6: Get Help When You Need It
 
-The built-in "Help & Credits" page provides a quick-start guide and acknowledges the open-source projects that make this application possible.
+The built-in "Help & Credits" page provides a quick-start guide, code examples, and acknowledges the open-source projects that make this application possible.
 
 ![Help and Credits Page](assets/help.png)
 
@@ -135,12 +136,34 @@ docker run -d --name ollama-proxy \
 
 ---
 
+## Resetting Your Installation (Troubleshooting)
+
+> **WARNING: IRREVERSIBLE ACTION**
+>
+> The reset scripts are for troubleshooting or starting over completely. They will **PERMANENTLY DELETE** your database, configuration, and Python environment. All users, API keys, and settings will be lost. Use with extreme caution.
+
+If you encounter critical errors or wish to perform a completely fresh installation, you can use the provided reset scripts. You will be asked for confirmation before any files are deleted.
+
+**On Windows:**
+Simply double-click the `reset.bat` file and follow the on-screen instructions.
+
+**On macOS or Linux:**
+Open your terminal and run the following commands:
+```bash
+chmod +x reset.sh
+./reset.sh
+```
+
+After the reset is complete, you can run the `run.sh` or `run_windows.bat` script again to perform a new installation.
+
+---
+
 ## Credits and Acknowledgements
 
 This application was developed with passion by the open-source community and stands on the shoulders of giants. A special thank you to:
 
 *   **Saifeddine ALOUI (ParisNeo)** for creating and maintaining this project.
-*   The teams behind **FastAPI**, **SQLAlchemy**, **Alembic**, **Jinja2**, and **Tailwind CSS** for their incredible open-source tools.
+*   The teams behind **FastAPI**, **SQLAlchemy**, **Jinja2**, **Chart.js**, and **Tailwind CSS** for their incredible open-source tools.
 
 Visit the project on [GitHub](https://github.com/ParisNeo/ollama_proxy_server) to contribute, report issues, or star the repository!
 

@@ -14,10 +14,32 @@
             <p>This proxy server acts as a secure gateway to your Ollama instances. The workflow is simple:</p>
             <ol class="list-decimal list-inside space-y-2 pl-4">
                 <li><strong>Create a User:</strong> From the <a href="{{ url_for('admin_dashboard') }}" class="text-indigo-600 hover:underline">Dashboard</a>, create a virtual user. This helps you organize API keys (e.g., one user for each application).</li>
-                <li><strong>Generate an API Key:</strong> Click "Manage" next to a user and create a new API key. Give it a descriptive name.</li>
+                <li><strong>Generate an API Key:</strong> Click "Manage" next to a user to access the key management page.</li>
                 <li><strong>Copy the Key:</strong> The full API key is shown only once upon creation. Copy it and store it securely in your application's configuration.</li>
                 <li><strong>Make Secure API Calls:</strong> Use the proxy's URL (e.g., `http://127.0.0.1:8080`) instead of your direct Ollama URL. Provide the API key in the `Authorization` header as a Bearer token.</li>
             </ol>
+        </div>
+
+        <h3 class="text-xl font-semibold mt-6 mb-4 border-b pb-2">Advanced Key Management</h3>
+        <div class="space-y-4 text-gray-700">
+            <div>
+                <h4 class="font-semibold">Per-Key Rate Limiting</h4>
+                <p>When creating a new API key, you can set a custom rate limit that applies only to that key. You do this by filling in the two rate limit fields:</p>
+                <ul class="list-disc list-inside space-y-2 pl-4 mt-2">
+                    <li><code class="bg-gray-200 px-1 rounded">Rate Limit Requests</code>: The maximum number of requests this key can make within the time window.</li>
+                    <li><code class="bg-gray-200 px-1 rounded">Window (Minutes)</code>: The duration of the time window in minutes.</li>
+                </ul>
+                <p class="mt-2"><strong>Example:</strong> Setting `Requests` to `100` and `Window` to `5` means this specific key can be used a maximum of 100 times every 5 minutes.</p>
+                <p class="mt-2">If you leave these fields blank, the key will automatically use the global rate limit settings defined in your server's `.env` file.</p>
+            </div>
+            <div>
+                <h4 class="font-semibold">Key Status: Active, Disabled, and Revoked</h4>
+                <ul class="list-disc list-inside space-y-1 pl-4">
+                    <li><strong class="text-green-600">Active:</strong> The key is fully functional.</li>
+                    <li><strong class="text-yellow-600">Disabled:</strong> The key is temporarily blocked and cannot be used for API calls. It can be re-enabled at any time. This is useful for temporarily pausing access for an application without deleting the key.</li>
+                    <li><strong class="text-black">Revoked:</strong> The key is permanently and irreversibly destroyed. It can never be used again. Use this action if a key has been compromised or is no longer needed.</li>
+                </ul>
+            </div>
         </div>
     </div>
         
@@ -122,8 +144,8 @@ print(models)
             <ul class="list-disc list-inside space-y-2 pl-4">
                 <li><strong><a href="https://fastapi.tiangolo.com/" target="_blank" class="text-indigo-600 hover:underline">FastAPI</a>:</strong> For the high-performance, easy-to-use web framework.</li>
                 <li><strong><a href="https://www.sqlalchemy.org/" target="_blank" class="text-indigo-600 hover:underline">SQLAlchemy</a>:</strong> For providing a powerful and Pythonic SQL toolkit and ORM.</li>
-                <li><strong><a href="https://alembic.sqlalchemy.org/" target="_blank" class="text-indigo-600 hover:underline">Alembic</a>:</strong> For lightweight and effective database migrations.</li>
                 <li><strong><a href="https://jinja.palletsprojects.com/" target="_blank" class="text-indigo-600 hover:underline">Jinja2</a>:</strong> For fast and expressive server-side templating.</li>
+                <li><strong><a href="https://www.chartjs.org/" target="_blank" class="text-indigo-600 hover:underline">Chart.js</a>:</strong> For the beautiful and interactive data visualizations.</li>
                 <li><strong><a href="https://tailwindcss.com/" target="_blank" class="text-indigo-600 hover:underline">Tailwind CSS</a>:</strong> For the utility-first CSS framework that makes the UI beautiful.</li>
             </ul>
             <p class="pt-4">

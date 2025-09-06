@@ -23,14 +23,25 @@
     <div class="bg-white p-6 rounded-lg shadow-md mb-8">
         <h3 class="text-xl font-bold mb-4">Create New API Key</h3>
         <form action="{{ url_for('admin_create_key', user_id=user.id) }}" method="post">
-            <div class="flex items-end space-x-4">
-                <div class="flex-grow">
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div class="md:col-span-2">
                     <label for="key_name" class="block text-sm font-medium text-gray-700">Key Name (e.g., "My App")</label>
-                    <input type="text" name="key_name" id="key_name" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm">
+                    <input type="text" name="key_name" id="key_name" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 sm:text-sm">
                 </div>
                 <div>
-                    <button type="submit" class="justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700">Create Key</button>
+                    <label for="rate_limit_requests" class="block text-sm font-medium text-gray-700">Rate Limit Requests</label>
+                    <input type="number" name="rate_limit_requests" id="rate_limit_requests" placeholder="e.g., 100" min="0" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 sm:text-sm">
                 </div>
+                <div>
+                    <label for="rate_limit_window_minutes" class="block text-sm font-medium text-gray-700">Window (Minutes)</label>
+                    <input type="number" name="rate_limit_window_minutes" id="rate_limit_window_minutes" placeholder="e.g., 1" min="0" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 sm:text-sm">
+                </div>
+            </div>
+             <p class="text-xs text-gray-500 mt-2">
+                <strong>Hint:</strong> Set a custom limit (e.g., <code class="bg-gray-200 px-1 rounded">100</code> requests per <code class="bg-gray-200 px-1 rounded">1</code> minute). Leave blank to use the global default settings.
+             </p>
+            <div class="mt-4">
+                <button type="submit" class="justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700">Create Key</button>
             </div>
         </form>
     </div>
@@ -42,9 +53,9 @@
             <table class="min-w-full divide-y divide-gray-200">
                 <thead class="bg-gray-50">
                     <tr>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Prefix</th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Created At</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name / Prefix</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Created</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Rate Limit</th>
                         <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
                         <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                     </tr>
@@ -52,22 +63,42 @@
                 <tbody class="bg-white divide-y divide-gray-200">
                     {% for key in api_keys %}
                     <tr>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{{ key.key_name }}</td>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 font-mono">{{ key.key_prefix }}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm">
+                            <div class="font-medium text-gray-900">{{ key.key_name }}</div>
+                            <div class="text-gray-500 font-mono">{{ key.key_prefix }}</div>
+                        </td>
                         <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{{ key.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                            {% if key.rate_limit_requests and key.rate_limit_window_minutes %}
+                                {{ key.rate_limit_requests }} / {{ key.rate_limit_window_minutes }} min
+                            {% else %}
+                                <span class="italic text-gray-400">Default</span>
+                            {% endif %}
+                        </td>
                         <td class="px-6 py-4 whitespace-nowrap text-sm">
                             {% if key.is_revoked %}
-                            <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-red-100 text-red-800">Revoked</span>
+                                <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-black text-white">Revoked</span>
+                            {% elif key.is_active %}
+                                <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">Active</span>
                             {% else %}
-                            <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">Active</span>
+                                <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-yellow-100 text-yellow-800">Disabled</span>
                             {% endif %}
                         </td>
                         <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                            <div class="flex justify-end space-x-4">
                             {% if not key.is_revoked %}
-                            <form action="{{ url_for('admin_revoke_key', key_id=key.id) }}" method="post">
-                                <button type="submit" class="text-red-600 hover:text-red-900">Revoke</button>
-                            </form>
+                                <form action="{{ url_for('admin_toggle_key_active', key_id=key.id) }}" method="post">
+                                    {% if key.is_active %}
+                                        <button type="submit" class="text-yellow-600 hover:text-yellow-900">Disable</button>
+                                    {% else %}
+                                        <button type="submit" class="text-green-600 hover:text-green-900">Enable</button>
+                                    {% endif %}
+                                </form>
+                                <form action="{{ url_for('admin_revoke_key', key_id=key.id) }}" method="post" onsubmit="return confirm('Are you sure you want to permanently revoke this key? This cannot be undone.');">
+                                    <button type="submit" class="text-red-600 hover:text-red-900">Revoke</button>
+                                </form>
                             {% endif %}
+                            </div>
                         </td>
                     </tr>
                     {% else %}

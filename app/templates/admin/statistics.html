@@ -4,35 +4,206 @@
 {% block header_title %}API Usage Statistics{% endblock %}
 
 {% block content %}
-<div class="max-w-7xl mx-auto">
-    <div class="bg-white p-6 rounded-lg shadow-md">
-        <h2 class="text-2xl font-bold mb-4">Total Requests per API Key</h2>
-        <div class="overflow-x-auto">
-            <table class="min-w-full divide-y divide-gray-200">
-                <thead class="bg-gray-50">
-                    <tr>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Username</th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Key Name</th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Key Prefix</th>
-                        <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Total Requests</th>
-                    </tr>
-                </thead>
-                <tbody class="bg-white divide-y divide-gray-200">
-                    {% for stat in stats %}
-                    <tr>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{{ stat.username }}</td>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{{ stat.key_name }}</td>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 font-mono">{{ stat.key_prefix }}</td>
-                        <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium text-gray-900">{{ stat.request_count }}</td>
-                    </tr>
-                    {% else %}
-                    <tr>
-                        <td colspan="4" class="px-6 py-4 text-center text-gray-500">No usage data available.</td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
+<div class="space-y-8">
+
+    <!-- Charts Row -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        
+        <!-- Daily Usage Card -->
+        <div class="bg-white p-6 rounded-lg shadow-md">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-xl font-bold">Requests per Day (Last 30 Days)</h2>
+                <div class="space-x-2">
+                    <button onclick="exportChartToPNG('dailyUsageChart', 'daily-usage.png')" class="text-sm text-indigo-600 hover:underline">Export PNG</button>
+                    <button onclick="exportDataToCSV(['Date', 'Request Count'], {{ daily_labels | tojson }}, {{ daily_data | tojson }}, 'daily-usage.csv')" class="text-sm text-indigo-600 hover:underline">Export CSV</button>
+                </div>
+            </div>
+            <canvas id="dailyUsageChart"></canvas>
+        </div>
+
+        <!-- Hourly Usage Card -->
+        <div class="bg-white p-6 rounded-lg shadow-md">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-xl font-bold">Peak Hours (UTC)</h2>
+                 <div class="space-x-2">
+                    <button onclick="exportChartToPNG('hourlyUsageChart', 'hourly-usage.png')" class="text-sm text-indigo-600 hover:underline">Export PNG</button>
+                    <button onclick="exportDataToCSV(['Hour (UTC)', 'Request Count'], {{ hourly_labels | tojson }}, {{ hourly_data | tojson }}, 'hourly-usage.csv')" class="text-sm text-indigo-600 hover:underline">Export CSV</button>
+                </div>
+            </div>
+            <canvas id="hourlyUsageChart"></canvas>
+        </div>
+
+    </div>
+
+    <!-- Server Load and Key Usage Row -->
+    <div class="grid grid-cols-1 lg:grid-cols-5 gap-8">
+        <!-- Server Load Card -->
+        <div class="bg-white p-6 rounded-lg shadow-md lg:col-span-2">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-xl font-bold">Server Load Distribution</h2>
+                 <div class="space-x-2">
+                    <button onclick="exportChartToPNG('serverLoadChart', 'server-load.png')" class="text-sm text-indigo-600 hover:underline">Export PNG</button>
+                    <button onclick="exportDataToCSV(['Server Name', 'Request Count'], {{ server_labels | tojson }}, {{ server_data | tojson }}, 'server-load.csv')" class="text-sm text-indigo-600 hover:underline">Export CSV</button>
+                </div>
+            </div>
+            <canvas id="serverLoadChart"></canvas>
+        </div>
+
+        <!-- Key Usage Table Card -->
+        <div class="bg-white p-6 rounded-lg shadow-md lg:col-span-3">
+             <div class="flex justify-between items-center mb-4">
+                <h2 class="text-xl font-bold">Total Requests per API Key</h2>
+                <button onclick="exportTableToCSV('keyUsageTable', 'key-usage.csv')" class="text-sm text-indigo-600 hover:underline">Export CSV</button>
+            </div>
+            <div class="overflow-x-auto max-h-96">
+                <table class="min-w-full divide-y divide-gray-200" id="keyUsageTable">
+                    <thead class="bg-gray-50 sticky top-0">
+                        <tr>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Username</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Key Name</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Key Prefix</th>
+                            <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Requests</th>
+                        </tr>
+                    </thead>
+                    <tbody class="bg-white divide-y divide-gray-200">
+                        {% for stat in key_usage_stats %}
+                        <tr>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{{ stat.username }}</td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{{ stat.key_name }}</td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 font-mono">{{ stat.key_prefix }}</td>
+                            <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium text-gray-900">{{ stat.request_count }}</td>
+                        </tr>
+                        {% else %}
+                        <tr>
+                            <td colspan="4" class="px-6 py-4 text-center text-gray-500">No usage data available.</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
         </div>
     </div>
+
 </div>
+
+<!-- CHART & EXPORT JAVASCRIPT -->
+<script>
+    // --- Helper Functions for Exporting ---
+    function downloadURI(uri, name) {
+        const link = document.createElement("a");
+        link.download = name;
+        link.href = uri;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    }
+
+    function exportChartToPNG(chartId, filename) {
+        const chart = Chart.getChart(chartId);
+        if (chart) {
+            const uri = chart.toBase64Image();
+            downloadURI(uri, filename);
+        }
+    }
+
+    function exportDataToCSV(headers, labels, data, filename) {
+        let csvContent = "data:text/csv;charset=utf-8," + headers.join(",") + "\n";
+        labels.forEach((label, index) => {
+            csvContent += `"${label}",${data[index]}\n`;
+        });
+        const encodedUri = encodeURI(csvContent);
+        downloadURI(encodedUri, filename);
+    }
+
+    function exportTableToCSV(tableId, filename) {
+        const table = document.getElementById(tableId);
+        let csvContent = "data:text/csv;charset=utf-8,";
+        const rows = table.querySelectorAll("tr");
+        
+        rows.forEach(row => {
+            const cols = row.querySelectorAll("th, td");
+            const rowData = Array.from(cols).map(col => `"${col.innerText}"`);
+            csvContent += rowData.join(",") + "\n";
+        });
+
+        const encodedUri = encodeURI(csvContent);
+        downloadURI(encodedUri, filename);
+    }
+
+
+    // --- Chart Initializations ---
+    document.addEventListener('DOMContentLoaded', function () {
+        const primaryColor = 'rgba(79, 70, 229, 1)';
+        const primaryColorTransparent = 'rgba(79, 70, 229, 0.2)';
+
+        // 1. Daily Usage Chart (Line)
+        const dailyCtx = document.getElementById('dailyUsageChart').getContext('2d');
+        new Chart(dailyCtx, {
+            type: 'line',
+            data: {
+                labels: {{ daily_labels | tojson }},
+                datasets: [{
+                    label: 'Requests',
+                    data: {{ daily_data | tojson }},
+                    borderColor: primaryColor,
+                    backgroundColor: primaryColorTransparent,
+                    fill: true,
+                    tension: 0.1
+                }]
+            },
+            options: {
+                responsive: true,
+                scales: {
+                    y: { beginAtZero: true }
+                }
+            }
+        });
+
+        // 2. Hourly Usage Chart (Bar)
+        const hourlyCtx = document.getElementById('hourlyUsageChart').getContext('2d');
+        new Chart(hourlyCtx, {
+            type: 'bar',
+            data: {
+                labels: {{ hourly_labels | tojson }},
+                datasets: [{
+                    label: 'Requests',
+                    data: {{ hourly_data | tojson }},
+                    backgroundColor: primaryColorTransparent,
+                    borderColor: primaryColor,
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                responsive: true,
+                scales: {
+                    y: { beginAtZero: true }
+                }
+            }
+        });
+
+        // 3. Server Load Chart (Doughnut)
+        const serverCtx = document.getElementById('serverLoadChart').getContext('2d');
+        new Chart(serverCtx, {
+            type: 'doughnut',
+            data: {
+                labels: {{ server_labels | tojson }},
+                datasets: [{
+                    label: 'Requests',
+                    data: {{ server_data | tojson }},
+                    backgroundColor: [
+                        'rgba(79, 70, 229, 0.8)',
+                        'rgba(5, 150, 105, 0.8)',
+                        'rgba(217, 70, 239, 0.8)',
+                        'rgba(245, 158, 11, 0.8)',
+                        'rgba(220, 38, 38, 0.8)',
+                        'rgba(107, 114, 128, 0.8)'
+                    ],
+                }]
+            },
+            options: {
+                responsive: true,
+            }
+        });
+    });
+</script>
 {% endblock %}

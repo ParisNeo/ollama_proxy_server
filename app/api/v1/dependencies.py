@@ -46,7 +46,6 @@ async def get_valid_api_key(
     api_key_str = auth_header.split(" ")[1]
 
     try:
-        # --- CRITICAL FIX: Split from the right to correctly separate prefix and secret ---
         prefix, secret = api_key_str.rsplit("_", 1)
     except ValueError:
         raise HTTPException(
@@ -62,11 +61,19 @@ async def get_valid_api_key(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API Key"
         )
 
+    # --- UPDATED VALIDATION LOGIC ---
     if db_api_key.is_revoked:
         logger.warning(f"Attempt to use revoked API key with prefix '{prefix}'.")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="API Key has been revoked"
         )
+
+    if not db_api_key.is_active:
+        logger.warning(f"Attempt to use disabled API key with prefix '{prefix}'.")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="API Key is disabled"
+        )
+    # --- END UPDATED LOGIC ---
 
     if not verify_api_key(secret, db_api_key.hashed_key):
         logger.warning(f"Invalid secret for API key with prefix '{prefix}'.")
@@ -84,11 +91,19 @@ async def rate_limiter(
 ):
     redis_client: redis.Redis = request.app.state.redis
     if not redis_client:
-        # If Redis isn't configured, we silently skip rate limiting.
         return True
 
-    limit = settings.RATE_LIMIT_REQUESTS
-    window = settings.RATE_LIMIT_WINDOW_MINUTES * 60  # in seconds
+    # --- UPDATED RATE LIMIT LOGIC ---
+    # Use per-key limit if available, otherwise fall back to global settings.
+    if api_key.rate_limit_requests is not None and api_key.rate_limit_window_minutes is not None:
+        limit = api_key.rate_limit_requests
+        window_minutes = api_key.rate_limit_window_minutes
+    else:
+        limit = settings.RATE_LIMIT_REQUESTS
+        window_minutes = settings.RATE_LIMIT_WINDOW_MINUTES
+    # --- END UPDATED LOGIC ---
+    
+    window = window_minutes * 60  # in seconds
     key = f"rate_limit:{api_key.key_prefix}"
 
     try:
@@ -106,5 +121,4 @@ async def rate_limiter(
             )
     except Exception as e:
         logger.error(f"Could not connect to Redis for rate limiting: {e}")
-        # Fail open: if Redis is down, allow the request to proceed.
     return True

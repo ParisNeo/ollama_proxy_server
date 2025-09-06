@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from typing import List
+from typing import List, Tuple
 from fastapi import APIRouter, Depends, Request, Response, HTTPException, status
 from fastapi.responses import StreamingResponse
 from httpx import AsyncClient
@@ -27,27 +27,22 @@ async def get_active_servers(db: AsyncSession = Depends(get_db)) -> List[OllamaS
     return active_servers
 
 
-async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer]):
+async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer]) -> Tuple[Response, OllamaServer]:
     """
     Core reverse proxy logic. Forwards the request to a backend Ollama server
-    and streams the response back.
+    and streams the response back. Returns the response and the chosen server.
     """
     http_client: AsyncClient = request.app.state.http_client
     
-    # Simple round-robin load balancing
     if not hasattr(request.app.state, 'backend_server_index'):
         request.app.state.backend_server_index = 0
     
     index = request.app.state.backend_server_index
-    backend_server = servers[index]
+    chosen_server = servers[index]
     request.app.state.backend_server_index = (index + 1) % len(servers)
 
-    # --- CRITICAL FIX: Re-add the /api/ prefix and normalize URL ---
-    # The 'path' from FastAPI has the router prefix ('/api') stripped. We must add it back.
-    # We also normalize the URL to prevent issues with trailing slashes.
-    normalized_url = backend_server.url.rstrip('/')
+    normalized_url = chosen_server.url.rstrip('/')
     backend_url = f"{normalized_url}/api/{path}"
-    # --- END FIX ---
 
     url = http_client.build_request(
         method=request.method,
@@ -69,15 +64,15 @@ async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer
     try:
         backend_response = await http_client.send(backend_request, stream=True)
     except Exception as e:
-        logger.error(f"Error connecting to backend server {backend_server.url}: {e}")
+        logger.error(f"Error connecting to backend server {chosen_server.url}: {e}")
         raise HTTPException(status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail="Could not connect to backend server.")
 
-
-    return StreamingResponse(
+    response = StreamingResponse(
         backend_response.aiter_raw(),
         status_code=backend_response.status_code,
         headers=backend_response.headers,
     )
+    return response, chosen_server
 
 @router.get("/tags")
 async def federate_models(
@@ -93,7 +88,6 @@ async def federate_models(
     
     async def fetch_models(server_url: str):
         try:
-            # Defensive normalization
             normalized_url = server_url.rstrip('/')
             response = await http_client.get(f"{normalized_url}/api/tags")
             response.raise_for_status()
@@ -111,7 +105,7 @@ async def federate_models(
             all_models[model['name']] = model
 
     await log_crud.create_usage_log(
-        db=db, api_key_id=api_key.id, endpoint="/api/tags", status_code=200
+        db=db, api_key_id=api_key.id, endpoint="/api/tags", status_code=200, server_id=None
     )
     
     return {"models": list(all_models.values())}
@@ -128,10 +122,14 @@ async def proxy_ollama(
     """
     A catch-all route that proxies all other requests to the Ollama backend.
     """
-    response = await _reverse_proxy(request, path, servers)
+    response, chosen_server = await _reverse_proxy(request, path, servers)
     
     await log_crud.create_usage_log(
-        db=db, api_key_id=api_key.id, endpoint=f"/api/{path}", status_code=response.status_code
+        db=db, 
+        api_key_id=api_key.id, 
+        endpoint=f"/api/{path}", 
+        status_code=response.status_code,
+        server_id=chosen_server.id
     )
     
     return response

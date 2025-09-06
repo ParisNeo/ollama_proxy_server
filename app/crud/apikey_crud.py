@@ -2,6 +2,7 @@ import secrets
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy import update
+from typing import Optional
 
 from app.database.models import APIKey
 from app.core.security import get_api_key_hash
@@ -23,7 +24,11 @@ async def get_api_keys_for_user(db: AsyncSession, user_id: int) -> list[APIKey]:
 
 
 async def create_api_key(
-    db: AsyncSession, user_id: int, key_name: str
+    db: AsyncSession, 
+    user_id: int, 
+    key_name: str,
+    rate_limit_requests: Optional[int] = None,
+    rate_limit_window_minutes: Optional[int] = None
 ) -> (str, APIKey):
     """
     Generates a new API key, stores its hash, and returns the plain key and the DB object.
@@ -40,6 +45,8 @@ async def create_api_key(
         hashed_key=hashed_key,
         key_prefix=prefix,
         user_id=user_id,
+        rate_limit_requests=rate_limit_requests,
+        rate_limit_window_minutes=rate_limit_window_minutes
     )
     db.add(db_api_key)
     await db.commit()
@@ -51,9 +58,21 @@ async def revoke_api_key(db: AsyncSession, key_id: int) -> APIKey | None:
     stmt = (
         update(APIKey)
         .where(APIKey.id == key_id)
-        .values(is_revoked=True)
+        .values(is_revoked=True, is_active=False) # Revoking also deactivates
         .returning(APIKey)
     )
     result = await db.execute(stmt)
     await db.commit()
     return result.scalars().first()
+
+# --- NEW FUNCTION ---
+async def toggle_api_key_active(db: AsyncSession, key_id: int) -> APIKey | None:
+    """Toggles the is_active status of an API key."""
+    key = await get_api_key_by_id(db, key_id)
+    if not key or key.is_revoked:
+        return None
+
+    key.is_active = not key.is_active
+    await db.commit()
+    await db.refresh(key)
+    return key

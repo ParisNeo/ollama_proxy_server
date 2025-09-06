@@ -34,8 +34,13 @@ class APIKey(Base):
     key_prefix = Column(String, unique=True, nullable=False)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     expires_at = Column(DateTime, nullable=True)
-    is_revoked = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    
+    is_active = Column(Boolean, default=True, nullable=False)
+    is_revoked = Column(Boolean, default=False, nullable=False)
+    
+    rate_limit_requests = Column(Integer, nullable=True)
+    rate_limit_window_minutes = Column(Integer, nullable=True)
 
     user = relationship("User", back_populates="api_keys")
     usage_logs = relationship("UsageLog", back_populates="api_key", cascade="all, delete-orphan")
@@ -51,8 +56,10 @@ class UsageLog(Base):
     endpoint = Column(String, nullable=False)
     status_code = Column(Integer, nullable=False)
     request_timestamp = Column(DateTime, default=datetime.datetime.utcnow)
+    server_id = Column(Integer, ForeignKey("ollama_servers.id"), nullable=True)
 
     api_key = relationship("APIKey", back_populates="usage_logs")
+    server = relationship("OllamaServer")
 
 
 class OllamaServer(Base):
