@@ -22,7 +22,7 @@
     <!-- Create New API Key -->
     <div class="bg-white p-6 rounded-lg shadow-md mb-8">
         <h3 class="text-xl font-bold mb-4">Create New API Key</h3>
-        <form action="{{ url_for('create_user_api_key', user_id=user.id) }}" method="post">
+        <form action="{{ url_for('admin_create_key', user_id=user.id) }}" method="post">
             <div class="flex items-end space-x-4">
                 <div class="flex-grow">
                     <label for="key_name" class="block text-sm font-medium text-gray-700">Key Name (e.g., "My App")</label>
@@ -64,7 +64,7 @@
                         </td>
                         <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                             {% if not key.is_revoked %}
-                            <form action="{{ url_for('revoke_user_api_key', key_id=key.id) }}" method="post">
+                            <form action="{{ url_for('admin_revoke_key', key_id=key.id) }}" method="post">
                                 <button type="submit" class="text-red-600 hover:text-red-900">Revoke</button>
                             </form>
                             {% endif %}

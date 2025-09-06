@@ -20,7 +20,7 @@ router = APIRouter()
 templates = Jinja2Templates(directory="app/templates")
 
 # ----------------------------------------------------------------------
-# Flash‑message helpers (unchanged)
+# Flash‑message helpers
 # ----------------------------------------------------------------------
 def flash(request: Request, message: str, category: str = "info"):
     if "_messages" not in request.session:
@@ -33,7 +33,7 @@ def get_flashed_messages(request: Request):
 templates.env.globals["get_flashed_messages"] = get_flashed_messages
 
 # ----------------------------------------------------------------------
-# Admin authentication helpers (unchanged)
+# Admin authentication helpers
 # ----------------------------------------------------------------------
 async def get_current_user_from_cookie(
     request: Request, db: AsyncSession = Depends(get_db)
@@ -57,7 +57,7 @@ async def require_admin_user(
     return current_user
 
 # ----------------------------------------------------------------------
-# Admin UI routes (unchanged up to the key‑creation endpoint)
+# Admin UI routes
 # ----------------------------------------------------------------------
 @router.get("/login", response_class=HTMLResponse, name="admin_login")
 async def admin_login_form(request: Request):
@@ -102,7 +102,7 @@ async def admin_stats(
     return templates.TemplateResponse("admin/statistics.html", {"request": request, "stats": stats})
 
 # ----------------------------------------------------------------------
-# Server management routes (unchanged)
+# Server management routes
 # ----------------------------------------------------------------------
 @router.get("/servers", response_class=HTMLResponse, name="admin_servers")
 async def admin_server_management(
@@ -145,7 +145,7 @@ async def admin_delete_server(
     return RedirectResponse(url=request.url_for("admin_servers"), status_code=status.HTTP_303_SEE_OTHER)
 
 # ----------------------------------------------------------------------
-# USER MANAGEMENT (unchanged up to API‑key creation)
+# USER MANAGEMENT
 # ----------------------------------------------------------------------
 @router.post("/users", name="create_new_user")
 async def create_new_user(
@@ -178,9 +178,9 @@ async def get_user_details(
     return templates.TemplateResponse("admin/user_details.html", {"request": request, "user": user, "api_keys": api_keys})
 
 # ----------------------------------------------------------------------
-# *** NEW: Show the generated key with a copy button ***
+# API KEY MANAGEMENT (REVISED)
 # ----------------------------------------------------------------------
-@router.post("/users/{user_id}/keys", name="create_user_api_key")
+@router.post("/users/{user_id}/keys/create", name="admin_create_key")
 async def create_user_api_key(
     request: Request,
     user_id: int,
@@ -190,13 +190,16 @@ async def create_user_api_key(
 ):
     """
     Creates a new API key for the given user.
-    Instead of flashing the key (which would be lost on a redirect),
-    we render a dedicated page that displays the **full plain key**
-    exactly once and offers a “Copy to clipboard” button.
     """
-    plain_key, _ = await apikey_crud.create_api_key(db, user_id=user_id, key_name=key_name)
+    # --- CRITICAL FIX: Extract the ID *before* any await calls ---
+    current_admin_id = admin_user.id
 
-    # Render a page that shows the key and a copy button.
+    # This await call will expire the 'admin_user' object from the dependency
+    plain_key, _ = await apikey_crud.create_api_key(db, user_id=user_id, key_name=key_name)
+    
+    # Now, refresh the user object on the request state using the safe, saved ID
+    request.state.user = await db.get(User, current_admin_id)
+    
     return templates.TemplateResponse(
         "admin/key_created.html",
         {
@@ -206,41 +209,21 @@ async def create_user_api_key(
         },
     )
 
-@router.post("/users/{user_id}/keys", name="create_user_api_key")
-async def create_user_api_key(
+@router.post("/keys/{key_id}/revoke", name="admin_revoke_key")
+async def revoke_user_api_key(
     request: Request,
-    user_id: int,
+    key_id: int,
     db: AsyncSession = Depends(get_db),
     admin_user: User = Depends(require_admin_user),
-    key_name: str = Form(...),
 ):
-    """
-    Creates a new API key for the given user.
-    Instead of flashing the key (which would be lost on a redirect),
-    we render a dedicated page that displays the **full plain key**
-    exactly once and offers a “Copy to clipboard” button.
-    """
-    plain_key, _ = await apikey_crud.create_api_key(db, user_id=user_id, key_name=key_name)
+    key = await apikey_crud.get_api_key_by_id(db, key_id=key_id)
+    if not key:
+        raise HTTPException(status_code=404, detail="API Key not found")
+    
+    await apikey_crud.revoke_api_key(db, key_id=key_id)
+    flash(request, f"API Key '{key.key_name}' has been revoked.", "success")
+    return RedirectResponse(url=request.url_for("get_user_details", user_id=key.user_id), status_code=status.HTTP_303_SEE_OTHER)
 
-    # --- FIX ---
-    # The user object in request.state (admin_user) is from a different,
-    # now-closed session. Accessing its properties in the template would
-    # cause a lazy-load, which fails in a synchronous context.
-    # We fetch a fresh user object using the current session ('db') and
-    # update the request state to ensure the template renders correctly.
-    fresh_admin_user = await user_crud.get_user_by_id(db, user_id=admin_user.id)
-    request.state.user = fresh_admin_user
-    # --- END FIX ---
-
-    # Render a page that shows the key and a copy button.
-    return templates.TemplateResponse(
-        "admin/key_created.html",
-        {
-            "request": request,
-            "plain_key": plain_key,
-            "user_id": user_id,
-        },
-    )
 @router.post("/users/{user_id}/delete", name="delete_user_account")
 async def delete_user_account(
     request: Request,

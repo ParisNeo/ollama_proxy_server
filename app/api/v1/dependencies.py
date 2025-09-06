@@ -46,7 +46,8 @@ async def get_valid_api_key(
     api_key_str = auth_header.split(" ")[1]
 
     try:
-        prefix, secret = api_key_str.split("_", 1)
+        # --- CRITICAL FIX: Split from the right to correctly separate prefix and secret ---
+        prefix, secret = api_key_str.rsplit("_", 1)
     except ValueError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -83,7 +84,7 @@ async def rate_limiter(
 ):
     redis_client: redis.Redis = request.app.state.redis
     if not redis_client:
-        logger.warning("Redis client not available, skipping rate limit check.")
+        # If Redis isn't configured, we silently skip rate limiting.
         return True
 
     limit = settings.RATE_LIMIT_REQUESTS
@@ -97,9 +98,11 @@ async def rate_limiter(
 
         if current_requests > limit:
             logger.warning(f"Rate limit exceeded for API key prefix: {api_key.key_prefix}")
+            ttl = await redis_client.ttl(key)
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail=f"Rate limit exceeded. Try again in {await redis_client.ttl(key)} seconds.",
+                detail=f"Rate limit exceeded. Try again in {ttl} seconds.",
+                headers={"Retry-After": str(ttl)}
             )
     except Exception as e:
         logger.error(f"Could not connect to Redis for rate limiting: {e}")
