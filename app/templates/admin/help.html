@@ -19,18 +19,98 @@
                 <li><strong>Make Secure API Calls:</strong> Use the proxy's URL (e.g., `http://127.0.0.1:8080`) instead of your direct Ollama URL. Provide the API key in the `Authorization` header as a Bearer token.</li>
             </ol>
         </div>
+    </div>
+        
+    <!-- Usage Examples Section -->
+    <div class="bg-white p-6 rounded-lg shadow-md">
+        <h2 class="text-2xl font-bold mb-4 border-b pb-2">Usage Examples</h2>
+        <p class="text-gray-600 mb-6">
+            In all examples, replace `op_..._...` with your actual generated API key.
+        </p>
 
-        <h3 class="text-xl font-semibold mt-6 mb-2">Example `curl` Request</h3>
-        <p class="text-sm text-gray-600 mb-2">Replace `op_..._...` with your generated API key.</p>
-        <div class="bg-gray-800 text-white rounded-lg p-4 font-mono text-sm overflow-x-auto">
-            <code class="whitespace-pre">
-curl http://127.0.0.1:8080/api/generate \
-  -H "Authorization: Bearer op_prefix_secret" \
-  -H "Content-Type: application/json" \
-  -d '{
+        <!-- Example 1: Listing Models with cURL -->
+        <div class="mb-8">
+            <h3 class="text-xl font-semibold mb-2">Example 1: Listing Available Models (cURL)</h3>
+            <p class="text-sm text-gray-600 mb-2">This command fetches the federated list of all models from all active backend servers.</p>
+            <div class="bg-gray-800 text-white rounded-lg p-4 font-mono text-sm overflow-x-auto">
+                <code class="whitespace-pre">
+curl http://127.0.0.1:8080/api/tags \
+  -H "Authorization: Bearer op_prefix_secret"</code>
+            </div>
+        </div>
+
+        <!-- Example 2: Streaming with Python (requests) -->
+        <div class="mb-8">
+            <h3 class="text-xl font-semibold mb-2">Example 2: Streaming Generation with Python (`requests`)</h3>
+            <p class="text-sm text-gray-600 mb-2">A standard way to stream a response using the popular `requests` library.</p>
+            <div class="bg-gray-800 text-white rounded-lg p-4 font-mono text-sm overflow-x-auto">
+                <code class="whitespace-pre">
+import requests
+import json
+
+API_KEY = "op_prefix_secret"  # <-- Replace with your key
+PROXY_URL = "http://127.0.0.1:8080/api/generate"
+
+headers = {
+    "Authorization": f"Bearer {API_KEY}",
+    "Content-Type": "application/json"
+}
+
+data = {
     "model": "llama3",
-    "prompt": "Why is the sky blue?"
-  }'</code>
+    "prompt": "Tell me a short story about a robot who discovers music.",
+    "stream": True
+}
+
+try:
+    with requests.post(PROXY_URL, headers=headers, json=data, stream=True) as response:
+        response.raise_for_status()  # Raise an exception for bad status codes
+        print("Story: ", end="", flush=True)
+        for chunk in response.iter_lines():
+            if chunk:
+                decoded_chunk = json.loads(chunk.decode('utf-8'))
+                print(decoded_chunk.get("response", ""), end="", flush=True)
+    print()
+except requests.exceptions.RequestException as e:
+    print(f"\nAn error occurred: {e}")
+</code>
+            </div>
+        </div>
+
+        <!-- Example 3: lollms-client -->
+        <div>
+            <h3 class="text-xl font-semibold mb-2">Example 3: Using with `lollms-client`</h3>
+            <p class="text-sm text-gray-600 mb-2">To use the proxy with the `lollms-client` library, configure the host address to point to the proxy and provide your key as the `service_key`.</p>
+            <div class="bg-gray-800 text-white rounded-lg p-4 font-mono text-sm overflow-x-auto">
+                <code class="whitespace-pre">
+from lollms_client import LollmsClient, MSG_TYPE
+
+# Configure the client to use the secure proxy
+lc = LollmsClient(
+    llm_binding_name="ollama",
+    llm_binding_config={
+        "host_address": "http://localhost:8080",  # <-- Point to the proxy server
+        "model_name": "llama3",                   # Or any model you have
+        "service_key": "op_prefix_secret",        # <-- Replace with your API key
+    }
+)
+
+def streaming_callback(data, msg_type):
+    if msg_type == MSG_TYPE.MSG_TYPE_CHUNK:
+        print(data, end="", flush=True)
+    return True
+
+print("--- Streaming with lollms-client ---")
+lc.generate_text(
+    prompt="What is the capital of France?",
+    stream=True,
+    streaming_callback=streaming_callback
+)
+print("\n\n--- Listing models ---")
+models = lc.listModels()
+print(models)
+</code>
+            </div>
         </div>
     </div>
 
