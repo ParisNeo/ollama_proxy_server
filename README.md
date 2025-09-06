@@ -58,7 +58,8 @@ Based on your operating system, run the appropriate script. The first time you r
 Simply double-click `run_windows.bat`.
 
 **On macOS or Linux:**
-Open your terminal, navigate to the project folder, and run:```bash
+Open your terminal, navigate to the project folder, and run:
+```bash
 chmod +x run.sh
 ./run.sh
 ```
