@@ -14,7 +14,7 @@ from app.crud import log_crud, server_crud
 logger = logging.getLogger(__name__)
 router = APIRouter(dependencies=[Depends(ip_filter), Depends(rate_limiter)])
 
-# --- New Dependency to get active servers ---
+# --- Dependency to get active servers ---
 async def get_active_servers(db: AsyncSession = Depends(get_db)) -> List[OllamaServer]:
     servers = await server_crud.get_servers(db)
     active_servers = [s for s in servers if s.is_active]
@@ -34,7 +34,7 @@ async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer
     """
     http_client: AsyncClient = request.app.state.http_client
     
-    # Simple load balancing: round-robin
+    # Simple round-robin load balancing
     if not hasattr(request.app.state, 'backend_server_index'):
         request.app.state.backend_server_index = 0
     
@@ -42,7 +42,12 @@ async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer
     backend_server = servers[index]
     request.app.state.backend_server_index = (index + 1) % len(servers)
 
-    backend_url = f"{backend_server.url}/{path}"
+    # --- CRITICAL FIX: Re-add the /api/ prefix and normalize URL ---
+    # The 'path' from FastAPI has the router prefix ('/api') stripped. We must add it back.
+    # We also normalize the URL to prevent issues with trailing slashes.
+    normalized_url = backend_server.url.rstrip('/')
+    backend_url = f"{normalized_url}/api/{path}"
+    # --- END FIX ---
 
     url = http_client.build_request(
         method=request.method,
@@ -86,13 +91,15 @@ async def federate_models(
     """
     http_client: AsyncClient = request.app.state.http_client
     
-    async def fetch_models(url):
+    async def fetch_models(server_url: str):
         try:
-            response = await http_client.get(f"{url}/api/tags")
+            # Defensive normalization
+            normalized_url = server_url.rstrip('/')
+            response = await http_client.get(f"{normalized_url}/api/tags")
             response.raise_for_status()
             return response.json().get("models", [])
         except Exception as e:
-            logger.error(f"Failed to fetch models from {url}: {e}")
+            logger.error(f"Failed to fetch models from {server_url}: {e}")
             return []
 
     tasks = [fetch_models(server.url) for server in servers]
@@ -124,7 +131,7 @@ async def proxy_ollama(
     response = await _reverse_proxy(request, path, servers)
     
     await log_crud.create_usage_log(
-        db=db, api_key_id=api_key.id, endpoint=f"/{path}", status_code=response.status_code
+        db=db, api_key_id=api_key.id, endpoint=f"/api/{path}", status_code=response.status_code
     )
     
     return response
