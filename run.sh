@@ -139,7 +139,7 @@ Finally, update the reset scripts to remove the now-obsolete Alembic deletion co
 setlocal enabledelayedexpansion
 
 :: ==================================================================
-::   Ollama Proxy Fortress - FULL RESET SCRIPT (Alembic-Free)
+::   Ollama Proxy Fortress - FULL RESET SCRIPT
 :: ==================================================================
 
 cls
