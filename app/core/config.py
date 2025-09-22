@@ -34,6 +34,15 @@ class Settings(BaseSettings):
     RATE_LIMIT_REQUESTS: int = 100
     RATE_LIMIT_WINDOW_MINUTES: int = 1
 
+    # --- HTTP Client (Backend) Timeouts & Limits ---
+    HTTPX_CONNECT_TIMEOUT: float = 10.0
+    HTTPX_READ_TIMEOUT: float = 600.0
+    HTTPX_WRITE_TIMEOUT: float = 600.0
+    HTTPX_POOL_TIMEOUT: float = 60.0
+    HTTPX_MAX_KEEPALIVE_CONNECTIONS: int = 20
+    HTTPX_MAX_CONNECTIONS: int = 100
+    HTTPX_KEEPALIVE_EXPIRY: float = 60.0
+
     # --- IP Access Control ---
     ALLOWED_IPS: List[str] = []
     DENIED_IPS: List[str] = []
