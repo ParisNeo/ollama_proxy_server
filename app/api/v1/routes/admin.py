@@ -58,10 +58,12 @@ async def admin_stats(request: Request, db: AsyncSession = Depends(get_db), admi
     daily_stats = await log_crud.get_daily_usage_stats(db, days=30)
     hourly_stats = await log_crud.get_hourly_usage_stats(db)
     server_stats = await log_crud.get_server_load_stats(db)
+    model_stats = await log_crud.get_model_usage_stats(db)
     daily_labels = [row.date.strftime('%Y-%m-%d') for row in daily_stats]; daily_data = [row.request_count for row in daily_stats]
     hourly_labels = [row['hour'] for row in hourly_stats]; hourly_data = [row['request_count'] for row in hourly_stats]
     server_labels = [row.server_name for row in server_stats]; server_data = [row.request_count for row in server_stats]
-    return templates.TemplateResponse("admin/statistics.html", {"request": request, "key_usage_stats": key_usage_stats, "daily_labels": daily_labels, "daily_data": daily_data, "hourly_labels": hourly_labels, "hourly_data": hourly_data, "server_labels": server_labels, "server_data": server_data})
+    model_labels = [row.model_name for row in model_stats]; model_data = [row.request_count for row in model_stats]
+    return templates.TemplateResponse("admin/statistics.html", {"request": request, "key_usage_stats": key_usage_stats, "daily_labels": daily_labels, "daily_data": daily_data, "hourly_labels": hourly_labels, "hourly_data": hourly_data, "server_labels": server_labels, "server_data": server_data, "model_labels": model_labels, "model_data": model_data})
 @router.get("/help", response_class=HTMLResponse, name="admin_help")
 async def admin_help_page(request: Request, admin_user: User = Depends(require_admin_user)): return templates.TemplateResponse("admin/help.html", {"request": request})
 @router.get("/servers", response_class=HTMLResponse, name="admin_servers")
@@ -83,6 +85,18 @@ async def admin_add_server(request: Request, db: AsyncSession = Depends(get_db),
 async def admin_delete_server(request: Request, server_id: int, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
     await server_crud.delete_server(db, server_id=server_id)
     flash(request, "Server deleted successfully.", "success")
+    return RedirectResponse(url=request.url_for("admin_servers"), status_code=status.HTTP_303_SEE_OTHER)
+
+@router.post("/servers/{server_id}/refresh-models", name="admin_refresh_models")
+async def admin_refresh_models(request: Request, server_id: int, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
+    result = await server_crud.fetch_and_update_models(db, server_id=server_id)
+
+    if result["success"]:
+        model_count = len(result["models"])
+        flash(request, f"Successfully fetched {model_count} model(s) from server.", "success")
+    else:
+        flash(request, f"Failed to fetch models: {result['error']}", "error")
+
     return RedirectResponse(url=request.url_for("admin_servers"), status_code=status.HTTP_303_SEE_OTHER)
 @router.post("/users", name="create_new_user")
 async def create_new_user(request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user), username: str = Form(...), password: str = Form(...)):

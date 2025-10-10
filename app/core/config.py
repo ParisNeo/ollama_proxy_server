@@ -54,6 +54,8 @@ class Settings(BaseSettings):
             return [ip.strip() for ip in v.split(",") if ip.strip()]
         return v
 
+    # --- Model Refresh Settings ---
+    MODEL_REFRESH_INTERVAL_MINUTES: int = 10
 
     class Config:
         env_file = ".env"

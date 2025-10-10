@@ -4,13 +4,14 @@ from app.database.models import UsageLog, APIKey, User, OllamaServer
 import datetime
 
 async def create_usage_log(
-    db: AsyncSession, *, api_key_id: int, endpoint: str, status_code: int, server_id: int | None
+    db: AsyncSession, *, api_key_id: int, endpoint: str, status_code: int, server_id: int | None, model: str | None = None
 ) -> UsageLog:
     db_log = UsageLog(
-        api_key_id=api_key_id, 
-        endpoint=endpoint, 
+        api_key_id=api_key_id,
+        endpoint=endpoint,
         status_code=status_code,
-        server_id=server_id
+        server_id=server_id,
+        model=model
     )
     db.add(db_log)
     await db.commit()
@@ -89,6 +90,20 @@ async def get_server_load_stats(db: AsyncSession):
         .select_from(OllamaServer)
         .outerjoin(UsageLog, OllamaServer.id == UsageLog.server_id)
         .group_by(OllamaServer.name)
+        .order_by(func.count(UsageLog.id).desc())
+    )
+    result = await db.execute(stmt)
+    return result.all()
+
+async def get_model_usage_stats(db: AsyncSession):
+    """Returns total requests per model."""
+    stmt = (
+        select(
+            UsageLog.model.label("model_name"),
+            func.count(UsageLog.id).label("request_count")
+        )
+        .filter(UsageLog.model.isnot(None))
+        .group_by(UsageLog.model)
         .order_by(func.count(UsageLog.id).desc())
     )
     result = await db.execute(stmt)
