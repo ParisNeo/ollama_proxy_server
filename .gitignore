@@ -99,3 +99,6 @@ ollama_proxy.db
 
 # setup state
 .setup_state
+
+# lollms vs coder discussions
+.lollms
