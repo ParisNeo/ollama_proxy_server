@@ -1,5 +1,6 @@
 import sys
 import secrets
+import getpass
 
 def print_info(message):
     print(f"[INFO] {message}")
@@ -14,6 +15,11 @@ def get_user_input(prompt, default=None):
     user_value = input(prompt_text)
     return user_value.strip() if user_value.strip() else default
 
+def get_secure_input(prompt):
+    """Gets user input without showing it on the screen."""
+    prompt_text = f"   -> {prompt}: "
+    return getpass.getpass(prompt_text).strip()
+
 def create_env_file():
     """
     Guides the user through creating a .env file and writes it.
@@ -24,18 +30,22 @@ def create_env_file():
     config = {
         "PROXY_PORT": get_user_input("Port for the proxy server", "8080"),
         "OLLAMA_SERVERS": get_user_input("Backend Ollama server(s)", "http://127.0.0.1:11434"),
-        "REDIS_URL": get_user_input("Redis URL for rate limiting", "redis://localhost:6379/0"),
+        "REDIS_HOST": get_user_input("Redis Host", "localhost"),
+        "REDIS_PORT": get_user_input("Redis Port", "6379"),
+        "REDIS_USERNAME": get_user_input("Redis Username (optional)", ""),
         "ADMIN_USER": get_user_input("Username for the admin dashboard", "admin"),
         "ALLOWED_IPS": get_user_input("Allowed IPs (comma-separated, leave empty for all)", ""),
         "DENIED_IPS": get_user_input("Denied IPs (comma-separated, leave empty for none)", ""),
     }
 
-    # --- Password Loop ---
+    # --- Secure Password Inputs ---
+    config["REDIS_PASSWORD"] = get_secure_input("Redis Password (optional, will be hidden)")
+    
     admin_password = ""
     while not admin_password:
-        admin_password = input("   -> Password for the admin user (cannot be empty): ").strip()
+        admin_password = get_secure_input("Password for the admin user (cannot be empty, will be hidden)")
         if not admin_password:
-            print_error("   Password cannot be empty. Please try again.")
+            print_error("   Admin password cannot be empty. Please try again.")
     config["ADMIN_PASSWORD"] = admin_password
 
     # --- Generate Secret Key ---
@@ -54,11 +64,18 @@ def create_env_file():
             f.write(f'ADMIN_USER="{config["ADMIN_USER"]}"\n')
             f.write(f'ADMIN_PASSWORD="{config["ADMIN_PASSWORD"]}"\n')
             f.write(f'SECRET_KEY="{config["SECRET_KEY"]}"\n')
-            f.write(f'REDIS_URL="{config["REDIS_URL"]}"\n')
+            
+            # Write new Redis variables
+            f.write(f'REDIS_HOST="{config["REDIS_HOST"]}"\n')
+            f.write(f'REDIS_PORT="{config["REDIS_PORT"]}"\n')
+            if config["REDIS_USERNAME"]:
+                f.write(f'REDIS_USERNAME="{config["REDIS_USERNAME"]}"\n')
+            if config["REDIS_PASSWORD"]:
+                f.write(f'REDIS_PASSWORD="{config["REDIS_PASSWORD"]}"\n')
+
             f.write('RATE_LIMIT_REQUESTS="100"\n')
             f.write('RATE_LIMIT_WINDOW_MINUTES="1"\n')
             
-            # --- CRITICAL FIX: Only write these lines if they have a value ---
             if config["ALLOWED_IPS"]:
                 f.write(f'ALLOWED_IPS="{config["ALLOWED_IPS"]}"\n')
             if config["DENIED_IPS"]:

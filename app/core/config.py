@@ -1,6 +1,6 @@
 import os
-from typing import List, Union
-from pydantic import AnyHttpUrl, field_validator, RedisDsn
+from typing import List, Union, Optional
+from pydantic import AnyHttpUrl, field_validator, RedisDsn, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -30,7 +30,32 @@ class Settings(BaseSettings):
     ADMIN_PASSWORD: str = "changeme"
 
     # --- Redis & Rate Limiting ---
-    REDIS_URL: RedisDsn = "redis://localhost:6379/0"
+    REDIS_HOST: str = "localhost"
+    REDIS_PORT: int = 6379
+    REDIS_USERNAME: Optional[str] = None
+    REDIS_PASSWORD: Optional[str] = None
+    REDIS_URL: Optional[RedisDsn] = None
+
+    @model_validator(mode='after')
+    def assemble_redis_url(self) -> 'Settings':
+        """
+        Constructs Redis DSN from components if REDIS_URL is not already provided.
+        This ensures backward compatibility with old .env files that have REDIS_URL.
+        """
+        if self.REDIS_URL is None:
+            # Build the URL from components if the old REDIS_URL is not set
+            if self.REDIS_USERNAME and self.REDIS_PASSWORD:
+                credentials = f"{self.REDIS_USERNAME}:{self.REDIS_PASSWORD}@"
+            elif self.REDIS_USERNAME:
+                credentials = f"{self.REDIS_USERNAME}@"
+            else:
+                credentials = ""
+            
+            # Pydantic will validate this string against the RedisDsn type
+            self.REDIS_URL = f"redis://{credentials}{self.REDIS_HOST}:{self.REDIS_PORT}/0"
+        
+        return self
+
     RATE_LIMIT_REQUESTS: int = 100
     RATE_LIMIT_WINDOW_MINUTES: int = 1
 
