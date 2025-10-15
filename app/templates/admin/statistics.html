@@ -36,7 +36,7 @@
                     <button onclick="exportDataToCSV(['Hour (UTC)', 'Request Count'], {{ hourly_labels | tojson }}, {{ hourly_data | tojson }}, 'hourly-usage.csv')" class="text-sm text-indigo-600 hover:underline">Export CSV</button>
                 </div>
             </div>
-            {% if hourly_data and hourly_data | selectattr('request_count', 'gt', 0) | list | length > 0 %}
+            {% if hourly_data and hourly_data | sum > 0 %}
                 <canvas id="hourlyUsageChart"></canvas>
             {% else %}
                 <div class="flex items-center justify-center h-64 text-gray-500">
@@ -58,7 +58,7 @@
                     <button onclick="exportDataToCSV(['Server Name', 'Request Count'], {{ server_labels | tojson }}, {{ server_data | tojson }}, 'server-load.csv')" class="text-sm text-indigo-600 hover:underline">Export CSV</button>
                 </div>
             </div>
-            {% if server_data and server_data | selectattr('request_count', 'gt', 0) | list | length > 0 %}
+            {% if server_data and server_data | sum > 0 %}
                 <canvas id="serverLoadChart"></canvas>
             {% else %}
                 <div class="flex items-center justify-center h-64 text-gray-500">

@@ -12,65 +12,114 @@
             background-color: #4f46e5;
             color: white;
         }
+        /* Style for the sidebar scrollbar */
+        #sidebar::-webkit-scrollbar {
+            width: 8px;
+        }
+        #sidebar::-webkit-scrollbar-track {
+            background: #2d3748; /* gray-800 */
+        }
+        #sidebar::-webkit-scrollbar-thumb {
+            background: #4a5568; /* gray-600 */
+            border-radius: 4px;
+        }
+        /* Custom class for collapsed sidebar */
+        .sidebar-collapsed {
+            width: 0;
+            padding: 0;
+            overflow: hidden;
+        }
     </style>
 </head>
 <body class="bg-gray-100 font-sans leading-normal tracking-normal">
 
-    <div class="flex md:flex-row flex-col">
+    <div class="flex h-screen">
         <!-- Sidebar -->
-        <div class="bg-gray-800 text-white w-full md:w-64 min-h-screen flex flex-col justify-between relative">
-            <div>
+        <div id="sidebar" class="bg-gray-800 text-white w-64 flex-shrink-0 flex flex-col justify-between transition-all duration-300 ease-in-out overflow-y-auto">
+            <div class="flex-shrink-0">
                 <div class="flex items-center justify-between p-4 border-b border-gray-700">
-                    <a href="{{ url_for('admin_dashboard') }}" class="text-2xl font-bold">Ollama Proxy</a>
+                    <a href="{{ url_for('admin_dashboard') }}" class="text-2xl font-bold whitespace-nowrap">Ollama Proxy</a>
                 </div>
                 
                 {% if request.state.user %}
                 <nav class="mt-4">
-                    <a href="{{ url_for('admin_dashboard') }}" class="flex items-center px-4 py-3 hover:bg-gray-700 {% if request.url.path == url_for('admin_dashboard') %}active{% endif %}">
-                        <svg class="w-6 h-6 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 8v8m-4-5v5m-4-2v2m-2 4h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
+                    <a href="{{ url_for('admin_dashboard') }}" class="flex items-center px-4 py-3 hover:bg-gray-700 whitespace-nowrap {% if request.url.path == url_for('admin_dashboard') %}active{% endif %}">
+                        <svg class="w-6 h-6 mr-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 8v8m-4-5v5m-4-2v2m-2 4h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
                         Dashboard
                     </a>
-                    <a href="{{ url_for('admin_servers') }}" class="flex items-center px-4 py-3 hover:bg-gray-700 {% if request.url.path == url_for('admin_servers') %}active{% endif %}">
-                        <svg class="w-6 h-6 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01"></path></svg>
+                    <a href="{{ url_for('admin_servers') }}" class="flex items-center px-4 py-3 hover:bg-gray-700 whitespace-nowrap {% if request.url.path == url_for('admin_servers') %}active{% endif %}">
+                        <svg class="w-6 h-6 mr-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01"></path></svg>
                         Server Management
                     </a>
-                    <a href="{{ url_for('admin_stats') }}" class="flex items-center px-4 py-3 hover:bg-gray-700 {% if request.url.path == url_for('admin_stats') %}active{% endif %}">
-                         <svg class="w-6 h-6 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path></svg>
+                    <a href="{{ url_for('admin_stats') }}" class="flex items-center px-4 py-3 hover:bg-gray-700 whitespace-nowrap {% if request.url.path == url_for('admin_stats') %}active{% endif %}">
+                         <svg class="w-6 h-6 mr-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path></svg>
                         Usage Stats
                     </a>
-                    <a href="{{ url_for('admin_help') }}" class="flex items-center px-4 py-3 hover:bg-gray-700 {% if request.url.path == url_for('admin_help') %}active{% endif %}">
-                        <svg class="w-6 h-6 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.79 4 4 0 2.21-1.79 4-4 4-1.742 0-3.223-.835-3.772-2M12 18.5v.01M12 5.5v.01"></path></svg>
+                    <a href="{{ url_for('admin_help') }}" class="flex items-center px-4 py-3 hover:bg-gray-700 whitespace-nowrap {% if request.url.path == url_for('admin_help') %}active{% endif %}">
+                        <svg class="w-6 h-6 mr-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.79 4 4 0 2.21-1.79 4-4 4-1.742 0-3.223-.835-3.772-2M12 18.5v.01M12 5.5v.01"></path></svg>
                         Help & Credits
                     </a>
                 </nav>
                 {% endif %}
             </div>
 
-            <div class="w-full">
+            <div class="w-full flex-shrink-0">
                 {% if request.state.user %}
                 <div class="p-4 border-t border-gray-700">
-                    <p class="text-sm">Welcome, <span class="font-semibold">{{ request.state.user.username }}</span></p>
+                    <p class="text-sm whitespace-nowrap">Welcome, <span class="font-semibold">{{ request.state.user.username }}</span></p>
                 </div>
-                <a href="{{ url_for('admin_logout') }}" class="flex items-center w-full px-4 py-3 bg-red-600 hover:bg-red-700">
-                     <svg class="w-6 h-6 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path></svg>
+                <a href="{{ url_for('admin_logout') }}" class="flex items-center w-full px-4 py-3 bg-red-600 hover:bg-red-700 whitespace-nowrap">
+                     <svg class="w-6 h-6 mr-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path></svg>
                     Logout
                 </a>
                 {% endif %}
             </div>
         </div>
 
-        <div class="flex-1 flex flex-col">
-            <header class="bg-white shadow p-4 md:hidden">
-                 <h1 class="text-xl font-semibold text-gray-700">{% block header_title %}{% endblock %}</h1>
+        <!-- Main Content -->
+        <div id="main-content" class="flex-1 flex flex-col transition-all duration-300 ease-in-out">
+             <!-- Top Header -->
+            <header class="bg-white shadow p-4 flex items-center justify-between flex-shrink-0">
+                <!-- Sidebar Toggle Button -->
+                <button id="sidebar-toggle" class="text-gray-500 hover:text-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500 rounded-md">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path>
+                    </svg>
+                </button>
+                 <h1 class="text-xl font-semibold text-gray-700 text-center">{% block header_title %}{% endblock %}</h1>
+                 <div class="w-6"></div> <!-- Spacer to balance the toggle button -->
             </header>
-            <main class="flex-1 p-6 md:p-10">
+
+            <main class="flex-1 p-6 md:p-10 overflow-y-auto">
                 {% include 'partials/_flash_messages.html' %}
                 {% block content %}{% endblock %}
             </main>
-            <footer class="bg-white p-4 text-center text-sm text-gray-500">
+
+            <footer class="bg-white p-4 text-center text-sm text-gray-500 flex-shrink-0">
                 Ollama Proxy Server v{{ request.app.version }}
             </footer>
         </div>
     </div>
+
+<script>
+    document.addEventListener('DOMContentLoaded', () => {
+        const sidebar = document.getElementById('sidebar');
+        const sidebarToggle = document.getElementById('sidebar-toggle');
+
+        const toggleSidebar = () => {
+            sidebar.classList.toggle('sidebar-collapsed');
+            const isCollapsed = sidebar.classList.contains('sidebar-collapsed');
+            localStorage.setItem('sidebarState', isCollapsed ? 'closed' : 'open');
+        };
+
+        sidebarToggle.addEventListener('click', toggleSidebar);
+
+        // Set initial state from localStorage
+        if (localStorage.getItem('sidebarState') === 'closed') {
+            sidebar.classList.add('sidebar-collapsed');
+        }
+    });
+</script>
+
 </body>
 </html>
