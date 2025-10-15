@@ -1,6 +1,7 @@
 import asyncio
+import json
 import logging
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 from fastapi import APIRouter, Depends, Request, Response, HTTPException, status
 from fastapi.responses import StreamingResponse
 from httpx import AsyncClient
@@ -26,17 +27,49 @@ async def get_active_servers(db: AsyncSession = Depends(get_db)) -> List[OllamaS
         )
     return active_servers
 
+async def extract_model_from_request(request: Request) -> Optional[str]:
+    """
+    Attempts to extract the model name from the request body.
+    Common endpoints that contain model info: /api/generate, /api/chat, /api/embeddings, /api/pull, etc.
 
-async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer]) -> Tuple[Response, OllamaServer]:
+    Returns the model name if found, otherwise None.
+    """
+    try:
+        # Read the request body
+        body_bytes = await request.body()
+
+        if not body_bytes:
+            return None
+
+        # Parse JSON body
+        body = json.loads(body_bytes)
+
+        # Most Ollama API endpoints use "model" field
+        if isinstance(body, dict) and "model" in body:
+            return body["model"]
+
+    except (json.JSONDecodeError, UnicodeDecodeError, Exception) as e:
+        logger.debug(f"Could not extract model from request body: {e}")
+
+    return None
+
+
+async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer], body_bytes: bytes = b"") -> Tuple[Response, OllamaServer]:
     """
     Core reverse proxy logic. Forwards the request to a backend Ollama server
     and streams the response back. Returns the response and the chosen server.
+
+    Args:
+        request: The original FastAPI request
+        path: The path to proxy to
+        servers: List of servers to choose from
+        body_bytes: Pre-read request body (if already read for model extraction)
     """
     http_client: AsyncClient = request.app.state.http_client
-    
+
     if not hasattr(request.app.state, 'backend_server_index'):
         request.app.state.backend_server_index = 0
-    
+
     index = request.app.state.backend_server_index
     chosen_server = servers[index]
     request.app.state.backend_server_index = (index + 1) % len(servers)
@@ -44,22 +77,25 @@ async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer
     normalized_url = chosen_server.url.rstrip('/')
     backend_url = f"{normalized_url}/api/{path}"
 
-    url = http_client.build_request(
-        method=request.method,
-        url=backend_url,
-        headers=request.headers,
-        params=request.query_params,
-        content=request.stream(),
-    ).url
-
     headers = {k: v for k, v in request.headers.items() if k.lower() != 'host'}
 
-    backend_request = http_client.build_request(
-        method=request.method,
-        url=url,
-        headers=headers,
-        content=request.stream()
-    )
+    # Use pre-read body if available, otherwise stream from request
+    if body_bytes:
+        backend_request = http_client.build_request(
+            method=request.method,
+            url=backend_url,
+            headers=headers,
+            params=request.query_params,
+            content=body_bytes
+        )
+    else:
+        backend_request = http_client.build_request(
+            method=request.method,
+            url=backend_url,
+            headers=headers,
+            params=request.query_params,
+            content=request.stream()
+        )
 
     try:
         backend_response = await http_client.send(backend_request, stream=True)
@@ -121,15 +157,47 @@ async def proxy_ollama(
 ):
     """
     A catch-all route that proxies all other requests to the Ollama backend.
+    Uses smart routing to select servers that have the requested model.
     """
-    response, chosen_server = await _reverse_proxy(request, path, servers)
-    
+    # Try to extract model name from request body
+    body_bytes = await request.body()
+    model_name = None
+
+    if body_bytes:
+        try:
+            body = json.loads(body_bytes)
+            if isinstance(body, dict) and "model" in body:
+                model_name = body["model"]
+        except (json.JSONDecodeError, Exception):
+            pass
+
+    # Smart routing: filter servers by model availability
+    candidate_servers = servers
+    if model_name:
+        servers_with_model = await server_crud.get_servers_with_model(db, model_name)
+
+        if servers_with_model:
+            candidate_servers = servers_with_model
+            logger.info(f"Smart routing: Found {len(servers_with_model)} server(s) with model '{model_name}'")
+        else:
+            # Model not found in any server's catalog, or catalogs not fetched yet
+            # Fall back to all active servers
+            logger.warning(
+                f"Model '{model_name}' not found in any server's catalog. "
+                f"Falling back to round-robin across all {len(servers)} active server(s). "
+                f"Make sure to refresh model lists for accurate routing."
+            )
+
+    # Proxy to one of the candidate servers
+    response, chosen_server = await _reverse_proxy(request, path, candidate_servers, body_bytes)
+
     await log_crud.create_usage_log(
-        db=db, 
-        api_key_id=api_key.id, 
-        endpoint=f"/api/{path}", 
+        db=db,
+        api_key_id=api_key.id,
+        endpoint=f"/api/{path}",
         status_code=response.status_code,
-        server_id=chosen_server.id
+        server_id=chosen_server.id,
+        model=model_name
     )
-    
+
     return response
