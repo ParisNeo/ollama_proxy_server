@@ -9,11 +9,12 @@ import logging
 import httpx
 import redis.asyncio as redis
 from contextlib import asynccontextmanager
+import sys # <-- Import sys
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
-from starlette.responses import RedirectResponse
+from starlette.responses import RedirectResponse, Response
 
 from app.core.config import settings
 from app.core.logging_config import setup_logging
@@ -142,6 +143,13 @@ async def periodic_model_refresh() -> None:
 async def lifespan(app: FastAPI):
     # ---------- Startup ----------
     logger.info("Starting up Ollama Proxy Server…")
+    
+    # --- CRITICAL: Default Password Check ---
+    if settings.ADMIN_PASSWORD == "changeme":
+        logger.critical("FATAL: The admin password is set to the default value 'changeme'.")
+        logger.critical("Please change ADMIN_PASSWORD in your .env file and restart the server.")
+        sys.exit(1)
+    # --- END CHECK ---
 
     # Call our new database initializer first
     await init_db()
@@ -209,7 +217,31 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# --- MIDDLEWARE AND ROUTERS ---
+
 app.add_middleware(SessionMiddleware, secret_key=settings.SECRET_KEY)
+
+# --- CORRECTED Security Headers Middleware ---
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    # FIX: Added 'unsafe-inline' to script-src to allow chart rendering script
+    csp_policy = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdn.tailwindcss.com; "
+        "style-src 'self' 'unsafe-inline'; "
+        "connect-src 'self' https://cdn.jsdelivr.net; "
+        "object-src 'none'; "
+        "base-uri 'self'; "
+        "form-action 'self';"
+    )
+    response.headers["Content-Security-Policy"] = csp_policy
+    return response
+# --- END MIDDLEWARE ---
+
+
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 app.include_router(health_router, prefix="/api/v1", tags=["Health"])
 app.include_router(proxy_router, prefix="/api", tags=["Ollama Proxy"])

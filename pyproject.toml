@@ -2,7 +2,7 @@
 name = "ollama-proxy-server"
 version = "8.0.0"
 description = "A secure, high-performance FastAPI-based proxy and load balancer for Ollama."
-authors = ["Saifeddine ALOUI (ParisNeo) <parisneo_ai@gmail.com>"]
+authors = ["ParisNeo <parisneo_ai@gmail.com>"]
 license = "Apache-2.0"
 readme = "README.md"
 repository = "https://github.com/ParisNeo/ollama_proxy_server"

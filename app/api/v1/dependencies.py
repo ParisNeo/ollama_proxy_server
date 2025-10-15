@@ -1,18 +1,58 @@
 import logging
-from fastapi import Depends, HTTPException, status, Request
+from fastapi import Depends, HTTPException, status, Request, Form
 from fastapi.security import APIKeyHeader
 from sqlalchemy.ext.asyncio import AsyncSession
 import redis.asyncio as redis
+import time
 
 from app.core.config import settings
 from app.database.session import get_db
 from app.crud import apikey_crud
 from app.core.security import verify_api_key
 from app.database.models import APIKey
+import secrets
 
 logger = logging.getLogger(__name__)
 api_key_header = APIKeyHeader(name="Authorization", auto_error=False)
 
+# --- CSRF Token Generation and Validation ---
+async def get_csrf_token(request: Request) -> str:
+    """Get CSRF token from session or create a new one."""
+    if "csrf_token" not in request.session:
+        request.session["csrf_token"] = secrets.token_hex(32)
+    return request.session["csrf_token"]
+
+async def validate_csrf_token(request: Request, csrf_token: str = Form(...)):
+    """Dependency to validate CSRF token from a form submission."""
+    stored_token = await get_csrf_token(request)
+    if not stored_token or not secrets.compare_digest(csrf_token, stored_token):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="CSRF token mismatch")
+    return True
+
+# --- NEW: Login Rate Limiting Dependency ---
+async def login_rate_limiter(request: Request):
+    """
+    Prevents brute-force attacks on the admin login endpoint.
+    Limits to 5 failed attempts per IP per 5 minutes.
+    """
+    redis_client: redis.Redis = request.app.state.redis
+    if not redis_client:
+        return True # Redis not available, skip rate limiting
+
+    client_ip = request.client.host
+    key = f"login_fail:{client_ip}"
+    
+    try:
+        current_fails = await redis_client.get(key)
+        if current_fails and int(current_fails) >= 5:
+            ttl = await redis_client.ttl(key)
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=f"Too many failed login attempts. Try again in {ttl} seconds."
+            )
+    except Exception as e:
+        logger.error(f"Could not connect to Redis for login rate limiting: {e}")
+    return True
 
 # --- IP Filtering Dependency ---
 async def ip_filter(request: Request):

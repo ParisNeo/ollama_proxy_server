@@ -6,135 +6,191 @@
 {% block content %}
 <div class="max-w-4xl mx-auto space-y-8">
 
-    <!-- How to Use Section -->
+    <!-- Core Concepts Section -->
     <div class="bg-white p-6 rounded-lg shadow-md">
-        <h2 class="text-2xl font-bold mb-4 border-b pb-2">How to Use Ollama Proxy Fortress</h2>
-        
+        <h2 class="text-2xl font-bold mb-4 border-b pb-2">Core Concepts</h2>
         <div class="space-y-4 text-gray-700">
-            <p>This proxy server acts as a secure gateway to your Ollama instances. The workflow is simple:</p>
-            <ol class="list-decimal list-inside space-y-2 pl-4">
-                <li><strong>Create a User:</strong> From the <a href="{{ url_for('admin_dashboard') }}" class="text-indigo-600 hover:underline">Dashboard</a>, create a virtual user. This helps you organize API keys (e.g., one user for each application).</li>
-                <li><strong>Generate an API Key:</strong> Click "Manage" next to a user to access the key management page.</li>
-                <li><strong>Copy the Key:</strong> The full API key is shown only once upon creation. Copy it and store it securely in your application's configuration.</li>
-                <li><strong>Make Secure API Calls:</strong> Use the proxy's URL (e.g., `http://127.0.0.1:8080`) instead of your direct Ollama URL. Provide the API key in the `Authorization` header as a Bearer token.</li>
-            </ol>
+            <p>This proxy is more than just a security layer. It introduces several powerful concepts to enhance your Ollama experience:</p>
+            <div class="space-y-4">
+                <div>
+                    <h4 class="font-semibold text-lg">🛡️ API Key Authentication</h4>
+                    <p>Every request to the proxy must include a valid API key. This is the primary security feature, preventing unauthorized access to your models.</p>
+                </div>
+                <div>
+                    <h4 class="font-semibold text-lg">⚖️ Load Balancing</h4>
+                    <p>When a request is received, the proxy distributes it among all active backend servers in a round-robin fashion. This balances the load and improves availability.</p>
+                </div>
+                <div>
+                    <h4 class="font-semibold text-lg">🧠 Smart Model Routing</h4>
+                    <p>When you request a specific model (e.g., <code class="bg-gray-200 px-1 rounded text-sm">"llama3"</code>), the proxy is intelligent. It first looks up which of your backend servers have that model available and only routes the request to one of them. This ensures your request never fails because it was sent to a server without the right model.</p>
+                    <div class="mt-2 p-3 bg-blue-50 border border-blue-200 text-blue-800 rounded-md text-sm">
+                        <strong>Important:</strong> For Smart Routing to work, you must periodically click the <strong>"Refresh Models"</strong> button on the <a href="{{ url_for('admin_servers') }}" class="font-semibold underline">Server Management</a> page. This keeps the proxy's catalog of available models up to date.
+                    </div>
+                </div>
+                <div>
+                    <h4 class="font-semibold text-lg">🌐 Federated Model Listing</h4>
+                    <p>The standard <code class="bg-gray-200 px-1 rounded text-sm">/api/tags</code> endpoint is enhanced. When you call it through the proxy, it contacts all active backend servers, gathers their model lists, and returns a single, de-duplicated list of all unique models available across your entire setup.</p>
+                </div>
+            </div>
         </div>
+    </div>
 
-        <h3 class="text-xl font-semibold mt-6 mb-4 border-b pb-2">Advanced Key Management</h3>
+    <!-- Getting Started Workflow -->
+    <div class="bg-white p-6 rounded-lg shadow-md">
+        <h2 class="text-2xl font-bold mb-4 border-b pb-2">Getting Started: Your Workflow</h2>
         <div class="space-y-4 text-gray-700">
-            <div>
-                <h4 class="font-semibold">Per-Key Rate Limiting</h4>
-                <p>When creating a new API key, you can set a custom rate limit that applies only to that key. You do this by filling in the two rate limit fields:</p>
-                <ul class="list-disc list-inside space-y-2 pl-4 mt-2">
-                    <li><code class="bg-gray-200 px-1 rounded">Rate Limit Requests</code>: The maximum number of requests this key can make within the time window.</li>
-                    <li><code class="bg-gray-200 px-1 rounded">Window (Minutes)</code>: The duration of the time window in minutes.</li>
-                </ul>
-                <p class="mt-2"><strong>Example:</strong> Setting `Requests` to `100` and `Window` to `5` means this specific key can be used a maximum of 100 times every 5 minutes.</p>
-                <p class="mt-2">If you leave these fields blank, the key will automatically use the global rate limit settings defined in your server's `.env` file.</p>
-            </div>
-            <div>
-                <h4 class="font-semibold">Key Status: Active, Disabled, and Revoked</h4>
-                <ul class="list-disc list-inside space-y-1 pl-4">
-                    <li><strong class="text-green-600">Active:</strong> The key is fully functional.</li>
-                    <li><strong class="text-yellow-600">Disabled:</strong> The key is temporarily blocked and cannot be used for API calls. It can be re-enabled at any time. This is useful for temporarily pausing access for an application without deleting the key.</li>
-                    <li><strong class="text-black">Revoked:</strong> The key is permanently and irreversibly destroyed. It can never be used again. Use this action if a key has been compromised or is no longer needed.</li>
-                </ul>
-            </div>
+            <ol class="list-decimal list-inside space-y-3">
+                <li>
+                    <strong>Configure Servers:</strong> Go to the <a href="{{ url_for('admin_servers') }}" class="text-indigo-600 hover:underline">Server Management</a> page and add the URLs of all your Ollama instances.
+                </li>
+                <li>
+                    <strong>Create a User:</strong> From the <a href="{{ url_for('admin_dashboard') }}" class="text-indigo-600 hover:underline">Dashboard</a>, create a virtual user. This helps organize keys (e.g., one user per application).
+                </li>
+                <li>
+                    <strong>Generate an API Key:</strong> Click "Manage" for a user. On the user details page, give your new key a name. You can also set optional per-key rate limits that override the global settings.
+                </li>
+                <li>
+                    <strong>Copy the Key:</strong> The full API key is shown only once upon creation. Copy it and store it securely.
+                </li>
+                <li>
+                    <strong>Use the Key:</strong> In your applications, replace your Ollama URL with the proxy's URL (e.g., `http://127.0.0.1:8080`) and provide the API key in the `Authorization` header as a Bearer token.
+                </li>
+            </ol>
         </div>
     </div>
         
     <!-- Usage Examples Section -->
     <div class="bg-white p-6 rounded-lg shadow-md">
         <h2 class="text-2xl font-bold mb-4 border-b pb-2">Usage Examples</h2>
-        <p class="text-gray-600 mb-6">
-            In all examples, replace `op_..._...` with your actual generated API key.
-        </p>
-
-        <!-- Example 1: Listing Models with cURL -->
-        <div class="mb-8">
-            <h3 class="text-xl font-semibold mb-2">Example 1: Listing Available Models (cURL)</h3>
-            <p class="text-sm text-gray-600 mb-2">This command fetches the federated list of all models from all active backend servers.</p>
-            <div class="bg-gray-800 text-white rounded-lg p-4 font-mono text-sm overflow-x-auto">
-                <code class="whitespace-pre">
-curl http://127.0.0.1:8080/api/tags \
-  -H "Authorization: Bearer op_prefix_secret"</code>
+        
+        <!-- Example 1: cURL -->
+        <div class="mb-6">
+            <h3 class="text-xl font-semibold mb-2">cURL</h3>
+            <div class="code-block-wrapper">
+                <pre><code class="language-bash">
+curl http://127.0.0.1:8080/api/generate \
+  -H "Authorization: Bearer op_prefix_secret" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "llama3",
+    "prompt": "Why is the sky blue?",
+    "stream": false
+  }'</code></pre>
+                <button class="copy-button">Copy</button>
             </div>
         </div>
 
-        <!-- Example 2: Streaming with Python (requests) -->
-        <div class="mb-8">
-            <h3 class="text-xl font-semibold mb-2">Example 2: Streaming Generation with Python (`requests`)</h3>
-            <p class="text-sm text-gray-600 mb-2">A standard way to stream a response using the popular `requests` library.</p>
-            <div class="bg-gray-800 text-white rounded-lg p-4 font-mono text-sm overflow-x-auto">
-                <code class="whitespace-pre">
+        <!-- Example 2: Python (requests) -->
+        <div class="mb-6">
+            <h3 class="text-xl font-semibold mb-2">Python (`requests`)</h3>
+            <div class="code-block-wrapper">
+                <pre><code class="language-python">
 import requests
 import json
 
-API_KEY = "op_prefix_secret"  # <-- Replace with your key
-PROXY_URL = "http://127.0.0.1:8080/api/generate"
+API_KEY = "op_prefix_secret"
+PROXY_URL = "http://127.0.0.1:8080/api/chat"
 
 headers = {
     "Authorization": f"Bearer {API_KEY}",
     "Content-Type": "application/json"
 }
-
 data = {
     "model": "llama3",
-    "prompt": "Tell me a short story about a robot who discovers music.",
+    "messages": [{"role": "user", "content": "Tell me a joke"}],
     "stream": True
 }
 
 try:
-    with requests.post(PROXY_URL, headers=headers, json=data, stream=True) as response:
-        response.raise_for_status()  # Raise an exception for bad status codes
-        print("Story: ", end="", flush=True)
-        for chunk in response.iter_lines():
+    with requests.post(PROXY_URL, headers=headers, json=data, stream=True) as r:
+        r.raise_for_status()
+        for chunk in r.iter_lines():
             if chunk:
-                decoded_chunk = json.loads(chunk.decode('utf-8'))
-                print(decoded_chunk.get("response", ""), end="", flush=True)
+                body = json.loads(chunk)
+                print(body['message']['content'], end="", flush=True)
     print()
 except requests.exceptions.RequestException as e:
-    print(f"\nAn error occurred: {e}")
-</code>
+    print(f"An error occurred: {e}")
+</code></pre>
+                <button class="copy-button">Copy</button>
             </div>
         </div>
 
-        <!-- Example 3: lollms-client -->
-        <div>
-            <h3 class="text-xl font-semibold mb-2">Example 3: Using with `lollms-client`</h3>
-            <p class="text-sm text-gray-600 mb-2">To use the proxy with the `lollms-client` library, configure the host address to point to the proxy and provide your key as the `service_key`.</p>
-            <div class="bg-gray-800 text-white rounded-lg p-4 font-mono text-sm overflow-x-auto">
-                <code class="whitespace-pre">
-from lollms_client import LollmsClient, MSG_TYPE
+        <!-- Example 3: JavaScript (fetch) -->
+        <div class="mb-6">
+            <h3 class="text-xl font-semibold mb-2">JavaScript (`fetch` for streaming)</h3>
+            <div class="code-block-wrapper">
+                <pre><code class="language-javascript">
+const API_KEY = 'op_prefix_secret';
+const PROXY_URL = 'http://127.0.0.1:8080/api/generate';
 
-# Configure the client to use the secure proxy
-lc = LollmsClient(
-    llm_binding_name="ollama",
-    llm_binding_config={
-        "host_address": "http://localhost:8080",  # <-- Point to the proxy server
-        "model_name": "llama3",                   # Or any model you have
-        "service_key": "op_prefix_secret",        # <-- Replace with your API key
-    }
-)
+async function runCompletion() {
+  const response = await fetch(PROXY_URL, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${API_KEY}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      model: "llama3",
+      prompt: "Write a short poem about space.",
+      stream": true
+    })
+  });
 
-def streaming_callback(data, msg_type):
-    if msg_type == MSG_TYPE.MSG_TYPE_CHUNK:
-        print(data, end="", flush=True)
-    return True
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
 
-print("--- Streaming with lollms-client ---")
-lc.generate_text(
-    prompt="What is the capital of France?",
-    stream=True,
-    streaming_callback=streaming_callback
-)
-print("\n\n--- Listing models ---")
-models = lc.listModels()
-print(models)
-</code>
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    
+    const chunk = decoder.decode(value, { stream: true });
+    // Each chunk can contain multiple JSON objects
+    chunk.split('\n').filter(line => line).forEach(line => {
+        const data = JSON.parse(line);
+        console.log(data.response);
+    });
+  }
+}
+
+runCompletion();
+</code></pre>
+                <button class="copy-button">Copy</button>
             </div>
         </div>
     </div>
+
+    <!-- Advanced Configuration & FAQ -->
+    <div class="bg-white p-6 rounded-lg shadow-md">
+        <h2 class="text-2xl font-bold mb-4 border-b pb-2">Advanced Configuration & FAQ</h2>
+        <div class="space-y-6 text-gray-700">
+            <div>
+                <h4 class="font-semibold text-lg">Key `.env` Settings</h4>
+                <p class="text-sm text-gray-600 mb-2">You can fine-tune the proxy by editing the <code class="bg-gray-200 px-1 rounded">.env</code> file in the project root.</p>
+                <ul class="list-disc list-inside space-y-2 pl-2">
+                    <li><code class="font-semibold">OLLAMA_SERVERS</code>: A comma-separated list of your backend Ollama URLs.</li>
+                    <li><code class="font-semibold">REDIS_URL</code>: The connection string for your Redis instance. If left blank or invalid, rate limiting is disabled.</li>
+                    <li><code class="font-semibold">RATE_LIMIT_REQUESTS</code> / <code class="font-semibold">...WINDOW_MINUTES</code>: The default global rate limit for all keys.</li>
+                    <li><code class="font-semibold">ALLOWED_IPS</code> / <code class="font-semibold">DENIED_IPS</code>: Comma-separated lists to control access by IP address.</li>
+                </ul>
+            </div>
+            <div>
+                <h4 class="font-semibold text-lg">Frequently Asked Questions</h4>
+                <div class="space-y-4 mt-2">
+                    <div>
+                        <p class="font-semibold">Why are my new models not being used for Smart Routing?</p>
+                        <p>The proxy caches model lists for performance. You must go to the <span class="font-bold">Server Management</span> page and click <span class="font-bold">"Refresh Models"</span> to make the proxy aware of any new models you've pulled on your backend servers.</p>
+                    </div>
+                     <div>
+                        <p class="font-semibold">Why do I see a "Redis not available" warning on startup?</p>
+                        <p>This means the proxy could not connect to the Redis server defined by <code class="bg-gray-200 px-1 rounded text-sm">REDIS_URL</code>. The proxy will still work perfectly, but <span class="font-bold">all rate limiting features (global and per-key) and brute-force protection will be disabled</span>. Install and run Redis for these features.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
 
     <!-- Credits Section -->
     <div class="bg-white p-6 rounded-lg shadow-md">
@@ -142,20 +198,62 @@ print(models)
         <div class="space-y-4 text-gray-700">
             <p>This application was developed with passion by the open-source community. It stands on the shoulders of giants and wouldn't be possible without the following incredible projects:</p>
             <ul class="list-disc list-inside space-y-2 pl-4">
-                <li><strong><a href="https://fastapi.tiangolo.com/" target="_blank" class="text-indigo-600 hover:underline">FastAPI</a>:</strong> For the high-performance, easy-to-use web framework.</li>
-                <li><strong><a href="https://www.sqlalchemy.org/" target="_blank" class="text-indigo-600 hover:underline">SQLAlchemy</a>:</strong> For providing a powerful and Pythonic SQL toolkit and ORM.</li>
-                <li><strong><a href="https://jinja.palletsprojects.com/" target="_blank" class="text-indigo-600 hover:underline">Jinja2</a>:</strong> For fast and expressive server-side templating.</li>
-                <li><strong><a href="https://www.chartjs.org/" target="_blank" class="text-indigo-600 hover:underline">Chart.js</a>:</strong> For the beautiful and interactive data visualizations.</li>
-                <li><strong><a href="https://tailwindcss.com/" target="_blank" class="text-indigo-600 hover:underline">Tailwind CSS</a>:</strong> For the utility-first CSS framework that makes the UI beautiful.</li>
+                <li><strong><a href="https://fastapi.tiangolo.com/" target="_blank" class="text-indigo-600 hover:underline">FastAPI</a></strong>, <strong><a href="https://www.sqlalchemy.org/" target="_blank" class="text-indigo-600 hover:underline">SQLAlchemy</a></strong>, <strong><a href="https://jinja.palletsprojects.com/" target="_blank" class="text-indigo-600 hover:underline">Jinja2</a></strong>, <strong><a href="https://www.chartjs.org/" target="_blank" class="text-indigo-600 hover:underline">Chart.js</a></strong>, and <strong><a href="https://tailwindcss.com/" target="_blank" class="text-indigo-600 hover:underline">Tailwind CSS</a></strong>.</li>
             </ul>
-            <p class="pt-4">
-                A special thank you to **Saifeddine ALOUI (ParisNeo)** for creating and maintaining this project.
-            </p>
-            <p>
-                Visit the project on <a href="https://github.com/ParisNeo/ollama_proxy_server" target="_blank" class="text-indigo-600 hover:underline">GitHub</a> to contribute, report issues, or star the repository!
-            </p>
+            <p class="pt-4">Project built and maintained by <strong>ParisNeo</strong> with help from AI and Cool developers (check the contributors list in the github page).</p>
+            <p>Visit the project on <a href="https://github.com/ParisNeo/ollama_proxy_server" target="_blank" class="text-indigo-600 hover:underline">GitHub</a> to contribute, report issues, or star the repository!</p>
         </div>
     </div>
 
 </div>
+
+<style>
+    .code-block-wrapper {
+        position: relative;
+        background-color: #1f2937; /* gray-800 */
+        color: #d1d5db; /* gray-300 */
+        border-radius: 0.5rem;
+        padding: 1rem;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+        font-size: 0.875rem;
+        overflow-x: auto;
+    }
+    .copy-button {
+        position: absolute;
+        top: 0.5rem;
+        right: 0.5rem;
+        background-color: #4b5563; /* gray-600 */
+        color: white;
+        border: none;
+        padding: 0.25rem 0.5rem;
+        border-radius: 0.25rem;
+        font-size: 0.75rem;
+        cursor: pointer;
+        transition: background-color 0.2s;
+    }
+    .copy-button:hover {
+        background-color: #6b7280; /* gray-500 */
+    }
+</style>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    document.querySelectorAll('.copy-button').forEach(button => {
+        button.addEventListener('click', () => {
+            const codeBlock = button.previousElementSibling.querySelector('code');
+            const text = codeBlock.innerText;
+            
+            navigator.clipboard.writeText(text).then(() => {
+                const originalText = button.textContent;
+                button.textContent = 'Copied!';
+                setTimeout(() => {
+                    button.textContent = originalText;
+                }, 2000);
+            }).catch(err => {
+                console.error('Failed to copy text: ', err);
+            });
+        });
+    });
+});
+</script>
 {% endblock %}

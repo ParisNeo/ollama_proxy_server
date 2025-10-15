@@ -1,6 +1,7 @@
 # app/api/v1/routes/admin.py
 import logging
 from typing import Union, Optional
+import redis.asyncio as redis
 
 from fastapi import APIRouter, Depends, Request, Form, HTTPException, status
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -14,10 +15,12 @@ from app.database.models import User
 from app.crud import user_crud, apikey_crud, log_crud, server_crud
 from app.schema.user import UserCreate
 from app.schema.server import ServerCreate
+from app.api.v1.dependencies import get_csrf_token, validate_csrf_token, login_rate_limiter
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 templates = Jinja2Templates(directory="app/templates")
+# templates.env.globals["get_csrf_token"] = get_csrf_token # <-- REMOVE THIS LINE
 
 # ... (helpers and other routes remain the same up to API Key Management) ...
 def flash(request: Request, message: str, category: str = "info"):
@@ -33,25 +36,53 @@ async def require_admin_user(request: Request, current_user: Union[User, None] =
     if not current_user or not current_user.is_admin: raise HTTPException(status_code=status.HTTP_303_SEE_OTHER, detail="Not authorized", headers={"Location": str(request.url_for("admin_login"))})
     request.state.user = current_user
     return current_user
+    
 @router.get("/login", response_class=HTMLResponse, name="admin_login")
-async def admin_login_form(request: Request): return templates.TemplateResponse("admin/login.html", {"request": request})
-@router.post("/login", name="admin_login_post")
+async def admin_login_form(request: Request):
+    csrf_token = await get_csrf_token(request)
+    return templates.TemplateResponse("admin/login.html", {"request": request, "csrf_token": csrf_token})
+
+@router.post("/login", name="admin_login_post", dependencies=[Depends(login_rate_limiter), Depends(validate_csrf_token)])
 async def admin_login_post(request: Request, db: AsyncSession = Depends(get_db), username: str = Form(...), password: str = Form(...)):
     user = await user_crud.get_user_by_username(db, username=username)
-    if not user or not user.is_admin or not verify_password(password, user.hashed_password):
+    
+    # --- BRUTE-FORCE HANDLING ---
+    is_valid = user and user.is_admin and verify_password(password, user.hashed_password)
+    redis_client: redis.Redis = request.app.state.redis
+    client_ip = request.client.host
+
+    if not is_valid and redis_client:
+        key = f"login_fail:{client_ip}"
+        try:
+            current_fails = await redis_client.incr(key)
+            if current_fails == 1:
+                await redis_client.expire(key, 300) # 5-minute lockout window
+        except Exception as e:
+            logger.error(f"Redis failed during login attempt tracking: {e}")
+    # --- END BRUTE-FORCE HANDLING ---
+
+    if not is_valid:
         flash(request, "Invalid username or password", "error")
         return RedirectResponse(url=request.url_for("admin_login"), status_code=status.HTTP_303_SEE_OTHER)
+
+    if redis_client: # Clear failed attempts on successful login
+        await redis_client.delete(f"login_fail:{client_ip}")
+
     request.session["user_id"] = user.id
     flash(request, "Successfully logged in.", "success")
     return RedirectResponse(url=request.url_for("admin_dashboard"), status_code=status.HTTP_303_SEE_OTHER)
+    
 @router.get("/logout", name="admin_logout")
 async def admin_logout(request: Request):
     request.session.clear()
     return RedirectResponse(url=request.url_for("admin_login"), status_code=status.HTTP_303_SEE_OTHER)
+    
 @router.get("/dashboard", response_class=HTMLResponse, name="admin_dashboard")
 async def admin_dashboard(request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
     users = await user_crud.get_users(db)
-    return templates.TemplateResponse("admin/dashboard.html", {"request": request, "users": users})
+    csrf_token = await get_csrf_token(request)
+    return templates.TemplateResponse("admin/dashboard.html", {"request": request, "users": users, "csrf_token": csrf_token})
+    
 @router.get("/stats", response_class=HTMLResponse, name="admin_stats")
 async def admin_stats(request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
     key_usage_stats = await log_crud.get_usage_statistics(db)
@@ -66,11 +97,14 @@ async def admin_stats(request: Request, db: AsyncSession = Depends(get_db), admi
     return templates.TemplateResponse("admin/statistics.html", {"request": request, "key_usage_stats": key_usage_stats, "daily_labels": daily_labels, "daily_data": daily_data, "hourly_labels": hourly_labels, "hourly_data": hourly_data, "server_labels": server_labels, "server_data": server_data, "model_labels": model_labels, "model_data": model_data})
 @router.get("/help", response_class=HTMLResponse, name="admin_help")
 async def admin_help_page(request: Request, admin_user: User = Depends(require_admin_user)): return templates.TemplateResponse("admin/help.html", {"request": request})
+
 @router.get("/servers", response_class=HTMLResponse, name="admin_servers")
 async def admin_server_management(request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
     servers = await server_crud.get_servers(db)
-    return templates.TemplateResponse("admin/servers.html", {"request": request, "servers": servers})
-@router.post("/servers/add", name="admin_add_server")
+    csrf_token = await get_csrf_token(request)
+    return templates.TemplateResponse("admin/servers.html", {"request": request, "servers": servers, "csrf_token": csrf_token})
+
+@router.post("/servers/add", name="admin_add_server", dependencies=[Depends(validate_csrf_token)])
 async def admin_add_server(request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user), server_name: str = Form(...), server_url: str = Form(...)):
     existing_server = await server_crud.get_server_by_url(db, url=server_url)
     if existing_server: flash(request, f"Server with URL '{server_url}' already exists.", "error")
@@ -81,13 +115,14 @@ async def admin_add_server(request: Request, db: AsyncSession = Depends(get_db),
             flash(request, f"Server '{server_name}' added successfully.", "success")
         except Exception: flash(request, "Invalid URL format.", "error")
     return RedirectResponse(url=request.url_for("admin_servers"), status_code=status.HTTP_303_SEE_OTHER)
-@router.post("/servers/{server_id}/delete", name="admin_delete_server")
+
+@router.post("/servers/{server_id}/delete", name="admin_delete_server", dependencies=[Depends(validate_csrf_token)])
 async def admin_delete_server(request: Request, server_id: int, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
     await server_crud.delete_server(db, server_id=server_id)
     flash(request, "Server deleted successfully.", "success")
     return RedirectResponse(url=request.url_for("admin_servers"), status_code=status.HTTP_303_SEE_OTHER)
 
-@router.post("/servers/{server_id}/refresh-models", name="admin_refresh_models")
+@router.post("/servers/{server_id}/refresh-models", name="admin_refresh_models", dependencies=[Depends(validate_csrf_token)])
 async def admin_refresh_models(request: Request, server_id: int, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
     result = await server_crud.fetch_and_update_models(db, server_id=server_id)
 
@@ -98,7 +133,8 @@ async def admin_refresh_models(request: Request, server_id: int, db: AsyncSessio
         flash(request, f"Failed to fetch models: {result['error']}", "error")
 
     return RedirectResponse(url=request.url_for("admin_servers"), status_code=status.HTTP_303_SEE_OTHER)
-@router.post("/users", name="create_new_user")
+
+@router.post("/users", name="create_new_user", dependencies=[Depends(validate_csrf_token)])
 async def create_new_user(request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user), username: str = Form(...), password: str = Form(...)):
     existing_user = await user_crud.get_user_by_username(db, username=username)
     if existing_user: flash(request, f"User '{username}' already exists.", "error")
@@ -107,17 +143,19 @@ async def create_new_user(request: Request, db: AsyncSession = Depends(get_db), 
         await user_crud.create_user(db, user=user_in)
         flash(request, f"User '{username}' created successfully.", "success")
     return RedirectResponse(url=request.url_for("admin_dashboard"), status_code=status.HTTP_303_SEE_OTHER)
+
 @router.get("/users/{user_id}", response_class=HTMLResponse, name="get_user_details")
 async def get_user_details(request: Request, user_id: int, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
     user = await user_crud.get_user_by_id(db, user_id=user_id)
     if not user: raise HTTPException(status_code=404, detail="User not found")
     api_keys = await apikey_crud.get_api_keys_for_user(db, user_id=user_id)
-    return templates.TemplateResponse("admin/user_details.html", {"request": request, "user": user, "api_keys": api_keys})
+    csrf_token = await get_csrf_token(request)
+    return templates.TemplateResponse("admin/user_details.html", {"request": request, "user": user, "api_keys": api_keys, "csrf_token": csrf_token})
 
 # ----------------------------------------------------------------------
 # API KEY MANAGEMENT (REVISED)
 # ----------------------------------------------------------------------
-@router.post("/users/{user_id}/keys/create", name="admin_create_key")
+@router.post("/users/{user_id}/keys/create", name="admin_create_key", dependencies=[Depends(validate_csrf_token)])
 async def create_user_api_key(
     request: Request,
     user_id: int,
@@ -144,7 +182,7 @@ async def create_user_api_key(
     )
 
 # --- NEW ROUTE ---
-@router.post("/keys/{key_id}/toggle-active", name="admin_toggle_key_active")
+@router.post("/keys/{key_id}/toggle-active", name="admin_toggle_key_active", dependencies=[Depends(validate_csrf_token)])
 async def toggle_key_active_status(
     request: Request,
     key_id: int,
@@ -160,7 +198,7 @@ async def toggle_key_active_status(
     return RedirectResponse(url=request.url_for("get_user_details", user_id=key.user_id), status_code=status.HTTP_303_SEE_OTHER)
 # --- END NEW ROUTE ---
 
-@router.post("/keys/{key_id}/revoke", name="admin_revoke_key")
+@router.post("/keys/{key_id}/revoke", name="admin_revoke_key", dependencies=[Depends(validate_csrf_token)])
 async def revoke_user_api_key(
     request: Request,
     key_id: int,
@@ -175,7 +213,7 @@ async def revoke_user_api_key(
     flash(request, f"API Key '{key.key_name}' has been revoked.", "success")
     return RedirectResponse(url=request.url_for("get_user_details", user_id=key.user_id), status_code=status.HTTP_303_SEE_OTHER)
 
-@router.post("/users/{user_id}/delete", name="delete_user_account")
+@router.post("/users/{user_id}/delete", name="delete_user_account", dependencies=[Depends(validate_csrf_token)])
 async def delete_user_account(request: Request, user_id: int, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
     user = await user_crud.get_user_by_id(db, user_id=user_id)
     if not user: raise HTTPException(status_code=404, detail="User not found")

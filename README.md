@@ -163,7 +163,7 @@ After the reset is complete, you can run the `run.sh` or `run_windows.bat` scrip
 
 This application was developed with passion by the open-source community and stands on the shoulders of giants. A special thank you to:
 
-*   **Saifeddine ALOUI (ParisNeo)** for creating and maintaining this project.
+*   **ParisNeo** for creating and maintaining this project.
 *   All the contributors who notified about bugs in previous versions and for some of them contributed with actual bug fix code (take a look at the full contributors list for details).
 *   The teams behind **FastAPI**, **SQLAlchemy**, **Jinja2**, **Chart.js**, and **Tailwind CSS** for their incredible open-source tools.
 

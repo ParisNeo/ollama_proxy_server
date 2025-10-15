@@ -13,6 +13,7 @@
             <h2 class="text-2xl font-bold">User: <span class="text-indigo-600">{{ user.username }}</span></h2>
             {% if not user.is_admin %}
             <form action="{{ url_for('delete_user_account', user_id=user.id) }}" method="post" onsubmit="return confirm('Are you sure you want to delete this user and all their API keys?');">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                 <button type="submit" class="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700">Delete User</button>
             </form>
             {% endif %}
@@ -23,6 +24,7 @@
     <div class="bg-white p-6 rounded-lg shadow-md mb-8">
         <h3 class="text-xl font-bold mb-4">Create New API Key</h3>
         <form action="{{ url_for('admin_create_key', user_id=user.id) }}" method="post">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
                 <div class="md:col-span-2">
                     <label for="key_name" class="block text-sm font-medium text-gray-700">Key Name (e.g., "My App")</label>
@@ -88,6 +90,7 @@
                             <div class="flex justify-end space-x-4">
                             {% if not key.is_revoked %}
                                 <form action="{{ url_for('admin_toggle_key_active', key_id=key.id) }}" method="post">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                                     {% if key.is_active %}
                                         <button type="submit" class="text-yellow-600 hover:text-yellow-900">Disable</button>
                                     {% else %}
@@ -95,6 +98,7 @@
                                     {% endif %}
                                 </form>
                                 <form action="{{ url_for('admin_revoke_key', key_id=key.id) }}" method="post" onsubmit="return confirm('Are you sure you want to permanently revoke this key? This cannot be undone.');">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                                     <button type="submit" class="text-red-600 hover:text-red-900">Revoke</button>
                                 </form>
                             {% endif %}

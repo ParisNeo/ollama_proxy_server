@@ -32,25 +32,37 @@
 </div>
 
 <script>
-    // Simple clipboard copy logic – works in all modern browsers
     document.getElementById('copy-btn').addEventListener('click', function () {
-        const keyEl = document.getElementById('plain-key');
-        const range = document.createRange();
-        range.selectNodeContents(keyEl);
-        const sel = window.getSelection();
-        sel.removeAllRanges();
-        sel.addRange(range);
-        try {
-            document.execCommand('copy');
-            // Show a quick visual feedback
-            const original = this.textContent;
-            this.textContent = 'Copied!';
-            setTimeout(() => { this.textContent = original; }, 1500);
-        } catch (err) {
-            console.error('Copy failed', err);
+        const keyText = document.getElementById('plain-key').innerText;
+        const copyButton = this;
+
+        // Use modern Clipboard API if available (more secure)
+        if (navigator.clipboard && window.isSecureContext) {
+            navigator.clipboard.writeText(keyText).then(function() {
+                const originalText = copyButton.textContent;
+                copyButton.textContent = 'Copied!';
+                setTimeout(() => { copyButton.textContent = originalText; }, 1500);
+            }).catch(function(err) {
+                console.error('Async copy failed: ', err);
+            });
+        } else {
+            // Fallback for older browsers
+            const textArea = document.createElement('textarea');
+            textArea.value = keyText;
+            textArea.style.position = 'fixed'; // Avoid scrolling to bottom
+            document.body.appendChild(textArea);
+            textArea.focus();
+            textArea.select();
+            try {
+                document.execCommand('copy');
+                const originalText = copyButton.textContent;
+                copyButton.textContent = 'Copied!';
+                setTimeout(() => { copyButton.textContent = originalText; }, 1500);
+            } catch (err) {
+                console.error('Fallback copy failed', err);
+            }
+            document.body.removeChild(textArea);
         }
-        // Cleanup selection
-        sel.removeAllRanges();
     });
 </script>
 {% endblock %}
