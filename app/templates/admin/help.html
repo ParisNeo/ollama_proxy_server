@@ -79,119 +79,76 @@ curl http://127.0.0.1:8080/api/generate \
                 <button class="copy-button">Copy</button>
             </div>
         </div>
-
-        <!-- Example 2: Python (requests) -->
-        <div class="mb-6">
-            <h3 class="text-xl font-semibold mb-2">Python (`requests`)</h3>
-            <div class="code-block-wrapper">
-                <pre><code class="language-python">
-import requests
-import json
-
-API_KEY = "op_prefix_secret"
-PROXY_URL = "http://127.0.0.1:8080/api/chat"
-
-headers = {
-    "Authorization": f"Bearer {API_KEY}",
-    "Content-Type": "application/json"
-}
-data = {
-    "model": "llama3",
-    "messages": [{"role": "user", "content": "Tell me a joke"}],
-    "stream": True
-}
-
-try:
-    with requests.post(PROXY_URL, headers=headers, json=data, stream=True) as r:
-        r.raise_for_status()
-        for chunk in r.iter_lines():
-            if chunk:
-                body = json.loads(chunk)
-                print(body['message']['content'], end="", flush=True)
-    print()
-except requests.exceptions.RequestException as e:
-    print(f"An error occurred: {e}")
-</code></pre>
-                <button class="copy-button">Copy</button>
-            </div>
-        </div>
-
-        <!-- Example 3: JavaScript (fetch) -->
-        <div class="mb-6">
-            <h3 class="text-xl font-semibold mb-2">JavaScript (`fetch` for streaming)</h3>
-            <div class="code-block-wrapper">
-                <pre><code class="language-javascript">
-const API_KEY = 'op_prefix_secret';
-const PROXY_URL = 'http://127.0.0.1:8080/api/generate';
-
-async function runCompletion() {
-  const response = await fetch(PROXY_URL, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${API_KEY}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      model: "llama3",
-      prompt: "Write a short poem about space.",
-      stream": true
-    })
-  });
-
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    
-    const chunk = decoder.decode(value, { stream: true });
-    // Each chunk can contain multiple JSON objects
-    chunk.split('\n').filter(line => line).forEach(line => {
-        const data = JSON.parse(line);
-        console.log(data.response);
-    });
-  }
-}
-
-runCompletion();
-</code></pre>
-                <button class="copy-button">Copy</button>
-            </div>
-        </div>
     </div>
 
-    <!-- Advanced Configuration & FAQ -->
-    <div class="bg-white p-6 rounded-lg shadow-md">
-        <h2 class="text-2xl font-bold mb-4 border-b pb-2">Advanced Configuration & FAQ</h2>
+    <!-- NEW REDIS SETUP GUIDE -->
+    <div id="redis-setup" class="bg-white p-6 rounded-lg shadow-md scroll-mt-20">
+        <h2 class="text-2xl font-bold mb-4 border-b pb-2">Redis Setup Guide</h2>
         <div class="space-y-6 text-gray-700">
             <div>
-                <h4 class="font-semibold text-lg">Key `.env` Settings</h4>
-                <p class="text-sm text-gray-600 mb-2">You can fine-tune the proxy by editing the <code class="bg-gray-200 px-1 rounded">.env</code> file in the project root.</p>
-                <ul class="list-disc list-inside space-y-2 pl-2">
-                    <li><code class="font-semibold">OLLAMA_SERVERS</code>: A comma-separated list of your backend Ollama URLs.</li>
-                    <li><code class="font-semibold">REDIS_URL</code>: The connection string for your Redis instance. If left blank or invalid, rate limiting is disabled.</li>
-                    <li><code class="font-semibold">RATE_LIMIT_REQUESTS</code> / <code class="font-semibold">...WINDOW_MINUTES</code>: The default global rate limit for all keys.</li>
-                    <li><code class="font-semibold">ALLOWED_IPS</code> / <code class="font-semibold">DENIED_IPS</code>: Comma-separated lists to control access by IP address.</li>
+                <h3 class="text-xl font-semibold mb-2">Why Do I Need Redis?</h3>
+                <p>Redis is an in-memory database that is extremely fast. This application uses it for two optional but important security features:</p>
+                <ul class="list-disc list-inside space-y-1 mt-2 pl-4">
+                    <li><strong>API Rate Limiting:</strong> Prevents abuse by limiting the number of requests a single API key can make in a given time frame.</li>
+                    <li><strong>Brute-Force Protection:</strong> Temporarily locks an IP address after too many failed login attempts to the admin panel.</li>
                 </ul>
+                <div class="mt-3 p-3 bg-yellow-50 border border-yellow-200 text-yellow-800 rounded-md text-sm">
+                    <strong>Note:</strong> The proxy will work perfectly without Redis, but these security features will be disabled.
+                </div>
             </div>
+
             <div>
-                <h4 class="font-semibold text-lg">Frequently Asked Questions</h4>
-                <div class="space-y-4 mt-2">
+                <h3 class="text-xl font-semibold mb-2">Installation</h3>
+                <p class="mb-3">The easiest way to run Redis on any platform is with Docker. If you don't use Docker, choose your OS below.</p>
+                <div class="space-y-4">
                     <div>
-                        <p class="font-semibold">Why are my new models not being used for Smart Routing?</p>
-                        <p>The proxy caches model lists for performance. You must go to the <span class="font-bold">Server Management</span> page and click <span class="font-bold">"Refresh Models"</span> to make the proxy aware of any new models you've pulled on your backend servers.</p>
+                        <h4 class="font-semibold text-lg">Docker (Recommended)</h4>
+                        <p>This single command will download and run a Redis container that restarts automatically.</p>
+                        <div class="code-block-wrapper mt-2">
+                            <pre><code class="language-bash">docker run -d --name redis-stack -p 6379:6379 --restart always redis/redis-stack:latest</code></pre>
+                             <button class="copy-button">Copy</button>
+                        </div>
+                    </div>
+                    <div>
+                        <h4 class="font-semibold text-lg">Windows (via WSL 2)</h4>
+                        <p>Redis is not officially supported on Windows, but it runs perfectly under the Windows Subsystem for Linux (WSL).</p>
+                        <ol class="list-decimal list-inside space-y-2 mt-2 pl-4">
+                            <li>Open PowerShell as an Administrator and run: <code class="bg-gray-200 px-1 rounded text-sm">wsl --install</code></li>
+                            <li>After it's done, open your new Linux terminal (e.g., Ubuntu) and run:</li>
+                        </ol>
+                        <div class="code-block-wrapper mt-2">
+                            <pre><code class="language-bash">sudo apt update && sudo apt upgrade
+sudo apt install redis-server
+sudo service redis-server start</code></pre>
+                            <button class="copy-button">Copy</button>
+                        </div>
                     </div>
                      <div>
-                        <p class="font-semibold">Why do I see a "Redis not available" warning on startup?</p>
-                        <p>This means the proxy could not connect to the Redis server defined by <code class="bg-gray-200 px-1 rounded text-sm">REDIS_URL</code>. The proxy will still work perfectly, but <span class="font-bold">all rate limiting features (global and per-key) and brute-force protection will be disabled</span>. Install and run Redis for these features.</p>
+                        <h4 class="font-semibold text-lg">macOS (via Homebrew)</h4>
+                        <div class="code-block-wrapper mt-2">
+                            <pre><code class="language-bash">brew install redis
+brew services start redis</code></pre>
+                            <button class="copy-button">Copy</button>
+                        </div>
+                    </div>
+                     <div>
+                        <h4 class="font-semibold text-lg">Linux (Ubuntu/Debian)</h4>
+                        <div class="code-block-wrapper mt-2">
+                            <pre><code class="language-bash">sudo apt-get install redis-server
+sudo systemctl enable --now redis-server</code></pre>
+                             <button class="copy-button">Copy</button>
+                        </div>
                     </div>
                 </div>
             </div>
+            
+             <div>
+                <h3 class="text-xl font-semibold mb-2">Configuration</h3>
+                <p>Once Redis is running, go to the <a href="{{ url_for('admin_settings') }}" class="text-indigo-600 hover:underline">Settings</a> page in the admin UI and enter your Redis connection details (the defaults are usually fine for a local install). Save the settings, and the proxy will attempt to connect automatically.</p>
+            </div>
         </div>
     </div>
-
-
+    
     <!-- Credits Section -->
     <div class="bg-white p-6 rounded-lg shadow-md">
         <h2 class="text-2xl font-bold mb-4 border-b pb-2">Credits & Acknowledgements</h2>

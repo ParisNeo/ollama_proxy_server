@@ -74,3 +74,8 @@ class OllamaServer(Base):
     available_models = Column(JSON, nullable=True)
     models_last_updated = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+class AppSettings(Base):
+    __tablename__ = "app_settings"
+    id = Column(Integer, primary_key=True)
+    settings_data = Column(JSON, nullable=False)

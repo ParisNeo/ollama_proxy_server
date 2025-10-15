@@ -1,0 +1,86 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Application Settings{% endblock %}
+{% block header_title %}Application Settings{% endblock %}
+
+{% block content %}
+<div class="max-w-4xl mx-auto">
+    <form action="{{ url_for('admin_settings_post') }}" method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+
+        <!-- Redis Section -->
+        <div class="bg-white p-6 rounded-lg shadow-md mb-8">
+            <h2 class="text-2xl font-bold mb-4">Redis Configuration</h2>
+            <p class="text-sm text-gray-500 mb-4">Used for rate limiting and brute-force protection. Features are disabled if the connection fails.</p>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                    <label for="redis_host" class="block text-sm font-medium text-gray-700">Redis Host</label>
+                    <input type="text" id="redis_host" name="redis_host" value="{{ settings.redis_host }}" class="mt-1 block w-full input-field">
+                </div>
+                <div>
+                    <label for="redis_port" class="block text-sm font-medium text-gray-700">Redis Port</label>
+                    <input type="number" id="redis_port" name="redis_port" value="{{ settings.redis_port }}" class="mt-1 block w-full input-field">
+                </div>
+                <div>
+                    <label for="redis_username" class="block text-sm font-medium text-gray-700">Redis Username (Optional)</label>
+                    <input type="text" id="redis_username" name="redis_username" value="{{ settings.redis_username or '' }}" class="mt-1 block w-full input-field">
+                </div>
+                <div>
+                    <label for="redis_password" class="block text-sm font-medium text-gray-700">Redis Password (Optional)</label>
+                    <input type="password" id="redis_password" name="redis_password" placeholder="Unchanged if empty" class="mt-1 block w-full input-field">
+                </div>
+            </div>
+        </div>
+
+        <!-- Other Settings -->
+        <div class="bg-white p-6 rounded-lg shadow-md mb-8">
+            <h2 class="text-2xl font-bold mb-4">General Settings</h2>
+
+            {% if not is_redis_connected %}
+            <div class="mb-4 p-3 bg-yellow-50 border border-yellow-200 text-yellow-800 rounded-md text-sm">
+                <strong>Rate Limiting is Inactive.</strong> The settings below have no effect until Redis is connected. <a href="{{ url_for('admin_help') }}#redis-setup" class="font-semibold underline">Learn how to set up Redis</a>.
+            </div>
+            {% endif %}
+            
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div class="{% if not is_redis_connected %}opacity-50{% endif %}">
+                    <label for="rate_limit_requests" class="block text-sm font-medium text-gray-700">Global Rate Limit (Requests)</label>
+                    <input type="number" id="rate_limit_requests" name="rate_limit_requests" value="{{ settings.rate_limit_requests }}" class="mt-1 block w-full input-field {% if not is_redis_connected %}cursor-not-allowed bg-gray-100{% endif %}" {% if not is_redis_connected %}disabled{% endif %}>
+                </div>
+                <div class="{% if not is_redis_connected %}opacity-50{% endif %}">
+                    <label for="rate_limit_window_minutes" class="block text-sm font-medium text-gray-700">Global Rate Limit (Window in Minutes)</label>
+                    <input type="number" id="rate_limit_window_minutes" name="rate_limit_window_minutes" value="{{ settings.rate_limit_window_minutes }}" class="mt-1 block w-full input-field {% if not is_redis_connected %}cursor-not-allowed bg-gray-100{% endif %}" {% if not is_redis_connected %}disabled{% endif %}>
+                </div>
+                <div>
+                    <label for="model_update_interval_minutes" class="block text-sm font-medium text-gray-700">Model Refresh Interval (Minutes)</label>
+                    <input type="number" id="model_update_interval_minutes" name="model_update_interval_minutes" value="{{ settings.model_update_interval_minutes }}" class="mt-1 block w-full input-field">
+                </div>
+                 <div>
+                    <label for="allowed_ips" class="block text-sm font-medium text-gray-700">Allowed IPs (comma-separated)</label>
+                    <input type="text" id="allowed_ips" name="allowed_ips" value="{{ settings.allowed_ips }}" placeholder="Leave empty for all" class="mt-1 block w-full input-field">
+                </div>
+                 <div>
+                    <label for="denied_ips" class="block text-sm font-medium text-gray-700">Denied IPs (comma-separated)</label>
+                    <input type="text" id="denied_ips" name="denied_ips" value="{{ settings.denied_ips }}" class="mt-1 block w-full input-field">
+                </div>
+            </div>
+        </div>
+
+        <div class="flex justify-end">
+            <button type="submit" class="px-6 py-2 bg-indigo-600 text-white font-semibold rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
+                Save Settings
+            </button>
+        </div>
+    </form>
+</div>
+
+<style>
+.input-field {
+    padding: 0.5rem 0.75rem;
+    border: 1px solid #D1D5DB;
+    border-radius: 0.375rem;
+    box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+}
+</style>
+
+{% endblock %}

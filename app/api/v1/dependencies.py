@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import redis.asyncio as redis
 import time
 
-from app.core.config import settings
+from app.schema.settings import AppSettingsModel # <-- NEW
 from app.database.session import get_db
 from app.crud import apikey_crud
 from app.core.security import verify_api_key
@@ -14,6 +14,10 @@ import secrets
 
 logger = logging.getLogger(__name__)
 api_key_header = APIKeyHeader(name="Authorization", auto_error=False)
+
+# --- NEW: Dependency to get DB-loaded settings ---
+def get_settings(request: Request) -> AppSettingsModel:
+    return request.app.state.settings
 
 # --- CSRF Token Generation and Validation ---
 async def get_csrf_token(request: Request) -> str:
@@ -29,15 +33,11 @@ async def validate_csrf_token(request: Request, csrf_token: str = Form(...)):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="CSRF token mismatch")
     return True
 
-# --- NEW: Login Rate Limiting Dependency ---
+# --- Login Rate Limiting Dependency ---
 async def login_rate_limiter(request: Request):
-    """
-    Prevents brute-force attacks on the admin login endpoint.
-    Limits to 5 failed attempts per IP per 5 minutes.
-    """
     redis_client: redis.Redis = request.app.state.redis
     if not redis_client:
-        return True # Redis not available, skip rate limiting
+        return True 
 
     client_ip = request.client.host
     key = f"login_fail:{client_ip}"
@@ -55,12 +55,15 @@ async def login_rate_limiter(request: Request):
     return True
 
 # --- IP Filtering Dependency ---
-async def ip_filter(request: Request):
+async def ip_filter(request: Request, settings: AppSettingsModel = Depends(get_settings)):
     client_ip = request.client.host
-    if not "*" in settings.ALLOWED_IPS and settings.ALLOWED_IPS and client_ip not in settings.ALLOWED_IPS:
+    allowed_ips = [ip.strip() for ip in settings.allowed_ips.split(',') if ip.strip()]
+    denied_ips = [ip.strip() for ip in settings.denied_ips.split(',') if ip.strip()]
+
+    if "*" not in allowed_ips and allowed_ips and client_ip not in allowed_ips:
         logger.warning(f"IP address {client_ip} denied by allow-list.")
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="IP address not allowed")
-    if settings.DENIED_IPS and client_ip in settings.DENIED_IPS:
+    if denied_ips and client_ip in denied_ips:
         logger.warning(f"IP address {client_ip} denied by deny-list.")
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="IP address has been blocked")
     return True
@@ -101,7 +104,6 @@ async def get_valid_api_key(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API Key"
         )
 
-    # --- UPDATED VALIDATION LOGIC ---
     if db_api_key.is_revoked:
         logger.warning(f"Attempt to use revoked API key with prefix '{prefix}'.")
         raise HTTPException(
@@ -113,7 +115,6 @@ async def get_valid_api_key(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="API Key is disabled"
         )
-    # --- END UPDATED LOGIC ---
 
     if not verify_api_key(secret, db_api_key.hashed_key):
         logger.warning(f"Invalid secret for API key with prefix '{prefix}'.")
@@ -128,22 +129,20 @@ async def get_valid_api_key(
 async def rate_limiter(
     request: Request,
     api_key: APIKey = Depends(get_valid_api_key),
+    settings: AppSettingsModel = Depends(get_settings),
 ):
     redis_client: redis.Redis = request.app.state.redis
     if not redis_client:
         return True
 
-    # --- UPDATED RATE LIMIT LOGIC ---
-    # Use per-key limit if available, otherwise fall back to global settings.
     if api_key.rate_limit_requests is not None and api_key.rate_limit_window_minutes is not None:
         limit = api_key.rate_limit_requests
         window_minutes = api_key.rate_limit_window_minutes
     else:
-        limit = settings.RATE_LIMIT_REQUESTS
-        window_minutes = settings.RATE_LIMIT_WINDOW_MINUTES
-    # --- END UPDATED LOGIC ---
+        limit = settings.rate_limit_requests
+        window_minutes = settings.rate_limit_window_minutes
     
-    window = window_minutes * 60  # in seconds
+    window = window_minutes * 60
     key = f"rate_limit:{api_key.key_prefix}"
 
     try:

@@ -9,7 +9,8 @@ import logging
 import httpx
 import redis.asyncio as redis
 from contextlib import asynccontextmanager
-import sys # <-- Import sys
+import sys 
+import json
 
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
@@ -22,10 +23,11 @@ from app.api.v1.routes.health import router as health_router
 from app.api.v1.routes.proxy import router as proxy_router
 from app.api.v1.routes.admin import router as admin_router
 from app.database.session import AsyncSessionLocal, engine
-from app.database.base import Base # <-- Import Base
-from app.crud import user_crud, server_crud
+from app.database.base import Base 
+from app.crud import user_crud, server_crud, settings_crud
 from app.schema.user import UserCreate
 from app.schema.server import ServerCreate
+from app.schema.settings import AppSettingsModel
 
 # --- Logging and Passlib setup ---
 setup_logging(settings.LOG_LEVEL)
@@ -33,47 +35,14 @@ logger = logging.getLogger(__name__)
 import os
 os.environ.setdefault("PASSLIB_DISABLE_WARNINGS", "1")
 
-# --- NEW FUNCTION: Initialize Database ---
 async def init_db():
     """
     Creates all database tables based on the SQLAlchemy models.
-    This replaces the need for Alembic migrations for initial setup.
     """
     logger.info("Initializing database schema if it doesn't exist...")
     async with engine.begin() as conn:
-        # This command creates tables only if they don't already exist.
         await conn.run_sync(Base.metadata.create_all)
-
-        # Manual migration: Add new columns if they don't exist
-        # This is a simple approach for SQLite - for production with PostgreSQL, use Alembic
-        def add_missing_columns(connection):
-            from sqlalchemy import text, inspect
-            inspector = inspect(connection)
-
-            # Check and add 'model' column to usage_logs
-            columns = [col['name'] for col in inspector.get_columns('usage_logs')]
-            if 'model' not in columns:
-                logger.info("Adding 'model' column to usage_logs table...")
-                connection.execute(text("ALTER TABLE usage_logs ADD COLUMN model VARCHAR"))
-                logger.info("Column 'model' added successfully.")
-
-            # Check and add 'available_models' column to ollama_servers
-            columns = [col['name'] for col in inspector.get_columns('ollama_servers')]
-            if 'available_models' not in columns:
-                logger.info("Adding 'available_models' column to ollama_servers table...")
-                connection.execute(text("ALTER TABLE ollama_servers ADD COLUMN available_models JSON"))
-                logger.info("Column 'available_models' added successfully.")
-
-            # Check and add 'models_last_updated' column to ollama_servers
-            if 'models_last_updated' not in columns:
-                logger.info("Adding 'models_last_updated' column to ollama_servers table...")
-                connection.execute(text("ALTER TABLE ollama_servers ADD COLUMN models_last_updated DATETIME"))
-                logger.info("Column 'models_last_updated' added successfully.")
-
-        await conn.run_sync(add_missing_columns)
-
     logger.info("Database schema is ready.")
-# --- END NEW FUNCTION ---
 
 from sqlalchemy.exc import IntegrityError
 
@@ -91,32 +60,20 @@ async def create_initial_admin_user() -> None:
         except IntegrityError:
             logger.info("Admin user was created concurrently by another worker.")
 
-async def create_initial_servers() -> None:
-    async with AsyncSessionLocal() as db:
-        existing = await server_crud.get_servers(db, limit=1)
-        if existing:
-            logger.info("Ollama servers already present – skipping bootstrap.")
-            return
-        logger.info("No servers found – bootstrapping from .env.")
-        for i, server_url in enumerate(settings.OLLAMA_SERVERS):
-            server_in = ServerCreate(name=f"Default Server {i + 1}", url=server_url)
-            try:
-                await server_crud.create_server(db, server=server_in)
-            except IntegrityError:
-                logger.warning(f"Server {server_url} already exists (race condition).")
-        logger.info(f"{len(settings.OLLAMA_SERVERS)} server(s) bootstrapped successfully.")
-
-async def periodic_model_refresh() -> None:
+async def periodic_model_refresh(app: FastAPI) -> None:
     """
     Background task that periodically refreshes model lists for all servers.
     """
     import asyncio
-
-    interval_seconds = settings.MODEL_REFRESH_INTERVAL_MINUTES * 60
-    logger.info(f"Starting periodic model refresh task (every {settings.MODEL_REFRESH_INTERVAL_MINUTES} minutes)")
-
+    
     while True:
         try:
+            # Fetch the interval from app state so it can be updated live
+            app_settings: AppSettingsModel = app.state.settings
+            interval_minutes = app_settings.model_update_interval_minutes
+            interval_seconds = interval_minutes * 60
+            
+            logger.info(f"Next model refresh in {interval_minutes} minutes.")
             await asyncio.sleep(interval_seconds)
 
             logger.info("Running periodic model refresh for all servers...")
@@ -138,50 +95,50 @@ async def periodic_model_refresh() -> None:
         except Exception as e:
             logger.error(f"Error in periodic model refresh: {e}", exc_info=True)
 
-# --- MODIFIED LIFESPAN ---
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # ---------- Startup ----------
     logger.info("Starting up Ollama Proxy Server…")
     
-    # --- CRITICAL: Default Password Check ---
     if settings.ADMIN_PASSWORD == "changeme":
         logger.critical("FATAL: The admin password is set to the default value 'changeme'.")
-        logger.critical("Please change ADMIN_PASSWORD in your .env file and restart the server.")
+        logger.critical("Please change ADMIN_PASSWORD in your .env file or run the setup wizard and restart.")
         sys.exit(1)
-    # --- END CHECK ---
 
-    # Call our new database initializer first
     await init_db()
+    
+    # --- NEW: Load settings from DB ---
+    async with AsyncSessionLocal() as db:
+        db_settings_obj = await settings_crud.create_initial_settings(db)
+        app.state.settings = AppSettingsModel.model_validate(db_settings_obj.settings_data)
 
     await create_initial_admin_user()
-    await create_initial_servers()
 
-    # Configure HTTP client using settings
-    timeout = httpx.Timeout(
-        connect=settings.HTTPX_CONNECT_TIMEOUT,
-        read=settings.HTTPX_READ_TIMEOUT,
-        write=settings.HTTPX_WRITE_TIMEOUT,
-        pool=settings.HTTPX_POOL_TIMEOUT,
-    )
-    limits = httpx.Limits(
-        max_keepalive_connections=settings.HTTPX_MAX_KEEPALIVE_CONNECTIONS,
-        max_connections=settings.HTTPX_MAX_CONNECTIONS,
-        keepalive_expiry=settings.HTTPX_KEEPALIVE_EXPIRY,
-    )
+    # Configure HTTP client (timeouts are now hardcoded for simplicity)
+    timeout = httpx.Timeout(10.0, read=600.0, write=600.0, pool=60.0)
+    limits = httpx.Limits(max_keepalive_connections=20, max_connections=100, keepalive_expiry=60.0)
     app.state.http_client = httpx.AsyncClient(timeout=timeout, limits=limits)
 
     try:
-        app.state.redis = redis.from_url(str(settings.REDIS_URL), encoding="utf-8", decode_responses=True)
+        db_settings: AppSettingsModel = app.state.settings
+        if db_settings.redis_username and db_settings.redis_password:
+            credentials = f"{db_settings.redis_username}:{db_settings.redis_password}@"
+        elif db_settings.redis_username:
+            credentials = f"{db_settings.redis_username}@"
+        else:
+            credentials = ""
+        redis_url = f"redis://{credentials}{db_settings.redis_host}:{db_settings.redis_port}/0"
+
+        app.state.redis = redis.from_url(redis_url, encoding="utf-8", decode_responses=True)
         await app.state.redis.ping()
         logger.info("Successfully connected to Redis.")
     except Exception as exc:
         logger.warning(f"Redis not available – rate limiting disabled. Reason: {exc}")
         app.state.redis = None
 
-    # Start background task for periodic model refresh
     import asyncio
-    refresh_task = asyncio.create_task(periodic_model_refresh())
+    refresh_task = asyncio.create_task(periodic_model_refresh(app))
     app.state.refresh_task = refresh_task
 
     # Do initial model refresh on startup
@@ -194,8 +151,6 @@ async def lifespan(app: FastAPI):
 
     # ---------- Shutdown ----------
     logger.info("Shutting down…")
-
-    # Cancel the background refresh task
     if hasattr(app.state, 'refresh_task'):
         app.state.refresh_task.cancel()
         try:
@@ -206,7 +161,6 @@ async def lifespan(app: FastAPI):
     await app.state.http_client.aclose()
     if app.state.redis:
         await app.state.redis.close()
-# --- END MODIFIED LIFESPAN ---
 
 app = FastAPI(
     title=settings.APP_NAME,
@@ -217,17 +171,13 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# --- MIDDLEWARE AND ROUTERS ---
-
 app.add_middleware(SessionMiddleware, secret_key=settings.SECRET_KEY)
 
-# --- CORRECTED Security Headers Middleware ---
 @app.middleware("http")
 async def add_security_headers(request: Request, call_next):
     response = await call_next(request)
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
-    # FIX: Added 'unsafe-inline' to script-src to allow chart rendering script
     csp_policy = (
         "default-src 'self'; "
         "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdn.tailwindcss.com; "
@@ -239,8 +189,6 @@ async def add_security_headers(request: Request, call_next):
     )
     response.headers["Content-Security-Policy"] = csp_policy
     return response
-# --- END MIDDLEWARE ---
-
 
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 app.include_router(health_router, prefix="/api/v1", tags=["Health"])
