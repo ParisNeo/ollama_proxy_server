@@ -7,6 +7,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     UniqueConstraint,
+    JSON,
 )
 from sqlalchemy.orm import relationship
 from app.database.base import Base
@@ -57,6 +58,7 @@ class UsageLog(Base):
     status_code = Column(Integer, nullable=False)
     request_timestamp = Column(DateTime, default=datetime.datetime.utcnow)
     server_id = Column(Integer, ForeignKey("ollama_servers.id"), nullable=True)
+    model = Column(String, nullable=True, index=True)
 
     api_key = relationship("APIKey", back_populates="usage_logs")
     server = relationship("OllamaServer")
@@ -69,4 +71,6 @@ class OllamaServer(Base):
     name = Column(String, nullable=False)
     url = Column(String, unique=True, nullable=False)
     is_active = Column(Boolean, default=True)
+    available_models = Column(JSON, nullable=True)
+    models_last_updated = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)

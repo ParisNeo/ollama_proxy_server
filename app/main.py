@@ -42,6 +42,35 @@ async def init_db():
     async with engine.begin() as conn:
         # This command creates tables only if they don't already exist.
         await conn.run_sync(Base.metadata.create_all)
+
+        # Manual migration: Add new columns if they don't exist
+        # This is a simple approach for SQLite - for production with PostgreSQL, use Alembic
+        def add_missing_columns(connection):
+            from sqlalchemy import text, inspect
+            inspector = inspect(connection)
+
+            # Check and add 'model' column to usage_logs
+            columns = [col['name'] for col in inspector.get_columns('usage_logs')]
+            if 'model' not in columns:
+                logger.info("Adding 'model' column to usage_logs table...")
+                connection.execute(text("ALTER TABLE usage_logs ADD COLUMN model VARCHAR"))
+                logger.info("Column 'model' added successfully.")
+
+            # Check and add 'available_models' column to ollama_servers
+            columns = [col['name'] for col in inspector.get_columns('ollama_servers')]
+            if 'available_models' not in columns:
+                logger.info("Adding 'available_models' column to ollama_servers table...")
+                connection.execute(text("ALTER TABLE ollama_servers ADD COLUMN available_models JSON"))
+                logger.info("Column 'available_models' added successfully.")
+
+            # Check and add 'models_last_updated' column to ollama_servers
+            if 'models_last_updated' not in columns:
+                logger.info("Adding 'models_last_updated' column to ollama_servers table...")
+                connection.execute(text("ALTER TABLE ollama_servers ADD COLUMN models_last_updated DATETIME"))
+                logger.info("Column 'models_last_updated' added successfully.")
+
+        await conn.run_sync(add_missing_columns)
+
     logger.info("Database schema is ready.")
 # --- END NEW FUNCTION ---
 
@@ -75,6 +104,38 @@ async def create_initial_servers() -> None:
             except IntegrityError:
                 logger.warning(f"Server {server_url} already exists (race condition).")
         logger.info(f"{len(settings.OLLAMA_SERVERS)} server(s) bootstrapped successfully.")
+
+async def periodic_model_refresh() -> None:
+    """
+    Background task that periodically refreshes model lists for all servers.
+    """
+    import asyncio
+
+    interval_seconds = settings.MODEL_REFRESH_INTERVAL_MINUTES * 60
+    logger.info(f"Starting periodic model refresh task (every {settings.MODEL_REFRESH_INTERVAL_MINUTES} minutes)")
+
+    while True:
+        try:
+            await asyncio.sleep(interval_seconds)
+
+            logger.info("Running periodic model refresh for all servers...")
+            async with AsyncSessionLocal() as db:
+                results = await server_crud.refresh_all_server_models(db)
+
+            logger.info(
+                f"Model refresh completed: {results['success']}/{results['total']} servers updated successfully"
+            )
+
+            if results['failed'] > 0:
+                logger.warning(f"{results['failed']} server(s) failed to update:")
+                for error in results['errors']:
+                    logger.warning(f"  - {error['server_name']}: {error['error']}")
+
+        except asyncio.CancelledError:
+            logger.info("Periodic model refresh task cancelled")
+            break
+        except Exception as e:
+            logger.error(f"Error in periodic model refresh: {e}", exc_info=True)
 
 # --- MODIFIED LIFESPAN ---
 @asynccontextmanager
@@ -110,10 +171,30 @@ async def lifespan(app: FastAPI):
         logger.warning(f"Redis not available – rate limiting disabled. Reason: {exc}")
         app.state.redis = None
 
+    # Start background task for periodic model refresh
+    import asyncio
+    refresh_task = asyncio.create_task(periodic_model_refresh())
+    app.state.refresh_task = refresh_task
+
+    # Do initial model refresh on startup
+    logger.info("Performing initial model refresh on startup...")
+    async with AsyncSessionLocal() as db:
+        initial_results = await server_crud.refresh_all_server_models(db)
+    logger.info(f"Initial model refresh: {initial_results['success']}/{initial_results['total']} servers updated")
+
     yield
 
     # ---------- Shutdown ----------
     logger.info("Shutting down…")
+
+    # Cancel the background refresh task
+    if hasattr(app.state, 'refresh_task'):
+        app.state.refresh_task.cancel()
+        try:
+            await app.state.refresh_task
+        except asyncio.CancelledError:
+            pass
+
     await app.state.http_client.aclose()
     if app.state.redis:
         await app.state.redis.close()
