@@ -13,8 +13,8 @@ GUNICORN_CONF="gunicorn_conf.py"
 APP_MODULE="app.main:app"
 STATE_FILE=".setup_state"
 
-# Use python3.12 as default, allow override with $PYTHON_BIN env var
-PYTHON_BIN="${PYTHON_BIN:-python3.12}"
+# Allow override with $PYTHON_BIN env var
+PYTHON_BIN="${PYTHON_BIN:-python3}"
 
 COLOR_RESET='\e[0m'; COLOR_INFO='\e[1;34m'; COLOR_SUCCESS='\e[1;32m'
 COLOR_ERROR='\e[1;31m'; COLOR_WARN='\e[1;33m'; COLOR_HEADER='\e[1;35m'
