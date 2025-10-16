@@ -13,6 +13,9 @@ GUNICORN_CONF="gunicorn_conf.py"
 APP_MODULE="app.main:app"
 STATE_FILE=".setup_state"
 
+# Use python3.12 as default, allow override with $PYTHON_BIN env var
+PYTHON_BIN="${PYTHON_BIN:-python3.12}"
+
 COLOR_RESET='\e[0m'; COLOR_INFO='\e[1;34m'; COLOR_SUCCESS='\e[1;32m'
 COLOR_ERROR='\e[1;31m'; COLOR_WARN='\e[1;33m'; COLOR_HEADER='\e[1;35m'
 
@@ -28,11 +31,11 @@ clear
 print_header "    Ollama Proxy Fortress Installer & Runner"
 
 print_info "Performing initial system checks..."
-if ! command -v python3 &>/dev/null || ! python3 -m pip --version &>/dev/null || ! python3 -m venv -h &>/dev/null; then
-    print_error "Python 3, pip, or venv is missing."
+if ! command -v "$PYTHON_BIN" &>/dev/null || ! "$PYTHON_BIN" -m pip --version &>/dev/null || ! "$PYTHON_BIN" -m venv -h &>/dev/null; then
+    print_error "Python ($PYTHON_BIN), pip, or venv is missing."
     exit 1
 fi
-print_success "Python 3, pip, and venv are available."
+print_success "Python ($PYTHON_BIN), pip, and venv are available."
 
 CURRENT_STATE=0
 if [[ -f "$STATE_FILE" ]]; then CURRENT_STATE=$(cat "$STATE_FILE"); fi
@@ -55,7 +58,7 @@ if [[ "$CURRENT_STATE" -lt 3 ]]; then
 
     if [[ "$CURRENT_STATE" -lt 1 ]]; then
         print_header "--- [Step 1/3] Creating Python Virtual Environment ---"
-        python3 -m venv "$VENV_DIR"
+        "$PYTHON_BIN" -m venv "$VENV_DIR"
         echo "1" > "$STATE_FILE"
         print_success "Virtual environment created."
     fi
@@ -68,7 +71,7 @@ if [[ "$CURRENT_STATE" -lt 3 ]]; then
     fi
     if [[ "$CURRENT_STATE" -lt 3 ]]; then
         print_header "--- [Step 3/3] Server Configuration ---"
-        python setup_wizard.py
+        "$PYTHON_BIN" setup_wizard.py
         if [ $? -ne 0 ]; then
             print_error "Setup wizard failed. Aborting."
             exit 1
