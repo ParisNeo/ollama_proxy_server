@@ -23,7 +23,8 @@ from app.api.v1.routes.health import router as health_router
 from app.api.v1.routes.proxy import router as proxy_router
 from app.api.v1.routes.admin import router as admin_router
 from app.database.session import AsyncSessionLocal, engine
-from app.database.base import Base 
+from app.database.base import Base
+from app.database.migrations import run_all_migrations
 from app.crud import user_crud, server_crud, settings_crud
 from app.schema.user import UserCreate
 from app.schema.server import ServerCreate
@@ -38,8 +39,14 @@ os.environ.setdefault("PASSLIB_DISABLE_WARNINGS", "1")
 async def init_db():
     """
     Creates all database tables based on the SQLAlchemy models.
+    Runs migrations first to ensure backward compatibility with older database schemas.
     """
     logger.info("Initializing database schema if it doesn't exist...")
+
+    # Run migrations first to add any missing columns to existing tables
+    await run_all_migrations(engine)
+
+    # Then create any missing tables
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     logger.info("Database schema is ready.")
