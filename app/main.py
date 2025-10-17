@@ -189,6 +189,7 @@ async def add_security_headers(request: Request, call_next):
         "default-src 'self'; "
         "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdn.tailwindcss.com; "
         "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' https: data:; "
         "connect-src 'self' https://cdn.jsdelivr.net; "
         "object-src 'none'; "
         "base-uri 'self'; "

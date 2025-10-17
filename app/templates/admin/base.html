@@ -53,7 +53,6 @@
             <div>
                 <div class="flex items-center justify-between p-4 border-b border-gray-700 h-16">
                     <a href="{{ url_for('admin_dashboard') }}" class="flex items-center text-2xl font-bold whitespace-nowrap">
-                        <!-- DEBUG: SHOW_LOGO={{ bootstrap_settings.BRANDING_SHOW_LOGO }}, URL={{ bootstrap_settings.BRANDING_LOGO_URL }} -->
                         {% if bootstrap_settings.BRANDING_SHOW_LOGO and bootstrap_settings.BRANDING_LOGO_URL %}
                         <img src="{{ bootstrap_settings.BRANDING_LOGO_URL }}" alt="Logo" class="h-8 w-8 mr-2 object-contain">
                         {% endif %}
