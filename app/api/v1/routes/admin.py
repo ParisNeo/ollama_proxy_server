@@ -26,7 +26,8 @@ templates = Jinja2Templates(directory="app/templates")
 def get_template_context(request: Request) -> dict:
     return {
         "request": request,
-        "is_redis_connected": request.app.state.redis is not None
+        "is_redis_connected": request.app.state.redis is not None,
+        "bootstrap_settings": settings
     }
 
 def flash(request: Request, message: str, category: str = "info"):

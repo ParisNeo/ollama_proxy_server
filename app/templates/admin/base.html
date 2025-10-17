@@ -52,7 +52,12 @@
         <div id="sidebar" class="bg-gray-800 text-white w-64 min-w-[16rem] flex-shrink-0 flex flex-col justify-between transition-all duration-300 ease-in-out">
             <div>
                 <div class="flex items-center justify-between p-4 border-b border-gray-700 h-16">
-                    <a href="{{ url_for('admin_dashboard') }}" class="text-2xl font-bold whitespace-nowrap">Ollama Proxy</a>
+                    <a href="{{ url_for('admin_dashboard') }}" class="flex items-center text-2xl font-bold whitespace-nowrap">
+                        {% if bootstrap_settings.BRANDING_SHOW_LOGO and bootstrap_settings.BRANDING_LOGO_PATH %}
+                        <img src="{{ url_for('static', path=bootstrap_settings.BRANDING_LOGO_PATH) }}" alt="Logo" class="h-8 w-8 mr-2 object-contain">
+                        {% endif %}
+                        {{ bootstrap_settings.BRANDING_TITLE }}
+                    </a>
                     <button id="sidebar-close-btn" class="text-gray-400 hover:text-white">
                         <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path>
@@ -125,7 +130,7 @@
             </main>
 
             <footer class="bg-white p-4 text-center text-sm text-gray-500 flex-shrink-0">
-                Ollama Proxy Server v{{ request.app.version }}
+                {{ bootstrap_settings.BRANDING_TITLE }} Server v{{ request.app.version }}
             </footer>
         </div>
     </div>

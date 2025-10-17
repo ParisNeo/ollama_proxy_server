@@ -1,3 +1,4 @@
+from typing import Optional
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
@@ -8,11 +9,16 @@ class Settings(BaseSettings):
     ADMIN_PASSWORD: str = "changeme"
     PROXY_PORT: int = 8080
     SECRET_KEY: str = "dd2a57833f4a2115b02644c3c332822d5b6e405d542a2258c422fb39a8e97b10"
-    
+
     # --- App Info (Hardcoded) ---
     APP_NAME: str = "Ollama Proxy Server"
     APP_VERSION: str = "8.0.0"
     LOG_LEVEL: str = "info"
+
+    # --- Branding Configuration ---
+    BRANDING_TITLE: str = "Ollama Proxy"
+    BRANDING_LOGO_PATH: Optional[str] = None
+    BRANDING_SHOW_LOGO: bool = False
 
     class Config:
         env_file = ".env"
