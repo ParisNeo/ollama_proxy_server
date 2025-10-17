@@ -17,7 +17,7 @@ class Settings(BaseSettings):
 
     # --- Branding Configuration ---
     BRANDING_TITLE: str = "Ollama Proxy"
-    BRANDING_LOGO_PATH: Optional[str] = None
+    BRANDING_LOGO_URL: Optional[str] = None
     BRANDING_SHOW_LOGO: bool = False
 
     class Config:
