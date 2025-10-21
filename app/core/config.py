@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     BRANDING_TITLE: str = "Ollama Proxy"
     BRANDING_LOGO_URL: Optional[str] = None
     BRANDING_SHOW_LOGO: bool = False
+    BRANDING_SIDEBAR_BG_COLOR: str = "bg-gray-800"  # Tailwind CSS class for sidebar background color
 
     class Config:
         env_file = ".env"
