@@ -5,6 +5,7 @@ from app.schema.server import ServerCreate
 import httpx
 import logging
 import datetime
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -12,8 +13,11 @@ async def get_server_by_url(db: AsyncSession, url: str) -> OllamaServer | None:
     result = await db.execute(select(OllamaServer).filter(OllamaServer.url == url))
     return result.scalars().first()
 
-async def get_servers(db: AsyncSession, skip: int = 0, limit: int = 100) -> list[OllamaServer]:
-    result = await db.execute(select(OllamaServer).order_by(OllamaServer.created_at.desc()).offset(skip).limit(limit))
+async def get_servers(db: AsyncSession, skip: int = 0, limit: Optional[int] = None) -> list[OllamaServer]:
+    query = select(OllamaServer).order_by(OllamaServer.created_at.desc()).offset(skip)
+    if limit is not None:
+        query = query.limit(limit)
+    result = await db.execute(query)
     return result.scalars().all()
 
 async def create_server(db: AsyncSession, server: ServerCreate) -> OllamaServer:
