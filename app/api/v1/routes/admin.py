@@ -3,7 +3,8 @@ import logging
 from typing import Union, Optional, List
 import redis.asyncio as redis
 
-from fastapi import APIRouter, Depends, Request, Form, HTTPException, status
+# Make sure 'Query' is imported from fastapi
+from fastapi import APIRouter, Depends, Request, Form, HTTPException, status, Query
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -96,9 +97,15 @@ async def admin_dashboard(request: Request, db: AsyncSession = Depends(get_db), 
     return templates.TemplateResponse("admin/dashboard.html", context)
     
 @router.get("/stats", response_class=HTMLResponse, name="admin_stats")
-async def admin_stats(request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
+async def admin_stats(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    admin_user: User = Depends(require_admin_user),
+    sort_by: str = Query("request_count"),
+    sort_order: str = Query("desc"),
+):
     context = get_template_context(request)
-    key_usage_stats = await log_crud.get_usage_statistics(db)
+    key_usage_stats = await log_crud.get_usage_statistics(db, sort_by=sort_by, sort_order=sort_order)
     daily_stats = await log_crud.get_daily_usage_stats(db, days=30)
     hourly_stats = await log_crud.get_hourly_usage_stats(db)
     server_stats = await log_crud.get_server_load_stats(db)
@@ -112,7 +119,9 @@ async def admin_stats(request: Request, db: AsyncSession = Depends(get_db), admi
         "server_labels": [row.server_name for row in server_stats],
         "server_data": [row.request_count for row in server_stats],
         "model_labels": [row.model_name for row in model_stats],
-        "model_data": [row.request_count for row in model_stats]
+        "model_data": [row.request_count for row in model_stats],
+        "sort_by": sort_by,
+        "sort_order": sort_order,
     })
     return templates.TemplateResponse("admin/statistics.html", context)
 
@@ -223,6 +232,13 @@ async def create_user_api_key(
     rate_limit_requests: Optional[int] = Form(None),
     rate_limit_window_minutes: Optional[int] = Form(None),
 ):
+    # --- FIX: Check for existing key with the same name for this user ---
+    existing_key = await apikey_crud.get_api_key_by_name_and_user_id(db, key_name=key_name, user_id=user_id)
+    if existing_key:
+        flash(request, f"An API key with the name '{key_name}' already exists for this user.", "error")
+        return RedirectResponse(url=request.url_for("get_user_details", user_id=user_id), status_code=status.HTTP_303_SEE_OTHER)
+    # --- END FIX ---
+
     current_admin_id = admin_user.id
     
     plain_key, _ = await apikey_crud.create_api_key(

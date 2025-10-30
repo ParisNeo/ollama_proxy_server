@@ -1,3 +1,4 @@
+# app/crud/log_crud.py
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import func, select, text, Date # <-- Import Date
 from app.database.models import UsageLog, APIKey, User, OllamaServer
@@ -18,8 +19,26 @@ async def create_usage_log(
     await db.refresh(db_log)
     return db_log
 
-async def get_usage_statistics(db: AsyncSession):
-    """Returns aggregated usage statistics for all API keys."""
+async def get_usage_statistics(db: AsyncSession, sort_by: str = "request_count", sort_order: str = "desc"):
+    """
+    Returns aggregated usage statistics for all API keys, with sorting.
+    """
+    sort_column_map = {
+        "username": User.username,
+        "key_name": APIKey.key_name,
+        "key_prefix": APIKey.key_prefix,
+        "request_count": func.count(UsageLog.id),
+    }
+
+    # Default to request_count if an invalid column is provided for safety
+    sort_column = sort_column_map.get(sort_by, func.count(UsageLog.id))
+
+    # Determine sort order
+    if sort_order.lower() == "asc":
+        order_modifier = sort_column.asc()
+    else:
+        order_modifier = sort_column.desc()
+
     stmt = (
         select(
             User.username,
@@ -32,7 +51,7 @@ async def get_usage_statistics(db: AsyncSession):
         .join(User, APIKey.user_id == User.id)
         .outerjoin(UsageLog, APIKey.id == UsageLog.api_key_id)
         .group_by(User.username, APIKey.key_name, APIKey.key_prefix, APIKey.is_revoked)
-        .order_by(func.count(UsageLog.id).desc())
+        .order_by(order_modifier)
     )
     result = await db.execute(stmt)
     return result.all()
