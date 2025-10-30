@@ -41,7 +41,7 @@
 <body class="bg-gray-100 font-sans leading-normal tracking-normal">
 
     <!-- Open Sidebar Button (Initially Hidden) -->
-    <button id="sidebar-open-btn" class="fixed top-4 left-4 z-50 p-2 bg-gray-800 text-white rounded-md hover:bg-gray-700 shadow-lg">
+    <button id="sidebar-open-btn" class="fixed top-4 left-4 z-50 p-2 {{ bootstrap_settings.BRANDING_SIDEBAR_BG_COLOR }} text-white rounded-md hover:opacity-80 shadow-lg">
         <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path>
         </svg>
@@ -49,10 +49,15 @@
 
     <div class="flex h-screen">
         <!-- Sidebar -->
-        <div id="sidebar" class="bg-gray-800 text-white w-64 min-w-[16rem] flex-shrink-0 flex flex-col justify-between transition-all duration-300 ease-in-out">
+        <div id="sidebar" class="{{ bootstrap_settings.BRANDING_SIDEBAR_BG_COLOR }} text-white w-64 min-w-[16rem] flex-shrink-0 flex flex-col justify-between transition-all duration-300 ease-in-out">
             <div>
                 <div class="flex items-center justify-between p-4 border-b border-gray-700 h-16">
-                    <a href="{{ url_for('admin_dashboard') }}" class="text-2xl font-bold whitespace-nowrap">Ollama Proxy</a>
+                    <a href="{{ url_for('admin_dashboard') }}" class="flex items-center text-2xl font-bold whitespace-nowrap">
+                        {% if bootstrap_settings.BRANDING_SHOW_LOGO and bootstrap_settings.BRANDING_LOGO_URL %}
+                        <img src="{{ bootstrap_settings.BRANDING_LOGO_URL }}" alt="Logo" class="h-8 w-8 mr-2 object-contain">
+                        {% endif %}
+                        {{ bootstrap_settings.BRANDING_TITLE }}
+                    </a>
                     <button id="sidebar-close-btn" class="text-gray-400 hover:text-white">
                         <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path>
@@ -125,7 +130,7 @@
             </main>
 
             <footer class="bg-white p-4 text-center text-sm text-gray-500 flex-shrink-0">
-                Ollama Proxy Server v{{ request.app.version }}
+                {{ bootstrap_settings.BRANDING_TITLE }} Server v{{ request.app.version }}
             </footer>
         </div>
     </div>

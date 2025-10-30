@@ -11,6 +11,8 @@ from app.database.session import get_db
 from app.api.v1.dependencies import get_valid_api_key, rate_limiter, ip_filter
 from app.database.models import APIKey, OllamaServer
 from app.crud import log_crud, server_crud
+from app.core.retry import retry_with_backoff, RetryConfig
+from app.schema.settings import AppSettingsModel
 
 logger = logging.getLogger(__name__)
 router = APIRouter(dependencies=[Depends(ip_filter), Depends(rate_limiter)])
@@ -54,61 +56,168 @@ async def extract_model_from_request(request: Request) -> Optional[str]:
     return None
 
 
+async def _send_backend_request(
+    http_client: AsyncClient,
+    server: OllamaServer,
+    path: str,
+    method: str,
+    headers: dict,
+    query_params,
+    body_bytes: bytes
+):
+    """
+    Internal function to send a single request to a backend server.
+    This function is wrapped by retry logic.
+
+    Args:
+        http_client: The HTTP client to use
+        server: The server to send the request to
+        path: The API path
+        method: HTTP method
+        headers: Request headers
+        query_params: Query parameters
+        body_bytes: Request body
+
+    Returns:
+        The HTTP response from the backend server
+
+    Raises:
+        Exception on any connection or HTTP error
+    """
+    normalized_url = server.url.rstrip('/')
+    backend_url = f"{normalized_url}/api/{path}"
+
+    backend_request = http_client.build_request(
+        method=method,
+        url=backend_url,
+        headers=headers,
+        params=query_params,
+        content=body_bytes
+    )
+
+    try:
+        backend_response = await http_client.send(backend_request, stream=True)
+
+        # Consider 5xx errors as failures that should be retried
+        if backend_response.status_code >= 500:
+            await backend_response.aclose()  # Clean up the response
+            raise Exception(
+                f"Backend server returned {backend_response.status_code}: "
+                f"{backend_response.reason_phrase}"
+            )
+
+        return backend_response
+
+    except Exception as e:
+        # Log and re-raise for retry logic
+        logger.debug(f"Request to {server.url} failed: {type(e).__name__}: {str(e)}")
+        raise
+
+
 async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer], body_bytes: bytes = b"") -> Tuple[Response, OllamaServer]:
     """
-    Core reverse proxy logic. Forwards the request to a backend Ollama server
-    and streams the response back. Returns the response and the chosen server.
+    Core reverse proxy logic with retry support. Forwards the request to a backend
+    Ollama server and streams the response back. Returns the response and the chosen server.
+
+    Features:
+    - Round-robin load balancing across available servers
+    - Automatic retries with exponential backoff on failures
+    - Falls back to other servers if one is unavailable
+    - Configurable retry behavior via app settings
 
     Args:
         request: The original FastAPI request
         path: The path to proxy to
         servers: List of servers to choose from
         body_bytes: Pre-read request body (if already read for model extraction)
+
+    Returns:
+        Tuple of (Response, OllamaServer) - the streaming response and the server that handled it
+
+    Raises:
+        HTTPException: If all retry attempts fail across all available servers
     """
     http_client: AsyncClient = request.app.state.http_client
+    app_settings: AppSettingsModel = request.app.state.settings
+
+    # Get retry configuration from app settings
+    retry_config = RetryConfig(
+        max_retries=app_settings.max_retries,
+        total_timeout_seconds=app_settings.retry_total_timeout_seconds,
+        base_delay_ms=app_settings.retry_base_delay_ms
+    )
 
     if not hasattr(request.app.state, 'backend_server_index'):
         request.app.state.backend_server_index = 0
 
-    index = request.app.state.backend_server_index
-    chosen_server = servers[index]
-    request.app.state.backend_server_index = (index + 1) % len(servers)
-
-    normalized_url = chosen_server.url.rstrip('/')
-    backend_url = f"{normalized_url}/api/{path}"
-
+    # Prepare request headers (exclude 'host' header)
     headers = {k: v for k, v in request.headers.items() if k.lower() != 'host'}
 
-    # Use pre-read body if available, otherwise stream from request
-    if body_bytes:
-        backend_request = http_client.build_request(
-            method=request.method,
-            url=backend_url,
-            headers=headers,
-            params=request.query_params,
-            content=body_bytes
-        )
-    else:
-        backend_request = http_client.build_request(
-            method=request.method,
-            url=backend_url,
-            headers=headers,
-            params=request.query_params,
-            content=request.stream()
+    # Try each server in round-robin fashion
+    # If we have N servers, we'll try each one with retries before giving up
+    num_servers = len(servers)
+    servers_tried = []
+
+    for server_attempt in range(num_servers):
+        # Select next server using round-robin
+        index = request.app.state.backend_server_index
+        chosen_server = servers[index]
+        request.app.state.backend_server_index = (index + 1) % len(servers)
+
+        servers_tried.append(chosen_server.name)
+
+        logger.info(
+            f"Attempting request to server '{chosen_server.name}' "
+            f"({server_attempt + 1}/{num_servers})"
         )
 
-    try:
-        backend_response = await http_client.send(backend_request, stream=True)
-    except Exception as e:
-        logger.error(f"Error connecting to backend server {chosen_server.url}: {e}")
-        raise HTTPException(status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail="Could not connect to backend server.")
+        # Attempt request with retries to this specific server
+        retry_result = await retry_with_backoff(
+            _send_backend_request,
+            http_client=http_client,
+            server=chosen_server,
+            path=path,
+            method=request.method,
+            headers=headers,
+            query_params=request.query_params,
+            body_bytes=body_bytes,
+            config=retry_config,
+            retry_on_exceptions=(Exception,),
+            operation_name=f"Request to {chosen_server.name}"
+        )
 
-    response = StreamingResponse(
-        backend_response.aiter_raw(),
-        status_code=backend_response.status_code,
-        headers=backend_response.headers,
+        if retry_result.success:
+            # Success! Create streaming response
+            backend_response = retry_result.result
+
+            logger.info(
+                f"Successfully proxied to '{chosen_server.name}' "
+                f"after {retry_result.attempts} attempt(s) "
+                f"in {retry_result.total_duration_ms:.1f}ms"
+            )
+
+            response = StreamingResponse(
+                backend_response.aiter_raw(),
+                status_code=backend_response.status_code,
+                headers=backend_response.headers,
+            )
+            return response, chosen_server
+        else:
+            # This server failed after all retries, try next server
+            logger.warning(
+                f"Server '{chosen_server.name}' failed after {retry_result.attempts} "
+                f"attempts. Trying next server if available."
+            )
+
+    # All servers exhausted
+    logger.error(
+        f"All {num_servers} backend server(s) failed after retries. "
+        f"Servers tried: {', '.join(servers_tried)}"
     )
-    return response, chosen_server
+    raise HTTPException(
+        status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+        detail=f"All backend servers unavailable. Tried: {', '.join(servers_tried)}"
+    )
 
 @router.get("/tags")
 async def federate_models(
