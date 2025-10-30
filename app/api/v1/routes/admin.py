@@ -31,8 +31,13 @@ def get_template_context(request: Request) -> dict:
     }
 
 def flash(request: Request, message: str, category: str = "info"):
-    if "_messages" not in request.session: request.session["_messages"] = []
-    request.session["_messages"].append({"message": message, "category": category})
+    """
+    FIX: Re-assign list to session to avoid mutation issues with modern SessionMiddleware.
+    """
+    messages = request.session.get("_messages", [])
+    messages.append({"message": message, "category": category})
+    request.session["_messages"] = messages
+
 def get_flashed_messages(request: Request): return request.session.pop("_messages", [])
 templates.env.globals["get_flashed_messages"] = get_flashed_messages
 async def get_current_user_from_cookie(request: Request, db: AsyncSession = Depends(get_db)) -> User | None:
