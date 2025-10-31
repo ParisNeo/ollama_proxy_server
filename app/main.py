@@ -11,6 +11,8 @@ import redis.asyncio as redis
 from contextlib import asynccontextmanager
 import sys 
 import json
+import os
+from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
@@ -33,7 +35,6 @@ from app.schema.settings import AppSettingsModel
 # --- Logging and Passlib setup ---
 setup_logging(settings.LOG_LEVEL)
 logger = logging.getLogger(__name__)
-import os
 os.environ.setdefault("PASSLIB_DISABLE_WARNINGS", "1")
 
 async def init_db():
@@ -108,6 +109,11 @@ async def lifespan(app: FastAPI):
     # ---------- Startup ----------
     logger.info("Starting up Ollama Proxy Server…")
     
+    # Ensure the directory for uploads exists
+    uploads_dir = Path("app/static/uploads")
+    uploads_dir.mkdir(exist_ok=True)
+    logger.info(f"Uploads directory is at: {uploads_dir.resolve()}")
+
     if settings.ADMIN_PASSWORD == "changeme":
         logger.critical("FATAL: The admin password is set to the default value 'changeme'.")
         logger.critical("Please change ADMIN_PASSWORD in your .env file or run the setup wizard and restart.")

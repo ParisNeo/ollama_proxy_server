@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
+  <defs>
+    <linearGradient id="shieldGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#4f46e5;"/>
+      <stop offset="100%" style="stop-color:#6366f1;"/>
+    </linearGradient>
+  </defs>
+  
+  <!-- Shield Background -->
+  <path d="M50 2 L95 20 L95 60 C95 80 50 98 50 98 C50 98 5 80 5 60 L5 20 Z" fill="url(#shieldGradient)"/>
+  
+  <!-- Llama Head (stylized) -->
+  <path d="M50 25 
+           C 40 25, 35 35, 35 45 
+           L 35 75 
+           L 45 75 
+           L 45 55 
+           C 45 50, 48 48, 50 48 
+           C 52 48, 55 50, 55 55 
+           L 55 75 
+           L 65 75 
+           L 65 45 
+           C 65 35, 60 25, 50 25 Z
+           M 42 32 
+           A 5 8 0 0 1 38 22 
+           A 5 5 0 0 1 45 25 Z
+           M 58 32 
+           A 5 8 0 0 0 62 22 
+           A 5 5 0 0 0 55 25 Z
+           " fill="white"/>
+</svg>

@@ -4,62 +4,156 @@
 {% block header_title %}Dashboard{% endblock %}
 
 {% block content %}
-<div class="max-w-7xl mx-auto">
+<div class="space-y-8">
 
-    <!-- Create New User Form -->
-    <div class="bg-white p-6 rounded-lg shadow-md mb-8">
-        <h2 class="text-2xl font-bold mb-4">Create New User</h2>
-        <form action="{{ url_for('create_new_user') }}" method="post">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div>
-                    <label for="username" class="block text-sm font-medium text-gray-700">Username</label>
-                    <input type="text" name="username" id="username" required autocomplete="username" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm">
-                </div>
-                <div>
-                    <label for="password" class="block text-sm font-medium text-gray-700">Password</label>
-                    <input type="password" name="password" id="password" required autocomplete="new-password" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm">
-                </div>
-                <div class="flex items-end">
-                    <button type="submit" class="w-full justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">Create User</button>
+    <!-- System Status -->
+    <div class="card-style">
+        <h2 class="card-header text-2xl font-bold mb-4 pb-2">System Status</h2>
+        <div id="system-info-container" class="grid grid-cols-1 sm:grid-cols-3 gap-6 text-center">
+            <!-- CPU -->
+            <div class="p-4 rounded-lg">
+                <h3 class="text-sm font-medium uppercase text-gray-400">CPU Usage</h3>
+                <div class="relative w-24 h-24 mx-auto mt-2">
+                    <svg class="w-full h-full" viewBox="0 0 36 36">
+                        <path class="text-gray-700/50" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke-width="3"></path>
+                        <path id="cpu-progress" class="text-[var(--color-primary-500)]" stroke-width="3" fill="none" stroke-dasharray="0, 100" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" stroke-linecap="round"></path>
+                    </svg>
+                    <div id="cpu-percent" class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-xl font-bold">--%</div>
                 </div>
             </div>
-        </form>
+            <!-- Memory -->
+            <div class="p-4 rounded-lg">
+                <h3 class="text-sm font-medium uppercase text-gray-400">Memory Usage</h3>
+                <div class="relative w-24 h-24 mx-auto mt-2">
+                     <svg class="w-full h-full" viewBox="0 0 36 36">
+                        <path class="text-gray-700/50" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke-width="3"></path>
+                        <path id="mem-progress" class="text-[var(--color-primary-500)]" stroke-width="3" fill="none" stroke-dasharray="0, 100" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" stroke-linecap="round"></path>
+                    </svg>
+                    <div id="mem-percent" class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-xl font-bold">--%</div>
+                </div>
+                <div id="mem-details" class="text-xs text-gray-400 mt-2">-- / -- GB</div>
+            </div>
+            <!-- Disk -->
+            <div class="p-4 rounded-lg">
+                <h3 class="text-sm font-medium uppercase text-gray-400">Disk Usage (/)</h3>
+                 <div class="relative w-24 h-24 mx-auto mt-2">
+                     <svg class="w-full h-full" viewBox="0 0 36 36">
+                        <path class="text-gray-700/50" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke-width="3"></path>
+                        <path id="disk-progress" class="text-[var(--color-primary-500)]" stroke-width="3" fill="none" stroke-dasharray="0, 100" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" stroke-linecap="round"></path>
+                    </svg>
+                    <div id="disk-percent" class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-xl font-bold">--%</div>
+                </div>
+                <div id="disk-details" class="text-xs text-gray-400 mt-2">-- / -- GB</div>
+            </div>
+        </div>
     </div>
-
-    <!-- Users List -->
-    <div class="bg-white p-6 rounded-lg shadow-md">
-        <h2 class="text-2xl font-bold mb-4">Existing Users</h2>
+    
+    <!-- Active Ollama Models -->
+    <div class="card-style">
+        <h2 class="card-header text-2xl font-bold mb-4 pb-2">Active Ollama Models</h2>
         <div class="overflow-x-auto">
-            <table class="min-w-full divide-y divide-gray-200">
-                <thead class="bg-gray-50">
+            <table class="min-w-full">
+                <thead>
                     <tr>
-                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ID</th>
-                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Username</th>
-                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Is Admin</th>
-                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Created At</th>
-                        <th scope="col" class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Model</th>
+                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Server</th>
+                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Size</th>
+                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Context</th>
+                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Expires In</th>
                     </tr>
                 </thead>
-                <tbody class="bg-white divide-y divide-gray-200">
-                    {% for user in users %}
+                <tbody id="running-models-tbody" class="divide-y divide-white/10">
+                    <!-- Loading state -->
                     <tr>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{{ user.id }}</td>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{{ user.username }}</td>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{{ 'Yes' if user.is_admin else 'No' }}</td>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{{ user.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
-                        <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                            <a href="{{ url_for('get_user_details', user_id=user.id) }}" class="text-indigo-600 hover:text-indigo-900">Manage</a>
+                        <td colspan="5" class="px-6 py-10 text-center text-gray-400">
+                            <svg class="animate-spin h-5 w-5 mx-auto" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                            <span class="mt-2 block">Loading active models...</span>
                         </td>
                     </tr>
-                    {% else %}
-                    <tr>
-                        <td colspan="5" class="px-6 py-4 text-center text-gray-500">No users found.</td>
-                    </tr>
-                    {% endfor %}
                 </tbody>
             </table>
         </div>
     </div>
 </div>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const systemInfoUrl = "{{ url_for('admin_system_info') }}";
+
+    function updateSystemInfo(data) {
+        const sys = data.system_info;
+
+        // CPU
+        document.getElementById('cpu-percent').textContent = `${sys.cpu.percent.toFixed(1)}%`;
+        document.getElementById('cpu-progress').style.strokeDasharray = `${sys.cpu.percent.toFixed(1)}, 100`;
+
+        // Memory
+        document.getElementById('mem-percent').textContent = `${sys.memory.percent.toFixed(1)}%`;
+        document.getElementById('mem-progress').style.strokeDasharray = `${sys.memory.percent.toFixed(1)}, 100`;
+        document.getElementById('mem-details').textContent = `${sys.memory.used_gb} / ${sys.memory.total_gb} GB`;
+
+        // Disk
+        document.getElementById('disk-percent').textContent = `${sys.disk.percent.toFixed(1)}%`;
+        document.getElementById('disk-progress').style.strokeDasharray = `${sys.disk.percent.toFixed(1)}, 100`;
+        document.getElementById('disk-details').textContent = `${sys.disk.used_gb} / ${sys.disk.total_gb} GB`;
+    }
+
+    function updateRunningModels(data) {
+        const models = data.running_models;
+        const tbody = document.getElementById('running-models-tbody');
+        tbody.innerHTML = ''; // Clear previous content
+
+        if (models.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="5" class="px-6 py-10 text-center text-gray-400">No models are currently running on active servers.</td></tr>`;
+            return;
+        }
+
+        models.forEach(model => {
+            const sizeGb = (model.size / (1024 ** 3)).toFixed(2);
+            const contextSize = model.size_in_memory ? (model.size_in_memory / (1024 ** 2)).toFixed(2) + ' MB' : (model.context_length || 'N/A');
+            const formattedContext = typeof contextSize === 'number' ? contextSize.toLocaleString() : contextSize;
+
+            const expiresDate = new Date(model.expires_at);
+            const now = new Date();
+            const diffSeconds = Math.round((expiresDate - now) / 1000);
+            let expiresIn = 'N/A';
+            if (diffSeconds > 0) {
+                const minutes = Math.floor(diffSeconds / 60);
+                const seconds = diffSeconds % 60;
+                expiresIn = `${minutes}m ${seconds}s`;
+            }
+
+            const row = `
+                <tr>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-current">${model.name}</td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm">${model.server_name}</td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm">${sizeGb} GB</td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm">${formattedContext}</td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm">${expiresIn}</td>
+                </tr>
+            `;
+            tbody.innerHTML += row;
+        });
+    }
+
+    async function fetchData() {
+        try {
+            const response = await fetch(systemInfoUrl);
+            if (!response.ok) {
+                console.error("Failed to fetch system info:", response.statusText);
+                return;
+            }
+            const data = await response.json();
+            updateSystemInfo(data);
+            updateRunningModels(data);
+        } catch (error) {
+            console.error("Error fetching dashboard data:", error);
+        }
+    }
+
+    // Fetch data immediately on load, then every 5 seconds
+    fetchData();
+    setInterval(fetchData, 5000);
+});
+</script>
 {% endblock %}

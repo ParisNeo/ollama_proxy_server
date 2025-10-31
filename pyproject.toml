@@ -25,6 +25,7 @@ python-json-logger = "^2.0.7"
 itsdangerous = "^2.2.0"
 aiosqlite = "^0.20.0"
 passlib = {extras = ["bcrypt"], version = "^1.7.4"}
+psutil = "^5.9.8"
 
 
 [tool.poetry.group.dev.dependencies]

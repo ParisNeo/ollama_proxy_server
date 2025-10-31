@@ -102,3 +102,6 @@ ollama_proxy.db
 
 # lollms vs coder discussions
 .lollms
+
+# User Uploads
+app/static/uploads/

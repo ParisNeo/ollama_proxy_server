@@ -5,7 +5,8 @@ from app.schema.server import ServerCreate
 import httpx
 import logging
 import datetime
-from typing import Optional
+from typing import Optional, List, Dict, Any
+import asyncio
 
 logger = logging.getLogger(__name__)
 
@@ -121,6 +122,35 @@ async def get_servers_with_model(db: AsyncSession, model_name: str) -> list[Olla
             servers_with_model.append(server)
 
     return servers_with_model
+
+async def get_ollama_ps_all_servers(db: AsyncSession, http_client: httpx.AsyncClient) -> List[Dict[str, Any]]:
+    """
+    Fetches running models (`/api/ps`) from all active Ollama servers.
+    """
+    active_servers = [s for s in await get_servers(db) if s.is_active]
+    if not active_servers:
+        return []
+
+    async def fetch_ps(server: OllamaServer):
+        try:
+            ps_url = f"{server.url.rstrip('/')}/api/ps"
+            response = await http_client.get(ps_url, timeout=5.0)
+            response.raise_for_status()
+            data = response.json()
+            # Add server info to each running model
+            for model in data.get("models", []):
+                model["server_name"] = server.name
+            return data.get("models", [])
+        except Exception as e:
+            logger.error(f"Failed to fetch running models from server '{server.name}': {e}")
+            return []
+
+    tasks = [fetch_ps(server) for server in active_servers]
+    results = await asyncio.gather(*tasks)
+    
+    # Flatten the list of lists
+    all_running_models = [model for sublist in results for model in sublist]
+    return all_running_models
 
 async def refresh_all_server_models(db: AsyncSession) -> dict:
     """

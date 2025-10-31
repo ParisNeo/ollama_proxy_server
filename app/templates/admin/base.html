@@ -4,61 +4,129 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}Ollama Proxy Admin{% endblock %}</title>
+    <link rel="icon" href="{{ url_for('static', path='favicon.svg') }}" type="image/svg+xml">
+    <link rel="shortcut icon" href="{{ url_for('static', path='favicon.svg') }}" type="image/svg+xml">
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- === ADD CHART.JS LIBRARY === -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        .active {
-            background-color: #4f46e5;
-            color: white;
+        {% set theme_colors = request.app.state.settings.available_themes[request.app.state.settings.selected_theme] %}
+        :root {
+            --color-primary-500: {{ theme_colors['500'] }};
+            --color-primary-600: {{ theme_colors['600'] }};
+            --color-primary-700: {{ theme_colors['700'] }};
+            --color-primary-800: {{ theme_colors['800'] }};
         }
-        /* Style for the sidebar scrollbar */
-        #sidebar::-webkit-scrollbar {
-            width: 8px;
+        
+        /* --- Base & Sidebar Styles --- */
+        #sidebar { background-color: var(--color-primary-800); }
+        #sidebar nav a:hover { background-color: rgba(255, 255, 255, 0.1); }
+        .active { background-color: var(--color-primary-600); color: white; }
+        #sidebar-open-btn { background-color: var(--color-primary-700); }
+        #sidebar::-webkit-scrollbar { width: 8px; }
+        #sidebar::-webkit-scrollbar-track { background: rgba(0,0,0,0.2); }
+        #sidebar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 4px; }
+        #sidebar.collapsed { width: 0; min-width: 0; padding: 0; overflow: hidden; }
+        #sidebar-open-btn { display: none; }
+        body.sidebar-collapsed #sidebar-open-btn { display: block; }
+
+        /* --- UI Style Engine --- */
+        
+        /* --- Dark Glass --- */
+        .ui-dark-glass { background-image: linear-gradient(to bottom right, var(--color-primary-800), #111827); color: #d1d5db; }
+        .ui-dark-glass .card-style { background-color: rgba(17, 24, 39, 0.4); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 0.75rem; box-shadow: 0 4px 6px -1px rgba(0,0,0,.1); padding: 1.5rem; }
+        .ui-dark-glass .card-header { color: white; border-bottom: 1px solid rgba(255, 255, 255, 0.1); }
+        .ui-dark-glass input, .ui-dark-glass select, .ui-dark-glass textarea { background-color: rgba(255,255,255,0.05); border-color: rgba(255,255,255,0.1); color: white; }
+        .ui-dark-glass table thead { color: #9ca3af; } /* gray-400 */
+        .ui-dark-glass table tbody { border-color: rgba(255,255,255,0.1); }
+        .ui-dark-glass .info-box { background-color: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.2); color: #93c5fd; }
+        .ui-dark-glass .warning-box { background-color: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.2); color: #fcd34d; }
+        .ui-dark-glass .inline-code { background-color: rgba(255,255,255,0.1); color: #e5e7eb; padding: 0.125rem 0.375rem; border-radius: 0.25rem; font-family: monospace; }
+        .ui-dark-glass .code-block-wrapper { background-color: rgba(0,0,0,0.3); color: #d1d5db; }
+        .ui-dark-glass .copy-button { background-color: #4b5563; color: white; }
+        .ui-dark-glass .copy-button:hover { background-color: #6b7280; }
+
+        /* --- Dark Flat --- */
+        .ui-dark-flat { background-color: #111827; color: #d1d5db; }
+        .ui-dark-flat .card-style { background-color: #1f2937; border-radius: 0.5rem; box-shadow: 0 4px 6px -1px rgba(0,0,0,.1); padding: 1.5rem; }
+        .ui-dark-flat .card-header { color: white; border-bottom: 1px solid #374151; }
+        .ui-dark-flat input, .ui-dark-flat select, .ui-dark-flat textarea { background-color: #374151; border-color: #4b5563; color: white; }
+        .ui-dark-flat table thead { color: #9ca3af; background-color: #374151; }
+        .ui-dark-flat table tbody { border-color: #374151; }
+        .ui-dark-flat .info-box { background-color: #1e293b; border: 1px solid #3b82f6; color: #93c5fd; }
+        .ui-dark-flat .warning-box { background-color: #422006; border: 1px solid #d97706; color: #fcd34d; }
+        .ui-dark-flat .inline-code { background-color: #374151; color: #e5e7eb; padding: 0.125rem 0.375rem; border-radius: 0.25rem; font-family: monospace; }
+        .ui-dark-flat .code-block-wrapper { background-color: #111827; color: #d1d5db; }
+        .ui-dark-flat .copy-button { background-color: #4b5563; color: white; }
+        .ui-dark-flat .copy-button:hover { background-color: #6b7280; }
+
+        /* --- Light Glass --- */
+        .ui-light-glass { background-image: linear-gradient(to bottom right, var(--color-primary-500), #e0e7ff); color: #1f2937; }
+        .ui-light-glass .card-style { background-color: rgba(255, 255, 255, 0.4); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 0.75rem; box-shadow: 0 4px 6px -1px rgba(0,0,0,.1); padding: 1.5rem; }
+        .ui-light-glass .card-header { color: #111827; border-bottom: 1px solid rgba(0, 0, 0, 0.1); }
+        .ui-light-glass input, .ui-light-glass select, .ui-light-glass textarea { background-color: rgba(255,255,255,0.2); border-color: rgba(0,0,0,0.1); color: #111827; }
+        .ui-light-glass input::placeholder { color: #6b7280; }
+        .ui-light-glass table thead { color: #374151; }
+        .ui-light-glass table tbody { border-color: rgba(0,0,0,0.1); }
+        .ui-light-glass .info-box { background-color: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.2); color: #1e40af; }
+        .ui-light-glass .warning-box { background-color: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.2); color: #92400e; }
+        .ui-light-glass .inline-code { background-color: rgba(0,0,0,0.05); color: #1f2937; padding: 0.125rem 0.375rem; border-radius: 0.25rem; font-family: monospace; }
+        .ui-light-glass .code-block-wrapper { background-color: #f3f4f6; color: #111827; }
+        .ui-light-glass .copy-button { background-color: #d1d5db; color: #1f2937; }
+        .ui-light-glass .copy-button:hover { background-color: #9ca3af; }
+
+        /* --- Light Flat --- */
+        .ui-light-flat { background-color: #f3f4f6; color: #1f2937; }
+        .ui-light-flat .card-style { background-color: white; border-radius: 0.5rem; box-shadow: 0 4px 6px -1px rgba(0,0,0,.1); padding: 1.5rem; }
+        .ui-light-flat .card-header { color: #111827; border-bottom: 1px solid #e5e7eb; }
+        .ui-light-flat input, .ui-light-flat select, .ui-light-flat textarea { background-color: white; border-color: #d1d5db; color: #111827; }
+        .ui-light-flat table thead { color: #374151; background-color: #f9fafb; }
+        .ui-light-flat table tbody { border-color: #e5e7eb; }
+        .ui-light-flat .info-box { background-color: #eff6ff; border: 1px solid #bfdbfe; color: #1e40af; }
+        .ui-light-flat .warning-box { background-color: #fffbeb; border: 1px solid #fde68a; color: #92400e; }
+        .ui-light-flat .inline-code { background-color: #e5e7eb; color: #1f2937; padding: 0.125rem 0.375rem; border-radius: 0.25rem; font-family: monospace; }
+        .ui-light-flat .code-block-wrapper { background-color: #1f2937; color: #d1d5db; }
+        .ui-light-flat .copy-button { background-color: #4b5563; color: white; }
+        .ui-light-flat .copy-button:hover { background-color: #6b7280; }
+        
+        /* --- Styles for Help Page Code Blocks --- */
+        .code-block-wrapper {
+            position: relative;
+            border-radius: 0.5rem;
+            padding: 1rem;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+            font-size: 0.875rem;
+            overflow-x: auto;
         }
-        #sidebar::-webkit-scrollbar-track {
-            background: #2d3748; /* gray-800 */
-        }
-        #sidebar::-webkit-scrollbar-thumb {
-            background: #4a5568; /* gray-600 */
-            border-radius: 4px;
-        }
-        /* Styles for the collapsed state */
-        #sidebar.collapsed {
-            width: 0;
-            min-width: 0;
-            padding: 0;
-            overflow: hidden;
-        }
-        #sidebar-open-btn {
-            display: none;
-        }
-        body.sidebar-collapsed #sidebar-open-btn {
-            display: block;
+        .copy-button {
+            position: absolute;
+            top: 0.5rem;
+            right: 0.5rem;
+            border: none;
+            padding: 0.25rem 0.5rem;
+            border-radius: 0.25rem;
+            font-size: 0.75rem;
+            cursor: pointer;
+            transition: background-color 0.2s;
         }
     </style>
 </head>
-<body class="bg-gray-100 font-sans leading-normal tracking-normal">
+<body class="font-sans leading-normal tracking-normal ui-{{ request.app.state.settings.ui_style }}">
 
-    <!-- Open Sidebar Button (Initially Hidden) -->
-    <button id="sidebar-open-btn" class="fixed top-4 left-4 z-50 p-2 {{ bootstrap_settings.BRANDING_SIDEBAR_BG_COLOR }} text-white rounded-md hover:opacity-80 shadow-lg">
-        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path>
-        </svg>
+    <button id="sidebar-open-btn" class="fixed top-4 left-4 z-50 p-2 text-white rounded-md hover:opacity-80 shadow-lg">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path></svg>
     </button>
 
     <div class="flex h-screen">
-        <!-- Sidebar -->
-        <div id="sidebar" class="{{ bootstrap_settings.BRANDING_SIDEBAR_BG_COLOR }} text-white w-64 min-w-[16rem] flex-shrink-0 flex flex-col justify-between transition-all duration-300 ease-in-out">
+        <div id="sidebar" class="text-white w-64 min-w-[16rem] flex-shrink-0 flex flex-col justify-between transition-all duration-300 ease-in-out">
             <div>
-                <div class="flex items-center justify-between p-4 border-b border-gray-700 h-16">
-                    <a href="{{ url_for('admin_dashboard') }}" class="flex items-center text-2xl font-bold whitespace-nowrap">
-                        {% if bootstrap_settings.BRANDING_SHOW_LOGO and bootstrap_settings.BRANDING_LOGO_URL %}
-                        <img src="{{ bootstrap_settings.BRANDING_LOGO_URL }}" alt="Logo" class="h-8 w-8 mr-2 object-contain">
+                <div class="flex items-center justify-between p-4 border-b border-white/10 h-16">
+                    <a href="{{ url_for('admin_dashboard') }}" class="flex items-center text-2xl font-bold whitespace-nowrap overflow-hidden">
+                        {% if request.app.state.settings.branding_logo_url %}
+                        <img src="{{ request.app.state.settings.branding_logo_url }}" alt="Logo" class="h-8 w-8 mr-2 object-contain flex-shrink-0">
                         {% endif %}
-                        {{ bootstrap_settings.BRANDING_TITLE }}
+                        <span class="truncate">{{ request.app.state.settings.branding_title }}</span>
                     </a>
-                    <button id="sidebar-close-btn" class="text-gray-400 hover:text-white">
+                    <button id="sidebar-close-btn" class="text-gray-300 hover:text-white ml-2 flex-shrink-0">
                         <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path>
                         </svg>
@@ -67,36 +135,37 @@
                 
                 {% if request.state.user %}
                 <nav class="mt-4">
-                    <a href="{{ url_for('admin_dashboard') }}" class="flex items-center px-4 py-3 hover:bg-gray-700 whitespace-nowrap {% if 'dashboard' in request.url.path %}active{% endif %}">
+                    <a href="{{ url_for('admin_dashboard') }}" class="flex items-center px-4 py-3 whitespace-nowrap {% if 'dashboard' in request.url.path %}active{% endif %}">
                         <svg class="w-6 h-6 mr-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 8v8m-4-5v5m-4-2v2m-2 4h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
                         Dashboard
                     </a>
-                    <a href="{{ url_for('admin_servers') }}" class="flex items-center px-4 py-3 hover:bg-gray-700 whitespace-nowrap {% if 'servers' in request.url.path %}active{% endif %}">
+                    <a href="{{ url_for('admin_users') }}" class="flex items-center px-4 py-3 whitespace-nowrap {% if 'users' in request.url.path %}active{% endif %}">
+                        <svg class="w-6 h-6 mr-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M15 21a6 6 0 00-9-5.197M15 21a6 6 0 00-9-5.197"></path></svg>
+                        User Management
+                    </a>
+                    <a href="{{ url_for('admin_servers') }}" class="flex items-center px-4 py-3 whitespace-nowrap {% if 'servers' in request.url.path %}active{% endif %}">
                         <svg class="w-6 h-6 mr-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01"></path></svg>
                         Server Management
                     </a>
-                    <a href="{{ url_for('admin_stats') }}" class="flex items-center px-4 py-3 hover:bg-gray-700 whitespace-nowrap {% if 'stats' in request.url.path %}active{% endif %}">
+                    <a href="{{ url_for('admin_stats') }}" class="flex items-center px-4 py-3 whitespace-nowrap {% if 'stats' in request.url.path %}active{% endif %}">
                          <svg class="w-6 h-6 mr-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path></svg>
                         Usage Stats
                     </a>
-                     <a href="{{ url_for('admin_settings') }}" class="flex items-center px-4 py-3 hover:bg-gray-700 whitespace-nowrap {% if 'settings' in request.url.path %}active{% endif %}">
+                     <a href="{{ url_for('admin_settings') }}" class="flex items-center px-4 py-3 whitespace-nowrap {% if 'settings' in request.url.path %}active{% endif %}">
                         <svg class="w-6 h-6 mr-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
                         Settings
                     </a>
-                    <a href="{{ url_for('admin_help') }}" class="flex items-center px-4 py-3 hover:bg-gray-700 whitespace-nowrap {% if 'help' in request.url.path %}active{% endif %}">
+                    <a href="{{ url_for('admin_help') }}" class="flex items-center px-4 py-3 whitespace-nowrap {% if 'help' in request.url.path %}active{% endif %}">
                         <svg class="w-6 h-6 mr-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.79 4 4 0 2.21-1.79 4-4 4-1.742 0-3.223-.835-3.772-2M12 18.5v.01M12 5.5v.01"></path></svg>
                         Help & Credits
                     </a>
                 </nav>
                 {% endif %}
             </div>
-
             <div class="w-full flex-shrink-0">
                 {% if request.state.user %}
-                <div class="p-4 border-t border-gray-700">
+                <div class="p-4 border-t border-white/10">
                     <p class="text-sm whitespace-nowrap">Welcome, <span class="font-semibold">{{ request.state.user.username }}</span></p>
-                    
-                    <!-- Redis Status Notifier -->
                     {% if is_redis_connected %}
                     <div class="flex items-center mt-2 text-xs text-green-400">
                         <span class="h-2 w-2 mr-2 bg-green-500 rounded-full"></span>
@@ -109,60 +178,56 @@
                     </a>
                     {% endif %}
                 </div>
-                <a href="{{ url_for('admin_logout') }}" class="flex items-center w-full px-4 py-3 bg-red-600 hover:bg-red-700 whitespace-nowrap">
+                <a href="{{ url_for('admin_logout') }}" class="flex items-center w-full px-4 py-3 bg-red-600/50 hover:bg-red-600 whitespace-nowrap">
                      <svg class="w-6 h-6 mr-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path></svg>
                     Logout
                 </a>
                 {% endif %}
             </div>
         </div>
-
-        <!-- Main Content -->
-        <div class="flex-1 flex flex-col">
-             <!-- Top Header -->
-            <header class="bg-white shadow p-4 flex items-center justify-center flex-shrink-0 h-16">
-                 <h1 class="text-xl font-semibold text-gray-700 text-center">{% block header_title %}{% endblock %}</h1>
+        <div class="flex-1 flex flex-col bg-transparent">
+            <header class="bg-transparent p-4 flex items-center justify-center flex-shrink-0 h-16">
+                 <h1 class="text-xl font-semibold text-current text-center">{% block header_title %}{% endblock %}</h1>
             </header>
-
             <main class="flex-1 p-6 md:p-10 overflow-y-auto">
                 {% include 'partials/_flash_messages.html' %}
-                {% block content %}{% endblock %}
+                <div class="max-w-7xl mx-auto">
+                    {% block content %}{% endblock %}
+                </div>
             </main>
-
-            <footer class="bg-white p-4 text-center text-sm text-gray-500 flex-shrink-0">
-                {{ bootstrap_settings.BRANDING_TITLE }} Server v{{ request.app.version }}
+            <footer class="bg-transparent p-4 text-center text-sm text-gray-400 flex-shrink-0">
+                {{ request.app.state.settings.branding_title }} v{{ request.app.version }}
+                <br>
+                <span class="text-xs">Powered by ParisNeo's Ollama Proxy Fortress</span>
             </footer>
         </div>
     </div>
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const body = document.body;
+            const sidebar = document.getElementById('sidebar');
+            const openBtn = document.getElementById('sidebar-open-btn');
+            const closeBtn = document.getElementById('sidebar-close-btn');
 
-<script>
-    document.addEventListener('DOMContentLoaded', () => {
-        const body = document.body;
-        const sidebar = document.getElementById('sidebar');
-        const openBtn = document.getElementById('sidebar-open-btn');
-        const closeBtn = document.getElementById('sidebar-close-btn');
+            const openSidebar = () => {
+                sidebar.classList.remove('collapsed');
+                body.classList.remove('sidebar-collapsed');
+                localStorage.setItem('sidebarState', 'open');
+            };
 
-        const openSidebar = () => {
-            sidebar.classList.remove('collapsed');
-            body.classList.remove('sidebar-collapsed');
-            localStorage.setItem('sidebarState', 'open');
-        };
+            const closeSidebar = () => {
+                sidebar.classList.add('collapsed');
+                body.classList.add('sidebar-collapsed');
+                localStorage.setItem('sidebarState', 'closed');
+            };
 
-        const closeSidebar = () => {
-            sidebar.classList.add('collapsed');
-            body.classList.add('sidebar-collapsed');
-            localStorage.setItem('sidebarState', 'closed');
-        };
+            openBtn.addEventListener('click', openSidebar);
+            closeBtn.addEventListener('click', closeSidebar);
 
-        openBtn.addEventListener('click', openSidebar);
-        closeBtn.addEventListener('click', closeSidebar);
-
-        // Set initial state from localStorage
-        if (localStorage.getItem('sidebarState') === 'closed') {
-            closeSidebar();
-        }
-    });
-</script>
-
+            if (localStorage.getItem('sidebarState') === 'closed') {
+                closeSidebar();
+            }
+        });
+    </script>
 </body>
 </html>

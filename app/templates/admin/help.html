@@ -6,11 +6,46 @@
 {% block content %}
 <div class="max-w-4xl mx-auto space-y-8">
 
+    <!-- Getting Started Workflow -->
+    <div class="card-style">
+        <h2 class="card-header text-2xl font-bold mb-4 pb-2">Getting Started: Your Workflow</h2>
+        <div class="space-y-4 text-current">
+            <ol class="list-decimal list-inside space-y-3">
+                <li>
+                    <strong>Configure Servers:</strong> Go to the <a href="{{ url_for('admin_servers') }}" class="text-[var(--color-primary-600)] hover:underline">Server Management</a> page and add the URLs of all your Ollama instances.
+                </li>
+                <li>
+                    <strong>Create a User:</strong> Navigate to the <a href="{{ url_for('admin_users') }}" class="text-[var(--color-primary-600)] hover:underline">User Management</a> page. This is where you'll create and manage all users.
+                </li>
+                <li>
+                    <strong>Generate an API Key:</strong> From the user list, click "Manage Keys" for a specific user. On their details page, you can generate new keys and set optional rate limits.
+                </li>
+                <li>
+                    <strong>Copy the Key:</strong> The full API key is shown only once upon creation. Copy it and store it securely.
+                </li>
+                <li>
+                    <strong>Use the Key:</strong> In your applications, replace your Ollama URL with the proxy's URL (e.g., `http://127.0.0.1:8080`) and provide the API key in the `Authorization` header as a Bearer token.
+                </li>
+            </ol>
+        </div>
+    </div>
+
+    <!-- Dashboard Section -->
+    <div class="card-style">
+        <h2 class="card-header text-2xl font-bold mb-4 pb-2">The Dashboard: Your Monitoring Hub</h2>
+        <div class="space-y-4 text-current">
+            <p>The main dashboard provides a real-time overview of your proxy server and connected Ollama instances.</p>
+            <ul class="list-disc list-inside space-y-2 pl-4">
+                <li><strong>System Status:</strong> These gauges show the live CPU, Memory, and Disk usage of the machine running the proxy server. This helps you monitor server health at a glance.</li>
+                <li><strong>Active Ollama Models:</strong> This table shows all models that are currently loaded into memory on your backend Ollama servers (equivalent to running `ollama ps`). It includes details like which server is running the model, its size, context length, and when it will expire from memory.</li>
+            </ul>
+        </div>
+    </div>
+
     <!-- Core Concepts Section -->
-    <div class="bg-white p-6 rounded-lg shadow-md">
-        <h2 class="text-2xl font-bold mb-4 border-b pb-2">Core Concepts</h2>
-        <div class="space-y-4 text-gray-700">
-            <p>This proxy is more than just a security layer. It introduces several powerful concepts to enhance your Ollama experience:</p>
+    <div class="card-style">
+        <h2 class="card-header text-2xl font-bold mb-4 pb-2">Core Concepts</h2>
+        <div class="space-y-4 text-current">
             <div class="space-y-4">
                 <div>
                     <h4 class="font-semibold text-lg">🛡️ API Key Authentication</h4>
@@ -22,46 +57,22 @@
                 </div>
                 <div>
                     <h4 class="font-semibold text-lg">🧠 Smart Model Routing</h4>
-                    <p>When you request a specific model (e.g., <code class="bg-gray-200 px-1 rounded text-sm">"llama3"</code>), the proxy is intelligent. It first looks up which of your backend servers have that model available and only routes the request to one of them. This ensures your request never fails because it was sent to a server without the right model.</p>
-                    <div class="mt-2 p-3 bg-blue-50 border border-blue-200 text-blue-800 rounded-md text-sm">
+                    <p>When you request a specific model (e.g., <code class="inline-code">"llama3"</code>), the proxy is intelligent. It first looks up which of your backend servers have that model available and only routes the request to one of them. This ensures your request never fails because it was sent to a server without the right model.</p>
+                    <div class="mt-2 p-3 rounded-md text-sm info-box">
                         <strong>Important:</strong> For Smart Routing to work, you must periodically click the <strong>"Refresh Models"</strong> button on the <a href="{{ url_for('admin_servers') }}" class="font-semibold underline">Server Management</a> page. This keeps the proxy's catalog of available models up to date.
                     </div>
                 </div>
                 <div>
                     <h4 class="font-semibold text-lg">🌐 Federated Model Listing</h4>
-                    <p>The standard <code class="bg-gray-200 px-1 rounded text-sm">/api/tags</code> endpoint is enhanced. When you call it through the proxy, it contacts all active backend servers, gathers their model lists, and returns a single, de-duplicated list of all unique models available across your entire setup.</p>
+                    <p>The standard <code class="inline-code">/api/tags</code> endpoint is enhanced. When you call it through the proxy, it contacts all active backend servers, gathers their model lists, and returns a single, de-duplicated list of all unique models available across your entire setup.</p>
                 </div>
             </div>
         </div>
     </div>
-
-    <!-- Getting Started Workflow -->
-    <div class="bg-white p-6 rounded-lg shadow-md">
-        <h2 class="text-2xl font-bold mb-4 border-b pb-2">Getting Started: Your Workflow</h2>
-        <div class="space-y-4 text-gray-700">
-            <ol class="list-decimal list-inside space-y-3">
-                <li>
-                    <strong>Configure Servers:</strong> Go to the <a href="{{ url_for('admin_servers') }}" class="text-indigo-600 hover:underline">Server Management</a> page and add the URLs of all your Ollama instances.
-                </li>
-                <li>
-                    <strong>Create a User:</strong> From the <a href="{{ url_for('admin_dashboard') }}" class="text-indigo-600 hover:underline">Dashboard</a>, create a virtual user. This helps organize keys (e.g., one user per application).
-                </li>
-                <li>
-                    <strong>Generate an API Key:</strong> Click "Manage" for a user. On the user details page, give your new key a name. You can also set optional per-key rate limits that override the global settings.
-                </li>
-                <li>
-                    <strong>Copy the Key:</strong> The full API key is shown only once upon creation. Copy it and store it securely.
-                </li>
-                <li>
-                    <strong>Use the Key:</strong> In your applications, replace your Ollama URL with the proxy's URL (e.g., `http://127.0.0.1:8080`) and provide the API key in the `Authorization` header as a Bearer token.
-                </li>
-            </ol>
-        </div>
-    </div>
         
     <!-- Usage Examples Section -->
-    <div class="bg-white p-6 rounded-lg shadow-md">
-        <h2 class="text-2xl font-bold mb-4 border-b pb-2">Usage Examples</h2>
+    <div class="card-style">
+        <h2 class="card-header text-2xl font-bold mb-4 pb-2">Usage Examples</h2>
         
         <!-- Example 1: cURL -->
         <div class="mb-6">
@@ -81,10 +92,10 @@ curl http://127.0.0.1:8080/api/generate \
         </div>
     </div>
 
-    <!-- NEW REDIS SETUP GUIDE -->
-    <div id="redis-setup" class="bg-white p-6 rounded-lg shadow-md scroll-mt-20">
-        <h2 class="text-2xl font-bold mb-4 border-b pb-2">Redis Setup Guide</h2>
-        <div class="space-y-6 text-gray-700">
+    <!-- Redis Setup Guide -->
+    <div id="redis-setup" class="card-style scroll-mt-20">
+        <h2 class="card-header text-2xl font-bold mb-4 pb-2">Redis Setup Guide</h2>
+        <div class="space-y-6 text-current">
             <div>
                 <h3 class="text-xl font-semibold mb-2">Why Do I Need Redis?</h3>
                 <p>Redis is an in-memory database that is extremely fast. This application uses it for two optional but important security features:</p>
@@ -92,7 +103,7 @@ curl http://127.0.0.1:8080/api/generate \
                     <li><strong>API Rate Limiting:</strong> Prevents abuse by limiting the number of requests a single API key can make in a given time frame.</li>
                     <li><strong>Brute-Force Protection:</strong> Temporarily locks an IP address after too many failed login attempts to the admin panel.</li>
                 </ul>
-                <div class="mt-3 p-3 bg-yellow-50 border border-yellow-200 text-yellow-800 rounded-md text-sm">
+                <div class="mt-3 p-3 rounded-md text-sm warning-box">
                     <strong>Note:</strong> The proxy will work perfectly without Redis, but these security features will be disabled.
                 </div>
             </div>
@@ -113,7 +124,7 @@ curl http://127.0.0.1:8080/api/generate \
                         <h4 class="font-semibold text-lg">Windows (via WSL 2)</h4>
                         <p>Redis is not officially supported on Windows, but it runs perfectly under the Windows Subsystem for Linux (WSL).</p>
                         <ol class="list-decimal list-inside space-y-2 mt-2 pl-4">
-                            <li>Open PowerShell as an Administrator and run: <code class="bg-gray-200 px-1 rounded text-sm">wsl --install</code></li>
+                            <li>Open PowerShell as an Administrator and run: <code class="inline-code">wsl --install</code></li>
                             <li>After it's done, open your new Linux terminal (e.g., Ubuntu) and run:</li>
                         </ol>
                         <div class="code-block-wrapper mt-2">
@@ -144,54 +155,25 @@ sudo systemctl enable --now redis-server</code></pre>
             
              <div>
                 <h3 class="text-xl font-semibold mb-2">Configuration</h3>
-                <p>Once Redis is running, go to the <a href="{{ url_for('admin_settings') }}" class="text-indigo-600 hover:underline">Settings</a> page in the admin UI and enter your Redis connection details (the defaults are usually fine for a local install). Save the settings, and the proxy will attempt to connect automatically.</p>
+                <p>Once Redis is running, go to the <a href="{{ url_for('admin_settings') }}" class="text-[var(--color-primary-600)] hover:underline">Settings</a> page in the admin UI and enter your Redis connection details (the defaults are usually fine for a local install). Save the settings, and the proxy will attempt to connect automatically.</p>
             </div>
         </div>
     </div>
     
     <!-- Credits Section -->
-    <div class="bg-white p-6 rounded-lg shadow-md">
-        <h2 class="text-2xl font-bold mb-4 border-b pb-2">Credits & Acknowledgements</h2>
-        <div class="space-y-4 text-gray-700">
+    <div class="card-style">
+        <h2 class="card-header text-2xl font-bold mb-4 pb-2">Credits & Acknowledgements</h2>
+        <div class="space-y-4 text-current">
             <p>This application was developed with passion by the open-source community. It stands on the shoulders of giants and wouldn't be possible without the following incredible projects:</p>
             <ul class="list-disc list-inside space-y-2 pl-4">
-                <li><strong><a href="https://fastapi.tiangolo.com/" target="_blank" class="text-indigo-600 hover:underline">FastAPI</a></strong>, <strong><a href="https://www.sqlalchemy.org/" target="_blank" class="text-indigo-600 hover:underline">SQLAlchemy</a></strong>, <strong><a href="https://jinja.palletsprojects.com/" target="_blank" class="text-indigo-600 hover:underline">Jinja2</a></strong>, <strong><a href="https://www.chartjs.org/" target="_blank" class="text-indigo-600 hover:underline">Chart.js</a></strong>, and <strong><a href="https://tailwindcss.com/" target="_blank" class="text-indigo-600 hover:underline">Tailwind CSS</a></strong>.</li>
+                <li><strong><a href="https://fastapi.tiangolo.com/" target="_blank" class="text-[var(--color-primary-600)] hover:underline">FastAPI</a></strong>, <strong><a href="https://www.sqlalchemy.org/" target="_blank" class="text-[var(--color-primary-600)] hover:underline">SQLAlchemy</a></strong>, <strong><a href="https://jinja.palletsprojects.com/" target="_blank" class="text-[var(--color-primary-600)] hover:underline">Jinja2</a></strong>, <strong><a href="https://www.chartjs.org/" target="_blank" class="text-[var(--color-primary-600)] hover:underline">Chart.js</a></strong>, and <strong><a href="https://tailwindcss.com/" target="_blank" class="text-[var(--color-primary-600)] hover:underline">Tailwind CSS</a></strong>.</li>
             </ul>
             <p class="pt-4">Project built and maintained by <strong>ParisNeo</strong> with help from AI and Cool developers (check the contributors list in the github page).</p>
-            <p>Visit the project on <a href="https://github.com/ParisNeo/ollama_proxy_server" target="_blank" class="text-indigo-600 hover:underline">GitHub</a> to contribute, report issues, or star the repository!</p>
+            <p>Visit the project on <a href="https://github.com/ParisNeo/ollama_proxy_server" target="_blank" class="text-[var(--color-primary-600)] hover:underline">GitHub</a> to contribute, report issues, or star the repository!</p>
         </div>
     </div>
 
 </div>
-
-<style>
-    .code-block-wrapper {
-        position: relative;
-        background-color: #1f2937; /* gray-800 */
-        color: #d1d5db; /* gray-300 */
-        border-radius: 0.5rem;
-        padding: 1rem;
-        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-        font-size: 0.875rem;
-        overflow-x: auto;
-    }
-    .copy-button {
-        position: absolute;
-        top: 0.5rem;
-        right: 0.5rem;
-        background-color: #4b5563; /* gray-600 */
-        color: white;
-        border: none;
-        padding: 0.25rem 0.5rem;
-        border-radius: 0.25rem;
-        font-size: 0.75rem;
-        cursor: pointer;
-        transition: background-color 0.2s;
-    }
-    .copy-button:hover {
-        background-color: #6b7280; /* gray-500 */
-    }
-</style>
 
 <script>
 document.addEventListener('DOMContentLoaded', () => {

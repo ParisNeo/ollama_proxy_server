@@ -4,49 +4,48 @@
 {% block header_title %}Server Management{% endblock %}
 
 {% block content %}
-<div class="max-w-7xl mx-auto">
-
+<div class="space-y-8">
     <!-- Add New Server Form -->
-    <div class="bg-white p-6 rounded-lg shadow-md mb-8">
-        <h2 class="text-2xl font-bold mb-4">Add New Ollama Server</h2>
+    <div class="card-style">
+        <h2 class="card-header text-2xl font-bold mb-4 pb-2">Add New Ollama Server</h2>
         <form action="{{ url_for('admin_add_server') }}" method="post">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
-                    <label for="server_name" class="block text-sm font-medium text-gray-700">Server Name</label>
-                    <input type="text" name="server_name" id="server_name" placeholder="e.g., Local Mac Studio" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm">
+                    <label for="server_name" class="block text-sm font-medium text-current">Server Name</label>
+                    <input type="text" name="server_name" id="server_name" placeholder="e.g., Local Mac Studio" required class="mt-1 block w-full px-3 py-2 bg-white/10 border border-white/20 rounded-md shadow-sm text-current focus:outline-none focus:ring-[var(--color-primary-500)] focus:border-[var(--color-primary-500)] sm:text-sm">
                 </div>
                 <div>
-                    <label for="server_url" class="block text-sm font-medium text-gray-700">Server URL</label>
-                    <input type="url" name="server_url" id="server_url" placeholder="http://127.0.0.1:11434" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm">
+                    <label for="server_url" class="block text-sm font-medium text-current">Server URL</label>
+                    <input type="url" name="server_url" id="server_url" placeholder="http://127.0.0.1:11434" required class="mt-1 block w-full px-3 py-2 bg-white/10 border border-white/20 rounded-md shadow-sm text-current focus:outline-none focus:ring-[var(--color-primary-500)] focus:border-[var(--color-primary-500)] sm:text-sm">
                 </div>
                 <div class="flex items-end">
-                    <button type="submit" class="w-full justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">Add Server</button>
+                    <button type="submit" class="w-full justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-[var(--color-primary-600)] hover:bg-[var(--color-primary-700)] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[var(--color-primary-500)]">Add Server</button>
                 </div>
             </div>
         </form>
     </div>
 
     <!-- Existing Servers List -->
-    <div class="bg-white p-6 rounded-lg shadow-md">
-        <h2 class="text-2xl font-bold mb-4">Configured Servers</h2>
+    <div class="card-style">
+        <h2 class="card-header text-2xl font-bold mb-4 pb-2">Configured Servers</h2>
         <div class="overflow-x-auto">
-            <table class="min-w-full divide-y divide-gray-200">
-                <thead class="bg-gray-50">
+            <table class="min-w-full">
+                <thead>
                     <tr>
-                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
-                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">URL</th>
-                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Models</th>
-                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Created At</th>
-                        <th scope="col" class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Name</th>
+                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">URL</th>
+                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Status</th>
+                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Models</th>
+                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Created At</th>
+                        <th scope="col" class="px-6 py-3 text-right text-xs font-medium text-gray-400 uppercase tracking-wider">Actions</th>
                     </tr>
                 </thead>
-                <tbody class="bg-white divide-y divide-gray-200">
+                <tbody class="divide-y divide-white/10">
                     {% for server in servers %}
                     <tr>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{{ server.name }}</td>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 font-mono">{{ server.url }}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-current">{{ server.name }}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm font-mono">{{ server.url }}</td>
                         <td class="px-6 py-4 whitespace-nowrap text-sm">
                              {% if server.is_active %}
                                 {% if server.available_models %}
@@ -58,10 +57,10 @@
                             <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-red-100 text-red-800">Inactive</span>
                             {% endif %}
                         </td>
-                        <td class="px-6 py-4 text-sm text-gray-500">
+                        <td class="px-6 py-4 text-sm">
                             {% if server.available_models %}
                                 <details class="cursor-pointer">
-                                    <summary class="text-indigo-600 hover:text-indigo-900 font-medium">
+                                    <summary class="text-[var(--color-primary-500)] hover:text-[var(--color-primary-700)] font-medium">
                                         {{ server.available_models|length }} model(s)
                                         {% if server.models_last_updated %}
                                         <span class="text-xs text-gray-400">(updated {{ server.models_last_updated.strftime('%Y-%m-%d %H:%M') }})</span>
@@ -72,33 +71,33 @@
                                         <li class="text-xs font-mono">
                                             <strong>{{ model.name }}</strong>
                                             {% if model.size %}
-                                            <span class="text-gray-500">({{ (model.size / 1024 / 1024 / 1024) | round(2) }} GB)</span>
+                                            <span class="text-gray-400">({{ (model.size / 1024 / 1024 / 1024) | round(2) }} GB)</span>
                                             {% endif %}
                                         </li>
                                         {% endfor %}
                                     </ul>
                                 </details>
                             {% else %}
-                                <span class="text-gray-400 italic">No models fetched</span>
+                                <span class="italic">No models fetched</span>
                             {% endif %}
                         </td>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{{ server.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm">{{ server.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
                         <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                             <div class="flex justify-end gap-2">
                                 <form action="{{ url_for('admin_refresh_models', server_id=server.id) }}" method="post" class="inline">
                                     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                                    <button type="submit" class="text-indigo-600 hover:text-indigo-900">Refresh Models</button>
+                                    <button type="submit" class="text-[var(--color-primary-500)] hover:text-[var(--color-primary-700)]">Refresh Models</button>
                                 </form>
                                 <form action="{{ url_for('admin_delete_server', server_id=server.id) }}" method="post" onsubmit="return confirm('Are you sure you want to delete this server?');" class="inline">
                                     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                                    <button type="submit" class="text-red-600 hover:text-red-900">Delete</button>
+                                    <button type="submit" class="text-red-500 hover:text-red-700">Delete</button>
                                 </form>
                             </div>
                         </td>
                     </tr>
                     {% else %}
                     <tr>
-                        <td colspan="6" class="px-6 py-4 text-center text-gray-500">No servers configured.</td>
+                        <td colspan="6" class="px-6 py-4 text-center">No servers configured.</td>
                     </tr>
                     {% endfor %}
                 </tbody>

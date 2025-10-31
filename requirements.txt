@@ -13,3 +13,4 @@ SQLAlchemy==2.0.31
 uvicorn==0.30.1
 aiosqlite==0.20.0
 passlib[bcrypt]==1.7.4
+psutil==5.9.8

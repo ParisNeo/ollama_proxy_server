@@ -29,10 +29,12 @@ While the core Ollama team impressively patched this vulnerability, the incident
 Ollama Proxy Fortress is **more than just a patch**. It's a permanent solution that offers layers of security and powerful features that core Ollama doesn't provide:
 
 *   🛡️ **Ironclad Security Gateway:** Enforce API key authentication for every single request. Add global rate limiting to prevent abuse and filter access by IP address.
-*   👤 **Centralized User Management:** Create different "users" for your different apps or family members, each with their own unique API keys.
+*   📊 **Live Monitoring Dashboard:** Get a real-time view of your proxy server's health with CPU, Memory, and Disk usage stats. Plus, see all currently running models across your Ollama instances (`ollama ps`).
+*   👤 **Dedicated User Management with Stats:** A separate, organized page to manage users. View key statistics at a glance, including API key count, total requests, and last activity.
 *   🔑 **Fine-Grained Key Controls:** Set optional, **per-key rate limits** (e.g., 100 requests every 5 minutes) that override the global settings. Temporarily **disable or re-enable keys** on the fly without having to revoke them permanently.
 *   🌐 **Multi-Server Management & Federation:** Centrally manage all your Ollama backend servers. The proxy load-balances requests and provides a unified view of all available models.
-*   📊 **Graphical Usage Insights:** A beautiful analytics dashboard with interactive charts shows you usage over time, peak hours, and server load distribution, with options to export data.
+*   🎨 **Customizable Branding:** Personalize your proxy's interface by setting your own title and uploading a custom logo directly from the settings page.
+*   📈 **Graphical Usage Insights:** A beautiful analytics dashboard with interactive charts shows you usage over time, peak hours, and server load distribution, with options to export data.
 *   🚀 **Effortless 1-Click Setup:** No Docker, no `pip install`, no command-line wizardry required. Just download and run a single script.
 
 ---
@@ -76,25 +78,37 @@ Once the server is running, go to the admin panel (e.g., `http://127.0.0.1:8080/
 
 ![Secure Admin Login Page](assets/login.png)
 
-### Step 2: Manage Users and API Keys
+### Step 2: Live Monitoring Dashboard
 
-The main dashboard is your central hub for creating virtual users. Click "Manage" to access the user details page where you can create, view, **enable/disable**, and revoke keys. You can also set **custom rate limits** for each new key, overriding the global settings.
+The main dashboard is your mission control. Instantly see the health of your server with live CPU, Memory, and Disk usage, and monitor all currently active models across your entire fleet of Ollama instances.
 
-![User Management Dashboard](assets/dashboard.png)
+![Live Monitoring Dashboard](assets/dashboard.png)
 
-### Step 3: Centrally Manage Ollama Servers
+### Step 3: Manage Users and View Stats
+
+The dedicated "User Management" page is your central hub for creating users. From here, you can see vital statistics at a glance, like key counts and total requests, then click "Manage Keys" to handle API keys for a specific user.
+
+*(Image placeholder: A screenshot of the new user management page with stats would go here.)*
+
+### Step 4: Centrally Manage Ollama Servers
 
 The "Server Management" page lets you add and remove all your backend Ollama instances. The proxy will load-balance requests across all active servers, and the `/api/tags` endpoint will show a federated list of models from all of them.
 
 ![Ollama Server Management](assets/server_management.png)
 
-### Step 4: Monitor Usage Statistics
+### Step 5: Customize Your Branding
+
+Navigate to the "Settings" page to personalize your proxy. You can change the title that appears in the sidebar and upload your own logo to create a fully branded experience.
+
+*(Image placeholder: A screenshot of the settings page showing the new branding section would go here.)*
+
+### Step 6: Monitor Usage Statistics
 
 The "Usage Stats" page features interactive charts showing requests per day, peak usage hours, and server load distribution. All data and charts can be exported for reports.
 
 ![API Usage Statistics](assets/stats.png)
 
-### Step 5: Make Secure API Calls
+### Step 7: Make Secure API Calls
 
 Configure your applications to use the proxy URL and provide the API key as a Bearer token in the `Authorization` header. Your underlying Ollama server is now completely shielded from direct access.
 
@@ -108,7 +122,7 @@ curl http://127.0.0.1:8080/api/generate \
   }'
 ```
 
-### Step 6: Get Help When You Need It
+### Step 8: Get Help When You Need It
 
 The built-in "Help & Credits" page provides a quick-start guide, code examples, and acknowledges the open-source projects that make this application possible.
 
