@@ -81,19 +81,20 @@ Log in with the secure credentials you created during setup.
 
 Your new mission control. Instantly see system health, active models, server status, and live rate-limit queues, all updating automatically.
 
-*[GIF showcasing the new dashboard with its auto-updating System Status, Load Balancer health (servers going online/offline), and Rate Limit Queue progress bars filling up.]*
+![Dashboard](assets/DashBoard.gif)
 
 ### Step 3: Choose Your Look: The Theming Engine
 
 Navigate to the Settings page and instantly transform the entire UI. Pick a style that matches your mood or your desktop setup.
 
-*[GIF rapidly cycling through various themes like Cyberpunk, Retro Terminal, Material Flat, Brutalism, and Aurora to show off the dramatic visual changes.]*
+
+![Theming](assets/theming.gif)
 
 ### Step 4: Manage Users & Drill Down into Analytics
 
 The User Management page gives you a sortable, high-level overview. From here, click "View Usage" to dive into a dedicated analytics page for any specific user.
 
-*[Image showing the user list with the "View Usage" button, perhaps with an arrow pointing to the new user-specific statistics page with its own set of charts.]*
+![User edit](assets/user_edit.gif)
 
 ### Step 5: Master Your Analytics
 
