@@ -17,12 +17,9 @@ async def get_user_by_id(db: AsyncSession, user_id: int) -> User | None:
     return result.scalars().first()
 
 
-async def get_users(db: AsyncSession, skip: int = 0, limit: int = 100) -> list:
+async def get_users(db: AsyncSession, skip: int = 0, limit: int = 100, sort_by: str = "username", sort_order: str = "asc") -> list:
     """
-    Retrieves a list of users along with their statistics:
-    - key_count: The number of API keys associated with the user.
-    - request_count: The total number of requests made with the user's keys.
-    - last_used: The timestamp of the most recent request.
+    Retrieves a list of users along with their statistics, with sorting.
     """
     # Subquery to find the last usage time for each user
     last_used_subq = (
@@ -35,8 +32,8 @@ async def get_users(db: AsyncSession, skip: int = 0, limit: int = 100) -> list:
         .subquery()
     )
 
-    # Main query to aggregate stats for each user
-    stmt = (
+    # Main query components
+    stmt_base = (
         select(
             User.id,
             User.username,
@@ -54,10 +51,23 @@ async def get_users(db: AsyncSession, skip: int = 0, limit: int = 100) -> list:
             User.is_admin,
             last_used_subq.c.last_used
         )
-        .order_by(User.username)
-        .offset(skip)
-        .limit(limit)
     )
+
+    # Sorting logic
+    sort_column_map = {
+        "username": User.username,
+        "key_count": func.count(func.distinct(APIKey.id)),
+        "request_count": func.count(UsageLog.id),
+        "last_used": last_used_subq.c.last_used
+    }
+    sort_column = sort_column_map.get(sort_by, User.username)
+
+    if sort_order.lower() == "desc":
+        order_modifier = sort_column.desc().nullslast()
+    else:
+        order_modifier = sort_column.asc().nullsfirst()
+
+    stmt = stmt_base.order_by(order_modifier).offset(skip).limit(limit)
 
     result = await db.execute(stmt)
     return result.all()

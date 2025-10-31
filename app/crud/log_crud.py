@@ -127,3 +127,75 @@ async def get_model_usage_stats(db: AsyncSession):
     )
     result = await db.execute(stmt)
     return result.all()
+
+# --- NEW USER-SPECIFIC STATISTICS FUNCTIONS ---
+
+async def get_daily_usage_stats_for_user(db: AsyncSession, user_id: int, days: int = 30):
+    """Returns total requests per day for the last N days for a specific user."""
+    start_date = datetime.datetime.utcnow() - datetime.timedelta(days=days)
+    date_column = func.date(UsageLog.request_timestamp, type_=Date).label("date")
+    
+    stmt = (
+        select(
+            date_column,
+            func.count(UsageLog.id).label("request_count")
+        )
+        .join(APIKey, UsageLog.api_key_id == APIKey.id)
+        .filter(APIKey.user_id == user_id)
+        .filter(UsageLog.request_timestamp >= start_date)
+        .group_by(date_column)
+        .order_by(date_column.asc())
+    )
+    result = await db.execute(stmt)
+    return result.all()
+
+async def get_hourly_usage_stats_for_user(db: AsyncSession, user_id: int):
+    """Returns total requests aggregated by the hour for a specific user."""
+    hour_extract = func.strftime('%H', UsageLog.request_timestamp)
+    
+    stmt = (
+        select(
+            hour_extract.label("hour"),
+            func.count(UsageLog.id).label("request_count")
+        )
+        .join(APIKey, UsageLog.api_key_id == APIKey.id)
+        .filter(APIKey.user_id == user_id)
+        .group_by("hour")
+        .order_by("hour")
+    )
+    result = await db.execute(stmt)
+    stats_dict = {row.hour: row.request_count for row in result.all()}
+    return [{"hour": f"{h:02d}:00", "request_count": stats_dict.get(f"{h:02d}", 0)} for h in range(24)]
+
+async def get_server_load_stats_for_user(db: AsyncSession, user_id: int):
+    """Returns total requests per backend server for a specific user."""
+    stmt = (
+        select(
+            OllamaServer.name.label("server_name"),
+            func.count(UsageLog.id).label("request_count")
+        )
+        .select_from(UsageLog)
+        .join(APIKey, UsageLog.api_key_id == APIKey.id)
+        .outerjoin(OllamaServer, UsageLog.server_id == OllamaServer.id)
+        .filter(APIKey.user_id == user_id)
+        .group_by(OllamaServer.name)
+        .order_by(func.count(UsageLog.id).desc())
+    )
+    result = await db.execute(stmt)
+    return result.all()
+
+async def get_model_usage_stats_for_user(db: AsyncSession, user_id: int):
+    """Returns total requests per model for a specific user."""
+    stmt = (
+        select(
+            UsageLog.model.label("model_name"),
+            func.count(UsageLog.id).label("request_count")
+        )
+        .join(APIKey, UsageLog.api_key_id == APIKey.id)
+        .filter(APIKey.user_id == user_id)
+        .filter(UsageLog.model.isnot(None))
+        .group_by(UsageLog.model)
+        .order_by(func.count(UsageLog.id).desc())
+    )
+    result = await db.execute(stmt)
+    return result.all()

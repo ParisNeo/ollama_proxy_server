@@ -1,41 +1,45 @@
 {% extends "admin/base.html" %}
 
 {% block title %}Manage User: {{ user.username }}{% endblock %}
+{% block header_title %}User Details{% endblock %}
 
 {% block content %}
 <div class="space-y-8">
-    <a href="{{ url_for('admin_dashboard') }}" class="text-[var(--color-primary-500)] hover:text-[var(--color-primary-700)] mb-4 inline-block">&larr; Back to Dashboard</a>
-    
-    {% include 'partials/_flash_messages.html' %}
-    
-    <div class="card-style">
-        <div class="flex justify-between items-center mb-4">
-            <h2 class="text-2xl font-bold">User: <span class="text-[var(--color-primary-500)]">{{ user.username }}</span></h2>
-            {% if not user.is_admin %}
-            <form action="{{ url_for('delete_user_account', user_id=user.id) }}" method="post" onsubmit="return confirm('Are you sure? This will delete the user and all their API keys.');">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                <button type="submit" class="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700">Delete User</button>
-            </form>
-            {% endif %}
-        </div>
+    <div class="flex justify-between items-center">
+        <a href="{{ url_for('admin_users') }}" class="text-[var(--color-primary-500)] hover:text-[var(--color-primary-700)]">&larr; Back to User Management</a>
     </div>
-
+    
     <div class="card-style">
-        <h3 class="card-header text-xl font-bold mb-4 pb-2">Create New API Key</h3>
+        <div class="flex flex-wrap gap-4 justify-between items-center mb-4 pb-2 border-b border-white/10">
+            <h2 class="text-2xl font-bold">User: <span class="text-[var(--color-primary-500)]">{{ user.username }}</span></h2>
+            <div class="flex items-center gap-4">
+                <a href="{{ url_for('admin_user_stats', user_id=user.id) }}" class="justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-green-600 hover:bg-green-700">
+                    View Usage
+                </a>
+                {% if not user.is_admin %}
+                <form action="{{ url_for('delete_user_account', user_id=user.id) }}" method="post" onsubmit="return confirm('Are you sure? This will delete the user and all their API keys.');" class="m-0">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                    <button type="submit" class="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700">Delete User</button>
+                </form>
+                {% endif %}
+            </div>
+        </div>
+        
+        <h3 class="text-xl font-bold mb-4">Create New API Key</h3>
         <form action="{{ url_for('admin_create_key', user_id=user.id) }}" method="post">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
                 <div class="md:col-span-2">
                     <label for="key_name" class="block text-sm font-medium text-current">Key Name (e.g., "My App")</label>
-                    <input type="text" name="key_name" id="key_name" required class="mt-1 block w-full px-3 py-2 bg-white/10 border border-white/20 rounded-md shadow-sm text-current focus:outline-none focus:ring-[var(--color-primary-500)] focus:border-[var(--color-primary-500)] sm:text-sm">
+                    <input type="text" name="key_name" id="key_name" required class="mt-1 block w-full px-3 py-2 rounded-md shadow-sm focus:outline-none focus:ring-[var(--color-primary-500)] focus:border-[var(--color-primary-500)] sm:text-sm">
                 </div>
                 <div class="{% if not is_redis_connected %}opacity-50{% endif %}">
                     <label for="rate_limit_requests" class="block text-sm font-medium text-current">Rate Limit Requests</label>
-                    <input type="number" name="rate_limit_requests" id="rate_limit_requests" placeholder="e.g., 100" min="0" class="mt-1 block w-full px-3 py-2 bg-white/10 border border-white/20 rounded-md shadow-sm text-current focus:outline-none focus:ring-[var(--color-primary-500)] focus:border-[var(--color-primary-500)] sm:text-sm {% if not is_redis_connected %}cursor-not-allowed{% endif %}" {% if not is_redis_connected %}disabled{% endif %}>
+                    <input type="number" name="rate_limit_requests" id="rate_limit_requests" placeholder="e.g., 100" min="0" class="mt-1 block w-full px-3 py-2 rounded-md shadow-sm focus:outline-none focus:ring-[var(--color-primary-500)] focus:border-[var(--color-primary-500)] sm:text-sm {% if not is_redis_connected %}cursor-not-allowed{% endif %}" {% if not is_redis_connected %}disabled{% endif %}>
                 </div>
                 <div class="{% if not is_redis_connected %}opacity-50{% endif %}">
                     <label for="rate_limit_window_minutes" class="block text-sm font-medium text-current">Window (Minutes)</label>
-                    <input type="number" name="rate_limit_window_minutes" id="rate_limit_window_minutes" placeholder="e.g., 1" min="0" class="mt-1 block w-full px-3 py-2 bg-white/10 border border-white/20 rounded-md shadow-sm text-current focus:outline-none focus:ring-[var(--color-primary-500)] focus:border-[var(--color-primary-500)] sm:text-sm {% if not is_redis_connected %}cursor-not-allowed{% endif %}" {% if not is_redis_connected %}disabled{% endif %}>
+                    <input type="number" name="rate_limit_window_minutes" id="rate_limit_window_minutes" placeholder="e.g., 1" min="0" class="mt-1 block w-full px-3 py-2 rounded-md shadow-sm focus:outline-none focus:ring-[var(--color-primary-500)] focus:border-[var(--color-primary-500)] sm:text-sm {% if not is_redis_connected %}cursor-not-allowed{% endif %}" {% if not is_redis_connected %}disabled{% endif %}>
                 </div>
             </div>
             <div class="mt-4">

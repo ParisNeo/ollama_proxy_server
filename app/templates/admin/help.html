@@ -4,49 +4,75 @@
 {% block header_title %}Help & Credits{% endblock %}
 
 {% block content %}
-<div class="max-w-4xl mx-auto space-y-8">
+<style>
+    .toc-link {
+        display: block;
+        padding: 0.5rem 1rem;
+        border-radius: 0.375rem;
+        transition: all 0.2s ease-in-out;
+        border-left: 3px solid transparent;
+    }
+    .toc-link:hover {
+        background-color: rgba(128, 128, 128, 0.1);
+        padding-left: 1.25rem;
+    }
+    .toc-link.active-toc {
+        color: var(--color-primary-500);
+        font-weight: 600;
+        border-left-color: var(--color-primary-500);
+    }
+    .ui-brutalism .toc-link.active-toc {
+        background-color: var(--color-primary-500);
+        color: white;
+        border: 3px solid black;
+    }
+</style>
 
-    <!-- Getting Started Workflow -->
-    <div class="card-style">
-        <h2 class="card-header text-2xl font-bold mb-4 pb-2">Getting Started: Your Workflow</h2>
-        <div class="space-y-4 text-current">
-            <ol class="list-decimal list-inside space-y-3">
-                <li>
-                    <strong>Configure Servers:</strong> Go to the <a href="{{ url_for('admin_servers') }}" class="text-[var(--color-primary-600)] hover:underline">Server Management</a> page and add the URLs of all your Ollama instances.
-                </li>
-                <li>
-                    <strong>Create a User:</strong> Navigate to the <a href="{{ url_for('admin_users') }}" class="text-[var(--color-primary-600)] hover:underline">User Management</a> page. This is where you'll create and manage all users.
-                </li>
-                <li>
-                    <strong>Generate an API Key:</strong> From the user list, click "Manage Keys" for a specific user. On their details page, you can generate new keys and set optional rate limits.
-                </li>
-                <li>
-                    <strong>Copy the Key:</strong> The full API key is shown only once upon creation. Copy it and store it securely.
-                </li>
-                <li>
-                    <strong>Use the Key:</strong> In your applications, replace your Ollama URL with the proxy's URL (e.g., `http://127.0.0.1:8080`) and provide the API key in the `Authorization` header as a Bearer token.
-                </li>
-            </ol>
+<div class="flex flex-col lg:flex-row gap-12">
+
+    <!-- Main Content -->
+    <div class="w-full lg:w-3/4 space-y-12">
+
+        <!-- Getting Started Workflow -->
+        <div id="getting-started" class="card-style scroll-mt-20">
+            <h2 class="card-header text-2xl font-bold mb-6 pb-2">🚀 Getting Started: Your Workflow</h2>
+            <div class="space-y-4 text-current">
+                <ol class="list-decimal list-inside space-y-4">
+                    <li>
+                        <strong>Configure Servers:</strong> Go to the <a href="{{ url_for('admin_servers') }}" class="font-semibold text-[var(--color-primary-600)] hover:underline">Server Management</a> page and add the URLs of all your Ollama instances.
+                    </li>
+                    <li>
+                        <strong>Create a User:</strong> Navigate to the <a href="{{ url_for('admin_users') }}" class="font-semibold text-[var(--color-primary-600)] hover:underline">User Management</a> page. This is where you'll create and manage all users.
+                    </li>
+                    <li>
+                        <strong>Generate an API Key:</strong> From the user list, click "Manage Keys" for a specific user. On their details page, you can generate new keys and set optional rate limits.
+                    </li>
+                    <li>
+                        <strong>Copy the Key:</strong> The full API key is shown only once upon creation. Copy it and store it securely.
+                    </li>
+                    <li>
+                        <strong>Use the Key:</strong> In your applications, replace your Ollama URL with the proxy's URL (e.g., `http://127.0.0.1:8080`) and provide the API key in the `Authorization` header as a Bearer token.
+                    </li>
+                </ol>
+            </div>
         </div>
-    </div>
 
-    <!-- Dashboard Section -->
-    <div class="card-style">
-        <h2 class="card-header text-2xl font-bold mb-4 pb-2">The Dashboard: Your Monitoring Hub</h2>
-        <div class="space-y-4 text-current">
-            <p>The main dashboard provides a real-time overview of your proxy server and connected Ollama instances.</p>
-            <ul class="list-disc list-inside space-y-2 pl-4">
-                <li><strong>System Status:</strong> These gauges show the live CPU, Memory, and Disk usage of the machine running the proxy server. This helps you monitor server health at a glance.</li>
-                <li><strong>Active Ollama Models:</strong> This table shows all models that are currently loaded into memory on your backend Ollama servers (equivalent to running `ollama ps`). It includes details like which server is running the model, its size, context length, and when it will expire from memory.</li>
-            </ul>
+        <!-- Dashboard Section -->
+        <div id="dashboard" class="card-style scroll-mt-20">
+            <h2 class="card-header text-2xl font-bold mb-6 pb-2">🖥️ The Dashboard: Your Monitoring Hub</h2>
+            <div class="space-y-4 text-current">
+                <p>The main dashboard provides a real-time overview of your proxy server and connected Ollama instances.</p>
+                <ul class="list-disc list-inside space-y-3 pl-4">
+                    <li><strong>System Status:</strong> These gauges show the live CPU, Memory, and Disk usage of the machine running the proxy server. This helps you monitor server health at a glance.</li>
+                    <li><strong>Active Ollama Models:</strong> This table shows all models that are currently loaded into memory on your backend Ollama servers (equivalent to running `ollama ps`). It includes details like which server is running the model, its size, context length, and when it will expire from memory.</li>
+                </ul>
+            </div>
         </div>
-    </div>
 
-    <!-- Core Concepts Section -->
-    <div class="card-style">
-        <h2 class="card-header text-2xl font-bold mb-4 pb-2">Core Concepts</h2>
-        <div class="space-y-4 text-current">
-            <div class="space-y-4">
+        <!-- Core Concepts Section -->
+        <div id="concepts" class="card-style scroll-mt-20">
+            <h2 class="card-header text-2xl font-bold mb-6 pb-2">💡 Core Concepts</h2>
+            <div class="space-y-6 text-current">
                 <div>
                     <h4 class="font-semibold text-lg">🛡️ API Key Authentication</h4>
                     <p>Every request to the proxy must include a valid API key. This is the primary security feature, preventing unauthorized access to your models.</p>
@@ -58,7 +84,7 @@
                 <div>
                     <h4 class="font-semibold text-lg">🧠 Smart Model Routing</h4>
                     <p>When you request a specific model (e.g., <code class="inline-code">"llama3"</code>), the proxy is intelligent. It first looks up which of your backend servers have that model available and only routes the request to one of them. This ensures your request never fails because it was sent to a server without the right model.</p>
-                    <div class="mt-2 p-3 rounded-md text-sm info-box">
+                    <div class="mt-3 p-3 rounded-md text-sm info-box">
                         <strong>Important:</strong> For Smart Routing to work, you must periodically click the <strong>"Refresh Models"</strong> button on the <a href="{{ url_for('admin_servers') }}" class="font-semibold underline">Server Management</a> page. This keeps the proxy's catalog of available models up to date.
                     </div>
                 </div>
@@ -68,17 +94,14 @@
                 </div>
             </div>
         </div>
-    </div>
-        
-    <!-- Usage Examples Section -->
-    <div class="card-style">
-        <h2 class="card-header text-2xl font-bold mb-4 pb-2">Usage Examples</h2>
-        
-        <!-- Example 1: cURL -->
-        <div class="mb-6">
-            <h3 class="text-xl font-semibold mb-2">cURL</h3>
-            <div class="code-block-wrapper">
-                <pre><code class="language-bash">
+            
+        <!-- Usage Examples Section -->
+        <div id="examples" class="card-style scroll-mt-20">
+            <h2 class="card-header text-2xl font-bold mb-6 pb-2">👨‍💻 Usage Examples</h2>
+            <div class="mb-6">
+                <h3 class="text-xl font-semibold mb-2">cURL</h3>
+                <div class="code-block-wrapper">
+                    <pre><code class="language-bash">
 curl http://127.0.0.1:8080/api/generate \
   -H "Authorization: Bearer op_prefix_secret" \
   -H "Content-Type: application/json" \
@@ -87,96 +110,116 @@ curl http://127.0.0.1:8080/api/generate \
     "prompt": "Why is the sky blue?",
     "stream": false
   }'</code></pre>
-                <button class="copy-button">Copy</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Redis Setup Guide -->
-    <div id="redis-setup" class="card-style scroll-mt-20">
-        <h2 class="card-header text-2xl font-bold mb-4 pb-2">Redis Setup Guide</h2>
-        <div class="space-y-6 text-current">
-            <div>
-                <h3 class="text-xl font-semibold mb-2">Why Do I Need Redis?</h3>
-                <p>Redis is an in-memory database that is extremely fast. This application uses it for two optional but important security features:</p>
-                <ul class="list-disc list-inside space-y-1 mt-2 pl-4">
-                    <li><strong>API Rate Limiting:</strong> Prevents abuse by limiting the number of requests a single API key can make in a given time frame.</li>
-                    <li><strong>Brute-Force Protection:</strong> Temporarily locks an IP address after too many failed login attempts to the admin panel.</li>
-                </ul>
-                <div class="mt-3 p-3 rounded-md text-sm warning-box">
-                    <strong>Note:</strong> The proxy will work perfectly without Redis, but these security features will be disabled.
+                    <button class="copy-button">Copy</button>
                 </div>
             </div>
+        </div>
 
-            <div>
-                <h3 class="text-xl font-semibold mb-2">Installation</h3>
-                <p class="mb-3">The easiest way to run Redis on any platform is with Docker. If you don't use Docker, choose your OS below.</p>
-                <div class="space-y-4">
-                    <div>
-                        <h4 class="font-semibold text-lg">Docker (Recommended)</h4>
-                        <p>This single command will download and run a Redis container that restarts automatically.</p>
-                        <div class="code-block-wrapper mt-2">
-                            <pre><code class="language-bash">docker run -d --name redis-stack -p 6379:6379 --restart always redis/redis-stack:latest</code></pre>
-                             <button class="copy-button">Copy</button>
-                        </div>
+        <!-- Redis Setup Guide -->
+        <div id="redis-setup" class="card-style scroll-mt-20">
+            <h2 class="card-header text-2xl font-bold mb-6 pb-2">⚡ Redis Setup Guide</h2>
+            <div class="space-y-6 text-current">
+                <div>
+                    <h3 class="text-xl font-semibold mb-2">Why Do I Need Redis?</h3>
+                    <p>Redis is an in-memory database that is extremely fast. This application uses it for two optional but important security features:</p>
+                    <ul class="list-disc list-inside space-y-2 mt-2 pl-4">
+                        <li><strong>API Rate Limiting:</strong> Prevents abuse by limiting the number of requests a single API key can make in a given time frame.</li>
+                        <li><strong>Brute-Force Protection:</strong> Temporarily locks an IP address after too many failed login attempts to the admin panel.</li>
+                    </ul>
+                    <div class="mt-4 p-3 rounded-md text-sm warning-box">
+                        <strong>Note:</strong> The proxy will work perfectly without Redis, but these security features will be disabled.
                     </div>
-                    <div>
-                        <h4 class="font-semibold text-lg">Windows (via WSL 2)</h4>
-                        <p>Redis is not officially supported on Windows, but it runs perfectly under the Windows Subsystem for Linux (WSL).</p>
-                        <ol class="list-decimal list-inside space-y-2 mt-2 pl-4">
-                            <li>Open PowerShell as an Administrator and run: <code class="inline-code">wsl --install</code></li>
-                            <li>After it's done, open your new Linux terminal (e.g., Ubuntu) and run:</li>
-                        </ol>
-                        <div class="code-block-wrapper mt-2">
-                            <pre><code class="language-bash">sudo apt update && sudo apt upgrade
+                </div>
+
+                <div>
+                    <h3 class="text-xl font-semibold mb-2">Installation</h3>
+                    <p class="mb-4">The easiest way to run Redis on any platform is with Docker. If you don't use Docker, choose your OS below.</p>
+                    <div class="space-y-6">
+                        <div>
+                            <h4 class="font-semibold text-lg">🐳 Docker (Recommended)</h4>
+                            <p>This single command will download and run a Redis container that restarts automatically.</p>
+                            <div class="code-block-wrapper mt-2">
+                                <pre><code class="language-bash">docker run -d --name redis-stack -p 6379:6379 --restart always redis/redis-stack:latest</code></pre>
+                                 <button class="copy-button">Copy</button>
+                            </div>
+                        </div>
+                        <div>
+                            <h4 class="font-semibold text-lg">🐧 Windows (via WSL 2)</h4>
+                            <p>Redis is not officially supported on Windows, but it runs perfectly under the Windows Subsystem for Linux (WSL).</p>
+                            <ol class="list-decimal list-inside space-y-2 mt-2 pl-4">
+                                <li>Open PowerShell as an Administrator and run: <code class="inline-code">wsl --install</code></li>
+                                <li>After it's done, open your new Linux terminal (e.g., Ubuntu) and run:</li>
+                            </ol>
+                            <div class="code-block-wrapper mt-2">
+                                <pre><code class="language-bash">sudo apt update && sudo apt upgrade
 sudo apt install redis-server
 sudo service redis-server start</code></pre>
-                            <button class="copy-button">Copy</button>
+                                <button class="copy-button">Copy</button>
+                            </div>
                         </div>
-                    </div>
-                     <div>
-                        <h4 class="font-semibold text-lg">macOS (via Homebrew)</h4>
-                        <div class="code-block-wrapper mt-2">
-                            <pre><code class="language-bash">brew install redis
+                         <div>
+                            <h4 class="font-semibold text-lg">🍏 macOS (via Homebrew)</h4>
+                            <div class="code-block-wrapper mt-2">
+                                <pre><code class="language-bash">brew install redis
 brew services start redis</code></pre>
-                            <button class="copy-button">Copy</button>
+                                <button class="copy-button">Copy</button>
+                            </div>
                         </div>
-                    </div>
-                     <div>
-                        <h4 class="font-semibold text-lg">Linux (Ubuntu/Debian)</h4>
-                        <div class="code-block-wrapper mt-2">
-                            <pre><code class="language-bash">sudo apt-get install redis-server
+                         <div>
+                            <h4 class="font-semibold text-lg">🐧 Linux (Ubuntu/Debian)</h4>
+                            <div class="code-block-wrapper mt-2">
+                                <pre><code class="language-bash">sudo apt-get install redis-server
 sudo systemctl enable --now redis-server</code></pre>
-                             <button class="copy-button">Copy</button>
+                                 <button class="copy-button">Copy</button>
+                            </div>
                         </div>
                     </div>
                 </div>
-            </div>
-            
-             <div>
-                <h3 class="text-xl font-semibold mb-2">Configuration</h3>
-                <p>Once Redis is running, go to the <a href="{{ url_for('admin_settings') }}" class="text-[var(--color-primary-600)] hover:underline">Settings</a> page in the admin UI and enter your Redis connection details (the defaults are usually fine for a local install). Save the settings, and the proxy will attempt to connect automatically.</p>
+                
+                 <div>
+                    <h3 class="text-xl font-semibold mb-2">Configuration</h3>
+                    <p>Once Redis is running, go to the <a href="{{ url_for('admin_settings') }}" class="font-semibold text-[var(--color-primary-600)] hover:underline">Settings</a> page in the admin UI and enter your Redis connection details (the defaults are usually fine for a local install). Save the settings, and the proxy will attempt to connect automatically.</p>
+                </div>
             </div>
         </div>
-    </div>
-    
-    <!-- Credits Section -->
-    <div class="card-style">
-        <h2 class="card-header text-2xl font-bold mb-4 pb-2">Credits & Acknowledgements</h2>
-        <div class="space-y-4 text-current">
-            <p>This application was developed with passion by the open-source community. It stands on the shoulders of giants and wouldn't be possible without the following incredible projects:</p>
-            <ul class="list-disc list-inside space-y-2 pl-4">
-                <li><strong><a href="https://fastapi.tiangolo.com/" target="_blank" class="text-[var(--color-primary-600)] hover:underline">FastAPI</a></strong>, <strong><a href="https://www.sqlalchemy.org/" target="_blank" class="text-[var(--color-primary-600)] hover:underline">SQLAlchemy</a></strong>, <strong><a href="https://jinja.palletsprojects.com/" target="_blank" class="text-[var(--color-primary-600)] hover:underline">Jinja2</a></strong>, <strong><a href="https://www.chartjs.org/" target="_blank" class="text-[var(--color-primary-600)] hover:underline">Chart.js</a></strong>, and <strong><a href="https://tailwindcss.com/" target="_blank" class="text-[var(--color-primary-600)] hover:underline">Tailwind CSS</a></strong>.</li>
-            </ul>
-            <p class="pt-4">Project built and maintained by <strong>ParisNeo</strong> with help from AI and Cool developers (check the contributors list in the github page).</p>
-            <p>Visit the project on <a href="https://github.com/ParisNeo/ollama_proxy_server" target="_blank" class="text-[var(--color-primary-600)] hover:underline">GitHub</a> to contribute, report issues, or star the repository!</p>
+        
+        <!-- Credits Section -->
+        <div id="credits" class="card-style scroll-mt-20">
+            <h2 class="card-header text-2xl font-bold mb-6 pb-2">💖 Credits & Acknowledgements</h2>
+            <div class="space-y-4 text-current">
+                <p>This application was developed with passion by the open-source community. It stands on the shoulders of giants and wouldn't be possible without the following incredible projects:</p>
+                <ul class="list-disc list-inside space-y-2 pl-4">
+                    <li><strong><a href="https://fastapi.tiangolo.com/" target="_blank" class="font-semibold text-[var(--color-primary-600)] hover:underline">FastAPI</a></strong>, <strong><a href="https://www.sqlalchemy.org/" target="_blank" class="font-semibold text-[var(--color-primary-600)] hover:underline">SQLAlchemy</a></strong>, <strong><a href="https://jinja.palletsprojects.com/" target="_blank" class="font-semibold text-[var(--color-primary-600)] hover:underline">Jinja2</a></strong>, <strong><a href="https://www.chartjs.org/" target="_blank" class="font-semibold text-[var(--color-primary-600)] hover:underline">Chart.js</a></strong>, and <strong><a href="https://tailwindcss.com/" target="_blank" class="font-semibold text-[var(--color-primary-600)] hover:underline">Tailwind CSS</a></strong>.</li>
+                </ul>
+                <p class="pt-4">Project built and maintained by <strong>ParisNeo</strong> with help from AI and cool developers (check the contributors list in the github page).</p>
+                <p>Visit the project on <a href="https://github.com/ParisNeo/ollama_proxy_server" target="_blank" class="font-semibold text-[var(--color-primary-600)] hover:underline">GitHub</a> to contribute, report issues, or star the repository!</p>
+            </div>
         </div>
     </div>
 
+    <!-- Sticky Table of Contents -->
+    <div class="w-full lg:w-1/4">
+        <div class="sticky top-10">
+            <div class="card-style">
+                <h3 class="card-header text-lg font-bold mb-4">On this page</h3>
+                <nav>
+                    <ul class="space-y-2">
+                        <li><a href="#getting-started" class="toc-link">Getting Started</a></li>
+                        <li><a href="#dashboard" class="toc-link">The Dashboard</a></li>
+                        <li><a href="#concepts" class="toc-link">Core Concepts</a></li>
+                        <li><a href="#examples" class="toc-link">Usage Examples</a></li>
+                        <li><a href="#redis-setup" class="toc-link">Redis Setup</a></li>
+                        <li><a href="#credits" class="toc-link">Credits</a></li>
+                    </ul>
+                </nav>
+            </div>
+        </div>
+    </div>
 </div>
 
 <script>
 document.addEventListener('DOMContentLoaded', () => {
+    // Copy button logic
     document.querySelectorAll('.copy-button').forEach(button => {
         button.addEventListener('click', () => {
             const codeBlock = button.previousElementSibling.querySelector('code');
@@ -192,6 +235,35 @@ document.addEventListener('DOMContentLoaded', () => {
                 console.error('Failed to copy text: ', err);
             });
         });
+    });
+
+    // Table of Contents scroll-spy logic
+    const sections = document.querySelectorAll('div[id]');
+    const tocLinks = document.querySelectorAll('.toc-link');
+
+    const observer = new IntersectionObserver((entries) => {
+        let visibleSectionId = null;
+        entries.forEach(entry => {
+            if (entry.isIntersecting && (!visibleSectionId || entry.intersectionRatio > 0.5)) {
+                visibleSectionId = entry.target.getAttribute('id');
+            }
+        });
+
+        if (visibleSectionId) {
+             tocLinks.forEach(link => {
+                link.classList.remove('active-toc');
+                if (link.getAttribute('href') === `#${visibleSectionId}`) {
+                    link.classList.add('active-toc');
+                }
+            });
+        }
+    }, {
+        rootMargin: '-20% 0px -70% 0px',
+        threshold: [0, 0.5, 1]
+    });
+
+    sections.forEach(section => {
+        observer.observe(section);
     });
 });
 </script>

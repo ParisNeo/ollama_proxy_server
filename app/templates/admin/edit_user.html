@@ -5,7 +5,12 @@
 
 {% block content %}
 <div class="max-w-2xl mx-auto space-y-8">
-    <a href="{{ url_for('admin_users') }}" class="text-[var(--color-primary-500)] hover:text-[var(--color-primary-700)] mb-4 inline-block">&larr; Back to User Management</a>
+    <div class="flex justify-between items-center">
+        <a href="{{ url_for('admin_users') }}" class="text-[var(--color-primary-500)] hover:text-[var(--color-primary-700)]">&larr; Back to User Management</a>
+        <a href="{{ url_for('admin_user_stats', user_id=user.id) }}" class="justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500">
+            View Usage Graphs
+        </a>
+    </div>
 
     <div class="card-style">
         <h2 class="card-header text-2xl font-bold mb-6 pb-2">Editing: <span class="text-[var(--color-primary-500)]">{{ user.username }}</span></h2>

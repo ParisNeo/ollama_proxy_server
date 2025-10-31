@@ -12,11 +12,30 @@
         <div>
             <h2 class="card-header text-xl font-bold mb-4 pb-2">Branding</h2>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div>
+                <div class="md:col-span-2">
                     <label for="branding_title" class="block text-sm font-medium text-current">Branding Title</label>
                     <input type="text" name="branding_title" id="branding_title" value="{{ settings.branding_title }}" class="mt-1 block w-full px-3 py-2 rounded-md shadow-sm focus:outline-none focus:ring-[var(--color-primary-500)] focus:border-[var(--color-primary-500)]">
                 </div>
-                <div>
+
+                {% if settings.branding_logo_url and 'uploads' in settings.branding_logo_url %}
+                <!-- VIEW 1: An image has been uploaded. Show preview and Remove button. -->
+                <div class="md:col-span-2">
+                    <label class="block text-sm font-medium text-current">Current Logo</label>
+                    <div class="mt-2 flex items-center gap-4 p-4 border border-dashed border-gray-500 rounded-md">
+                        <img src="{{ settings.branding_logo_url }}" alt="Current Logo" class="h-16 w-auto max-w-xs rounded-md bg-white/10 p-1">
+                        <div class="flex-grow">
+                            <p class="text-sm font-semibold">An uploaded logo is active.</p>
+                            <p class="text-xs text-gray-400">To replace it, first remove the current one and save.</p>
+                        </div>
+                        <button type="submit" name="remove_logo" value="true" class="flex items-center justify-center px-3 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-medium rounded-md">
+                            <svg class="w-5 h-5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                            Remove
+                        </button>
+                    </div>
+                </div>
+                {% else %}
+                <!-- VIEW 2: No uploaded image. Show URL and Upload fields. -->
+                <div class="md:col-span-2">
                     <label for="branding_logo_url" class="block text-sm font-medium text-current">Logo from URL</label>
                     <input type="url" name="branding_logo_url" id="branding_logo_url" value="{{ settings.branding_logo_url or '' }}" placeholder="https://example.com/logo.png" class="mt-1 block w-full px-3 py-2 rounded-md shadow-sm focus:outline-none focus:ring-[var(--color-primary-500)] focus:border-[var(--color-primary-500)]">
                 </div>
@@ -24,17 +43,6 @@
                     <label for="logo_file" class="block text-sm font-medium text-current">Or Upload Logo</label>
                     <input type="file" name="logo_file" id="logo_file" class="mt-1 block w-full text-sm rounded-md border border-gray-600 file:mr-4 file:py-2 file:px-4 file:rounded-l-md file:border-0 file:bg-[var(--color-primary-600)] file:text-white hover:file:bg-[var(--color-primary-700)]">
                     <p class="mt-1 text-xs text-gray-400">Max 2MB. Allowed types: PNG, JPG, GIF, SVG, WebP.</p>
-                </div>
-                {% if settings.branding_logo_url and 'uploads' in settings.branding_logo_url %}
-                <div class="md:col-span-2 flex items-center space-x-4">
-                    <div>
-                        <span class="block text-sm font-medium text-current">Current Logo:</span>
-                        <img src="{{ settings.branding_logo_url }}" alt="Current Logo" class="mt-2 h-12 w-auto max-w-xs rounded-md bg-white/10 p-1">
-                    </div>
-                    <div class="flex items-center pt-6">
-                        <input type="checkbox" id="remove_logo" name="remove_logo" class="h-4 w-4 rounded border-gray-500 text-[var(--color-primary-600)] focus:ring-[var(--color-primary-500)]">
-                        <label for="remove_logo" class="ml-2 block text-sm">Remove current logo</label>
-                    </div>
                 </div>
                 {% endif %}
             </div>
@@ -46,22 +54,62 @@
             <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
                 <div>
                     <label class="block text-sm font-medium text-current mb-2">UI Style</label>
-                    <div class="grid grid-cols-2 gap-4">
+                    <div class="grid grid-cols-2 md:grid-cols-3 gap-4">
                         <label class="flex items-center space-x-2 cursor-pointer">
-                            <input type="radio" name="ui_style" value="dark-glass" class="h-4 w-4 text-[var(--color-primary-600)] focus:ring-[var(--color-primary-500)] border-gray-500 bg-transparent" {% if settings.ui_style == 'dark-glass' %}checked{% endif %}>
+                            <input type="radio" name="ui_style" value="dark-glass" class="h-4 w-4 text-[var(--color-primary-600)]" {% if settings.ui_style == 'dark-glass' %}checked{% endif %}>
                             <span>Dark Glass</span>
                         </label>
                         <label class="flex items-center space-x-2 cursor-pointer">
-                            <input type="radio" name="ui_style" value="dark-flat" class="h-4 w-4 text-[var(--color-primary-600)] focus:ring-[var(--color-primary-500)] border-gray-500 bg-transparent" {% if settings.ui_style == 'dark-flat' %}checked{% endif %}>
+                            <input type="radio" name="ui_style" value="dark-flat" class="h-4 w-4 text-[var(--color-primary-600)]" {% if settings.ui_style == 'dark-flat' %}checked{% endif %}>
                             <span>Dark Flat</span>
                         </label>
+                         <label class="flex items-center space-x-2 cursor-pointer">
+                            <input type="radio" name="ui_style" value="black" class="h-4 w-4 text-[var(--color-primary-600)]" {% if settings.ui_style == 'black' %}checked{% endif %}>
+                            <span>Black</span>
+                        </label>
                         <label class="flex items-center space-x-2 cursor-pointer">
-                            <input type="radio" name="ui_style" value="light-glass" class="h-4 w-4 text-[var(--color-primary-600)] focus:ring-[var(--color-primary-500)] border-gray-500 bg-transparent" {% if settings.ui_style == 'light-glass' %}checked{% endif %}>
+                            <input type="radio" name="ui_style" value="light-glass" class="h-4 w-4 text-[var(--color-primary-600)]" {% if settings.ui_style == 'light-glass' %}checked{% endif %}>
                             <span>Light Glass</span>
                         </label>
                         <label class="flex items-center space-x-2 cursor-pointer">
-                            <input type="radio" name="ui_style" value="light-flat" class="h-4 w-4 text-[var(--color-primary-600)] focus:ring-[var(--color-primary-500)] border-gray-500 bg-transparent" {% if settings.ui_style == 'light-flat' %}checked{% endif %}>
+                            <input type="radio" name="ui_style" value="light-flat" class="h-4 w-4 text-[var(--color-primary-600)]" {% if settings.ui_style == 'light-flat' %}checked{% endif %}>
                             <span>Light Flat</span>
+                        </label>
+                         <label class="flex items-center space-x-2 cursor-pointer">
+                            <input type="radio" name="ui_style" value="white" class="h-4 w-4 text-[var(--color-primary-600)]" {% if settings.ui_style == 'white' %}checked{% endif %}>
+                            <span>White</span>
+                        </label>
+                        <label class="flex items-center space-x-2 cursor-pointer">
+                            <input type="radio" name="ui_style" value="aurora" class="h-4 w-4 text-[var(--color-primary-600)]" {% if settings.ui_style == 'aurora' %}checked{% endif %}>
+                            <span>Aurora</span>
+                        </label>
+                        <label class="flex items-center space-x-2 cursor-pointer">
+                            <input type="radio" name="ui_style" value="dark-neumorphic" class="h-4 w-4 text-[var(--color-primary-600)]" {% if settings.ui_style == 'dark-neumorphic' %}checked{% endif %}>
+                            <span>Dark Neumorphic</span>
+                        </label>
+                        <label class="flex items-center space-x-2 cursor-pointer">
+                            <input type="radio" name="ui_style" value="light-neumorphic" class="h-4 w-4 text-[var(--color-primary-600)]" {% if settings.ui_style == 'light-neumorphic' %}checked{% endif %}>
+                            <span>Light Neumorphic</span>
+                        </label>
+                        <label class="flex items-center space-x-2 cursor-pointer">
+                            <input type="radio" name="ui_style" value="brutalism" class="h-4 w-4 text-[var(--color-primary-600)]" {% if settings.ui_style == 'brutalism' %}checked{% endif %}>
+                            <span>Brutalism</span>
+                        </label>
+                        <label class="flex items-center space-x-2 cursor-pointer">
+                            <input type="radio" name="ui_style" value="retro-terminal" class="h-4 w-4 text-[var(--color-primary-600)]" {% if settings.ui_style == 'retro-terminal' %}checked{% endif %}>
+                            <span>Retro Terminal</span>
+                        </label>
+                        <label class="flex items-center space-x-2 cursor-pointer">
+                            <input type="radio" name="ui_style" value="cyberpunk" class="h-4 w-4 text-[var(--color-primary-600)]" {% if settings.ui_style == 'cyberpunk' %}checked{% endif %}>
+                            <span>Cyberpunk</span>
+                        </label>
+                         <label class="flex items-center space-x-2 cursor-pointer">
+                            <input type="radio" name="ui_style" value="material-flat" class="h-4 w-4 text-[var(--color-primary-600)]" {% if settings.ui_style == 'material-flat' %}checked{% endif %}>
+                            <span>Material Flat</span>
+                        </label>
+                         <label class="flex items-center space-x-2 cursor-pointer">
+                            <input type="radio" name="ui_style" value="ink" class="h-4 w-4 text-[var(--color-primary-600)]" {% if settings.ui_style == 'ink' %}checked{% endif %}>
+                            <span>Ink</span>
                         </label>
                     </div>
                 </div>
@@ -70,9 +118,9 @@
                     <div class="flex flex-wrap items-center gap-4">
                         {% for theme_name, theme_colors in themes.items() %}
                         <label class="flex items-center space-x-2 cursor-pointer">
-                            <input type="radio" name="selected_theme" value="{{ theme_name }}" class="h-4 w-4 text-[var(--color-primary-600)] focus:ring-[var(--color-primary-500)] border-gray-500 bg-transparent" {% if settings.selected_theme == theme_name %}checked{% endif %}>
+                            <input type="radio" name="selected_theme" value="{{ theme_name }}" class="h-4 w-4 text-[var(--color-primary-600)]" {% if settings.selected_theme == theme_name %}checked{% endif %}>
                             <div class="flex items-center space-x-1">
-                                <span class="w-5 h-5 rounded-full" style="background-color: {{ theme_colors['600'] }};"></span>
+                                <span class="w-5 h-5 rounded-full border border-gray-500" style="background-color: {{ theme_colors['600'] }};"></span>
                                 <span class="capitalize text-sm">{{ theme_name }}</span>
                             </div>
                         </label>
@@ -128,9 +176,9 @@
 
 
         <!-- Save Button -->
-        <div class="flex justify-end">
+        <div class="flex justify-end pt-4 border-t border-white/10 mt-8">
             <button type="submit" class="w-full md:w-auto justify-center py-2 px-6 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-[var(--color-primary-600)] hover:bg-[var(--color-primary-700)] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[var(--color-primary-500)]">
-                Save Settings
+                Save All Settings
             </button>
         </div>
     </form>

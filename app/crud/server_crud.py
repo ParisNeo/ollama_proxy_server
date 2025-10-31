@@ -184,3 +184,31 @@ async def refresh_all_server_models(db: AsyncSession) -> dict:
             })
 
     return results
+
+async def check_server_health(http_client: httpx.AsyncClient, server: OllamaServer) -> Dict[str, Any]:
+    """Performs a quick health check on a single Ollama server."""
+    try:
+        ping_url = server.url.rstrip('/')
+        response = await http_client.get(ping_url, timeout=3.0)
+        
+        if response.status_code == 200:
+            return {"server_id": server.id, "name": server.name, "url": server.url, "status": "Online", "reason": None}
+        else:
+            return {"server_id": server.id, "name": server.name, "url": server.url, "status": "Offline", "reason": f"Status {response.status_code}"}
+    
+    except httpx.RequestError as e:
+        logger.warning(f"Health check failed for server '{server.name}': {e}")
+        return {"server_id": server.id, "name": server.name, "url": server.url, "status": "Offline", "reason": str(e)}
+    except Exception as e:
+        logger.error(f"Unexpected error during health check for server '{server.name}': {e}")
+        return {"server_id": server.id, "name": server.name, "url": server.url, "status": "Offline", "reason": "Unexpected error"}
+
+async def check_all_servers_health(db: AsyncSession, http_client: httpx.AsyncClient) -> List[Dict[str, Any]]:
+    """Checks the health of all configured servers."""
+    servers = await get_servers(db)
+    if not servers:
+        return []
+
+    tasks = [check_server_health(http_client, server) for server in servers]
+    results = await asyncio.gather(*tasks)
+    return results

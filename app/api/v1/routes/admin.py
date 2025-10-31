@@ -1,6 +1,6 @@
 # app/api/v1/routes/admin.py
 import logging
-from typing import Union, Optional, List
+from typing import Union, Optional, List, Dict, Any
 import redis.asyncio as redis
 import psutil
 import shutil
@@ -63,6 +63,58 @@ def get_system_info():
             "percent": round((disk.used / disk.total) * 100, 2),
         },
     }
+
+# --- Helper for Redis Rate Limit Scan ---
+async def get_active_rate_limits(
+    redis_client: redis.Redis, 
+    db: AsyncSession, 
+    settings: AppSettingsModel
+) -> List[Dict[str, Any]]:
+    if not redis_client:
+        return []
+        
+    limits = []
+    # Use SCAN to avoid blocking the server.
+    async for key in redis_client.scan_iter("rate_limit:*"):
+        try:
+            pipe = redis_client.pipeline()
+            pipe.get(key)
+            pipe.ttl(key)
+            results = await pipe.execute()
+            count, ttl = results
+            
+            prefix = key.split(":", 1)[1]
+
+            # Fetch API key details from DB to get the specific rate limit
+            api_key = await apikey_crud.get_api_key_by_prefix(db, prefix=prefix)
+            
+            key_limit = settings.rate_limit_requests
+            key_window = settings.rate_limit_window_minutes
+
+            if api_key:
+                if api_key.rate_limit_requests is not None:
+                    key_limit = api_key.rate_limit_requests
+                if api_key.rate_limit_window_minutes is not None:
+                    key_window = api_key.rate_limit_window_minutes
+
+            if count is not None and ttl is not None:
+                limits.append({
+                    "prefix": prefix,
+                    "count": int(count),
+                    "ttl_seconds": int(ttl),
+                    "limit": key_limit,
+                    "window_minutes": key_window
+                })
+        except Exception as e:
+            logger.warning(f"Could not parse rate limit key {key}: {e}")
+            
+    # Sort by the percentage of the limit used
+    def sort_key(item):
+        if item['limit'] > 0:
+            return item['count'] / item['limit']
+        return 0
+        
+    return sorted(limits, key=sort_key, reverse=True)[:10]
 
 # --- Helper to add common context to all templates ---
 def get_template_context(request: Request) -> dict:
@@ -135,7 +187,7 @@ async def admin_dashboard(request: Request, db: AsyncSession = Depends(get_db), 
     context = get_template_context(request)
     return templates.TemplateResponse("admin/dashboard.html", context)
 
-# --- NEW API ENDPOINT FOR DYNAMIC DASHBOARD DATA ---
+# --- API ENDPOINT FOR DYNAMIC DASHBOARD DATA ---
 @router.get("/system-info", response_class=JSONResponse, name="admin_system_info")
 async def get_system_and_ollama_info(
     request: Request, 
@@ -143,20 +195,46 @@ async def get_system_and_ollama_info(
     admin_user: User = Depends(require_admin_user)
 ):
     http_client: httpx.AsyncClient = request.app.state.http_client
-    
+    redis_client: redis.Redis = request.app.state.redis
+    app_settings: AppSettingsModel = request.app.state.settings
+
     # Run blocking psutil calls in a threadpool to avoid blocking the event loop
     system_info_task = run_in_threadpool(get_system_info)
     
-    # Fetch ollama ps info concurrently
+    # Fetch ollama ps info, server health, and server load concurrently
     running_models_task = server_crud.get_ollama_ps_all_servers(db, http_client)
+    server_health_task = server_crud.check_all_servers_health(db, http_client)
+    server_load_task = log_crud.get_server_load_stats(db)
     
-    # Await both tasks
-    system_info, running_models = await asyncio.gather(
+    # Fetch rate limit info from Redis if available
+    rate_limit_task = get_active_rate_limits(redis_client, db, app_settings)
+    
+    # Await all tasks
+    (
+        system_info, 
+        running_models, 
+        server_health, 
+        server_load, 
+        rate_limits
+    ) = await asyncio.gather(
         system_info_task,
-        running_models_task
+        running_models_task,
+        server_health_task,
+        server_load_task,
+        rate_limit_task
     )
     
-    return {"system_info": system_info, "running_models": running_models}
+    # Combine server health and load data into a single structure
+    server_load_map = {row.server_name: row.request_count for row in server_load}
+    for server in server_health:
+        server["request_count"] = server_load_map.get(server["name"], 0)
+        
+    return {
+        "system_info": system_info, 
+        "running_models": running_models,
+        "load_balancer_status": server_health,
+        "queue_status": rate_limits
+    }
     
 @router.get("/stats", response_class=HTMLResponse, name="admin_stats")
 async def admin_stats(
@@ -246,10 +324,22 @@ async def admin_settings_post(
     current_settings: AppSettingsModel = request.app.state.settings
     form_data = await request.form()
     
-    final_logo_url = form_data.get("branding_logo_url")
+    final_logo_url = current_settings.branding_logo_url
+    is_uploaded_logo = final_logo_url and final_logo_url.startswith("/static/uploads/")
 
-    # --- Handle Logo Upload ---
-    if logo_file and logo_file.filename:
+    # --- Handle Logo Logic with Priority: Remove > Upload > URL ---
+
+    # 1. Check for Removal
+    if form_data.get("remove_logo"):
+        if is_uploaded_logo:
+            logo_to_remove = Path("app" + final_logo_url)
+            if logo_to_remove.exists():
+                os.remove(logo_to_remove)
+        final_logo_url = None
+        flash(request, "Logo removed successfully.", "success")
+
+    # 2. Check for New Upload (only if not removing)
+    elif logo_file and logo_file.filename:
         if logo_file.content_type not in ALLOWED_LOGO_TYPES:
             flash(request, f"Invalid logo file type. Allowed types: {', '.join(ALLOWED_LOGO_TYPES)}", "error")
             return RedirectResponse(url=request.url_for("admin_settings"), status_code=status.HTTP_303_SEE_OTHER)
@@ -261,18 +351,16 @@ async def admin_settings_post(
             flash(request, f"Logo file is too large. Maximum size is {MAX_LOGO_SIZE_MB}MB.", "error")
             return RedirectResponse(url=request.url_for("admin_settings"), status_code=status.HTTP_303_SEE_OTHER)
 
-        # Generate a secure filename
         file_ext = Path(logo_file.filename).suffix
         secure_filename = f"{secrets.token_hex(16)}{file_ext}"
         save_path = UPLOADS_DIR / secure_filename
         
-        # Save the file
         try:
             with open(save_path, "wb") as buffer:
                 shutil.copyfileobj(logo_file.file, buffer)
             
             # If there was an old uploaded logo, delete it
-            if current_settings.branding_logo_url and current_settings.branding_logo_url.startswith("/static/uploads/"):
+            if is_uploaded_logo:
                 old_logo_path = Path("app" + current_settings.branding_logo_url)
                 if old_logo_path.exists():
                     os.remove(old_logo_path)
@@ -285,13 +373,16 @@ async def admin_settings_post(
             flash(request, f"Error saving logo: {e}", "error")
             final_logo_url = current_settings.branding_logo_url
 
-    # Check if user wants to remove the logo
-    if form_data.get("remove_logo"):
-        if current_settings.branding_logo_url and current_settings.branding_logo_url.startswith("/static/uploads/"):
-            logo_to_remove = Path("app" + current_settings.branding_logo_url)
-            if logo_to_remove.exists():
-                os.remove(logo_to_remove)
-        final_logo_url = None
+    # 3. Handle URL Input (fallback if no removal or upload)
+    else:
+        new_url = form_data.get("branding_logo_url")
+        # If user cleared the URL field or provided a new one, and there was an old uploaded file, remove it.
+        if is_uploaded_logo and new_url != final_logo_url:
+             old_logo_path = Path("app" + final_logo_url)
+             if old_logo_path.exists():
+                 os.remove(old_logo_path)
+        final_logo_url = new_url
+
 
     # Get selected theme and style
     selected_theme = form_data.get("selected_theme", current_settings.selected_theme)
@@ -300,7 +391,12 @@ async def admin_settings_post(
         return RedirectResponse(url=request.url_for("admin_settings"), status_code=status.HTTP_303_SEE_OTHER)
 
     ui_style = form_data.get("ui_style", current_settings.ui_style)
-    if ui_style not in ["dark-glass", "dark-flat", "light-glass", "light-flat"]:
+    valid_styles = [
+        "dark-glass", "dark-flat", "light-glass", "light-flat", 
+        "aurora", "dark-neumorphic", "light-neumorphic", "brutalism",
+        "black", "white", "retro-terminal", "cyberpunk", "material-flat", "ink"
+    ]
+    if ui_style not in valid_styles:
         ui_style = "dark-glass"
     
     new_redis_password = form_data.get("redis_password")
@@ -327,19 +423,26 @@ async def admin_settings_post(
         logger.error(f"Invalid form data for settings: {e}")
         flash(request, "Error: Invalid data provided for a setting (e.g., a port number was not a number).", "error")
     except Exception as e:
-        logger.error(f"Failed to update settings: {e}")
-        flash(request, f"Error updating settings: {e}", "error")
+        logger.error(f"Failed to update settings: {e}", exc_info=True)
+        flash(request, "An unexpected error occurred while saving settings. Please check the server logs for details.", "error")
 
     return RedirectResponse(url=request.url_for("admin_settings"), status_code=status.HTTP_303_SEE_OTHER)
-
 
 # --- USER MANAGEMENT ROUTES ---
 
 @router.get("/users", response_class=HTMLResponse, name="admin_users")
-async def admin_user_management(request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
+async def admin_user_management(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    admin_user: User = Depends(require_admin_user),
+    sort_by: str = Query("username"),
+    sort_order: str = Query("asc"),
+):
     context = get_template_context(request)
-    context["users"] = await user_crud.get_users(db)
+    context["users"] = await user_crud.get_users(db, sort_by=sort_by, sort_order=sort_order)
     context["csrf_token"] = await get_csrf_token(request)
+    context["sort_by"] = sort_by
+    context["sort_order"] = sort_order
     return templates.TemplateResponse("admin/users.html", context)
 
 @router.post("/users", name="create_new_user", dependencies=[Depends(validate_csrf_token)])
@@ -394,6 +497,39 @@ async def get_user_details(request: Request, user_id: int, db: AsyncSession = De
     context["api_keys"] = await apikey_crud.get_api_keys_for_user(db, user_id=user_id)
     context["csrf_token"] = await get_csrf_token(request)
     return templates.TemplateResponse("admin/user_details.html", context)
+
+@router.get("/users/{user_id}/stats", response_class=HTMLResponse, name="admin_user_stats")
+async def admin_user_stats(
+    request: Request,
+    user_id: int,
+    db: AsyncSession = Depends(get_db),
+    admin_user: User = Depends(require_admin_user),
+):
+    user = await user_crud.get_user_by_id(db, user_id=user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+        
+    context = get_template_context(request)
+    
+    daily_stats = await log_crud.get_daily_usage_stats_for_user(db, user_id=user_id, days=30)
+    hourly_stats = await log_crud.get_hourly_usage_stats_for_user(db, user_id=user_id)
+    server_stats = await log_crud.get_server_load_stats_for_user(db, user_id=user_id)
+    model_stats = await log_crud.get_model_usage_stats_for_user(db, user_id=user_id)
+
+    context.update({
+        "user": user,
+        "daily_labels": [row.date.strftime('%Y-%m-%d') for row in daily_stats],
+        "daily_data": [row.request_count for row in daily_stats],
+        "hourly_labels": [row['hour'] for row in hourly_stats],
+        "hourly_data": [row['request_count'] for row in hourly_stats],
+        "server_labels": [row.server_name for row in server_stats if row.server_name],
+        "server_data": [row.request_count for row in server_stats if row.server_name],
+        "model_labels": [row.model_name for row in model_stats],
+        "model_data": [row.request_count for row in model_stats],
+    })
+    
+    # Create a new template for this
+    return templates.TemplateResponse("admin/user_statistics.html", context)
 
 @router.post("/users/{user_id}/keys/create", name="admin_create_key", dependencies=[Depends(validate_csrf_token)])
 async def create_user_api_key(
