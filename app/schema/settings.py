@@ -66,6 +66,12 @@ class AppSettingsModel(BaseModel):
     ssl_keyfile_content: Optional[str] = Field(default=None, description="Content of the uploaded SSL key file.", exclude=True) # Exclude from API responses
     ssl_certfile_content: Optional[str] = Field(default=None, description="Content of the uploaded SSL cert file.", exclude=True) # Exclude from API responses
 
+    # --- SECURITY ---
+    blocked_ollama_endpoints: str = Field(
+        default="pull,delete,create,copy,push",
+        description="Comma-separated list of Ollama API paths to block for API key holders."
+    )
+
     @field_validator('retry_total_timeout_seconds')
     @classmethod
     def validate_retry_timeout(cls, v: float, info) -> float:
@@ -84,3 +90,4 @@ class AppSettingsModel(BaseModel):
     class Config:
         from_attributes = True
         protected_namespaces = ()
+

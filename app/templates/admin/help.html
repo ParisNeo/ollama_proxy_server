@@ -39,21 +39,33 @@
             <div class="space-y-4 text-current">
                 <ol class="list-decimal list-inside space-y-4">
                     <li>
-                        <strong>Configure Servers:</strong> Go to <a href="{{ url_for('admin_servers') }}" class="font-semibold text-[var(--color-primary-600)] hover:underline">Server Management</a> and add the URLs of your Ollama instances.
+                        <strong>Configure Servers:</strong> Go to the <a href="{{ url_for('admin_servers') }}" class="font-semibold text-[var(--color-primary-600)] hover:underline">Server Management</a> page and add the URLs of all your Ollama instances.
                     </li>
                     <li>
-                        <strong>Create a User:</strong> Navigate to <a href="{{ url_for('admin_users') }}" class="font-semibold text-[var(--color-primary-600)] hover:underline">User Management</a> to create accounts for your users or applications.
+                        <strong>Create a User:</strong> Navigate to the <a href="{{ url_for('admin_users') }}" class="font-semibold text-[var(--color-primary-600)] hover:underline">User Management</a> page. This is where you'll create and manage all users.
                     </li>
                     <li>
-                        <strong>Generate an API Key:</strong> Click "Manage Keys" for a user. On their details page, generate a new key, giving it a descriptive name and optional rate limits.
+                        <strong>Generate an API Key:</strong> From the user list, click "Manage Keys" for a specific user. On their details page, you can generate new keys and set optional rate limits.
                     </li>
                     <li>
-                        <strong>Copy the Key:</strong> The full API key is shown **only once**. Copy it immediately and store it securely in your application's configuration.
+                        <strong>Copy the Key:</strong> The full API key is shown only once upon creation. Copy it and store it securely.
                     </li>
                     <li>
-                        <strong>Use the Key:</strong> In your applications, point to the proxy's URL (e.g., `http://127.0.0.1:8080`) and provide the API key in the `Authorization` header as a `Bearer` token.
+                        <strong>Use the Key:</strong> In your applications, replace your Ollama URL with the proxy's URL (e.g., `http://127.0.0.1:8080`) and provide the API key in the `Authorization` header as a Bearer token.
                     </li>
                 </ol>
+            </div>
+        </div>
+
+        <!-- Dashboard Section -->
+        <div id="dashboard" class="card-style scroll-mt-20">
+            <h2 class="card-header text-2xl font-bold mb-6 pb-2">🖥️ The Dashboard: Your Monitoring Hub</h2>
+            <div class="space-y-4 text-current">
+                <p>The main dashboard provides a real-time overview of your proxy server and connected Ollama instances.</p>
+                <ul class="list-disc list-inside space-y-3 pl-4">
+                    <li><strong>System Status:</strong> These gauges show the live CPU, Memory, and Disk usage of the machine running the proxy server. This helps you monitor server health at a glance.</li>
+                    <li><strong>Active Ollama Models:</strong> This table shows all models that are currently loaded into memory on your backend Ollama servers (equivalent to running `ollama ps`). It includes details like which server is running the model, its size, context length, and when it will expire from memory.</li>
+                </ul>
             </div>
         </div>
 
@@ -62,57 +74,59 @@
             <h2 class="card-header text-2xl font-bold mb-6 pb-2">💡 Core Concepts</h2>
             <div class="space-y-6 text-current">
                 <div>
-                    <h4 class="font-semibold text-lg">⚖️ Load Balancing & High Availability</h4>
-                    <p>The proxy distributes requests across your backend servers in a round-robin fashion. This prevents any single server from being overwhelmed and means your service remains available even if one of your Ollama instances goes down.</p>
+                    <h4 class="font-semibold text-lg">🛡️ API Key Authentication</h4>
+                    <p>Every request to the proxy must include a valid API key. This is the primary security feature, preventing unauthorized access to your models.</p>
+                </div>
+                <div>
+                    <h4 class="font-semibold text-lg">⚖️ Load Balancing</h4>
+                    <p>When a request is received, the proxy distributes it among all active backend servers in a round-robin fashion. This balances the load and improves availability.</p>
                 </div>
                 <div>
                     <h4 class="font-semibold text-lg">🧠 Smart Model Routing</h4>
-                    <p>When you request a model like <code class="inline-code">"llama3"</code>, the proxy intelligently routes the request only to servers that have that model available. This prevents failed requests and saves compute resources.</p>
+                    <p>When you request a specific model (e.g., <code class="inline-code">"llama3"</code>), the proxy is intelligent. It first looks up which of your backend servers have that model available and only routes the request to one of them. This ensures your request never fails because it was sent to a server without the right model.</p>
                     <div class="mt-3 p-3 rounded-md text-sm info-box">
-                        <strong>Pro-Tip:</strong> For Smart Routing to work best, enable the periodic model refresh in <a href="{{ url_for('admin_settings') }}" class="font-semibold underline">Settings</a> or manually click <strong>"Refresh Models"</strong> on the Server Management page.
+                        <strong>Important:</strong> For Smart Routing to work, you must periodically click the <strong>"Refresh Models"</strong> button on the <a href="{{ url_for('admin_servers') }}" class="font-semibold underline">Server Management</a> page. This keeps the proxy's catalog of available models up to date.
                     </div>
                 </div>
                 <div>
                     <h4 class="font-semibold text-lg">🌐 Federated Model Listing</h4>
-                    <p>The standard <code class="inline-code">/api/tags</code> endpoint is supercharged. Calling it through the proxy returns a single, de-duplicated list of all unique models available across your *entire* fleet of servers, giving you a unified view.</p>
-                </div>
-                 <div>
-                    <h4 class="font-semibold text-lg">🔄 Automatic Retries</h4>
-                    <p>If a request to a backend server fails due to a temporary network issue or a 5xx error, the proxy won't give up immediately. It will automatically retry the request with an intelligent backoff strategy, increasing the resilience of your AI services.</p>
+                    <p>The standard <code class="inline-code">/api/tags</code> endpoint is enhanced. When you call it through the proxy, it contacts all active backend servers, gathers their model lists, and returns a single, de-duplicated list of all unique models available across your entire setup.</p>
                 </div>
             </div>
         </div>
-
-        <!-- HTTPS/SSL Setup -->
-        <div id="https-setup" class="card-style scroll-mt-20">
-            <h2 class="card-header text-2xl font-bold mb-6 pb-2">🔒 Encrypting Traffic with HTTPS/SSL</h2>
-            <div class="space-y-6 text-current">
+        
+        <!-- Security Features Section -->
+        <div id="security" class="card-style scroll-mt-20">
+            <h2 class="card-header text-2xl font-bold mb-6 pb-2">🛡️ Security Features</h2>
+            <div class="space-y-8 text-current">
                 <div>
-                    <h3 class="text-xl font-semibold mb-2">Why is this important?</h3>
-                    <p>By default, traffic to the proxy is unencrypted (HTTP). This is fine for local testing, but if the proxy is accessible on a network, your prompts and model responses could be intercepted. HTTPS encrypts this traffic, making it secure.</p>
-                </div>
-                <div>
-                    <h3 class="text-xl font-semibold mb-2">Configuration Methods</h3>
-                    <p>In the <a href="{{ url_for('admin_settings') }}" class="font-semibold text-[var(--color-primary-600)] hover:underline">Settings</a> page, you have two simple ways to enable SSL:</p>
-                    <ul class="list-disc list-inside space-y-3 mt-3 pl-4">
-                        <li>
-                            <strong>Uploading Files (Easiest):</strong> Simply use the "Upload Key File" and "Upload Certificate File" buttons. The files will be securely stored on the server and automatically configured for use.
-                        </li>
-                        <li>
-                            <strong>Using File Paths:</strong> If your SSL certificates are already on the server (e.g., managed by Certbot), you can provide the absolute paths to the key and certificate files.
-                        </li>
+                    <h3 class="text-xl font-semibold mb-2">Endpoint Blocking</h3>
+                    <p>This is a critical security layer to prevent abuse. By default, the proxy **blocks** API key holders from accessing sensitive Ollama endpoints like <code class="inline-code">/api/pull</code>, <code class="inline-code">/api/delete</code>, and <code class="inline-code">/api/create</code>.</p>
+                    <ul class="list-disc list-inside space-y-2 mt-3 pl-4">
+                        <li><strong>Prevents DoS Attacks:</strong> Stops users from initiating large model downloads that could saturate your server's bandwidth and disk space.</li>
+                        <li><strong>Protects Your Models:</strong> Prevents unauthorized users from deleting or modifying models on your backend servers.</li>
+                        <li><strong>Admin Control:</strong> These actions can only be performed by an authenticated admin through the secure <a href="{{ url_for('admin_servers') }}" class="font-semibold text-[var(--color-primary-600)] hover:underline">Server Management</a> interface.</li>
                     </ul>
-                     <div class="mt-4 p-3 rounded-md text-sm warning-box">
-                        <strong>Action Required:</strong> Changes to SSL settings require a **full server restart** to take effect.
+                     <div class="mt-4 p-3 rounded-md text-sm info-box">
+                        <strong>Customizable:</strong> You can change the list of blocked endpoints in the <a href="{{ url_for('admin_settings') }}" class="font-semibold underline">Settings</a> page under "Endpoint Security".
                     </div>
                 </div>
                 <div>
-                    <h3 class="text-xl font-semibold mb-2">Need Certificates for Testing?</h3>
-                    <p>You can generate a self-signed certificate valid for 365 days with a single command (requires OpenSSL). This is perfect for local development.</p>
+                    <h3 class="text-xl font-semibold mb-2">HTTPS/SSL Encryption</h3>
+                    <p>Encrypt all traffic between your users and the proxy. In the Settings page, you can either **upload your certificate files** directly or provide the file paths if they're already on the server. A restart is required to apply changes.</p>
+                    <p class="mt-2">For local testing, you can generate a self-signed certificate with OpenSSL:</p>
                      <div class="code-block-wrapper mt-2">
                         <pre><code class="language-bash">openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -sha256 -days 365 -nodes -subj "/CN=localhost"</code></pre>
                         <button class="copy-button">Copy</button>
                     </div>
+                </div>
+                <div>
+                    <h3 class="text-xl font-semibold mb-2">IP Filtering</h3>
+                    <p>You can create an "allow list" to ensure only specific IP addresses or ranges can access the proxy, and a "deny list" to explicitly block malicious actors. This is configured in the Settings page.</p>
+                </div>
+                 <div>
+                    <h3 class="text-xl font-semibold mb-2">Rate Limiting & Brute-Force Protection</h3>
+                    <p>When Redis is enabled, you can set global or per-key rate limits to prevent a single user from overwhelming the system. The proxy also automatically blocks IPs that have too many failed admin login attempts.</p>
                 </div>
             </div>
         </div>
@@ -136,7 +150,7 @@ curl http://127.0.0.1:8080/api/generate \
                         <button class="copy-button">Copy</button>
                     </div>
                 </div>
-                <div>
+                 <div>
                     <h3 class="text-xl font-semibold mb-2">Python (`requests`)</h3>
                     <div class="code-block-wrapper">
                         <pre><code class="language-python">
@@ -178,23 +192,64 @@ except requests.exceptions.RequestException as e:
             <div class="space-y-6 text-current">
                 <div>
                     <h3 class="text-xl font-semibold mb-2">Why Do I Need Redis?</h3>
-                    <p>Redis is an optional but highly recommended in-memory database used for two critical security features:</p>
+                    <p>Redis is an in-memory database that is extremely fast. This application uses it for two optional but important security features:</p>
                     <ul class="list-disc list-inside space-y-2 mt-2 pl-4">
-                        <li><strong>API Rate Limiting:</strong> Prevents abuse by limiting how many requests a key can make in a given time.</li>
-                        <li><strong>Brute-Force Protection:</strong> Temporarily locks an IP address after too many failed admin login attempts.</li>
+                        <li><strong>API Rate Limiting:</strong> Prevents abuse by limiting the number of requests a single API key can make in a given time frame.</li>
+                        <li><strong>Brute-Force Protection:</strong> Temporarily locks an IP address after too many failed login attempts to the admin panel.</li>
                     </ul>
-                </div>
-                 <div>
-                    <h3 class="text-xl font-semibold mb-2">Installation (Docker is Easiest)</h3>
-                    <p>The fastest way to run Redis is with Docker. This command will start a Redis instance that restarts automatically.</p>
-                    <div class="code-block-wrapper mt-2">
-                        <pre><code class="language-bash">docker run -d --name redis-stack -p 6379:6379 --restart always redis/redis-stack:latest</code></pre>
-                         <button class="copy-button">Copy</button>
+                    <div class="mt-4 p-3 rounded-md text-sm warning-box">
+                        <strong>Note:</strong> The proxy will work perfectly without Redis, but these security features will be disabled.
                     </div>
                 </div>
+
+                <div>
+                    <h3 class="text-xl font-semibold mb-2">Installation</h3>
+                    <p class="mb-4">The easiest way to run Redis on any platform is with Docker. If you don't use Docker, choose your OS below.</p>
+                    <div class="space-y-6">
+                        <div>
+                            <h4 class="font-semibold text-lg">🐳 Docker (Recommended)</h4>
+                            <p>This single command will download and run a Redis container that restarts automatically.</p>
+                            <div class="code-block-wrapper mt-2">
+                                <pre><code class="language-bash">docker run -d --name redis-stack -p 6379:6379 --restart always redis/redis-stack:latest</code></pre>
+                                 <button class="copy-button">Copy</button>
+                            </div>
+                        </div>
+                        <div>
+                            <h4 class="font-semibold text-lg">🐧 Windows (via WSL 2)</h4>
+                            <p>Redis is not officially supported on Windows, but it runs perfectly under the Windows Subsystem for Linux (WSL).</p>
+                            <ol class="list-decimal list-inside space-y-2 mt-2 pl-4">
+                                <li>Open PowerShell as an Administrator and run: <code class="inline-code">wsl --install</code></li>
+                                <li>After it's done, open your new Linux terminal (e.g., Ubuntu) and run:</li>
+                            </ol>
+                            <div class="code-block-wrapper mt-2">
+                                <pre><code class="language-bash">sudo apt update && sudo apt upgrade
+sudo apt install redis-server
+sudo service redis-server start</code></pre>
+                                <button class="copy-button">Copy</button>
+                            </div>
+                        </div>
+                         <div>
+                            <h4 class="font-semibold text-lg">🍏 macOS (via Homebrew)</h4>
+                            <div class="code-block-wrapper mt-2">
+                                <pre><code class="language-bash">brew install redis
+brew services start redis</code></pre>
+                                <button class="copy-button">Copy</button>
+                            </div>
+                        </div>
+                         <div>
+                            <h4 class="font-semibold text-lg">🐧 Linux (Ubuntu/Debian)</h4>
+                            <div class="code-block-wrapper mt-2">
+                                <pre><code class="language-bash">sudo apt-get install redis-server
+sudo systemctl enable --now redis-server</code></pre>
+                                 <button class="copy-button">Copy</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
                  <div>
                     <h3 class="text-xl font-semibold mb-2">Configuration</h3>
-                    <p>Once Redis is running, go to the <a href="{{ url_for('admin_settings') }}" class="font-semibold text-[var(--color-primary-600)] hover:underline">Settings</a> page, enter your connection details (the defaults are usually correct for a local install), and save. The proxy will connect automatically.</p>
+                    <p>Once Redis is running, go to the <a href="{{ url_for('admin_settings') }}" class="font-semibold text-[var(--color-primary-600)] hover:underline">Settings</a> page in the admin UI and enter your Redis connection details (the defaults are usually fine for a local install). Save the settings, and the proxy will attempt to connect automatically.</p>
                 </div>
             </div>
         </div>
@@ -203,12 +258,12 @@ except requests.exceptions.RequestException as e:
         <div id="credits" class="card-style scroll-mt-20">
             <h2 class="card-header text-2xl font-bold mb-6 pb-2">💖 Credits & Acknowledgements</h2>
             <div class="space-y-4 text-current">
-                <p>This application was developed with passion by the open-source community. It stands on the shoulders of giants:</p>
+                <p>This application was developed with passion by the open-source community. It stands on the shoulders of giants and wouldn't be possible without the following incredible projects:</p>
                 <ul class="list-disc list-inside space-y-2 pl-4">
-                    <li><strong>Core Technologies:</strong> FastAPI, SQLAlchemy, Jinja2, Chart.js, and Tailwind CSS.</li>
-                     <li><strong>Project Lead:</strong> ParisNeo</li>
+                    <li><strong><a href="https://fastapi.tiangolo.com/" target="_blank" class="font-semibold text-[var(--color-primary-600)] hover:underline">FastAPI</a></strong>, <strong><a href="https://www.sqlalchemy.org/" target="_blank" class="font-semibold text-[var(--color-primary-600)] hover:underline">SQLAlchemy</a></strong>, <strong><a href="https://jinja.palletsprojects.com/" target="_blank" class="font-semibold text-[var(--color-primary-600)] hover:underline">Jinja2</a></strong>, <strong><a href="https://www.chartjs.org/" target="_blank" class="font-semibold text-[var(--color-primary-600)] hover:underline">Chart.js</a></strong>, and <strong><a href="https://tailwindcss.com/" target="_blank" class="font-semibold text-[var(--color-primary-600)] hover:underline">Tailwind CSS</a></strong>.</li>
                 </ul>
-                <p class="pt-4">Visit the project on <a href="https://github.com/ParisNeo/ollama_proxy_server" target="_blank" class="font-semibold text-[var(--color-primary-600)] hover:underline">GitHub</a> to contribute, report issues, or star the repository!</p>
+                <p class="pt-4">Project built and maintained by <strong>ParisNeo</strong> with help from AI and cool developers (check the contributors list in the github page).</p>
+                <p>Visit the project on <a href="https://github.com/ParisNeo/ollama_proxy_server" target="_blank" class="font-semibold text-[var(--color-primary-600)] hover:underline">GitHub</a> to contribute, report issues, or star the repository!</p>
             </div>
         </div>
     </div>
@@ -221,8 +276,9 @@ except requests.exceptions.RequestException as e:
                 <nav>
                     <ul class="space-y-2">
                         <li><a href="#getting-started" class="toc-link">Getting Started</a></li>
+                        <li><a href="#dashboard" class="toc-link">The Dashboard</a></li>
                         <li><a href="#concepts" class="toc-link">Core Concepts</a></li>
-                        <li><a href="#https-setup" class="toc-link">HTTPS/SSL Setup</a></li>
+                        <li><a href="#security" class="toc-link">Security Features</a></li>
                         <li><a href="#examples" class="toc-link">Usage Examples</a></li>
                         <li><a href="#redis-setup" class="toc-link">Redis Setup</a></li>
                         <li><a href="#credits" class="toc-link">Credits</a></li>

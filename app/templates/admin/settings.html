@@ -174,6 +174,16 @@
             </div>
         </div>
 
+        <!-- Endpoint Security -->
+        <div>
+            <h2 class="card-header text-xl font-bold mb-4 pb-2">Endpoint Security</h2>
+            <div>
+                <label for="blocked_ollama_endpoints" class="block text-sm font-medium text-current">Blocked Ollama Endpoints</label>
+                <textarea name="blocked_ollama_endpoints" id="blocked_ollama_endpoints" rows="3" class="mt-1 block w-full px-3 py-2 rounded-md shadow-sm focus:outline-none focus:ring-[var(--color-primary-500)] focus:border-[var(--color-primary-500)]" placeholder="e.g., pull, delete, create">{{ settings.blocked_ollama_endpoints }}</textarea>
+                <p class="mt-1 text-xs text-gray-400">Comma-separated list of Ollama API paths to block for API key holders (e.g., pull, delete). This protects your backend servers from resource-intensive tasks initiated by users. This does not affect the admin UI's model management features.</p>
+            </div>
+        </div>
+
         <!-- HTTPS/SSL Settings -->
         <div>
             <h2 class="card-header text-xl font-bold mb-4 pb-2">HTTPS/SSL Settings</h2>

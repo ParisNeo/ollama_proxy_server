@@ -58,35 +58,18 @@
                             {% endif %}
                         </td>
                         <td class="px-6 py-4 text-sm">
-                            {% if server.available_models %}
-                                <details class="cursor-pointer">
-                                    <summary class="text-[var(--color-primary-500)] hover:text-[var(--color-primary-700)] font-medium">
-                                        {{ server.available_models|length }} model(s)
-                                        {% if server.models_last_updated %}
-                                        <span class="text-xs text-gray-400">(updated {{ server.models_last_updated.strftime('%Y-%m-%d %H:%M') }})</span>
-                                        {% endif %}
-                                    </summary>
-                                    <ul class="mt-2 ml-4 space-y-1">
-                                        {% for model in server.available_models %}
-                                        <li class="text-xs font-mono">
-                                            <strong>{{ model.name }}</strong>
-                                            {% if model.size %}
-                                            <span class="text-gray-400">({{ (model.size / 1024 / 1024 / 1024) | round(2) }} GB)</span>
-                                            {% endif %}
-                                        </li>
-                                        {% endfor %}
-                                    </ul>
-                                </details>
-                            {% else %}
-                                <span class="italic">No models fetched</span>
+                            <span class="font-medium">{{ server.available_models|length }} model(s)</span>
+                            {% if server.models_last_updated %}
+                                <span class="text-xs text-gray-400 block">(updated {{ server.models_last_updated.strftime('%Y-%m-%d %H:%M') }})</span>
                             {% endif %}
                         </td>
                         <td class="px-6 py-4 whitespace-nowrap text-sm">{{ server.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
                         <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                            <div class="flex justify-end gap-2">
+                            <div class="flex justify-end gap-4">
+                                <a href="{{ url_for('admin_manage_server_models', server_id=server.id) }}" class="text-[var(--color-primary-500)] hover:text-[var(--color-primary-700)]">Manage Models</a>
                                 <form action="{{ url_for('admin_refresh_models', server_id=server.id) }}" method="post" class="inline">
                                     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                                    <button type="submit" class="text-[var(--color-primary-500)] hover:text-[var(--color-primary-700)]">Refresh Models</button>
+                                    <button type="submit" class="text-blue-400 hover:text-blue-600">Refresh List</button>
                                 </form>
                                 <form action="{{ url_for('admin_delete_server', server_id=server.id) }}" method="post" onsubmit="return confirm('Are you sure you want to delete this server?');" class="inline">
                                     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">

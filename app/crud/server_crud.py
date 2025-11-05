@@ -7,8 +7,13 @@ import logging
 import datetime
 from typing import Optional, List, Dict, Any
 import asyncio
+import json
 
 logger = logging.getLogger(__name__)
+
+async def get_server_by_id(db: AsyncSession, server_id: int) -> OllamaServer | None:
+    result = await db.execute(select(OllamaServer).filter(OllamaServer.id == server_id))
+    return result.scalars().first()
 
 async def get_server_by_url(db: AsyncSession, url: str) -> OllamaServer | None:
     result = await db.execute(select(OllamaServer).filter(OllamaServer.url == url))
@@ -78,6 +83,57 @@ async def fetch_and_update_models(db: AsyncSession, server_id: int) -> dict:
         error_msg = f"Unexpected error: {str(e)}"
         logger.error(f"Failed to fetch models from server '{server.name}' ({server.url}): {error_msg}")
         return {"success": False, "error": error_msg, "models": []}
+
+async def pull_model_on_server(http_client: httpx.AsyncClient, server: OllamaServer, model_name: str) -> dict:
+    """Pulls a model on a specific Ollama server."""
+    pull_url = f"{server.url.rstrip('/')}/api/pull"
+    payload = {"name": model_name, "stream": False}
+    try:
+        # Use a long timeout as pulling can take a significant amount of time
+        async with http_client.stream("POST", pull_url, json=payload, timeout=1800.0) as response:
+            async for chunk in response.aiter_text():
+                try:
+                    line = json.loads(chunk)
+                    # You could process status updates here if needed in the future
+                    logger.debug(f"Pull status for {model_name} on {server.name}: {line.get('status')}")
+                except json.JSONDecodeError:
+                    continue # Ignore non-json chunks
+        
+        response.raise_for_status() # Will raise an exception for 4xx/5xx responses
+        logger.info(f"Successfully pulled/updated model '{model_name}' on server '{server.name}'")
+        return {"success": True, "message": f"Model '{model_name}' pulled/updated successfully."}
+    except httpx.HTTPStatusError as e:
+        error_msg = f"Failed to pull model '{model_name}': Server returned status {e.response.status_code}"
+        logger.error(f"{error_msg} on server '{server.name}'")
+        return {"success": False, "message": error_msg}
+    except Exception as e:
+        error_msg = f"An unexpected error occurred while pulling model '{model_name}': {e}"
+        logger.error(f"{error_msg} on server '{server.name}'")
+        return {"success": False, "message": error_msg}
+
+async def delete_model_on_server(http_client: httpx.AsyncClient, server: OllamaServer, model_name: str) -> dict:
+    """Deletes a model from a specific Ollama server."""
+    delete_url = f"{server.url.rstrip('/')}/api/delete"
+    payload = {"name": model_name}
+    try:
+        # FIX: Use the more robust .request() method to send a JSON body with DELETE.
+        # This is compatible with a wider range of httpx versions.
+        response = await http_client.request("DELETE", delete_url, json=payload, timeout=120.0)
+        response.raise_for_status()
+        logger.info(f"Successfully deleted model '{model_name}' from server '{server.name}'")
+        return {"success": True, "message": f"Model '{model_name}' deleted successfully."}
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 404:
+            message = f"Model '{model_name}' not found on server."
+            logger.warning(message)
+            return {"success": True, "message": message} # Treat not found as a success
+        error_msg = f"Failed to delete model '{model_name}': Server returned status {e.response.status_code}"
+        logger.error(f"{error_msg} on server '{server.name}'")
+        return {"success": False, "message": error_msg}
+    except Exception as e:
+        error_msg = f"An unexpected error occurred while deleting model '{model_name}': {e}"
+        logger.error(f"{error_msg} on server '{server.name}'")
+        return {"success": False, "message": error_msg}
 
 def get_model_names_from_server(server: OllamaServer) -> set[str]:
     """

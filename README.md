@@ -22,7 +22,10 @@ While the core team patched this, the incident highlighted a crucial need for a 
 
 Ollama Proxy Fortress is **more than just a patch**. It's a permanent solution that unleashes a suite of powerful, enterprise-grade features that core Ollama doesn't provide:
 
+*   ✨ **Centralized Model Management:** Pull, update, and delete models on any of your connected Ollama servers directly from the proxy's web UI. No more terminal commands or switching between machines.
+
 *   🛡️ **Rock-Solid Security:**
+    *   **Endpoint Blocking:** Prevent API key holders from accessing sensitive endpoints like `pull`, `delete`, and `create` to protect your servers from abuse.
     *   **API Key Authentication:** Eliminate anonymous access entirely.
     *   **One-Click HTTPS/SSL:** Encrypt all traffic with easy certificate uploads or path-based configuration.
     *   **IP Filtering:** Create granular allow/deny lists to control exactly which machines can connect.
@@ -55,11 +58,22 @@ Ollama Proxy Fortress is **more than just a patch**. It's a permanent solution t
 
 ---
 
+## 🛡️ Harden Your Defenses: Endpoint Blocking
+
+Giving every user an API key shouldn't mean giving them the keys to the kingdom. By default, **Ollama Proxy Fortress blocks access to dangerous and resource-intensive API endpoints** for all API key holders.
+
+-   **Prevent Denial-of-Service:** Stop users from triggering massive model downloads (`/api/pull`) that can saturate your network and fill your disk.
+-   **Protect Your Models:** Prevent API users from deleting (`/api/delete`), copying (`/api/copy`), or creating (`/api/create`) models on your backend servers.
+-   **Full Admin Control:** As an administrator, you can still perform all these actions securely through the web UI's **Model Management** page.
+-   **Customizable:** You have full control to change which endpoints are blocked via the **Settings -> Endpoint Security** menu.
+
+---
+
 ## 🔒 Encrypt Everything with One-Click HTTPS/SSL
 
 Securing your AI traffic is now dead simple. In the **Settings -> HTTPS/SSL** menu, you have two easy options:
 
-1.  **Upload & Go (Easiest):** Simply upload your `key.pem` and `cert.pem` files directly through the UI. The server handles the rest, storing them securely on the server.
+1.  **Upload & Go (Easiest):** Simply upload your `key.pem` and `cert.pem` files directly through the UI. The server handles the rest.
 2.  **Path-Based:** If your certificates are already on the server (e.g., managed by Certbot), just provide the full file paths.
 
 A server restart is required to apply changes, ensuring your connection is fully encrypted and secure from eavesdropping.
@@ -67,8 +81,6 @@ A server restart is required to apply changes, ensuring your connection is fully
 ---
 
 ## Get Started in 60 Seconds (Yes, Really!)
-
-This is the easiest way to secure your AI setup, period.
 
 ### 1. Download the Project
 
@@ -107,41 +119,33 @@ Log in with the secure credentials you created during setup.
 
 ### Step 2: The Command Center Dashboard
 
-Your new mission control. Instantly see a live, auto-updating view of system health, all active models across all servers, server status, and real-time rate-limit queues.
+Your new mission control. Instantly see system health, active models, server status, and live rate-limit queues, all updating automatically.
 
 ![Dashboard](assets/DashBoard.gif)
 
-### Step 3: Choose Your Look: The Theming Engine
+### Step 3: Manage Your Models from One Place
+
+No more SSH or terminal juggling. Pull, update, and delete models on any server with a few clicks.
+
+![Model Management](assets/model_management.gif)
+
+### Step 4: Choose Your Look: The Theming Engine
 
 Navigate to the Settings page and instantly transform the entire UI. Pick a style that matches your mood or your desktop setup.
 
 ![Theming](assets/theming.gif)
 
-### Step 4: Manage Users & Drill Down into Analytics
+### Step 5: Manage Users & Drill Down into Analytics
 
 The User Management page gives you a sortable, high-level overview. From here, click "View Usage" to dive into a dedicated analytics page for any specific user.
 
 ![User edit](assets/user_edit.gif)
 
-### Step 5: Master Your Analytics
+### Step 6: Master Your Analytics
 
 The main "Usage Stats" page and the per-user pages give you a beautiful, exportable overview of exactly how your models are being used.
 
 ![API Usage Statistics](assets/stats.png)
-
-### Step 6: Make Secure API Calls
-
-Configure your applications to use the proxy URL and provide the API key. Your underlying Ollama server is now completely shielded.
-
-```bash
-curl http://127.0.0.1:8080/api/generate \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer op_prefix_secret" \
-  -d '{
-    "model": "llama3",
-    "prompt": "Why is the sky blue?"
-  }'
-```
 
 ### Step 7: Get Help When You Need It
 

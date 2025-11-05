@@ -8,7 +8,7 @@ from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.session import get_db
-from app.api.v1.dependencies import get_valid_api_key, rate_limiter, ip_filter
+from app.api.v1.dependencies import get_valid_api_key, rate_limiter, ip_filter, get_settings
 from app.database.models import APIKey, OllamaServer
 from app.crud import log_crud, server_crud
 from app.core.retry import retry_with_backoff, RetryConfig
@@ -262,12 +262,26 @@ async def proxy_ollama(
     path: str,
     api_key: APIKey = Depends(get_valid_api_key),
     db: AsyncSession = Depends(get_db),
+    settings: AppSettingsModel = Depends(get_settings),
     servers: List[OllamaServer] = Depends(get_active_servers),
 ):
     """
     A catch-all route that proxies all other requests to the Ollama backend.
     Uses smart routing to select servers that have the requested model.
     """
+    # --- Endpoint Security Check ---
+    blocked_paths = {p.strip().lstrip('/') for p in settings.blocked_ollama_endpoints.split(',') if p.strip()}
+    request_path = path.strip().lstrip('/')
+
+    if request_path in blocked_paths:
+        logger.warning(
+            f"Blocked attempt to access sensitive endpoint '/api/{request_path}' by API key {api_key.key_prefix}"
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Access to the endpoint '/api/{request_path}' is disabled by the proxy administrator."
+        )
+
     # Try to extract model name from request body
     body_bytes = await request.body()
     model_name = None

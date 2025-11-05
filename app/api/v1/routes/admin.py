@@ -36,6 +36,10 @@ MAX_LOGO_SIZE_MB = 2
 MAX_LOGO_SIZE_BYTES = MAX_LOGO_SIZE_MB * 1024 * 1024
 ALLOWED_LOGO_TYPES = ["image/png", "image/jpeg", "image/gif", "image/svg+xml", "image/webp"]
 UPLOADS_DIR = Path("app/static/uploads")
+SSL_DIR = Path(".ssl")
+
+
+# ... (existing functions from get_system_info down to admin_add_server remain the same) ...
 
 # --- Sync helper for system info (to be run in threadpool) ---
 def get_system_info():
@@ -304,6 +308,76 @@ async def admin_refresh_models(request: Request, server_id: int, db: AsyncSessio
         flash(request, f"Failed to fetch models: {result['error']}", "error")
     return RedirectResponse(url=request.url_for("admin_servers"), status_code=status.HTTP_303_SEE_OTHER)
 
+# --- NEW SERVER MODEL MANAGEMENT ROUTES ---
+
+@router.get("/servers/{server_id}/manage", response_class=HTMLResponse, name="admin_manage_server_models")
+async def admin_manage_server_models(
+    request: Request,
+    server_id: int,
+    db: AsyncSession = Depends(get_db),
+    admin_user: User = Depends(require_admin_user)
+):
+    server = await server_crud.get_server_by_id(db, server_id=server_id)
+    if not server:
+        raise HTTPException(status_code=404, detail="Server not found")
+
+    context = get_template_context(request)
+    context["server"] = server
+    context["csrf_token"] = await get_csrf_token(request)
+    return templates.TemplateResponse("admin/manage_server.html", context)
+
+@router.post("/servers/{server_id}/pull", name="admin_pull_model", dependencies=[Depends(validate_csrf_token)])
+async def admin_pull_model(
+    request: Request,
+    server_id: int,
+    db: AsyncSession = Depends(get_db),
+    admin_user: User = Depends(require_admin_user),
+    model_name: str = Form(...)
+):
+    server = await server_crud.get_server_by_id(db, server_id=server_id)
+    if not server:
+        raise HTTPException(status_code=404, detail="Server not found")
+
+    flash(request, f"Pull initiated for '{model_name}'. This may take several minutes...", "info")
+    
+    http_client: httpx.AsyncClient = request.app.state.http_client
+    result = await server_crud.pull_model_on_server(http_client, server, model_name)
+
+    if result["success"]:
+        flash(request, result["message"], "success")
+        # Refresh the model list in the proxy's database after a successful pull
+        await server_crud.fetch_and_update_models(db, server_id=server_id)
+    else:
+        flash(request, result["message"], "error")
+        
+    return RedirectResponse(url=request.url_for("admin_manage_server_models", server_id=server_id), status_code=status.HTTP_303_SEE_OTHER)
+
+
+@router.post("/servers/{server_id}/delete-model", name="admin_delete_model", dependencies=[Depends(validate_csrf_token)])
+async def admin_delete_model(
+    request: Request,
+    server_id: int,
+    db: AsyncSession = Depends(get_db),
+    admin_user: User = Depends(require_admin_user),
+    model_name: str = Form(...)
+):
+    server = await server_crud.get_server_by_id(db, server_id=server_id)
+    if not server:
+        raise HTTPException(status_code=404, detail="Server not found")
+
+    http_client: httpx.AsyncClient = request.app.state.http_client
+    result = await server_crud.delete_model_on_server(http_client, server, model_name)
+
+    if result["success"]:
+        flash(request, result["message"], "success")
+        # Refresh the model list in the proxy's database after a successful delete
+        await server_crud.fetch_and_update_models(db, server_id=server_id)
+    else:
+        flash(request, result["message"], "error")
+
+    return RedirectResponse(url=request.url_for("admin_manage_server_models", server_id=server_id), status_code=status.HTTP_303_SEE_OTHER)
+
+
 @router.get("/settings", response_class=HTMLResponse, name="admin_settings")
 async def admin_settings_form(request: Request, admin_user: User = Depends(require_admin_user)):
     context = get_template_context(request)
@@ -428,6 +502,7 @@ async def admin_settings_post(
         "model_update_interval_minutes": int(form_data.get("model_update_interval_minutes", 10)),
         "allowed_ips": form_data.get("allowed_ips", ""),
         "denied_ips": form_data.get("denied_ips", ""),
+        "blocked_ollama_endpoints": form_data.get("blocked_ollama_endpoints", ""),
     })
     if new_redis_password:
         update_data["redis_password"] = new_redis_password
