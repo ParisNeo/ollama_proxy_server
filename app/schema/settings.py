@@ -63,6 +63,8 @@ class AppSettingsModel(BaseModel):
     # --- HTTPS/SSL Settings ---
     ssl_keyfile: Optional[str] = Field(default=None, description="Path to the SSL private key file (e.g., key.pem). Requires a restart.")
     ssl_certfile: Optional[str] = Field(default=None, description="Path to the SSL certificate file (e.g., cert.pem). Requires a restart.")
+    ssl_keyfile_content: Optional[str] = Field(default=None, description="Content of the uploaded SSL key file.", exclude=True) # Exclude from API responses
+    ssl_certfile_content: Optional[str] = Field(default=None, description="Content of the uploaded SSL cert file.", exclude=True) # Exclude from API responses
 
     @field_validator('retry_total_timeout_seconds')
     @classmethod
@@ -74,7 +76,7 @@ class AppSettingsModel(BaseModel):
     
     @field_validator('branding_logo_url', 'ssl_keyfile', 'ssl_certfile')
     @classmethod
-    def validate_logo_url(cls, v: Optional[str]) -> Optional[str]:
+    def validate_empty_string_to_none(cls, v: Optional[str]) -> Optional[str]:
         if v == "":
             return None
         return v

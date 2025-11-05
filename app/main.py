@@ -109,10 +109,14 @@ async def lifespan(app: FastAPI):
     # ---------- Startup ----------
     logger.info("Starting up Ollama Proxy Server…")
     
-    # Ensure the directory for uploads exists
+    # Ensure directories exist
     uploads_dir = Path("app/static/uploads")
     uploads_dir.mkdir(exist_ok=True)
     logger.info(f"Uploads directory is at: {uploads_dir.resolve()}")
+    
+    ssl_dir = Path(".ssl")
+    ssl_dir.mkdir(exist_ok=True)
+    logger.info(f"SSL storage directory is at: {ssl_dir.resolve()}")
 
     if settings.ADMIN_PASSWORD == "changeme":
         logger.critical("FATAL: The admin password is set to the default value 'changeme'.")

@@ -105,3 +105,6 @@ ollama_proxy.db
 
 # User Uploads
 app/static/uploads/
+
+# SSL Uploads
+.ssl/

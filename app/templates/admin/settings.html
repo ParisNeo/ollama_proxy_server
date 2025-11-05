@@ -177,16 +177,70 @@
         <!-- HTTPS/SSL Settings -->
         <div>
             <h2 class="card-header text-xl font-bold mb-4 pb-2">HTTPS/SSL Settings</h2>
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div class="space-y-6">
+                <!-- SSL Key -->
                 <div>
-                    <label for="ssl_keyfile" class="block text-sm font-medium text-current">SSL Key File Path</label>
-                    <input type="text" name="ssl_keyfile" id="ssl_keyfile" value="{{ settings.ssl_keyfile or '' }}" class="mt-1 block w-full px-3 py-2 rounded-md shadow-sm focus:outline-none focus:ring-[var(--color-primary-500)] focus:border-[var(--color-primary-500)]" placeholder="/path/to/your/key.pem">
-                    <p class="mt-1 text-xs text-gray-400">Path to the SSL private key file. Requires a restart.</p>
+                    <h3 class="text-lg font-semibold text-current mb-2">SSL Private Key</h3>
+                    {% if settings.ssl_keyfile_content %}
+                    <div class="flex items-center gap-4 p-4 border border-dashed border-green-500 rounded-md bg-green-900/20">
+                        <svg class="w-8 h-8 text-green-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path></svg>
+                        <div class="flex-grow">
+                            <p class="text-sm font-semibold">An uploaded key file is currently active.</p>
+                            <p class="text-xs text-gray-400">Path: <code class="text-xs">{{ settings.ssl_keyfile }}</code></p>
+                        </div>
+                        <button type="submit" name="remove_ssl_key" value="true" class="flex items-center justify-center px-3 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-medium rounded-md">
+                            Remove
+                        </button>
+                    </div>
+                    {% else %}
+                    <div>
+                        <label for="ssl_keyfile" class="block text-sm font-medium text-current">Specify Key File Path</label>
+                        <input type="text" name="ssl_keyfile" id="ssl_keyfile" value="{{ settings.ssl_keyfile or '' }}" class="mt-1 block w-full px-3 py-2 rounded-md shadow-sm focus:outline-none focus:ring-[var(--color-primary-500)] focus:border-[var(--color-primary-500)]" placeholder="/path/to/your/key.pem">
+                    </div>
+                    <div class="flex items-center my-3">
+                        <hr class="flex-grow border-gray-600">
+                        <span class="px-2 text-sm text-gray-400">OR</span>
+                        <hr class="flex-grow border-gray-600">
+                    </div>
+                    <div>
+                        <label for="ssl_key_file" class="block text-sm font-medium text-current">Upload Key File</label>
+                        <input type="file" name="ssl_key_file" id="ssl_key_file" class="mt-1 block w-full text-sm rounded-md border border-gray-600 file:mr-4 file:py-2 file:px-4 file:rounded-l-md file:border-0 file:bg-[var(--color-primary-600)] file:text-white hover:file:bg-[var(--color-primary-700)]">
+                    </div>
+                    {% endif %}
                 </div>
+
+                <!-- SSL Certificate -->
                 <div>
-                    <label for="ssl_certfile" class="block text-sm font-medium text-current">SSL Certificate File Path</label>
-                    <input type="text" name="ssl_certfile" id="ssl_certfile" value="{{ settings.ssl_certfile or '' }}" class="mt-1 block w-full px-3 py-2 rounded-md shadow-sm focus:outline-none focus:ring-[var(--color-primary-500)] focus:border-[var(--color-primary-500)]" placeholder="/path/to/your/cert.pem">
-                    <p class="mt-1 text-xs text-gray-400">Path to the SSL certificate file. Requires a restart.</p>
+                    <h3 class="text-lg font-semibold text-current mb-2">SSL Certificate</h3>
+                     {% if settings.ssl_certfile_content %}
+                    <div class="flex items-center gap-4 p-4 border border-dashed border-green-500 rounded-md bg-green-900/20">
+                         <svg class="w-8 h-8 text-green-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path></svg>
+                        <div class="flex-grow">
+                            <p class="text-sm font-semibold">An uploaded certificate file is currently active.</p>
+                            <p class="text-xs text-gray-400">Path: <code class="text-xs">{{ settings.ssl_certfile }}</code></p>
+                        </div>
+                        <button type="submit" name="remove_ssl_cert" value="true" class="flex items-center justify-center px-3 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-medium rounded-md">
+                            Remove
+                        </button>
+                    </div>
+                    {% else %}
+                    <div>
+                        <label for="ssl_certfile" class="block text-sm font-medium text-current">Specify Certificate File Path</label>
+                        <input type="text" name="ssl_certfile" id="ssl_certfile" value="{{ settings.ssl_certfile or '' }}" class="mt-1 block w-full px-3 py-2 rounded-md shadow-sm focus:outline-none focus:ring-[var(--color-primary-500)] focus:border-[var(--color-primary-500)]" placeholder="/path/to/your/cert.pem">
+                    </div>
+                     <div class="flex items-center my-3">
+                        <hr class="flex-grow border-gray-600">
+                        <span class="px-2 text-sm text-gray-400">OR</span>
+                        <hr class="flex-grow border-gray-600">
+                    </div>
+                    <div>
+                        <label for="ssl_cert_file" class="block text-sm font-medium text-current">Upload Certificate File</label>
+                        <input type="file" name="ssl_cert_file" id="ssl_cert_file" class="mt-1 block w-full text-sm rounded-md border border-gray-600 file:mr-4 file:py-2 file:px-4 file:rounded-l-md file:border-0 file:bg-[var(--color-primary-600)] file:text-white hover:file:bg-[var(--color-primary-700)]">
+                    </div>
+                    {% endif %}
+                </div>
+                 <div class="mt-4 p-3 rounded-md text-sm warning-box">
+                    <strong>Important:</strong> Changes to SSL settings require a full server restart to take effect.
                 </div>
             </div>
         </div>

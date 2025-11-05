@@ -20,21 +20,49 @@ While the core team patched this, the incident highlighted a crucial need for a 
 
 ### So, Why Do You Still Need This?
 
-Ollama Proxy Fortress is **more than just a patch**. It's a permanent solution that unleashes a suite of powerful features that core Ollama doesn't provide:
+Ollama Proxy Fortress is **more than just a patch**. It's a permanent solution that unleashes a suite of powerful, enterprise-grade features that core Ollama doesn't provide:
 
-*   🚀 **Hyper-Detailed Live Dashboard:** Go beyond `ollama ps`. Get a real-time, auto-updating view of your proxy's health (CPU, Memory, Disk), see all active models across all servers, monitor the **live health of your load balancer**, and watch API rate-limit queues fill and reset in real-time.
+*   🛡️ **Rock-Solid Security:**
+    *   **API Key Authentication:** Eliminate anonymous access entirely.
+    *   **One-Click HTTPS/SSL:** Encrypt all traffic with easy certificate uploads or path-based configuration.
+    *   **IP Filtering:** Create granular allow/deny lists to control exactly which machines can connect.
+    *   **Rate Limiting & Brute-Force Protection:** Prevent abuse and secure your admin login (powered by Redis).
 
-*   🎨 **Radical Theming Engine:** Why should your tools be boring? Choose from over a dozen stunning UI themes to match your personal aesthetic. Whether you prefer a sleek **Material Design**, a futuristic **Cyberpunk** neon glow, a retro **CRT Terminal**, or a stark **Brutalist** look, you can make the interface truly yours.
+*   🚀 **High-Performance Engine:**
+    *   **Intelligent Load Balancing:** Distribute requests across multiple Ollama servers for maximum speed and high availability.
+    *   **Smart Model Routing:** Automatically sends requests only to servers that have the specific model available, preventing failed requests and saving compute resources.
+    *   **Automatic Retries:** The proxy resiliently handles temporary server hiccups with an exponential backoff strategy, making your AI services more reliable.
 
-*   📈 **Comprehensive Analytics Suite:** Don't just guess your usage—know it. Dive into beautiful, interactive charts for daily and hourly requests, model popularity, and server load. Plus, with a single click, drill down into **per-user analytics** to understand individual usage patterns. All data is exportable.
+*   📊 **Mission Control Dashboard:**
+    *   Go beyond `ollama ps`. Get a real-time, auto-updating view of your proxy's health (CPU, Memory, Disk), see all active models across all servers, monitor the **live health of your load balancer**, and watch API rate-limit queues fill and reset in real-time.
 
-*   👤 **Granular User & API Key Management:** Effortlessly create and manage users. The sortable user table gives you at-a-glance stats on key counts, total requests, and last activity. From there, manage individual API keys with per-key rate limits, and temporarily disable or re-enable keys on the fly.
+*   📈 **Comprehensive Analytics Suite:**
+    *   Don't just guess your usage—know it. Dive into beautiful, interactive charts for daily and hourly requests, model popularity, and server load.
+    *   With a single click, drill down into **per-user analytics** to understand individual usage patterns. All data is exportable to CSV or PNG.
 
-*   🌐 **Multi-Server Management & Federation:** Centrally manage all your Ollama backend servers. The proxy load-balances requests and provides a unified, federated view of all available models from all your instances combined.
+*   🎨 **Radical Theming Engine:**
+    *   Why should your tools be boring? Choose from over a dozen stunning UI themes to match your personal aesthetic. Whether you prefer a sleek **Material Design**, a futuristic **Cyberpunk** neon glow, a retro **CRT Terminal**, or a stark **Brutalist** look, you can make the interface truly yours.
 
-*   ✨ **Polished User Experience:** From a streamlined logo upload process to a rich, navigable Help page with a scroll-spying table of contents, every detail has been crafted to be intuitive and enjoyable to use.
+*   👤 **Granular User & API Key Management:**
+    *   Effortlessly create and manage users. The sortable user table gives you at-a-glance stats on key counts, total requests, and last activity.
+    *   From there, manage individual API keys with per-key rate limits, and temporarily disable or re-enable keys on the fly.
 
-*   🚀 **Effortless 1-Click Setup:** No Docker, no `pip install`, no command-line wizardry required. Just download and run a single script.
+*   🌐 **Multi-Server Management & Federation:**
+    *   Centrally manage all your Ollama backend servers. The proxy load-balances requests and provides a unified, federated view of all available models from all your instances combined.
+
+*   ✨ **Effortless 1-Click Setup:**
+    *   No Docker, no `pip install`, no command-line wizardry required. Just download and run a single script.
+
+---
+
+## 🔒 Encrypt Everything with One-Click HTTPS/SSL
+
+Securing your AI traffic is now dead simple. In the **Settings -> HTTPS/SSL** menu, you have two easy options:
+
+1.  **Upload & Go (Easiest):** Simply upload your `key.pem` and `cert.pem` files directly through the UI. The server handles the rest, storing them securely on the server.
+2.  **Path-Based:** If your certificates are already on the server (e.g., managed by Certbot), just provide the full file paths.
+
+A server restart is required to apply changes, ensuring your connection is fully encrypted and secure from eavesdropping.
 
 ---
 
@@ -79,14 +107,13 @@ Log in with the secure credentials you created during setup.
 
 ### Step 2: The Command Center Dashboard
 
-Your new mission control. Instantly see system health, active models, server status, and live rate-limit queues, all updating automatically.
+Your new mission control. Instantly see a live, auto-updating view of system health, all active models across all servers, server status, and real-time rate-limit queues.
 
 ![Dashboard](assets/DashBoard.gif)
 
 ### Step 3: Choose Your Look: The Theming Engine
 
 Navigate to the Settings page and instantly transform the entire UI. Pick a style that matches your mood or your desktop setup.
-
 
 ![Theming](assets/theming.gif)
 
@@ -140,6 +167,7 @@ docker run -d --name ollama-proxy \
   -p 8080:8080 \
   --env-file ./.env \
   -v ./ollama_proxy.db:/home/app/ollama_proxy.db \
+  -v ./.ssl:/home/app/.ssl \
   ollama-proxy-server
 ```
 
