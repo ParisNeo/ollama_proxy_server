@@ -414,11 +414,13 @@ async def admin_settings_post(
             "model_update_interval_minutes": int(form_data.get("model_update_interval_minutes")),
             "allowed_ips": form_data.get("allowed_ips", ""),
             "denied_ips": form_data.get("denied_ips", ""),
+            "ssl_keyfile": form_data.get("ssl_keyfile"),
+            "ssl_certfile": form_data.get("ssl_certfile"),
         })
         
         await settings_crud.update_app_settings(db, settings_data=updated_settings_data)
         request.app.state.settings = updated_settings_data
-        flash(request, "Settings updated successfully. Changes are now live.", "success")
+        flash(request, "Settings updated successfully. A restart is required for some changes (like HTTPS) to take effect.", "success")
     except (ValueError, TypeError) as e:
         logger.error(f"Invalid form data for settings: {e}")
         flash(request, "Error: Invalid data provided for a setting (e.g., a port number was not a number).", "error")

@@ -174,6 +174,23 @@
             </div>
         </div>
 
+        <!-- HTTPS/SSL Settings -->
+        <div>
+            <h2 class="card-header text-xl font-bold mb-4 pb-2">HTTPS/SSL Settings</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                    <label for="ssl_keyfile" class="block text-sm font-medium text-current">SSL Key File Path</label>
+                    <input type="text" name="ssl_keyfile" id="ssl_keyfile" value="{{ settings.ssl_keyfile or '' }}" class="mt-1 block w-full px-3 py-2 rounded-md shadow-sm focus:outline-none focus:ring-[var(--color-primary-500)] focus:border-[var(--color-primary-500)]" placeholder="/path/to/your/key.pem">
+                    <p class="mt-1 text-xs text-gray-400">Path to the SSL private key file. Requires a restart.</p>
+                </div>
+                <div>
+                    <label for="ssl_certfile" class="block text-sm font-medium text-current">SSL Certificate File Path</label>
+                    <input type="text" name="ssl_certfile" id="ssl_certfile" value="{{ settings.ssl_certfile or '' }}" class="mt-1 block w-full px-3 py-2 rounded-md shadow-sm focus:outline-none focus:ring-[var(--color-primary-500)] focus:border-[var(--color-primary-500)]" placeholder="/path/to/your/cert.pem">
+                    <p class="mt-1 text-xs text-gray-400">Path to the SSL certificate file. Requires a restart.</p>
+                </div>
+            </div>
+        </div>
+
 
         <!-- Save Button -->
         <div class="flex justify-end pt-4 border-t border-white/10 mt-8">

@@ -59,6 +59,10 @@ class AppSettingsModel(BaseModel):
         le=5000,
         description="Base delay in milliseconds for exponential backoff between retries"
     )
+    
+    # --- HTTPS/SSL Settings ---
+    ssl_keyfile: Optional[str] = Field(default=None, description="Path to the SSL private key file (e.g., key.pem). Requires a restart.")
+    ssl_certfile: Optional[str] = Field(default=None, description="Path to the SSL certificate file (e.g., cert.pem). Requires a restart.")
 
     @field_validator('retry_total_timeout_seconds')
     @classmethod
@@ -68,7 +72,7 @@ class AppSettingsModel(BaseModel):
             raise ValueError("retry_total_timeout_seconds must be positive")
         return v
     
-    @field_validator('branding_logo_url')
+    @field_validator('branding_logo_url', 'ssl_keyfile', 'ssl_certfile')
     @classmethod
     def validate_logo_url(cls, v: Optional[str]) -> Optional[str]:
         if v == "":
@@ -77,3 +81,4 @@ class AppSettingsModel(BaseModel):
 
     class Config:
         from_attributes = True
+        protected_namespaces = ()

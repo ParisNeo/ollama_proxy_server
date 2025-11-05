@@ -86,16 +86,11 @@ call .\%VENV_DIR%\Scripts\activate.bat
 echo [INFO] Setting Python Path...
 set PYTHONPATH=.
 
-set PORT_TO_USE=8080
-for /f "usebackq tokens=1,* delims==" %%a in (".env") do (
-    if /i "%%a"=="PROXY_PORT" set "PORT_TO_USE=%%~b"
-)
-
-echo [INFO] Starting Ollama Proxy Server on port !PORT_TO_USE!...
+echo [INFO] Starting Ollama Proxy Server...
 echo To stop the server, simply close this window or press Ctrl+C.
 echo.
 
-uvicorn app.main:app --host 0.0.0.0 --port !PORT_TO_USE!
+python app/main.py
 
 echo [INFO] Server has been stopped.
 pause

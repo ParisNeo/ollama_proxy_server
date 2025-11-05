@@ -212,3 +212,58 @@ app.include_router(admin_router, prefix="/admin", tags=["Admin UI"], include_in_
 @app.get("/", include_in_schema=False, summary="Root")
 def read_root():
     return RedirectResponse(url="/admin/dashboard")
+
+if __name__ == "__main__":
+    import uvicorn
+    import asyncio
+
+    async def run_server():
+        """
+        Connects to the DB to get settings and starts Uvicorn programmatically.
+        """
+        port = settings.PROXY_PORT
+        ssl_keyfile = None
+        ssl_certfile = None
+        
+        # Use the app's own DB session management to get settings
+        try:
+            # Run init_db which includes migrations and create_all
+            await init_db()
+            async with AsyncSessionLocal() as db:
+                db_settings_obj = await settings_crud.get_app_settings(db)
+                if not db_settings_obj:
+                    # This ensures settings exist if the DB was just created
+                    db_settings_obj = await settings_crud.create_initial_settings(db)
+
+                if db_settings_obj:
+                    app_settings = AppSettingsModel.model_validate(db_settings_obj.settings_data)
+                    
+                    if app_settings.ssl_keyfile and app_settings.ssl_certfile:
+                        key_path = Path(app_settings.ssl_keyfile)
+                        cert_path = Path(app_settings.ssl_certfile)
+                        
+                        if key_path.is_file() and cert_path.is_file():
+                            ssl_keyfile = str(key_path)
+                            ssl_certfile = str(cert_path)
+                            logger.info(f"Uvicorn starting with HTTPS enabled.")
+                        else:
+                            if not key_path.is_file():
+                                logger.warning(f"SSL key file not found at '{key_path}'. Starting without HTTPS.")
+                            if not cert_path.is_file():
+                                logger.warning(f"SSL cert file not found at '{cert_path}'. Starting without HTTPS.")
+        except Exception as e:
+                logger.info(f"Could not load SSL settings from DB (this is normal on first run). Reason: {e}")
+
+        # Correct way to run uvicorn programmatically from an async function
+        config = uvicorn.Config(
+            "app.main:app",
+            host="0.0.0.0",
+            port=port,
+            ssl_keyfile=ssl_keyfile,
+            ssl_certfile=ssl_certfile,
+            log_config=None, # Let our custom logging handle it
+        )
+        server = uvicorn.Server(config)
+        await server.serve()
+
+    asyncio.run(run_server())
