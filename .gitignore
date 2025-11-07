@@ -108,3 +108,6 @@ app/static/uploads/
 
 # SSL Uploads
 .ssl/
+
+# Lollms vscoder files
+.lollms
