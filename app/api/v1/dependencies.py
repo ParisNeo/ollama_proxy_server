@@ -1,16 +1,16 @@
 import logging
-from fastapi import Depends, HTTPException, status, Request, Form
+from fastapi import Depends, HTTPException, status, Request, Form, Header
 from fastapi.security import APIKeyHeader
 from sqlalchemy.ext.asyncio import AsyncSession
 import redis.asyncio as redis
 import time
+import secrets
 
 from app.schema.settings import AppSettingsModel # <-- NEW
 from app.database.session import get_db
 from app.crud import apikey_crud
 from app.core.security import verify_api_key
 from app.database.models import APIKey
-import secrets
 
 logger = logging.getLogger(__name__)
 api_key_header = APIKeyHeader(name="Authorization", auto_error=False)
@@ -30,6 +30,13 @@ async def validate_csrf_token(request: Request, csrf_token: str = Form(...)):
     """Dependency to validate CSRF token from a form submission."""
     stored_token = await get_csrf_token(request)
     if not stored_token or not secrets.compare_digest(csrf_token, stored_token):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="CSRF token mismatch")
+    return True
+
+async def validate_csrf_token_header(request: Request, x_csrf_token: str = Header(..., alias="X-CSRF-Token")):
+    """Dependency to validate CSRF token from an X-CSRF-Token header for AJAX/fetch requests."""
+    stored_token = await get_csrf_token(request)
+    if not stored_token or not secrets.compare_digest(x_csrf_token, stored_token):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="CSRF token mismatch")
     return True
 

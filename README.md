@@ -36,6 +36,10 @@ Ollama Proxy Fortress is **more than just a patch**. It's a permanent solution t
     *   **Smart Model Routing:** Automatically sends requests only to servers that have the specific model available, preventing failed requests and saving compute resources.
     *   **Automatic Retries:** The proxy resiliently handles temporary server hiccups with an exponential backoff strategy, making your AI services more reliable.
 
+*   🧪 **Model Playgrounds & Benchmarking:**
+    *   **Interactive Chat Playground:** Go beyond simple API calls. Chat with any model in a familiar interface that supports streaming, multi-modal inputs (paste images directly!), and full conversation history management (import/export).
+    *   **Advanced Embedding Playground:** A powerful tool for data scientists and developers. Visualize how different embedding models "understand" language by plotting concepts in a 2D space. Use pre-built benchmarks or create your own to compare model performance side-by-side.
+
 *   📊 **Mission Control Dashboard:**
     *   Go beyond `ollama ps`. Get a real-time, auto-updating view of your proxy's health (CPU, Memory, Disk), see all active models across all servers, monitor the **live health of your load balancer**, and watch API rate-limit queues fill and reset in real-time.
 
@@ -102,8 +106,7 @@ Simply double-click `run_windows.bat`.
 Open your terminal, navigate to the project folder, and run:
 ```bash
 chmod +x run.sh
-./run.sh
-```
+./run.sh```
 
 **That's it!** The server is now running. To stop it, just close the terminal window or press `Ctrl+C`.
 
@@ -123,11 +126,11 @@ Your new mission control. Instantly see system health, active models, server sta
 
 ![Dashboard](assets/DashBoard.gif)
 
-### Step 3: Manage Your Models from One Place
+### Step 3: Manage Your Servers & Models
 
-No more SSH or terminal juggling. Pull, update, and delete models on any server with a few clicks.
+No more SSH or terminal juggling. Add all your Ollama instances, then pull, update, and delete models on any server with a few clicks.
 
-![Model Management](assets/model_management.gif)
+![Server Management](assets/server_management.png)
 
 ### Step 4: Choose Your Look: The Theming Engine
 
@@ -141,13 +144,17 @@ The User Management page gives you a sortable, high-level overview. From here, c
 
 ![User edit](assets/user_edit.gif)
 
-### Step 6: Master Your Analytics
+### Step 6: Test & Benchmark in the Playgrounds
+
+Use the built-in playgrounds to evaluate your models. The **Chat Playground** provides a familiar UI to test conversational models with streaming and image support. The **Embedding Playground** lets you visualize and benchmark how different models understand semantic relationships using powerful 2D plots.
+
+### Step 7: Master Your Analytics
 
 The main "Usage Stats" page and the per-user pages give you a beautiful, exportable overview of exactly how your models are being used.
 
 ![API Usage Statistics](assets/stats.png)
 
-### Step 7: Get Help When You Need It
+### Step 8: Get Help When You Need It
 
 The built-in Help page is now a rich document with a sticky table of contents that tracks your scroll position, making it effortless to find the information you need.
 
@@ -161,8 +168,7 @@ If you prefer a container-based workflow, we've got you covered.
 
 **1. Build the Docker image:**
 ```bash
-docker build -t ollama-proxy-server .
-```
+docker build -t ollama-proxy-server .```
 
 **2. Run the container:**
 Create a `.env` file on your host machine, then run:
@@ -172,8 +178,10 @@ docker run -d --name ollama-proxy \
   --env-file ./.env \
   -v ./ollama_proxy.db:/home/app/ollama_proxy.db \
   -v ./.ssl:/home/app/.ssl \
+  -v ./app/static/uploads:/home/app/app/static/uploads \
   ollama-proxy-server
 ```
+*Note the extra volume mounts for the database, SSL files, and user uploads to persist data outside the container.*
 
 ---
 

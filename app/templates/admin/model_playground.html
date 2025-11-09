@@ -4,11 +4,20 @@
 {% block header_title %}Chat Playground{% endblock %}
 
 {% block content %}
-<div class="flex flex-col h-[calc(100vh-12rem)] max-w-4xl mx-auto card-style p-0">
+<div class="flex flex-col h-[calc(100vh-12rem)] max-w-7xl mx-auto card-style p-0">
     <!-- Header -->
     <div class="card-header p-4 flex items-center justify-between flex-shrink-0">
-        <h2 class="text-xl font-bold">Chat</h2>
+        <div class="flex items-center gap-4">
+            <h2 class="text-xl font-bold">Chat</h2>
+            <div id="system-prompt-indicator" class="hidden items-center gap-1 text-xs px-2 py-1 bg-sky-500/20 text-sky-300 rounded-full cursor-pointer" title="A system prompt is active. Click to edit.">
+                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+                <span>System Prompt Active</span>
+            </div>
+        </div>
         <div class="flex items-center gap-2">
+            <button id="system-prompt-btn" title="Set System Prompt" class="p-2 rounded hover:bg-white/10">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+            </button>
             <select id="model-selector" class="px-3 py-2 rounded-md shadow-sm focus:outline-none focus:ring-[var(--color-primary-500)] focus:border-[var(--color-primary-500)] sm:text-sm">
                 {% if models %}
                     {% for model in models %}
@@ -18,6 +27,9 @@
                     <option value="" disabled>No chat models found</option>
                 {% endif %}
             </select>
+            <button id="test-prompts-btn" title="Test Prompts" class="p-2 rounded hover:bg-white/10">
+                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"></path></svg>
+            </button>
             <input type="file" id="import-chat-input" class="hidden" accept=".json">
             <button id="import-chat-btn" title="Import Chat" class="p-2 rounded hover:bg-white/10">
                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path></svg>
@@ -32,14 +44,19 @@
     <!-- Chat Messages -->
     <div id="chat-container" class="flex-grow p-4 overflow-y-auto space-y-6">
         <!-- Messages will be injected here -->
-        <div class="text-center text-gray-400">Select a model and start chatting.</div>
+        <div class="text-center text-gray-400">Select a model, paste an image, or start chatting.</div>
     </div>
 
     <!-- Message Input -->
     <div class="p-4 flex-shrink-0 border-t border-white/10">
-        <form id="chat-form" class="flex items-center gap-4">
-            <textarea id="message-input" placeholder="Type your message here..." rows="1" class="flex-grow block w-full px-3 py-2 rounded-md shadow-sm focus:outline-none focus:ring-[var(--color-primary-500)] focus:border-[var(--color-primary-500)] sm:text-sm resize-none"></textarea>
-            <button type="submit" id="send-btn" class="justify-center py-2 px-6 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-[var(--color-primary-600)] hover:bg-[var(--color-primary-700)] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[var(--color-primary-500)]">Send</button>
+        <div id="image-previews" class="image-previews"></div>
+        <form id="chat-form" class="flex items-end gap-4">
+            <button type="button" id="attach-img-btn" class="p-2 rounded-md hover:bg-white/10 flex-shrink-0" title="Attach Image">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
+            </button>
+            <input type="file" id="image-input" class="hidden" multiple accept="image/*">
+            <textarea id="message-input" placeholder="Type your message here, or paste an image..." rows="1" class="flex-grow block w-full px-3 py-2 rounded-md shadow-sm focus:outline-none focus:ring-[var(--color-primary-500)] focus:border-[var(--color-primary-500)] sm:text-sm resize-none"></textarea>
+            <button type="submit" id="send-btn" class="justify-center py-2 px-6 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-[var(--color-primary-600)] hover:bg-[var(--color-primary-700)] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[var(--color-primary-500)] self-end">Send</button>
         </form>
     </div>
 </div>
@@ -47,6 +64,38 @@
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <script>
 document.addEventListener('DOMContentLoaded', () => {
+    // --- Marked.js & Renderer Setup ---
+    const renderer = new marked.Renderer();
+    const originalCodeRenderer = renderer.code;
+    renderer.code = function(code, lang, escaped) {
+      const originalHtml = originalCodeRenderer.call(this, code, lang, escaped);
+      // We add a wrapper div that our script will later use to inject a copy button.
+      return `<div class="code-block-wrapper">${originalHtml}</div>`;
+    };
+    marked.setOptions({
+        renderer: renderer,
+        gfm: true,
+        breaks: true,
+        smartypants: false
+    });
+
+    // --- Main Rendering Function ---
+    function highlightAndMathify(element) {
+        element.querySelectorAll('pre code').forEach((block) => {
+            hljs.highlightElement(block);
+        });
+        if (window.renderMathInElement) {
+            renderMathInElement(element, {
+                delimiters: [
+                    {left: '$$', right: '$$', display: true}, {left: '$', right: '$', display: false},
+                    {left: '\\[', right: '\\]', display: true}, {left: '\\(', right: '\\)', display: false}
+                ],
+                throwOnError: false
+            });
+        }
+    }
+    
+    // --- DOM Elements ---
     const chatContainer = document.getElementById('chat-container');
     const chatForm = document.getElementById('chat-form');
     const messageInput = document.getElementById('message-input');
@@ -56,44 +105,192 @@ document.addEventListener('DOMContentLoaded', () => {
     const importChatBtn = document.getElementById('import-chat-btn');
     const importChatInput = document.getElementById('import-chat-input');
     const exportChatBtn = document.getElementById('export-chat-btn');
+    const testPromptsBtn = document.getElementById('test-prompts-btn');
+    const systemPromptBtn = document.getElementById('system-prompt-btn');
+    const systemPromptIndicator = document.getElementById('system-prompt-indicator');
+    const attachImgBtn = document.getElementById('attach-img-btn');
+    const imageInput = document.getElementById('image-input');
+    const imagePreviews = document.getElementById('image-previews');
 
+    // --- State ---
     let messages = [];
     let isLoading = false;
+    let attachedImages = [];
+    let systemPrompt = '';
+    const CUSTOM_PROMPTS_KEY = 'ollama_proxy_custom_prompts';
+    const LAST_MODEL_KEY = 'ollama_proxy_last_model';
+    const LAST_SYSTEM_PROMPT_KEY = 'ollama_proxy_last_system_prompt';
+    const CUSTOM_SYSTEM_PROMPTS_KEY = 'ollama_proxy_custom_system_prompts';
 
-    // --- Event Listeners ---
-    messageInput.addEventListener('input', () => { // Auto-resize textarea
-        messageInput.style.height = 'auto';
-        messageInput.style.height = (messageInput.scrollHeight) + 'px';
-    });
-    
-    clearChatBtn.addEventListener('click', () => {
-        messages = [];
-        renderChat();
-        chatContainer.innerHTML = '<div class="text-center text-gray-400">Chat cleared.</div>';
-    });
-
-    exportChatBtn.addEventListener('click', exportChat);
-    importChatBtn.addEventListener('click', () => importChatInput.click());
-    importChatInput.addEventListener('change', importChat);
-    chatForm.addEventListener('submit', handleChatSubmit);
-
-    // --- Core Functions ---
-    async function handleChatSubmit(e) {
-        e.preventDefault();
-        const userInput = messageInput.value.trim();
-        if (!userInput || isLoading) return;
-
-        const selectedModel = modelSelector.value;
-        if (!selectedModel) {
-            alert('Please select a model.');
-            return;
+    // --- Image Handling ---
+    function handleImageFiles(files) {
+        for (const file of files) {
+            if (!file.type.startsWith('image/')){ continue }
+            const reader = new FileReader();
+            reader.onload = e => {
+                if (attachedImages.length < 5) {
+                    attachedImages.push(e.target.result);
+                    renderImagePreviews();
+                } else {
+                    alert("You can attach a maximum of 5 images.");
+                }
+            };
+            reader.readAsDataURL(file);
         }
+    }
 
-        messages.push({ role: 'user', content: userInput });
-        renderChat();
-        messageInput.value = '';
-        messageInput.style.height = 'auto';
+    function renderImagePreviews() {
+        imagePreviews.innerHTML = '';
+        attachedImages.forEach((imgData, index) => {
+            const previewContainer = document.createElement('div');
+            previewContainer.className = 'img-preview-container';
+            const img = document.createElement('img');
+            img.src = imgData;
+            img.className = 'img-preview';
+            const removeBtn = document.createElement('button');
+            removeBtn.className = 'remove-img-btn';
+            removeBtn.innerHTML = '&times;';
+            removeBtn.onclick = () => {
+                attachedImages.splice(index, 1);
+                renderImagePreviews();
+            };
+            previewContainer.appendChild(img);
+            previewContainer.appendChild(removeBtn);
+            imagePreviews.appendChild(previewContainer);
+        });
+    }
+
+    function handlePaste(event) {
+        const files = event.clipboardData?.files;
+        if (files && files.length > 0) {
+            handleImageFiles(files);
+            event.preventDefault();
+        }
+    }
+    
+    // --- Test Prompts Modal ---
+    async function showTestPrompts() {
+        const response = await fetch("{{ url_for('admin_get_test_prompts') }}");
+        const prebuiltPrompts = await response.json();
+        const customPrompts = JSON.parse(localStorage.getItem(CUSTOM_PROMPTS_KEY) || '[]');
         
+        let modalBody = `
+        <div class="space-y-4">
+            <details class="border border-gray-700 rounded-md">
+                <summary class="cursor-pointer p-3 font-semibold hover:bg-white/5">Add New Test Prompt</summary>
+                <div id="add-prompt-form" class="p-3 border-t border-gray-700 space-y-3">
+                    <input id="new-prompt-category" type="text" placeholder="Category (e.g., Coding)" class="w-full px-3 py-2 rounded-md">
+                    <input id="new-prompt-title" type="text" placeholder="Title (e.g., Python FizzBuzz)" class="w-full px-3 py-2 rounded-md">
+                    <textarea id="new-prompt-prompt" placeholder="Prompt text..." rows="3" class="w-full px-3 py-2 rounded-md"></textarea>
+                    <textarea id="new-prompt-expected" placeholder="Expected outcome..." rows="2" class="w-full px-3 py-2 rounded-md"></textarea>
+                    <button id="save-new-prompt-btn" class="py-2 px-4 bg-blue-600 text-white rounded hover:bg-blue-700">Save Custom Prompt</button>
+                </div>
+            </details>
+            <div class="prompts-list-container" style="max-height: 60vh; overflow-y: auto; padding-right: 0.5rem;"></div>
+        </div>`;
+        
+        window.showModal('Test Prompts Library', modalBody);
+        renderPromptsList(prebuiltPrompts, customPrompts);
+    }
+
+    function renderPromptsList(prebuilt, custom) {
+        const container = document.querySelector('.prompts-list-container');
+        if (!container) return;
+
+        const allPrompts = [...prebuilt.map(p => ({...p, isCustom: false})), ...custom.map(p => ({...p, isCustom: true}))];
+        const categories = allPrompts.reduce((acc, p) => {
+            if (!acc[p.category]) acc[p.category] = [];
+            acc[p.category].push(p);
+            return acc;
+        }, {});
+
+        let listHtml = '<div class="space-y-4">';
+        for (const category in categories) {
+            listHtml += `<h4 class="text-lg font-semibold mt-4">${category}</h4><div class="space-y-2">`;
+            categories[category].forEach(p => {
+                const deleteBtn = p.isCustom ? `<button class="delete-prompt-btn text-red-500 hover:text-red-700 text-lg" data-prompt-title="${escape(p.title)}" title="Delete">&times;</button>` : '';
+                listHtml += `
+                    <div class="p-3 border border-gray-700 rounded-md">
+                        <div class="flex justify-between items-start">
+                           <p class="font-semibold">${p.title} ${p.isCustom ? '<span class="text-xs font-normal text-blue-400">(Custom)</span>' : ''}</p>
+                           ${deleteBtn}
+                        </div>
+                        <p class="text-sm text-gray-400 italic mt-1"><strong>Expected:</strong> ${p.expected_outcome}</p>
+                        <button class="use-prompt-btn mt-2 text-sm text-[var(--color-primary-500)] hover:underline" data-prompt="${escape(p.prompt)}">Use this prompt</button>
+                    </div>`;
+            });
+            listHtml += '</div>';
+        }
+        listHtml += '</div>';
+        container.innerHTML = listHtml;
+    }
+
+    // --- System Prompt Modal ---
+    function showSystemPromptModal() {
+        const PREBUILT_SYSTEM_PROMPTS = [
+            { name: "Standard Assistant", prompt: "You are a helpful, respectful and honest assistant." },
+            { name: "Chain of Thought", prompt: "When you are asked a question, first provide a step-by-step plan of how you will answer the question. Then, produce the answer, explaining your reasoning at each step." },
+            { name: "Python Expert", prompt: "You are an expert Python programmer. Provide concise, efficient, and well-documented code. Your answers should only contain code, unless asked otherwise." },
+            { name: "Creative Writer", prompt: "You are a creative writer, tasked with writing a compelling and imaginative story based on the user's prompt. Focus on vivid descriptions and engaging narrative." }
+        ];
+        const customSystemPrompts = JSON.parse(localStorage.getItem(CUSTOM_SYSTEM_PROMPTS_KEY) || '[]');
+        
+        let modalBody = `<div class="space-y-4">
+            <div>
+                <label for="system-prompt-textarea" class="block text-sm font-medium mb-1">Current System Prompt</label>
+                <textarea id="system-prompt-textarea" rows="6" class="w-full p-2 rounded-md">${systemPrompt}</textarea>
+            </div>
+            <div class="flex flex-wrap gap-2 items-center">
+                <div class="relative">
+                     <button id="load-system-prompt-btn" class="py-2 px-4 text-sm bg-gray-600 rounded-md">Load Preset</button>
+                     <div id="system-prompt-dropdown" class="absolute bottom-full mb-2 w-72 rounded-md shadow-lg bg-gray-800 ring-1 ring-black ring-opacity-5 hidden z-20"></div>
+                </div>
+                <input id="new-system-prompt-name" type="text" placeholder="Save current as preset..." class="flex-grow p-2 rounded-md text-sm">
+                <button id="save-custom-system-prompt-btn" class="py-2 px-4 text-sm bg-blue-600 rounded-md">Save as Preset</button>
+            </div>
+             <div class="flex justify-end gap-4 pt-4 border-t border-gray-700">
+                <button id="clear-system-prompt-btn" class="py-2 px-4 bg-red-600 text-white rounded">Clear & Close</button>
+                <button id="apply-system-prompt-btn" class="py-2 px-4 bg-green-600 text-white rounded">Apply & Close</button>
+            </div>
+        </div>`;
+
+        window.showModal('System Prompt', modalBody);
+
+        const dropdown = document.getElementById('system-prompt-dropdown');
+        let dropdownHTML = '<div class="py-1">';
+        dropdownHTML += '<div class="px-4 py-2 text-xs uppercase text-gray-400">Pre-built</div>';
+        PREBUILT_SYSTEM_PROMPTS.forEach(p => {
+            dropdownHTML += `<a href="#" class="block px-4 py-2 text-sm text-gray-300 hover:bg-gray-700 system-prompt-item" data-prompt="${escape(p.prompt)}">${p.name}</a>`;
+        });
+        if (customSystemPrompts.length > 0) {
+            dropdownHTML += '<div class="px-4 py-2 mt-2 text-xs uppercase text-gray-400 border-t border-gray-600">Custom</div>';
+            customSystemPrompts.forEach(p => {
+                 dropdownHTML += `<div class="flex items-center justify-between px-4 py-2 text-sm text-gray-300 hover:bg-gray-700">
+                                    <a href="#" class="flex-grow system-prompt-item" data-prompt="${escape(p.prompt)}">${p.name}</a>
+                                    <button class="delete-system-prompt-btn text-red-500 hover:text-red-400 ml-2" data-name="${escape(p.name)}">&times;</button>
+                                 </div>`;
+            });
+        }
+        dropdownHTML += '</div>';
+        dropdown.innerHTML = dropdownHTML;
+    }
+
+    function updateSystemPromptIndicator() {
+        if (systemPrompt) {
+            systemPromptIndicator.classList.remove('hidden');
+            systemPromptIndicator.classList.add('flex');
+        } else {
+            systemPromptIndicator.classList.add('hidden');
+            systemPromptIndicator.classList.remove('flex');
+        }
+    }
+    
+    // --- Core Chat Functions ---
+    async function fetchStreamedResponse() {
+        if (isLoading) return;
+        toggleLoading(true);
+        renderChat(); // Shows current messages and adds placeholder
+
         const botMessageWrapper = findLastBotMessageWrapper();
         const botContentElement = botMessageWrapper.querySelector('.message-content');
         const botStatsElement = botMessageWrapper.querySelector('.message-stats');
@@ -101,15 +298,21 @@ document.addEventListener('DOMContentLoaded', () => {
         let fullResponse = '';
         let firstChunk = true;
         const startTime = performance.now();
-        toggleLoading(true);
+        let streamError = null;
+
+        const messagesForApi = messages.map(msg => Array.isArray(msg.content) && !msg.content.some(item => item.type === 'image_url') ? { ...msg, content: msg.content.find(item => item.type === 'text')?.text || '' } : msg);
+        
+        // Inject system prompt if it's the first user message of a conversation
+        if (systemPrompt && messages.length === 1 && messages[0].role === 'user') {
+            messagesForApi.unshift({ role: "system", content: systemPrompt });
+        }
 
         try {
             const response = await fetch("{{ url_for('admin_playground_stream') }}", {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ model: selectedModel, messages: messages }),
+                body: JSON.stringify({ model: modelSelector.value, messages: messagesForApi }),
             });
-
             if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
 
             const reader = response.body.getReader();
@@ -119,172 +322,391 @@ document.addEventListener('DOMContentLoaded', () => {
                 const { value, done } = await reader.read();
                 if (done) break;
                 
-                const chunk = decoder.decode(value);
+                const chunk = decoder.decode(value, { stream: true });
                 const lines = chunk.split('\n').filter(line => line.trim() !== '');
 
                 for (const line of lines) {
                     try {
                         const data = JSON.parse(line);
-                        
-                        if (firstChunk && data.message && data.message.content) {
+                        if (firstChunk && data.message?.content) {
                             firstChunk = false;
+                            botContentElement.innerHTML = ''; // Clear spinner
                             const ttft = Math.round(performance.now() - startTime);
                             botStatsElement.innerHTML = `<span>TTFT: ${ttft}ms</span>`;
                             botStatsElement.classList.remove('hidden');
                         }
-
-                        if (data.message && data.message.content) {
+                        if (data.message?.content) {
                             fullResponse += data.message.content;
                             renderBotMessage(botContentElement, fullResponse);
+                            highlightAndMathify(botContentElement);
                         }
-                        
-                        if (data.done && data.eval_count && data.eval_duration) {
+                        if (data.done && data.eval_count && data.eval_duration > 0) {
                             const tokensPerSecond = (data.eval_count / (data.eval_duration / 1e9)).toFixed(2);
-                            const existingStats = botStatsElement.innerHTML;
-                            botStatsElement.innerHTML = `${existingStats} | <span>Speed: ${tokensPerSecond} t/s</span>`;
+                            botStatsElement.innerHTML = `${botStatsElement.innerHTML} | <span>Speed: ${tokensPerSecond} t/s</span>`;
                         }
-                        
                         if (data.error) throw new Error(data.details || data.error);
-                        
-                    } catch (err) { console.error('Error parsing stream chunk:', line, err); }
+                    } catch (err) { /* Ignore JSON parse errors for partial chunks */ }
                 }
                 chatContainer.scrollTop = chatContainer.scrollHeight;
             }
         } catch (error) {
+            streamError = error;
             console.error('Error during chat stream:', error);
             botContentElement.innerHTML = `<p class="text-red-400"><strong>Error:</strong> ${error.message}</p>`;
+            botStatsElement.classList.add('hidden');
         } finally {
-            messages.push({ role: 'assistant', content: fullResponse });
             toggleLoading(false);
+            if (!streamError) {
+                messages.push({ role: 'assistant', content: fullResponse });
+            }
+            // Final re-render to attach all buttons correctly
+            renderChat(); 
             chatContainer.scrollTop = chatContainer.scrollHeight;
         }
     }
+    
+    async function handleChatSubmit(e) {
+        if (e) e.preventDefault();
+        const userInput = messageInput.value.trim();
+        if ((!userInput && attachedImages.length === 0) || isLoading) return;
 
-    function renderBotMessage(container, rawContent) {
-        container.innerHTML = ''; // Clear previous content
+        let content = [];
+        if(userInput) content.push({ type: 'text', text: userInput });
+        attachedImages.forEach(img => content.push({ type: 'image_url', image_url: { url: img }}));
         
-        const parts = rawContent.split(/(<think>[\s\S]*?<\/think>)/g);
+        messages.push({ role: 'user', content: content });
+        
+        messageInput.value = '';
+        messageInput.style.height = 'auto';
+        attachedImages = [];
+        renderImagePreviews();
 
-        parts.forEach(part => {
-            if (part.startsWith('<think>') && part.endsWith('</think>')) {
-                const thinkContent = part.slice(7, -8);
-                
-                const details = document.createElement('details');
-                details.className = 'think-block';
-                details.open = true;
-
-                const summary = document.createElement('summary');
-                summary.textContent = 'Thinking...';
-                
-                const contentDiv = document.createElement('div');
-                contentDiv.innerHTML = marked.parse(thinkContent);
-
-                details.appendChild(summary);
-                details.appendChild(contentDiv);
-                container.appendChild(details);
-            } else if (part) {
-                const contentDiv = document.createElement('div');
-                contentDiv.innerHTML = marked.parse(part);
-                container.appendChild(contentDiv);
-            }
+        await fetchStreamedResponse();
+    }
+    
+    function renderBotMessage(container, rawContent) {
+        const contentString = String(rawContent || '');
+        container.dataset.rawContent = rawContent;
+    
+        const thinkRegex = /<think>([\s\S]*?)<\/think>/g;
+        let finalHtml = contentString.replace(thinkRegex, (match, thinkContent) => {
+            return `<details class="think-block"><summary>Thoughts</summary><div>${marked.parse(thinkContent)}</div></details>`;
         });
+        
+        container.innerHTML = marked.parse(finalHtml);
     }
 
     function renderChat() {
         chatContainer.innerHTML = '';
-        if (messages.length === 0) {
+        if (messages.length === 0 && !isLoading) {
             chatContainer.innerHTML = '<div class="text-center text-gray-400">Select a model and start chatting.</div>';
             return;
         }
-        messages.forEach(msg => appendMessage(msg.role, msg.content, false));
-        // Append a placeholder for the next bot response if the last message was from a user
-        if (messages.length > 0 && messages[messages.length - 1].role === 'user') {
-            appendMessage('assistant', '...', true);
+        messages.forEach((msg, index) => appendMessage(msg.role, msg.content, false, index));
+        if (isLoading) {
+            appendMessage('assistant', '', true, messages.length);
         }
+        highlightAndMathify(chatContainer);
     }
     
-    function appendMessage(role, content, isPlaceholder = false) {
+    function appendMessage(role, content, isPlaceholder = false, messageIndex) {
         const messageWrapper = document.createElement('div');
-        messageWrapper.className = `flex gap-4 message-wrapper ${role === 'user' ? 'justify-end' : 'justify-start'}`;
+        messageWrapper.className = `flex gap-4 message-wrapper group ${role === 'user' ? 'justify-end' : 'justify-start'}`;
+        messageWrapper.dataset.messageIndex = messageIndex;
 
         const contentWrapper = document.createElement('div');
-        contentWrapper.className = `max-w-xl p-3 rounded-lg ${role === 'user' ? 'bg-[var(--color-primary-700)] text-white' : 'bg-gray-700/50'}`;
-        if (isPlaceholder) contentWrapper.classList.add('is-placeholder');
+        contentWrapper.className = `max-w-3xl w-full p-3 rounded-lg relative ${role === 'user' ? 'bg-[var(--color-primary-700)] text-white' : 'bg-gray-700/50'}`;
+        
+        const actionsDiv = document.createElement('div');
+        actionsDiv.className = 'message-actions absolute -top-3 right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity';
         
         const contentDiv = document.createElement('div');
-        contentDiv.className = 'message-content prose prose-invert max-w-none prose-p:my-2 prose-pre:my-2';
-        
-        if (role === 'assistant') {
-            renderBotMessage(contentDiv, content);
-        } else {
-            contentDiv.innerHTML = marked.parse(content);
-        }
+        contentDiv.className = 'message-content prose prose-invert max-w-none prose-p:my-2 prose-pre:my-2 prose-code:font-sans';
 
         const statsDiv = document.createElement('div');
         statsDiv.className = 'message-stats text-xs text-gray-400 mt-2 space-x-2 hidden';
 
+        if (isPlaceholder) {
+            contentDiv.innerHTML = `<div class="flex items-center gap-2 text-gray-400"><svg class="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg><span>Waiting for response...</span></div>`;
+        } else {
+            let actionsHTML = `
+                <button class="copy-btn p-1 rounded-full bg-gray-800 hover:bg-gray-700" title="Copy"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg></button>
+                <button class="edit-btn p-1 rounded-full bg-gray-800 hover:bg-gray-700" title="Edit"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.5L15.232 5.232z"></path></svg></button>
+                <button class="delete-btn p-1 rounded-full bg-gray-800 hover:bg-gray-700" title="Delete"><svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"></path></svg></button>`;
+            if (role === 'assistant') {
+                actionsHTML += `<button class="regenerate-btn p-1 rounded-full bg-gray-800 hover:bg-gray-700" title="Regenerate"><svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"></path></svg></button>`;
+            }
+            actionsDiv.innerHTML = actionsHTML;
+
+            if (role === 'assistant') {
+                renderBotMessage(contentDiv, content);
+            } else {
+                let textContent = '';
+                contentDiv.innerHTML = ''; 
+                if (Array.isArray(content)) {
+                    content.forEach(part => {
+                        if (part.type === 'text' && part.text) {
+                            textContent = part.text;
+                            contentDiv.insertAdjacentHTML('beforeend', marked.parse(part.text));
+                        } else if (part.type === 'image_url') {
+                            contentDiv.insertAdjacentHTML('beforeend', `<img src="${part.image_url.url}" class="max-w-full h-auto rounded-md mt-2">`);
+                        }
+                    });
+                } else if (typeof content === 'string') {
+                    textContent = content;
+                    contentDiv.innerHTML = marked.parse(content);
+                }
+                contentDiv.dataset.rawContent = textContent;
+            }
+            contentWrapper.querySelectorAll('.code-block-wrapper').forEach(wrapper => {
+                const copyBtn = document.createElement('button');
+                copyBtn.className = 'copy-button';
+                copyBtn.textContent = 'Copy';
+                wrapper.appendChild(copyBtn);
+            });
+        }
+
+        contentWrapper.appendChild(actionsDiv);
         contentWrapper.appendChild(contentDiv);
         if (role === 'assistant') contentWrapper.appendChild(statsDiv);
         messageWrapper.appendChild(contentWrapper);
         chatContainer.appendChild(messageWrapper);
-        chatContainer.scrollTop = chatContainer.scrollHeight;
     }
     
     function findLastBotMessageWrapper() {
         const wrappers = chatContainer.querySelectorAll('.message-wrapper');
-        for (let i = wrappers.length - 1; i >= 0; i--) {
-            if (!wrappers[i].classList.contains('justify-end')) {
-                return wrappers[i];
-            }
-        }
-        return null;
+        return wrappers[wrappers.length - 1];
     }
 
     function toggleLoading(state) {
         isLoading = state;
         sendBtn.disabled = state;
-        sendBtn.innerHTML = state ? '<svg class="animate-spin h-5 w-5 mx-auto" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>' : 'Send';
+        sendBtn.innerHTML = state ? '<svg class="animate-spin h-5 w-5 mx-auto" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>' : 'Send';
         messageInput.disabled = state;
     }
 
     function exportChat() {
-        if (messages.length === 0) {
-            alert('Nothing to export.');
-            return;
-        }
+        if (messages.length === 0) return;
         const blob = new Blob([JSON.stringify(messages, null, 2)], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
         a.download = `chat-history-${new Date().toISOString()}.json`;
-        document.body.appendChild(a);
         a.click();
-        document.body.removeChild(a);
         URL.revokeObjectURL(url);
     }
 
     function importChat(event) {
         const file = event.target.files[0];
         if (!file) return;
-        
         const reader = new FileReader();
         reader.onload = (e) => {
             try {
-                const importedMessages = JSON.parse(e.target.result);
-                if (Array.isArray(importedMessages) && importedMessages.every(m => m.role && m.content !== undefined)) {
-                    messages = importedMessages;
+                const imported = JSON.parse(e.target.result);
+                if (Array.isArray(imported) && imported.every(m => m.role && m.content !== undefined)) {
+                    messages = imported;
                     renderChat();
-                } else {
-                    alert('Invalid chat file format.');
-                }
-            } catch (error) {
-                alert('Failed to read or parse the chat file.');
-                console.error('Import error:', error);
-            }
+                } else { alert('Invalid chat file format.'); }
+            } catch (error) { alert('Failed to read or parse chat file.'); }
         };
         reader.readAsText(file);
-        event.target.value = null; // Reset input for same-file uploads
+        event.target.value = null;
     }
+
+    function copyToClipboard(text, button) {
+        const originalText = button.textContent || button.innerHTML;
+        navigator.clipboard.writeText(text).then(() => {
+            button.textContent = 'Copied!';
+            setTimeout(() => { button.innerHTML = originalText; }, 2000);
+        }).catch(() => { // Fallback for http or other issues
+            const textArea = document.createElement('textarea');
+            textArea.value = text;
+            textArea.style.position = 'fixed'; textArea.style.opacity = '0';
+            document.body.appendChild(textArea);
+            textArea.focus(); textArea.select();
+            try {
+                document.execCommand('copy');
+                button.textContent = 'Copied!';
+                setTimeout(() => { button.innerHTML = originalText; }, 2000);
+            } catch (err) { alert('Failed to copy'); }
+            document.body.removeChild(textArea);
+        });
+    }
+    
+    function enterEditMode(messageWrapper, messageIndex) {
+        const contentWrapper = messageWrapper.querySelector('.rounded-lg');
+        const contentDiv = contentWrapper.querySelector('.message-content');
+        contentDiv.style.display = 'none';
+        contentWrapper.querySelector('.message-actions').style.display = 'none';
+
+        const editContainer = document.createElement('div');
+        editContainer.className = 'edit-container';
+        const textarea = document.createElement('textarea');
+        textarea.className = 'block w-full px-3 py-2 rounded-md shadow-sm sm:text-sm resize-y bg-gray-900 text-white';
+        textarea.value = contentDiv.dataset.rawContent;
+        textarea.rows = Math.max(5, (textarea.value.match(/\n/g) || []).length + 1);
+        const buttonGroup = document.createElement('div');
+        buttonGroup.className = 'flex justify-end gap-2 mt-2';
+        const saveBtn = document.createElement('button');
+        saveBtn.textContent = 'Save & Submit';
+        saveBtn.className = 'py-1 px-3 bg-green-600 text-white rounded hover:bg-green-700 text-sm';
+        saveBtn.onclick = () => saveEdit(messageIndex, textarea.value);
+        const cancelBtn = document.createElement('button');
+        cancelBtn.textContent = 'Cancel';
+        cancelBtn.className = 'py-1 px-3 bg-gray-600 text-white rounded hover:bg-gray-700 text-sm';
+        cancelBtn.onclick = () => {
+            editContainer.remove();
+            contentDiv.style.display = 'block';
+            contentWrapper.querySelector('.message-actions').style.display = 'flex';
+        };
+        buttonGroup.appendChild(cancelBtn);
+        buttonGroup.appendChild(saveBtn);
+        editContainer.appendChild(textarea);
+        editContainer.appendChild(buttonGroup);
+        contentWrapper.appendChild(editContainer);
+    }
+
+    function saveEdit(messageIndex, newContent) {
+        messages.splice(messageIndex + 1); // Remove all subsequent messages
+        const oldMessage = messages[messageIndex];
+        if (Array.isArray(oldMessage.content)) {
+            const textPart = oldMessage.content.find(p => p.type === 'text');
+            if (textPart) textPart.text = newContent; else oldMessage.content.unshift({type: 'text', text: newContent});
+        } else {
+            oldMessage.content = newContent;
+        }
+        fetchStreamedResponse();
+    }
+
+    // --- Event Listeners & Init ---
+    messageInput.addEventListener('input', () => { messageInput.style.height = 'auto'; messageInput.style.height = `${Math.min(messageInput.scrollHeight, 200)}px`; });
+    messageInput.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); chatForm.dispatchEvent(new Event('submit', { cancelable: true })); } });
+    messageInput.addEventListener('paste', handlePaste);
+    clearChatBtn.addEventListener('click', () => { messages = []; attachedImages = []; renderChat(); renderImagePreviews(); chatContainer.innerHTML = '<div class="text-center text-gray-400">Chat cleared.</div>'; });
+    exportChatBtn.addEventListener('click', exportChat);
+    importChatBtn.addEventListener('click', () => importChatInput.click());
+    importChatInput.addEventListener('change', importChat);
+    chatForm.addEventListener('submit', handleChatSubmit);
+    testPromptsBtn.addEventListener('click', showTestPrompts);
+    systemPromptBtn.addEventListener('click', showSystemPromptModal);
+    systemPromptIndicator.addEventListener('click', showSystemPromptModal);
+    attachImgBtn.addEventListener('click', () => imageInput.click());
+    imageInput.addEventListener('change', (e) => handleImageFiles(e.target.files));
+
+    modelSelector.addEventListener('change', () => {
+        localStorage.setItem(LAST_MODEL_KEY, modelSelector.value);
+    });
+
+    document.addEventListener('click', async e => {
+        // --- Message Actions ---
+        const copyBtn = e.target.closest('.copy-btn');
+        if (copyBtn) {
+            const contentDiv = copyBtn.closest('.rounded-lg').querySelector('.message-content');
+            copyToClipboard(contentDiv.dataset.rawContent || '', copyBtn); return;
+        }
+        const codeCopyBtn = e.target.closest('.code-block-wrapper .copy-button');
+        if (codeCopyBtn) {
+            const codeEl = codeCopyBtn.closest('.code-block-wrapper').querySelector('code');
+            copyToClipboard(codeEl.innerText, codeCopyBtn); return;
+        }
+        const editBtn = e.target.closest('.edit-btn');
+        if (editBtn) {
+            const messageWrapper = editBtn.closest('.message-wrapper');
+            enterEditMode(messageWrapper, parseInt(messageWrapper.dataset.messageIndex, 10)); return;
+        }
+        const deleteBtn = e.target.closest('.delete-btn');
+        if (deleteBtn) {
+            if (isLoading) return;
+            const messageWrapper = deleteBtn.closest('.message-wrapper');
+            const messageIndex = parseInt(messageWrapper.dataset.messageIndex, 10);
+            if (!isNaN(messageIndex) && confirm('Are you sure you want to delete this message and all subsequent messages?')) {
+                messages.splice(messageIndex); renderChat();
+            } return;
+        }
+        const regenerateBtn = e.target.closest('.regenerate-btn');
+        if (regenerateBtn) {
+            if (isLoading) return;
+            const messageWrapper = regenerateBtn.closest('.message-wrapper');
+            const messageIndex = parseInt(messageWrapper.dataset.messageIndex, 10);
+            if (!isNaN(messageIndex)) {
+                messages.splice(messageIndex); fetchStreamedResponse();
+            } return;
+        }
+
+        // --- Prompt Modal Actions ---
+        if (e.target.classList.contains('use-prompt-btn')) {
+            messageInput.value = unescape(e.target.dataset.prompt);
+            document.getElementById('modal-close-btn').click();
+            messageInput.focus(); messageInput.dispatchEvent(new Event('input'));
+        }
+        if (e.target.id === 'save-new-prompt-btn') {
+            const [category, title, prompt, expected] = ['#new-prompt-category', '#new-prompt-title', '#new-prompt-prompt', '#new-prompt-expected'].map(id => document.getElementById(id.substring(1)).value.trim());
+            if (category && title && prompt && expected) {
+                const customPrompts = JSON.parse(localStorage.getItem(CUSTOM_PROMPTS_KEY) || '[]');
+                customPrompts.push({ category, title, prompt, expected_outcome: expected });
+                localStorage.setItem(CUSTOM_PROMPTS_KEY, JSON.stringify(customPrompts));
+                showTestPrompts();
+            } else { alert('All fields are required.'); }
+        }
+        if (e.target.classList.contains('delete-prompt-btn')) {
+            const titleToDelete = unescape(e.target.dataset.promptTitle);
+            if (confirm(`Delete custom prompt "${titleToDelete}"?`)) {
+                let customPrompts = JSON.parse(localStorage.getItem(CUSTOM_PROMPTS_KEY) || '[]');
+                customPrompts = customPrompts.filter(p => p.title !== titleToDelete);
+                localStorage.setItem(CUSTOM_PROMPTS_KEY, JSON.stringify(customPrompts));
+                showTestPrompts();
+            }
+        }
+        // --- System Prompt Modal Actions ---
+        if (e.target.id === 'load-system-prompt-btn') {
+            document.getElementById('system-prompt-dropdown').classList.toggle('hidden');
+        }
+        if (e.target.classList.contains('system-prompt-item')) {
+            e.preventDefault();
+            document.getElementById('system-prompt-textarea').value = unescape(e.target.dataset.prompt);
+            document.getElementById('system-prompt-dropdown').classList.add('hidden');
+        }
+        if (e.target.id === 'apply-system-prompt-btn') {
+            systemPrompt = document.getElementById('system-prompt-textarea').value.trim();
+            localStorage.setItem(LAST_SYSTEM_PROMPT_KEY, systemPrompt);
+            updateSystemPromptIndicator();
+            document.getElementById('modal-close-btn').click();
+        }
+        if (e.target.id === 'clear-system-prompt-btn') {
+            systemPrompt = '';
+            localStorage.removeItem(LAST_SYSTEM_PROMPT_KEY);
+            updateSystemPromptIndicator();
+            document.getElementById('modal-close-btn').click();
+        }
+        if (e.target.id === 'save-custom-system-prompt-btn') {
+            const name = document.getElementById('new-system-prompt-name').value.trim();
+            const prompt = document.getElementById('system-prompt-textarea').value.trim();
+            if (name && prompt) {
+                const custom = JSON.parse(localStorage.getItem(CUSTOM_SYSTEM_PROMPTS_KEY) || '[]');
+                if (custom.some(p => p.name === name)) { alert('A preset with this name already exists.'); return; }
+                custom.push({ name, prompt });
+                localStorage.setItem(CUSTOM_SYSTEM_PROMPTS_KEY, JSON.stringify(custom));
+                showSystemPromptModal();
+            } else { alert('Please provide a name and a prompt to save.'); }
+        }
+        if (e.target.classList.contains('delete-system-prompt-btn')) {
+            const nameToDelete = unescape(e.target.dataset.name);
+            if (confirm(`Delete system prompt preset "${nameToDelete}"?`)) {
+                let custom = JSON.parse(localStorage.getItem(CUSTOM_SYSTEM_PROMPTS_KEY) || '[]');
+                custom = custom.filter(p => p.name !== nameToDelete);
+                localStorage.setItem(CUSTOM_SYSTEM_PROMPTS_KEY, JSON.stringify(custom));
+                showSystemPromptModal();
+            }
+        }
+    });
+
+    // --- Init ---
+    const lastModel = localStorage.getItem(LAST_MODEL_KEY);
+    if (lastModel && modelSelector.querySelector(`option[value="${lastModel}"]`)) {
+        modelSelector.value = lastModel;
+    }
+    systemPrompt = localStorage.getItem(LAST_SYSTEM_PROMPT_KEY) || '';
+    updateSystemPromptIndicator();
 });
 </script>
 {% endblock %}

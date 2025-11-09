@@ -11,6 +11,9 @@ from pathlib import Path
 import os
 import json 
 import numpy as np
+from sklearn.decomposition import PCA
+from pydantic import BaseModel, conlist
+import base64
 
 from fastapi import APIRouter, Depends, Request, Form, HTTPException, status, Query, UploadFile, File
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, StreamingResponse 
@@ -27,7 +30,10 @@ from app.crud import user_crud, apikey_crud, log_crud, server_crud, settings_cru
 from app.schema.user import UserCreate
 from app.schema.server import ServerCreate
 from app.schema.settings import AppSettingsModel
-from app.api.v1.dependencies import get_csrf_token, validate_csrf_token, login_rate_limiter
+from app.api.v1.dependencies import get_csrf_token, validate_csrf_token, login_rate_limiter, validate_csrf_token_header
+from app.core.benchmarks import PREBUILT_BENCHMARKS
+from app.core.test_prompts import PREBUILT_TEST_PROMPTS
+
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -455,7 +461,7 @@ async def admin_playground_ui(
     return templates.TemplateResponse("admin/model_playground.html", context)
 
 
-@router.post("/playground-stream", name="admin_playground_stream")
+@router.post("/playground-stream", name="admin_playground_stream", dependencies=[Depends(validate_csrf_token_header)])
 async def admin_playground_stream(
     request: Request,
     db: AsyncSession = Depends(get_db),
@@ -469,6 +475,24 @@ async def admin_playground_stream(
         if not model_name or not messages:
             return JSONResponse({"error": "Model and messages are required."}, status_code=400)
 
+        # Handle base64 images, converting them to the format Ollama expects
+        for msg in messages:
+            if isinstance(msg.get("content"), list):
+                new_content = []
+                images_list = []
+                for item in msg["content"]:
+                    if item.get("type") == "text":
+                        new_content.append(item["text"])
+                    elif item.get("type") == "image_url":
+                        # data:image/jpeg;base64, -> just the base64 part
+                        base64_str = item["image_url"]["url"].split(",")[-1]
+                        images_list.append(base64_str)
+                
+                msg["content"] = " ".join(new_content)
+                if images_list:
+                    msg["images"] = images_list
+
+
         http_client: httpx.AsyncClient = request.app.state.http_client
         
         # Find a server with the model
@@ -479,11 +503,8 @@ async def admin_playground_stream(
             if not active_servers:
                 error_payload = {"error": "No active backend servers available."}
                 return Response(json.dumps(error_payload), media_type="application/x-ndjson", status_code=503)
-            # If the model isn't in our catalog, we can't be sure where it is.
-            # Best effort: just try the first active server.
             target_server = active_servers[0]
         else:
-            # Smart routing: pick the first server known to have the model
             target_server = servers_with_model[0]
         
         chat_url = f"{target_server.url.rstrip('/')}/api/chat"
@@ -492,7 +513,6 @@ async def admin_playground_stream(
         async def event_stream():
             try:
                 async with http_client.stream("POST", chat_url, json=payload, timeout=600.0) as response:
-                    # Check for non-200 responses from Ollama, which don't raise exceptions but indicate errors
                     if response.status_code != 200:
                         error_body = await response.aread()
                         error_text = error_body.decode('utf-8')
@@ -527,6 +547,14 @@ async def admin_embedding_playground_ui(
     context["csrf_token"] = await get_csrf_token(request)
     return templates.TemplateResponse("admin/embedding_playground.html", context)
 
+@router.get("/embedding-playground/prebuilt", name="admin_get_prebuilt_benchmarks")
+async def admin_get_prebuilt_benchmarks(admin_user: User = Depends(require_admin_user)):
+    return JSONResponse(PREBUILT_BENCHMARKS)
+
+@router.get("/playground/test-prompts", name="admin_get_test_prompts")
+async def admin_get_test_prompts(admin_user: User = Depends(require_admin_user)):
+    return JSONResponse(PREBUILT_TEST_PROMPTS)
+    
 async def get_embedding(
     http_client: httpx.AsyncClient, 
     server_url: str, 
@@ -549,75 +577,84 @@ async def get_embedding(
         logger.error(f"Failed to connect to Ollama server at {server_url}: {e}")
         raise HTTPException(status_code=500, detail=f"Could not connect to Ollama server to get embedding: {e}")
 
-@router.post("/embedding-playground/benchmark", name="admin_run_embedding_benchmark", dependencies=[Depends(validate_csrf_token)])
+class BenchmarkGroup(BaseModel):
+    id: str
+    name: str
+    color: str
+    texts: List[str]
+
+class BenchmarkPayload(BaseModel):
+    name: str
+    groups: List[BenchmarkGroup]
+
+class BenchmarkRequest(BaseModel):
+    models: conlist(str, min_length=1)
+    benchmark: BenchmarkPayload
+
+@router.post("/embedding-playground/benchmark", name="admin_run_embedding_benchmark")
 async def admin_run_embedding_benchmark(
+    request_data: BenchmarkRequest,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    admin_user: User = Depends(require_admin_user)
+    admin_user: User = Depends(require_admin_user),
+    csrf_valid: bool = Depends(validate_csrf_token_header)
 ):
-    try:
-        form_data = await request.form()
-        model_names = form_data.getlist("models")
+    http_client: httpx.AsyncClient = request.app.state.http_client
+
+    all_texts = {text for group in request_data.benchmark.groups for text in group.texts}
+    
+    model_embeddings = {}
+    
+    for model_name in request_data.models:
+        servers = await server_crud.get_servers_with_model(db, model_name)
+        if not servers:
+            # This case should be handled on the client, but as a fallback:
+            model_embeddings[model_name] = {"error": "Model not found on any active server."}
+            continue
         
-        text_pairs = []
-        i = 0
-        while True:
-            text1 = form_data.get(f"text_pairs[{i}][text1]")
-            if text1 is None:
-                break
-            text_pairs.append({
-                "text1": text1,
-                "text2": form_data.get(f"text_pairs[{i}][text2]"),
-                "expected": form_data.get(f"text_pairs[{i}][expected]"),
-            })
-            i += 1
-            
-        if not model_names or not text_pairs:
-            return JSONResponse({"error": "At least one model and one text pair are required."}, status_code=400)
-
-        http_client: httpx.AsyncClient = request.app.state.http_client
-        results = []
-
-        for pair in text_pairs:
-            pair_result = {"text1": pair["text1"], "text2": pair["text2"], "expected": pair["expected"], "scores": {}}
-            
-            # Get embeddings for this pair for all models
-            embedding_tasks = {}
-            for model_name in model_names:
-                servers = await server_crud.get_servers_with_model(db, model_name)
-                if not servers:
-                    pair_result["scores"][model_name] = {"error": "Model not found on any server."}
-                    continue
-                
-                server = servers[0]
-                embedding_tasks[f"{model_name}_1"] = get_embedding(http_client, server.url, model_name, pair["text1"])
-                embedding_tasks[f"{model_name}_2"] = get_embedding(http_client, server.url, model_name, pair["text2"])
-
-            embeddings = await asyncio.gather(*embedding_tasks.values(), return_exceptions=True)
-            
-            # Map results back and compute similarity
-            embedding_map = dict(zip(embedding_tasks.keys(), embeddings))
-
-            for model_name in model_names:
-                vec1 = embedding_map.get(f"{model_name}_1")
-                vec2 = embedding_map.get(f"{model_name}_2")
-                
-                if isinstance(vec1, Exception) or isinstance(vec2, Exception):
-                    error_msg = str(vec1) if isinstance(vec1, Exception) else str(vec2)
-                    pair_result["scores"][model_name] = {"error": error_msg}
-                else:
-                    vec1 = np.array(vec1)
-                    vec2 = np.array(vec2)
-                    similarity = np.dot(vec1, vec2) / (np.linalg.norm(vec1) * np.linalg.norm(vec2))
-                    pair_result["scores"][model_name] = {"similarity": float(similarity)}
-
-            results.append(pair_result)
+        server = servers[0]
         
-        return JSONResponse({"results": results})
+        # Fetch all embeddings for this model concurrently
+        tasks = {text: get_embedding(http_client, server.url, model_name, text) for text in all_texts}
+        results = await asyncio.gather(*tasks.values(), return_exceptions=True)
+        
+        embeddings_map = {text: result for text, result in zip(tasks.keys(), results)}
+        model_embeddings[model_name] = embeddings_map
 
-    except Exception as e:
-        logger.error(f"Error during embedding benchmark: {e}", exc_info=True)
-        return JSONResponse({"error": "An internal server error occurred."}, status_code=500)
+    # Process results and run PCA
+    response_data = {"models": {}, "groups": request_data.benchmark.model_dump()["groups"]}
+    
+    for model_name, embeddings_map in model_embeddings.items():
+        if "error" in embeddings_map:
+            response_data["models"][model_name] = {"error": embeddings_map["error"]}
+            continue
+            
+        points = []
+        vectors = []
+        labels = []
+        
+        for group in request_data.benchmark.groups:
+            for text in group.texts:
+                vector = embeddings_map.get(text)
+                if isinstance(vector, list):
+                    points.append({"label": text, "group_id": group.id})
+                    vectors.append(vector)
+                    labels.append(group.name)
+
+        if len(vectors) < 2:
+            response_data["models"][model_name] = {"error": "Not enough valid data points for analysis."}
+            continue
+
+        pca = PCA(n_components=2)
+        reduced_vectors = pca.fit_transform(np.array(vectors))
+        
+        for i, point in enumerate(points):
+            point['x'] = float(reduced_vectors[i, 0])
+            point['y'] = float(reduced_vectors[i, 1])
+            
+        response_data["models"][model_name] = {"points": points}
+        
+    return JSONResponse(response_data)
 
 
 @router.get("/settings", response_class=HTMLResponse, name="admin_settings")

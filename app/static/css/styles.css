@@ -25,9 +25,6 @@ body.sidebar-collapsed #sidebar-open-btn { display: block; }
 .ui-dark-glass .info-box { background-color: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.2); color: #93c5fd; }
 .ui-dark-glass .warning-box { background-color: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.2); color: #fcd34d; }
 .ui-dark-glass .inline-code { background-color: rgba(255,255,255,0.1); color: #e5e7eb; padding: 0.125rem 0.375rem; border-radius: 0.25rem; font-family: monospace; }
-.ui-dark-glass .code-block-wrapper { background-color: rgba(0,0,0,0.3); color: #d1d5db; }
-.ui-dark-glass .copy-button { background-color: #4b5563; color: white; }
-.ui-dark-glass .copy-button:hover { background-color: #6b7280; }
 
 /* --- Dark Flat & Black --- */
 .ui-dark-flat, .ui-black { background-color: #111827; color: #d1d5db; }
@@ -49,9 +46,6 @@ body.sidebar-collapsed #sidebar-open-btn { display: block; }
 .ui-dark-flat .info-box, .ui-black .info-box { background-color: #1e293b; border: 1px solid #3b82f6; color: #93c5fd; }
 .ui-dark-flat .warning-box, .ui-black .warning-box { background-color: #422006; border: 1px solid #d97706; color: #fcd34d; }
 .ui-dark-flat .inline-code, .ui-black .inline-code { background-color: #374151; color: #e5e7eb; padding: 0.125rem 0.375rem; border-radius: 0.25rem; font-family: monospace; }
-.ui-dark-flat .code-block-wrapper, .ui-black .code-block-wrapper { background-color: #111827; color: #d1d5db; }
-.ui-dark-flat .copy-button, .ui-black .copy-button { background-color: #4b5563; color: white; }
-.ui-dark-flat .copy-button:hover, .ui-black .copy-button:hover { background-color: #6b7280; }
 
 /* --- Light Glass --- */
 .ui-light-glass { background-image: linear-gradient(to bottom right, var(--color-primary-500), #e0e7ff); color: #1f2937; }
@@ -93,7 +87,7 @@ body.sidebar-collapsed #sidebar-open-btn { display: block; }
 .ui-white .warning-box { background-color: #fffbeb; color: #92400e; }
 .ui-light-flat .inline-code { background-color: #e5e7eb; color: #1f2937; padding: 0.125rem 0.375rem; border-radius: 0.25rem; font-family: monospace; }
 .ui-white .inline-code { background-color: #e5e7eb; }
-.ui-light-flat .code-block-wrapper, .ui-white .code-block-wrapper { background-color: #1f2937; color: #d1d5db; }
+.ui-light-flat .code-block-wrapper { background-color: #1f2937; color: #d1d5db; }
 .ui-light-flat .copy-button, .ui-white .copy-button { background-color: #4b5563; color: white; }
 .ui-light-flat .copy-button:hover, .ui-white .copy-button:hover { background-color: #6b7280; }
 
@@ -112,8 +106,7 @@ body.sidebar-collapsed #sidebar-open-btn { display: block; }
 .ui-aurora table tbody { border-color: rgba(255,255,255,0.1); }
 .ui-aurora .info-box { background-color: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.2); color: #93c5fd; }
 .ui-aurora .warning-box { background-color: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.2); color: #fcd34d; }
-.ui-aurora .inline-code, .ui-aurora .code-block-wrapper { background-color: rgba(0,0,0,0.3); color: #d1d5db; }
-.ui-aurora .copy-button { background-color: #4b5563; color: white; }
+.ui-aurora .inline-code { background-color: rgba(0,0,0,0.3); color: #d1d5db; }
 
 /* --- Dark Neumorphic --- */
 .ui-dark-neumorphic { background-color: #2e3236; color: #b0b8c4; }
@@ -254,53 +247,31 @@ body.sidebar-collapsed #sidebar-open-btn { display: block; }
 .ui-dark-glass .gpu-badge, .ui-dark-flat .gpu-badge, .ui-black .gpu-badge { color: #bbf7d0; background-color: rgba(34, 197, 94, 0.2); }
 .ui-dark-glass .cpu-badge, .ui-dark-flat .cpu-badge, .ui-black .cpu-badge { color: #d1d5db; background-color: rgba(107, 114, 128, 0.2); }
 
-/* --- Styles for Help Page Code Blocks --- */
-.code-block-wrapper { position: relative; border-radius: 0.5rem; padding: 1rem; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size: 0.875rem; overflow-x: auto; }
+/* --- Playground Specific Styles --- */
+.code-block-wrapper { position: relative; border-radius: 0.5rem; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size: 0.875rem; overflow-x: auto; }
+.ui-dark-flat .code-block-wrapper, .ui-black .code-block-wrapper { background-color: #111827; }
+.ui-aurora .code-block-wrapper, .ui-dark-glass .code-block-wrapper { background-color: rgba(0,0,0,0.3); }
+.ui-light-flat .code-block-wrapper, .ui-white .code-block-wrapper { background-color: #1f2937; color: #d1d5db; }
+.ui-light-glass .code-block-wrapper { background-color: #f3f4f6; color: #111827; }
+.code-block-wrapper pre { padding: 1rem; margin: 0; }
 .copy-button { position: absolute; top: 0.5rem; right: 0.5rem; border: none; padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-size: 0.75rem; cursor: pointer; transition: background-color 0.2s; }
+.ui-dark-flat .copy-button, .ui-black .copy-button, .ui-aurora .copy-button, .ui-dark-glass .copy-button, .ui-light-flat .copy-button, .ui-white .copy-button { background-color: #4b5563; color: white; }
+.ui-dark-flat .copy-button:hover, .ui-black .copy-button:hover, .ui-aurora .copy-button:hover, .ui-dark-glass .copy-button:hover, .ui-light-flat .copy-button:hover, .ui-white .copy-button:hover { background-color: #6b7280; }
+.ui-light-glass .copy-button { background-color: #d1d5db; color: #1f2937; }
+.ui-light-glass .copy-button:hover { background-color: #9ca3af; }
 
 /* --- Select Dropdown Option Styling --- */
-/* Note: Support for styling <option> is browser-dependent and may not work on all systems (e.g., Chrome on macOS). */
-
-/* For Dark Themes */
-.ui-dark-glass select option,
-.ui-dark-flat select option,
-.ui-black select option,
-.ui-aurora select option,
-.ui-dark-neumorphic select option,
-.ui-retro-terminal select option,
-.ui-cyberpunk select option {
-    background-color: #1f2937; /* gray-800 */
-    color: #e5e7eb; /* gray-200 */
-}
-
-/* For Light Themes */
-.ui-light-glass select option,
-.ui-light-flat select option,
-.ui-white select option,
-.ui-light-neumorphic select option,
-.ui-brutalism select option,
-.ui-material-flat select option,
-.ui-ink select option {
-    background-color: #ffffff;
-    color: #111827; /* gray-900 */
-}
+.ui-dark-glass select option, .ui-dark-flat select option, .ui-black select option, .ui-aurora select option, .ui-dark-neumorphic select option, .ui-retro-terminal select option, .ui-cyberpunk select option { background-color: #1f2937; color: #e5e7eb; }
+.ui-light-glass select option, .ui-light-flat select option, .ui-white select option, .ui-light-neumorphic select option, .ui-brutalism select option, .ui-material-flat select option, .ui-ink select option { background-color: #ffffff; color: #111827; }
 
 /* --- Collapsible 'Thinking' Block --- */
-.think-block {
-    background-color: rgba(128, 128, 128, 0.1);
-    border-left: 3px solid var(--color-primary-500);
-    border-radius: 4px;
-    margin: 1em 0;
-}
-.think-block summary {
-    cursor: pointer;
-    font-weight: 600;
-    color: var(--color-primary-500);
-    padding: 0.5em 1em;
-}
-.think-block[open] > summary {
-    border-bottom: 1px solid rgba(128, 128, 128, 0.2);
-}
-.think-block > div {
-    padding: 0.5em 1em;
-}
+.think-block { background-color: rgba(128, 128, 128, 0.1); border-left: 3px solid var(--color-primary-500); border-radius: 4px; margin: 1em 0; }
+.think-block summary { cursor: pointer; font-weight: 600; color: var(--color-primary-500); padding: 0.5em 1em; }
+.think-block[open] > summary { border-bottom: 1px solid rgba(128, 128, 128, 0.2); }
+.think-block > div { padding: 0.5em 1em; }
+
+/* --- Image Thumbnails in Chat --- */
+.image-previews { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.5rem; }
+.img-preview-container { position: relative; }
+.img-preview { max-height: 72px; max-width: 72px; border-radius: 0.375rem; object-fit: cover; }
+.remove-img-btn { position: absolute; top: -0.5rem; right: -0.5rem; background-color: #ef4444; color: white; border-radius: 9999px; width: 1.25rem; height: 1.25rem; display: flex; align-items: center; justify-content: center; font-size: 0.75rem; cursor: pointer; border: 1px solid white; }
