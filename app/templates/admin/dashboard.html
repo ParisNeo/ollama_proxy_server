@@ -59,8 +59,8 @@
                         <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Server</th>
                         <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Placement</th>
                         <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Size</th>
-                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Context</th>
                         <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Expires In</th>
+                        <th scope="col" class="px-6 py-3 text-right text-xs font-medium text-gray-400 uppercase tracking-wider">Actions</th>
                     </tr>
                 </thead>
                 <tbody id="running-models-tbody" class="divide-y divide-white/10">
@@ -141,6 +141,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function updateRunningModels(data) {
         const models = data.running_models;
         const tbody = document.getElementById('running-models-tbody');
+        const csrfToken = "{{ csrf_token }}";
         tbody.innerHTML = '';
         if (models.length === 0) {
             tbody.innerHTML = `<tr><td colspan="6" class="px-6 py-10 text-center text-gray-400">No models are currently running on active servers.</td></tr>`;
@@ -148,7 +149,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         models.forEach(model => {
             const sizeGb = (model.size / (1024 ** 3)).toFixed(2);
-            const contextSize = model.size_in_memory ? (model.size_in_memory / (1024 ** 2)).toFixed(2) + ' MB' : (model.context_length || 'N/A');
             const expiresDate = new Date(model.expires_at);
             const now = new Date();
             const diffSeconds = Math.round((expiresDate - now) / 1000);
@@ -159,7 +159,29 @@ document.addEventListener('DOMContentLoaded', () => {
                 expiresIn = `${minutes}m ${seconds}s`;
             }
             const placement = model.size_vram > 0 ? '<span class="gpu-badge">GPU</span>' : '<span class="cpu-badge">CPU</span>';
-            const row = `<tr><td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-current">${model.name}</td><td class="px-6 py-4 whitespace-nowrap text-sm">${model.server_name}</td><td class="px-6 py-4 whitespace-nowrap text-sm">${placement}</td><td class="px-6 py-4 whitespace-nowrap text-sm">${sizeGb} GB</td><td class="px-6 py-4 whitespace-nowrap text-sm">${contextSize.toLocaleString()}</td><td class="px-6 py-4 whitespace-nowrap text-sm">${expiresIn}</td></tr>`;
+            const chatUrl = `{{ url_for('admin_playground') }}?model=${encodeURIComponent(model.name)}`;
+            const unloadForm = `
+                <form action="{{ url_for('admin_unload_model_dashboard') }}" method="post" class="inline">
+                    <input type="hidden" name="csrf_token" value="${csrfToken}">
+                    <input type="hidden" name="model_name" value="${model.name}">
+                    <input type="hidden" name="server_name" value="${model.server_name}">
+                    <button type="submit" class="text-red-400 hover:text-red-600">Unload</button>
+                </form>
+            `;
+            const row = `
+                <tr>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-current">${model.name}</td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm">${model.server_name}</td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm">${placement}</td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm">${sizeGb} GB</td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm">${expiresIn}</td>
+                    <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                        <div class="flex justify-end gap-4">
+                            <a href="${chatUrl}" class="text-[var(--color-primary-500)] hover:text-[var(--color-primary-700)]">Chat</a>
+                            ${unloadForm}
+                        </div>
+                    </td>
+                </tr>`;
             tbody.innerHTML += row;
         });
     }

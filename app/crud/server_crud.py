@@ -19,6 +19,10 @@ async def get_server_by_url(db: AsyncSession, url: str) -> OllamaServer | None:
     result = await db.execute(select(OllamaServer).filter(OllamaServer.url == url))
     return result.scalars().first()
 
+async def get_server_by_name(db: AsyncSession, name: str) -> OllamaServer | None:
+    result = await db.execute(select(OllamaServer).filter(OllamaServer.name == name))
+    return result.scalars().first()
+
 async def get_servers(db: AsyncSession, skip: int = 0, limit: Optional[int] = None) -> list[OllamaServer]:
     query = select(OllamaServer).order_by(OllamaServer.created_at.desc()).offset(skip)
     if limit is not None:
@@ -69,6 +73,7 @@ async def fetch_and_update_models(db: AsyncSession, server_id: int) -> dict:
             # Update the server record with full model data
             server.available_models = models
             server.models_last_updated = datetime.datetime.utcnow()
+            server.last_error = None
             await db.commit()
             await db.refresh(server)
 
@@ -78,10 +83,16 @@ async def fetch_and_update_models(db: AsyncSession, server_id: int) -> dict:
     except httpx.HTTPError as e:
         error_msg = f"HTTP error: {str(e)}"
         logger.error(f"Failed to fetch models from server '{server.name}' ({server.url}): {error_msg}")
+        server.last_error = error_msg
+        server.available_models = None
+        await db.commit()
         return {"success": False, "error": error_msg, "models": []}
     except Exception as e:
         error_msg = f"Unexpected error: {str(e)}"
         logger.error(f"Failed to fetch models from server '{server.name}' ({server.url}): {error_msg}")
+        server.last_error = error_msg
+        server.available_models = None
+        await db.commit()
         return {"success": False, "error": error_msg, "models": []}
 
 async def pull_model_on_server(http_client: httpx.AsyncClient, server: OllamaServer, model_name: str) -> dict:
@@ -135,6 +146,55 @@ async def delete_model_on_server(http_client: httpx.AsyncClient, server: OllamaS
         logger.error(f"{error_msg} on server '{server.name}'")
         return {"success": False, "message": error_msg}
 
+async def load_model_on_server(http_client: httpx.AsyncClient, server: OllamaServer, model_name: str) -> dict:
+    """Sends a dummy request to a server to load a model into memory."""
+    generate_url = f"{server.url.rstrip('/')}/api/generate"
+    payload = {"model": model_name, "prompt": " ", "stream": False}
+    try:
+        # Use a timeout sufficient for model loading
+        response = await http_client.post(generate_url, json=payload, timeout=300.0)
+        response.raise_for_status()
+        logger.info(f"Successfully triggered load for model '{model_name}' on server '{server.name}'")
+        return {"success": True, "message": f"Model '{model_name}' is being loaded into memory."}
+    except httpx.HTTPStatusError as e:
+        try:
+            error_detail = e.response.json().get('error', e.response.text)
+        except json.JSONDecodeError:
+            error_detail = e.response.text
+        error_msg = f"Failed to load model '{model_name}': Server returned status {e.response.status_code}: {error_detail}"
+        logger.error(f"{error_msg} on server '{server.name}'")
+        return {"success": False, "message": error_msg}
+    except Exception as e:
+        error_msg = f"An unexpected error occurred while loading model '{model_name}': {e}"
+        logger.error(f"{error_msg} on server '{server.name}'")
+        return {"success": False, "message": error_msg}
+
+async def unload_model_on_server(http_client: httpx.AsyncClient, server: OllamaServer, model_name: str) -> dict:
+    """Sends a request to a server to unload a model from memory."""
+    generate_url = f"{server.url.rstrip('/')}/api/generate"
+    # Setting keep_alive to 0s tells Ollama to unload the model after this request.
+    payload = {"model": model_name, "prompt": " ", "keep_alive": "0s"}
+    try:
+        response = await http_client.post(generate_url, json=payload, timeout=60.0)
+        response.raise_for_status()
+        logger.info(f"Successfully triggered unload for model '{model_name}' on server '{server.name}'")
+        return {"success": True, "message": f"Unload signal sent for model '{model_name}'. It will be removed from memory shortly."}
+    except httpx.HTTPStatusError as e:
+        # If the model isn't found (which can happen if it's not loaded), treat as success.
+        if e.response.status_code == 404:
+             return {"success": True, "message": f"Model '{model_name}' was not loaded in memory."}
+        try:
+            error_detail = e.response.json().get('error', e.response.text)
+        except json.JSONDecodeError:
+            error_detail = e.response.text
+        error_msg = f"Failed to unload model '{model_name}': Server returned status {e.response.status_code}: {error_detail}"
+        logger.error(f"{error_msg} on server '{server.name}'")
+        return {"success": False, "message": error_msg}
+    except Exception as e:
+        error_msg = f"An unexpected error occurred while unloading model '{model_name}': {e}"
+        logger.error(f"{error_msg} on server '{server.name}'")
+        return {"success": False, "message": error_msg}
+
 def get_model_names_from_server(server: OllamaServer) -> set[str]:
     """
     Extract all model names from a server's available_models field.
@@ -178,6 +238,36 @@ async def get_servers_with_model(db: AsyncSession, model_name: str) -> list[Olla
             servers_with_model.append(server)
 
     return servers_with_model
+
+def is_embedding_model(model_name: str) -> bool:
+    """Heuristically determines if a model is for embeddings."""
+    return "embed" in model_name.lower()
+
+async def get_all_available_model_names(db: AsyncSession, filter_type: Optional[str] = None) -> List[str]:
+    """
+    Gets a unique, sorted list of all model names across all active servers.
+    Can be filtered by type ('chat' or 'embedding').
+    """
+    servers = await get_servers(db)
+    active_servers = [s for s in servers if s.is_active]
+
+    all_models = set()
+    for server in active_servers:
+        if not server.available_models:
+            continue
+        for model in server.available_models:
+            if isinstance(model, dict) and "name" in model:
+                model_name = model["name"]
+                is_embed = is_embedding_model(model_name)
+                
+                if filter_type == 'embedding' and is_embed:
+                    all_models.add(model_name)
+                elif filter_type == 'chat' and not is_embed:
+                    all_models.add(model_name)
+                elif filter_type is None:
+                    all_models.add(model_name)
+    
+    return sorted(list(all_models))
 
 async def get_ollama_ps_all_servers(db: AsyncSession, http_client: httpx.AsyncClient) -> List[Dict[str, Any]]:
     """

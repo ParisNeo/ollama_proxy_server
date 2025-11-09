@@ -9,9 +9,11 @@ import asyncio
 import secrets
 from pathlib import Path
 import os
+import json 
+import numpy as np
 
 from fastapi import APIRouter, Depends, Request, Form, HTTPException, status, Query, UploadFile, File
-from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, StreamingResponse 
 from fastapi.templating import Jinja2Templates
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -189,6 +191,7 @@ async def admin_logout(request: Request):
 @router.get("/dashboard", response_class=HTMLResponse, name="admin_dashboard")
 async def admin_dashboard(request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
     context = get_template_context(request)
+    context["csrf_token"] = await get_csrf_token(request)
     return templates.TemplateResponse("admin/dashboard.html", context)
 
 # --- API ENDPOINT FOR DYNAMIC DASHBOARD DATA ---
@@ -376,6 +379,245 @@ async def admin_delete_model(
         flash(request, result["message"], "error")
 
     return RedirectResponse(url=request.url_for("admin_manage_server_models", server_id=server_id), status_code=status.HTTP_303_SEE_OTHER)
+
+@router.post("/servers/{server_id}/load-model", name="admin_load_model", dependencies=[Depends(validate_csrf_token)])
+async def admin_load_model(
+    request: Request,
+    server_id: int,
+    db: AsyncSession = Depends(get_db),
+    admin_user: User = Depends(require_admin_user),
+    model_name: str = Form(...)
+):
+    server = await server_crud.get_server_by_id(db, server_id=server_id)
+    if not server:
+        raise HTTPException(status_code=404, detail="Server not found")
+
+    http_client: httpx.AsyncClient = request.app.state.http_client
+    result = await server_crud.load_model_on_server(http_client, server, model_name)
+
+    flash(request, result["message"], "success" if result["success"] else "error")
+    
+    return RedirectResponse(url=request.url_for("admin_dashboard"), status_code=status.HTTP_303_SEE_OTHER)
+
+@router.post("/servers/{server_id}/unload-model", name="admin_unload_model", dependencies=[Depends(validate_csrf_token)])
+async def admin_unload_model(
+    request: Request,
+    server_id: int,
+    db: AsyncSession = Depends(get_db),
+    admin_user: User = Depends(require_admin_user),
+    model_name: str = Form(...)
+):
+    server = await server_crud.get_server_by_id(db, server_id=server_id)
+    if not server:
+        raise HTTPException(status_code=404, detail="Server not found")
+
+    http_client: httpx.AsyncClient = request.app.state.http_client
+    result = await server_crud.unload_model_on_server(http_client, server, model_name)
+
+    flash(request, result["message"], "success" if result["success"] else "error")
+    
+    return RedirectResponse(url=request.url_for("admin_dashboard"), status_code=status.HTTP_303_SEE_OTHER)
+
+# --- NEW: Unload model from Dashboard ---
+@router.post("/models/unload", name="admin_unload_model_dashboard", dependencies=[Depends(validate_csrf_token)])
+async def admin_unload_model_dashboard(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    admin_user: User = Depends(require_admin_user),
+    model_name: str = Form(...),
+    server_name: str = Form(...)
+):
+    server = await server_crud.get_server_by_name(db, name=server_name)
+    if not server:
+        flash(request, f"Server '{server_name}' not found.", "error")
+        return RedirectResponse(url=request.url_for("admin_dashboard"), status_code=status.HTTP_303_SEE_OTHER)
+
+    http_client: httpx.AsyncClient = request.app.state.http_client
+    result = await server_crud.unload_model_on_server(http_client, server, model_name)
+
+    flash(request, result["message"], "success" if result["success"] else "error")
+    
+    await asyncio.sleep(1) # Give backend a moment to update state before reloading
+    
+    return RedirectResponse(url=request.url_for("admin_dashboard"), status_code=status.HTTP_303_SEE_OTHER)
+
+# --- MODEL PLAYGROUND ROUTES ---
+@router.get("/playground", response_class=HTMLResponse, name="admin_playground")
+async def admin_playground_ui(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    admin_user: User = Depends(require_admin_user),
+    model: Optional[str] = Query(None)
+):
+    context = get_template_context(request)
+    context["models"] = await server_crud.get_all_available_model_names(db, filter_type='chat')
+    context["selected_model"] = model
+    return templates.TemplateResponse("admin/model_playground.html", context)
+
+
+@router.post("/playground-stream", name="admin_playground_stream")
+async def admin_playground_stream(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    admin_user: User = Depends(require_admin_user)
+):
+    try:
+        data = await request.json()
+        model_name = data.get("model")
+        messages = data.get("messages")
+        
+        if not model_name or not messages:
+            return JSONResponse({"error": "Model and messages are required."}, status_code=400)
+
+        http_client: httpx.AsyncClient = request.app.state.http_client
+        
+        # Find a server with the model
+        servers_with_model = await server_crud.get_servers_with_model(db, model_name)
+        if not servers_with_model:
+            # Fallback to any active server if model not in DB list
+            active_servers = [s for s in await server_crud.get_servers(db) if s.is_active]
+            if not active_servers:
+                error_payload = {"error": "No active backend servers available."}
+                return Response(json.dumps(error_payload), media_type="application/x-ndjson", status_code=503)
+            # If the model isn't in our catalog, we can't be sure where it is.
+            # Best effort: just try the first active server.
+            target_server = active_servers[0]
+        else:
+            # Smart routing: pick the first server known to have the model
+            target_server = servers_with_model[0]
+        
+        chat_url = f"{target_server.url.rstrip('/')}/api/chat"
+        payload = {"model": model_name, "messages": messages, "stream": True}
+
+        async def event_stream():
+            try:
+                async with http_client.stream("POST", chat_url, json=payload, timeout=600.0) as response:
+                    # Check for non-200 responses from Ollama, which don't raise exceptions but indicate errors
+                    if response.status_code != 200:
+                        error_body = await response.aread()
+                        error_text = error_body.decode('utf-8')
+                        logger.error(f"Ollama backend returned error {response.status_code}: {error_text}")
+                        error_payload = {"error": f"Ollama server error: {error_text}"}
+                        yield json.dumps(error_payload).encode('utf-8')
+                        return
+
+                    async for chunk in response.aiter_bytes():
+                        yield chunk
+            except Exception as e:
+                logger.error(f"Error streaming from Ollama backend: {e}", exc_info=True)
+                error_payload = {"error": "Failed to stream from backend server.", "details": str(e)}
+                yield json.dumps(error_payload).encode('utf-8')
+        
+        return StreamingResponse(event_stream(), media_type="application/x-ndjson")
+
+    except Exception as e:
+        logger.error(f"Error in chat stream endpoint: {e}", exc_info=True)
+        return JSONResponse({"error": "An internal error occurred."}, status_code=500)
+
+
+# --- NEW EMBEDDING PLAYGROUND ROUTES ---
+@router.get("/embedding-playground", response_class=HTMLResponse, name="admin_embedding_playground")
+async def admin_embedding_playground_ui(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    admin_user: User = Depends(require_admin_user)
+):
+    context = get_template_context(request)
+    context["models"] = await server_crud.get_all_available_model_names(db, filter_type='embedding')
+    context["csrf_token"] = await get_csrf_token(request)
+    return templates.TemplateResponse("admin/embedding_playground.html", context)
+
+async def get_embedding(
+    http_client: httpx.AsyncClient, 
+    server_url: str, 
+    model_name: str, 
+    prompt: str
+) -> List[float]:
+    """Helper to get a single embedding from an Ollama server."""
+    try:
+        response = await http_client.post(
+            f"{server_url.rstrip('/')}/api/embeddings",
+            json={"model": model_name, "prompt": prompt},
+            timeout=60.0,
+        )
+        response.raise_for_status()
+        return response.json()["embedding"]
+    except httpx.HTTPStatusError as e:
+        logger.error(f"Error getting embedding for model {model_name}: {e.response.text}")
+        raise HTTPException(status_code=e.response.status_code, detail=f"Ollama server error: {e.response.text}")
+    except Exception as e:
+        logger.error(f"Failed to connect to Ollama server at {server_url}: {e}")
+        raise HTTPException(status_code=500, detail=f"Could not connect to Ollama server to get embedding: {e}")
+
+@router.post("/embedding-playground/benchmark", name="admin_run_embedding_benchmark", dependencies=[Depends(validate_csrf_token)])
+async def admin_run_embedding_benchmark(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    admin_user: User = Depends(require_admin_user)
+):
+    try:
+        form_data = await request.form()
+        model_names = form_data.getlist("models")
+        
+        text_pairs = []
+        i = 0
+        while True:
+            text1 = form_data.get(f"text_pairs[{i}][text1]")
+            if text1 is None:
+                break
+            text_pairs.append({
+                "text1": text1,
+                "text2": form_data.get(f"text_pairs[{i}][text2]"),
+                "expected": form_data.get(f"text_pairs[{i}][expected]"),
+            })
+            i += 1
+            
+        if not model_names or not text_pairs:
+            return JSONResponse({"error": "At least one model and one text pair are required."}, status_code=400)
+
+        http_client: httpx.AsyncClient = request.app.state.http_client
+        results = []
+
+        for pair in text_pairs:
+            pair_result = {"text1": pair["text1"], "text2": pair["text2"], "expected": pair["expected"], "scores": {}}
+            
+            # Get embeddings for this pair for all models
+            embedding_tasks = {}
+            for model_name in model_names:
+                servers = await server_crud.get_servers_with_model(db, model_name)
+                if not servers:
+                    pair_result["scores"][model_name] = {"error": "Model not found on any server."}
+                    continue
+                
+                server = servers[0]
+                embedding_tasks[f"{model_name}_1"] = get_embedding(http_client, server.url, model_name, pair["text1"])
+                embedding_tasks[f"{model_name}_2"] = get_embedding(http_client, server.url, model_name, pair["text2"])
+
+            embeddings = await asyncio.gather(*embedding_tasks.values(), return_exceptions=True)
+            
+            # Map results back and compute similarity
+            embedding_map = dict(zip(embedding_tasks.keys(), embeddings))
+
+            for model_name in model_names:
+                vec1 = embedding_map.get(f"{model_name}_1")
+                vec2 = embedding_map.get(f"{model_name}_2")
+                
+                if isinstance(vec1, Exception) or isinstance(vec2, Exception):
+                    error_msg = str(vec1) if isinstance(vec1, Exception) else str(vec2)
+                    pair_result["scores"][model_name] = {"error": error_msg}
+                else:
+                    vec1 = np.array(vec1)
+                    vec2 = np.array(vec2)
+                    similarity = np.dot(vec1, vec2) / (np.linalg.norm(vec1) * np.linalg.norm(vec2))
+                    pair_result["scores"][model_name] = {"similarity": float(similarity)}
+
+            results.append(pair_result)
+        
+        return JSONResponse({"results": results})
+
+    except Exception as e:
+        logger.error(f"Error during embedding benchmark: {e}", exc_info=True)
+        return JSONResponse({"error": "An internal server error occurred."}, status_code=500)
 
 
 @router.get("/settings", response_class=HTMLResponse, name="admin_settings")

@@ -1,0 +1,214 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Embedding Playground{% endblock %}
+{% block header_title %}Embedding Playground & Benchmark{% endblock %}
+
+{% block content %}
+<div class="max-w-6xl mx-auto space-y-8">
+    <div class="card-style">
+        <h2 class="card-header text-2xl font-bold mb-6 pb-2">Embedding Model Benchmark</h2>
+        <form id="embedding-benchmark-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <div class="space-y-8">
+                <!-- Model Selection -->
+                <div>
+                    <label for="model-selector" class="block text-sm font-medium text-current mb-2">Select Models to Benchmark</label>
+                    <select id="model-selector" name="models" multiple class="w-full p-2 rounded-md shadow-sm focus:outline-none focus:ring-[var(--color-primary-500)] focus:border-[var(--color-primary-500)] sm:text-sm" size="5">
+                        {% if models %}
+                            {% for model in models %}
+                            <option value="{{ model }}">{{ model }}</option>
+                            {% endfor %}
+                        {% else %}
+                            <option value="" disabled>No embedding models found</option>
+                        {% endif %}
+                    </select>
+                    <p class="mt-1 text-xs text-gray-400">Hold Ctrl/Cmd to select multiple models.</p>
+                </div>
+
+                <!-- Text Pairs -->
+                <div>
+                    <h3 class="text-lg font-semibold mb-2">Text Pairs for Comparison</h3>
+                    <div id="text-pairs-container" class="space-y-4">
+                        <!-- Text pairs will be added here by JS -->
+                    </div>
+                    <div class="mt-4 flex gap-4">
+                        <button type="button" id="add-pair-btn" class="justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-green-600 hover:bg-green-700">Add Pair</button>
+                    </div>
+                </div>
+                
+                <div class="flex justify-end pt-4 border-t border-white/10">
+                    <button type="submit" id="run-benchmark-btn" class="w-full md:w-auto justify-center py-2 px-6 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-[var(--color-primary-600)] hover:bg-[var(--color-primary-700)]">
+                        Run Benchmark
+                    </button>
+                </div>
+            </div>
+        </form>
+    </div>
+
+    <!-- Results -->
+    <div id="results-container" class="card-style hidden">
+        <h2 class="card-header text-2xl font-bold mb-4 pb-2">Benchmark Results</h2>
+        <div class="overflow-x-auto">
+            <table class="min-w-full">
+                <thead id="results-head"></thead>
+                <tbody id="results-body" class="divide-y divide-white/10"></tbody>
+                <tfoot id="results-foot"></tfoot>
+            </table>
+        </div>
+    </div>
+</div>
+
+<template id="text-pair-template">
+    <div class="text-pair-group border border-gray-700 rounded-md p-4 space-y-4 relative">
+        <button type="button" class="remove-pair-btn absolute -top-3 -right-3 p-1 bg-red-600 rounded-full text-white hover:bg-red-800">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+        </button>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <textarea name="text1" rows="3" class="block w-full px-3 py-2 rounded-md shadow-sm sm:text-sm" placeholder="Text 1"></textarea>
+            <textarea name="text2" rows="3" class="block w-full px-3 py-2 rounded-md shadow-sm sm:text-sm" placeholder="Text 2"></textarea>
+        </div>
+        <div class="flex items-center justify-center gap-4">
+            <label class="flex items-center gap-2 cursor-pointer"><input type="radio" name="expected" value="similar" class="h-4 w-4 text-green-500" checked> <span class="text-sm">Expect Similar</span></label>
+            <label class="flex items-center gap-2 cursor-pointer"><input type="radio" name="expected" value="dissimilar" class="h-4 w-4 text-red-500"> <span class="text-sm">Expect Dissimilar</span></label>
+        </div>
+    </div>
+</template>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const form = document.getElementById('embedding-benchmark-form');
+    const addPairBtn = document.getElementById('add-pair-btn');
+    const pairsContainer = document.getElementById('text-pairs-container');
+    const template = document.getElementById('text-pair-template');
+    const runBtn = document.getElementById('run-benchmark-btn');
+    
+    const resultsContainer = document.getElementById('results-container');
+    const resultsHead = document.getElementById('results-head');
+    const resultsBody = document.getElementById('results-body');
+    const resultsFoot = document.getElementById('results-foot');
+
+    let pairIndex = 0;
+
+    function addPair(text1 = '', text2 = '', expected = 'similar') {
+        const clone = template.content.cloneNode(true);
+        const group = clone.querySelector('.text-pair-group');
+        
+        const text1Area = group.querySelector('textarea[name="text1"]');
+        const text2Area = group.querySelector('textarea[name="text2"]');
+
+        text1Area.name = `text_pairs[${pairIndex}][text1]`;
+        text1Area.value = text1;
+        
+        text2Area.name = `text_pairs[${pairIndex}][text2]`;
+        text2Area.value = text2;
+        
+        clone.querySelectorAll('input[name="expected"]').forEach(radio => {
+            radio.name = `text_pairs[${pairIndex}][expected]`;
+            if(radio.value === expected) radio.checked = true;
+        });
+        
+        pairsContainer.appendChild(clone);
+        pairIndex++;
+    }
+
+    addPairBtn.addEventListener('click', () => addPair());
+    pairsContainer.addEventListener('click', (e) => {
+        if (e.target.closest('.remove-pair-btn')) {
+            e.target.closest('.text-pair-group').remove();
+        }
+    });
+    
+    // Add some default pairs to get started
+    addPair('The cat sat on the mat.', 'A feline was resting on the rug.', 'similar');
+    addPair('It was a sunny day.', 'The weather was bright and clear.', 'similar');
+    addPair('I love to read books.', 'Quantum physics is a complex field.', 'dissimilar');
+
+
+    form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        toggleLoading(true);
+        resultsContainer.classList.add('hidden');
+
+        const formData = new FormData(form);
+        
+        try {
+            const response = await fetch("{{ url_for('admin_run_embedding_benchmark') }}", {
+                method: 'POST',
+                body: formData,
+            });
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || 'Benchmark failed');
+            
+            displayResults(data.results, formData.getAll('models'));
+        } catch (error) {
+            alert(`Error: ${error.message}`);
+        } finally {
+            toggleLoading(false);
+        }
+    });
+
+    function displayResults(results, modelNames) {
+        // Build Header
+        resultsHead.innerHTML = `<tr>
+            <th class="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Text Pair</th>
+            <th class="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Expectation</th>
+            ${modelNames.map(name => `<th class="px-6 py-3 text-center text-xs font-medium uppercase tracking-wider">${name}</th>`).join('')}
+        </tr>`;
+
+        // Build Body
+        resultsBody.innerHTML = '';
+        let modelScores = Object.fromEntries(modelNames.map(name => [name, {correct: 0, total: 0}]));
+
+        results.forEach((res, i) => {
+            let rowHtml = `<tr>
+                <td class="px-6 py-4 text-sm"><div class="font-semibold">"${res.text1}"</div><div>"${res.text2}"</div></td>
+                <td class="px-6 py-4 text-sm">${res.expected}</td>`;
+            
+            modelNames.forEach(modelName => {
+                const scoreData = res.scores[modelName];
+                let cellContent = '';
+                if (scoreData.error) {
+                    cellContent = `<span class="text-red-400 text-xs">Error</span>`;
+                } else {
+                    const sim = scoreData.similarity;
+                    const percent = (sim * 100).toFixed(1);
+                    
+                    let isCorrect = false;
+                    if (res.expected === 'similar' && sim > 0.7) isCorrect = true;
+                    if (res.expected === 'dissimilar' && sim < 0.5) isCorrect = true;
+                    
+                    if(isCorrect) modelScores[modelName].correct++;
+                    modelScores[modelName].total++;
+                    
+                    const colorClass = isCorrect ? 'text-green-400' : 'text-red-400';
+                    cellContent = `<span class="font-bold text-lg ${colorClass}">${percent}%</span>`;
+                }
+                rowHtml += `<td class="px-6 py-4 text-center">${cellContent}</td>`;
+            });
+            rowHtml += `</tr>`;
+            resultsBody.innerHTML += rowHtml;
+        });
+
+        // Build Footer (Accuracy)
+        let footHtml = `<tr class="border-t-2 border-white/20">
+            <td colspan="2" class="px-6 py-4 text-right font-bold text-lg">Model Accuracy</td>`;
+        modelNames.forEach(name => {
+            const { correct, total } = modelScores[name];
+            const accuracy = total > 0 ? ((correct / total) * 100).toFixed(1) : 'N/A';
+            footHtml += `<td class="px-6 py-4 text-center font-bold text-xl text-[var(--color-primary-500)]">${accuracy}%</td>`;
+        });
+        footHtml += `</tr>`;
+        resultsFoot.innerHTML = footHtml;
+
+        resultsContainer.classList.remove('hidden');
+    }
+
+    function toggleLoading(isLoading) {
+        runBtn.disabled = isLoading;
+        runBtn.innerHTML = isLoading 
+            ? '<svg class="animate-spin h-5 w-5 mx-auto" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>'
+            : 'Run Benchmark';
+    }
+});
+</script>
+{% endblock %}

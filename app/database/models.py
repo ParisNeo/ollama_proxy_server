@@ -73,6 +73,7 @@ class OllamaServer(Base):
     is_active = Column(Boolean, default=True)
     available_models = Column(JSON, nullable=True)
     models_last_updated = Column(DateTime, nullable=True)
+    last_error = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
 class AppSettings(Base):

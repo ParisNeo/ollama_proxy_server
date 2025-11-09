@@ -1,0 +1,290 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Chat Playground{% endblock %}
+{% block header_title %}Chat Playground{% endblock %}
+
+{% block content %}
+<div class="flex flex-col h-[calc(100vh-12rem)] max-w-4xl mx-auto card-style p-0">
+    <!-- Header -->
+    <div class="card-header p-4 flex items-center justify-between flex-shrink-0">
+        <h2 class="text-xl font-bold">Chat</h2>
+        <div class="flex items-center gap-2">
+            <select id="model-selector" class="px-3 py-2 rounded-md shadow-sm focus:outline-none focus:ring-[var(--color-primary-500)] focus:border-[var(--color-primary-500)] sm:text-sm">
+                {% if models %}
+                    {% for model in models %}
+                    <option value="{{ model }}" {% if model == selected_model %}selected{% endif %}>{{ model }}</option>
+                    {% endfor %}
+                {% else %}
+                    <option value="" disabled>No chat models found</option>
+                {% endif %}
+            </select>
+            <input type="file" id="import-chat-input" class="hidden" accept=".json">
+            <button id="import-chat-btn" title="Import Chat" class="p-2 rounded hover:bg-white/10">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path></svg>
+            </button>
+            <button id="export-chat-btn" title="Export Chat" class="p-2 rounded hover:bg-white/10">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+            </button>
+            <button id="clear-chat-btn" class="px-3 py-2 bg-red-600 text-white rounded hover:bg-red-700 focus:outline-none">Clear</button>
+        </div>
+    </div>
+
+    <!-- Chat Messages -->
+    <div id="chat-container" class="flex-grow p-4 overflow-y-auto space-y-6">
+        <!-- Messages will be injected here -->
+        <div class="text-center text-gray-400">Select a model and start chatting.</div>
+    </div>
+
+    <!-- Message Input -->
+    <div class="p-4 flex-shrink-0 border-t border-white/10">
+        <form id="chat-form" class="flex items-center gap-4">
+            <textarea id="message-input" placeholder="Type your message here..." rows="1" class="flex-grow block w-full px-3 py-2 rounded-md shadow-sm focus:outline-none focus:ring-[var(--color-primary-500)] focus:border-[var(--color-primary-500)] sm:text-sm resize-none"></textarea>
+            <button type="submit" id="send-btn" class="justify-center py-2 px-6 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-[var(--color-primary-600)] hover:bg-[var(--color-primary-700)] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[var(--color-primary-500)]">Send</button>
+        </form>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const chatContainer = document.getElementById('chat-container');
+    const chatForm = document.getElementById('chat-form');
+    const messageInput = document.getElementById('message-input');
+    const modelSelector = document.getElementById('model-selector');
+    const sendBtn = document.getElementById('send-btn');
+    const clearChatBtn = document.getElementById('clear-chat-btn');
+    const importChatBtn = document.getElementById('import-chat-btn');
+    const importChatInput = document.getElementById('import-chat-input');
+    const exportChatBtn = document.getElementById('export-chat-btn');
+
+    let messages = [];
+    let isLoading = false;
+
+    // --- Event Listeners ---
+    messageInput.addEventListener('input', () => { // Auto-resize textarea
+        messageInput.style.height = 'auto';
+        messageInput.style.height = (messageInput.scrollHeight) + 'px';
+    });
+    
+    clearChatBtn.addEventListener('click', () => {
+        messages = [];
+        renderChat();
+        chatContainer.innerHTML = '<div class="text-center text-gray-400">Chat cleared.</div>';
+    });
+
+    exportChatBtn.addEventListener('click', exportChat);
+    importChatBtn.addEventListener('click', () => importChatInput.click());
+    importChatInput.addEventListener('change', importChat);
+    chatForm.addEventListener('submit', handleChatSubmit);
+
+    // --- Core Functions ---
+    async function handleChatSubmit(e) {
+        e.preventDefault();
+        const userInput = messageInput.value.trim();
+        if (!userInput || isLoading) return;
+
+        const selectedModel = modelSelector.value;
+        if (!selectedModel) {
+            alert('Please select a model.');
+            return;
+        }
+
+        messages.push({ role: 'user', content: userInput });
+        renderChat();
+        messageInput.value = '';
+        messageInput.style.height = 'auto';
+        
+        const botMessageWrapper = findLastBotMessageWrapper();
+        const botContentElement = botMessageWrapper.querySelector('.message-content');
+        const botStatsElement = botMessageWrapper.querySelector('.message-stats');
+        
+        let fullResponse = '';
+        let firstChunk = true;
+        const startTime = performance.now();
+        toggleLoading(true);
+
+        try {
+            const response = await fetch("{{ url_for('admin_playground_stream') }}", {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ model: selectedModel, messages: messages }),
+            });
+
+            if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+
+            while (true) {
+                const { value, done } = await reader.read();
+                if (done) break;
+                
+                const chunk = decoder.decode(value);
+                const lines = chunk.split('\n').filter(line => line.trim() !== '');
+
+                for (const line of lines) {
+                    try {
+                        const data = JSON.parse(line);
+                        
+                        if (firstChunk && data.message && data.message.content) {
+                            firstChunk = false;
+                            const ttft = Math.round(performance.now() - startTime);
+                            botStatsElement.innerHTML = `<span>TTFT: ${ttft}ms</span>`;
+                            botStatsElement.classList.remove('hidden');
+                        }
+
+                        if (data.message && data.message.content) {
+                            fullResponse += data.message.content;
+                            renderBotMessage(botContentElement, fullResponse);
+                        }
+                        
+                        if (data.done && data.eval_count && data.eval_duration) {
+                            const tokensPerSecond = (data.eval_count / (data.eval_duration / 1e9)).toFixed(2);
+                            const existingStats = botStatsElement.innerHTML;
+                            botStatsElement.innerHTML = `${existingStats} | <span>Speed: ${tokensPerSecond} t/s</span>`;
+                        }
+                        
+                        if (data.error) throw new Error(data.details || data.error);
+                        
+                    } catch (err) { console.error('Error parsing stream chunk:', line, err); }
+                }
+                chatContainer.scrollTop = chatContainer.scrollHeight;
+            }
+        } catch (error) {
+            console.error('Error during chat stream:', error);
+            botContentElement.innerHTML = `<p class="text-red-400"><strong>Error:</strong> ${error.message}</p>`;
+        } finally {
+            messages.push({ role: 'assistant', content: fullResponse });
+            toggleLoading(false);
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+    }
+
+    function renderBotMessage(container, rawContent) {
+        container.innerHTML = ''; // Clear previous content
+        
+        const parts = rawContent.split(/(<think>[\s\S]*?<\/think>)/g);
+
+        parts.forEach(part => {
+            if (part.startsWith('<think>') && part.endsWith('</think>')) {
+                const thinkContent = part.slice(7, -8);
+                
+                const details = document.createElement('details');
+                details.className = 'think-block';
+                details.open = true;
+
+                const summary = document.createElement('summary');
+                summary.textContent = 'Thinking...';
+                
+                const contentDiv = document.createElement('div');
+                contentDiv.innerHTML = marked.parse(thinkContent);
+
+                details.appendChild(summary);
+                details.appendChild(contentDiv);
+                container.appendChild(details);
+            } else if (part) {
+                const contentDiv = document.createElement('div');
+                contentDiv.innerHTML = marked.parse(part);
+                container.appendChild(contentDiv);
+            }
+        });
+    }
+
+    function renderChat() {
+        chatContainer.innerHTML = '';
+        if (messages.length === 0) {
+            chatContainer.innerHTML = '<div class="text-center text-gray-400">Select a model and start chatting.</div>';
+            return;
+        }
+        messages.forEach(msg => appendMessage(msg.role, msg.content, false));
+        // Append a placeholder for the next bot response if the last message was from a user
+        if (messages.length > 0 && messages[messages.length - 1].role === 'user') {
+            appendMessage('assistant', '...', true);
+        }
+    }
+    
+    function appendMessage(role, content, isPlaceholder = false) {
+        const messageWrapper = document.createElement('div');
+        messageWrapper.className = `flex gap-4 message-wrapper ${role === 'user' ? 'justify-end' : 'justify-start'}`;
+
+        const contentWrapper = document.createElement('div');
+        contentWrapper.className = `max-w-xl p-3 rounded-lg ${role === 'user' ? 'bg-[var(--color-primary-700)] text-white' : 'bg-gray-700/50'}`;
+        if (isPlaceholder) contentWrapper.classList.add('is-placeholder');
+        
+        const contentDiv = document.createElement('div');
+        contentDiv.className = 'message-content prose prose-invert max-w-none prose-p:my-2 prose-pre:my-2';
+        
+        if (role === 'assistant') {
+            renderBotMessage(contentDiv, content);
+        } else {
+            contentDiv.innerHTML = marked.parse(content);
+        }
+
+        const statsDiv = document.createElement('div');
+        statsDiv.className = 'message-stats text-xs text-gray-400 mt-2 space-x-2 hidden';
+
+        contentWrapper.appendChild(contentDiv);
+        if (role === 'assistant') contentWrapper.appendChild(statsDiv);
+        messageWrapper.appendChild(contentWrapper);
+        chatContainer.appendChild(messageWrapper);
+        chatContainer.scrollTop = chatContainer.scrollHeight;
+    }
+    
+    function findLastBotMessageWrapper() {
+        const wrappers = chatContainer.querySelectorAll('.message-wrapper');
+        for (let i = wrappers.length - 1; i >= 0; i--) {
+            if (!wrappers[i].classList.contains('justify-end')) {
+                return wrappers[i];
+            }
+        }
+        return null;
+    }
+
+    function toggleLoading(state) {
+        isLoading = state;
+        sendBtn.disabled = state;
+        sendBtn.innerHTML = state ? '<svg class="animate-spin h-5 w-5 mx-auto" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>' : 'Send';
+        messageInput.disabled = state;
+    }
+
+    function exportChat() {
+        if (messages.length === 0) {
+            alert('Nothing to export.');
+            return;
+        }
+        const blob = new Blob([JSON.stringify(messages, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `chat-history-${new Date().toISOString()}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    }
+
+    function importChat(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+        
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            try {
+                const importedMessages = JSON.parse(e.target.result);
+                if (Array.isArray(importedMessages) && importedMessages.every(m => m.role && m.content !== undefined)) {
+                    messages = importedMessages;
+                    renderChat();
+                } else {
+                    alert('Invalid chat file format.');
+                }
+            } catch (error) {
+                alert('Failed to read or parse the chat file.');
+                console.error('Import error:', error);
+            }
+        };
+        reader.readAsText(file);
+        event.target.value = null; // Reset input for same-file uploads
+    }
+});
+</script>
+{% endblock %}

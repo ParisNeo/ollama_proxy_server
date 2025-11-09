@@ -51,6 +51,16 @@
                             <td class="px-6 py-4 whitespace-nowrap text-sm">{{ model.modified_at[:19].replace('T', ' ') }}</td>
                             <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                                 <div class="flex justify-end gap-4">
+                                    <form action="{{ url_for('admin_load_model', server_id=server.id) }}" method="post" class="inline">
+                                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                        <input type="hidden" name="model_name" value="{{ model.name }}">
+                                        <button type="submit" class="text-green-400 hover:text-green-600">Load</button>
+                                    </form>
+                                     <form action="{{ url_for('admin_unload_model', server_id=server.id) }}" method="post" class="inline">
+                                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                        <input type="hidden" name="model_name" value="{{ model.name }}">
+                                        <button type="submit" class="text-yellow-400 hover:text-yellow-600">Unload</button>
+                                    </form>
                                     <form action="{{ url_for('admin_pull_model', server_id=server.id) }}" method="post" class="inline">
                                         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                                         <input type="hidden" name="model_name" value="{{ model.name }}">
@@ -68,7 +78,7 @@
                     {% else %}
                     <tr>
                         <td colspan="4" class="px-6 py-10 text-center text-gray-400">
-                            No models found on this server. Try <a href="{{ url_for('admin_refresh_models', server_id=server.id) }}" class="font-semibold text-[var(--color-primary-500)] hover:underline">refreshing the list</a>.
+                           No models found on this server. This might be because the server is offline or the initial model scan failed. Try refreshing from the main <a href="{{ url_for('admin_servers') }}" class="font-semibold text-[var(--color-primary-500)] hover:underline">Server Management</a> page.
                         </td>
                     </tr>
                     {% endif %}

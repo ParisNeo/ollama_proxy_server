@@ -257,3 +257,50 @@ body.sidebar-collapsed #sidebar-open-btn { display: block; }
 /* --- Styles for Help Page Code Blocks --- */
 .code-block-wrapper { position: relative; border-radius: 0.5rem; padding: 1rem; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size: 0.875rem; overflow-x: auto; }
 .copy-button { position: absolute; top: 0.5rem; right: 0.5rem; border: none; padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-size: 0.75rem; cursor: pointer; transition: background-color 0.2s; }
+
+/* --- Select Dropdown Option Styling --- */
+/* Note: Support for styling <option> is browser-dependent and may not work on all systems (e.g., Chrome on macOS). */
+
+/* For Dark Themes */
+.ui-dark-glass select option,
+.ui-dark-flat select option,
+.ui-black select option,
+.ui-aurora select option,
+.ui-dark-neumorphic select option,
+.ui-retro-terminal select option,
+.ui-cyberpunk select option {
+    background-color: #1f2937; /* gray-800 */
+    color: #e5e7eb; /* gray-200 */
+}
+
+/* For Light Themes */
+.ui-light-glass select option,
+.ui-light-flat select option,
+.ui-white select option,
+.ui-light-neumorphic select option,
+.ui-brutalism select option,
+.ui-material-flat select option,
+.ui-ink select option {
+    background-color: #ffffff;
+    color: #111827; /* gray-900 */
+}
+
+/* --- Collapsible 'Thinking' Block --- */
+.think-block {
+    background-color: rgba(128, 128, 128, 0.1);
+    border-left: 3px solid var(--color-primary-500);
+    border-radius: 4px;
+    margin: 1em 0;
+}
+.think-block summary {
+    cursor: pointer;
+    font-weight: 600;
+    color: var(--color-primary-500);
+    padding: 0.5em 1em;
+}
+.think-block[open] > summary {
+    border-bottom: 1px solid rgba(128, 128, 128, 0.2);
+}
+.think-block > div {
+    padding: 0.5em 1em;
+}

@@ -47,18 +47,20 @@
                         <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-current">{{ server.name }}</td>
                         <td class="px-6 py-4 whitespace-nowrap text-sm font-mono">{{ server.url }}</td>
                         <td class="px-6 py-4 whitespace-nowrap text-sm">
-                             {% if server.is_active %}
-                                {% if server.available_models %}
-                                    <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">Active</span>
-                                {% else %}
-                                    <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-yellow-100 text-yellow-800">Warning</span>
-                                {% endif %}
+                             {% if server.last_error %}
+                                <button
+                                    class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-yellow-100 text-yellow-800 cursor-pointer hover:bg-yellow-200"
+                                    data-modal-title="Server Error Details"
+                                    data-modal-body="<p>The last attempt to refresh models from this server failed with the following error:</p><div class='mt-4 p-3 rounded-md bg-red-900/50 border border-red-500 text-red-300 font-mono text-sm'>{{ server.last_error | e }}</div>"
+                                >
+                                    Warning
+                                </button>
                             {% else %}
-                            <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-red-100 text-red-800">Inactive</span>
+                                <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">Active</span>
                             {% endif %}
                         </td>
                         <td class="px-6 py-4 text-sm">
-                            <span class="font-medium">{{ server.available_models|length }} model(s)</span>
+                            <span class="font-medium">{{ server.available_models|length if server.available_models is not none else 'N/A' }} model(s)</span>
                             {% if server.models_last_updated %}
                                 <span class="text-xs text-gray-400 block">(updated {{ server.models_last_updated.strftime('%Y-%m-%d %H:%M') }})</span>
                             {% endif %}
