@@ -7,20 +7,31 @@
 <div class="space-y-8">
     <!-- Add New Server Form -->
     <div class="card-style">
-        <h2 class="card-header text-2xl font-bold mb-4 pb-2">Add New Ollama Server</h2>
+        <h2 class="card-header text-2xl font-bold mb-4 pb-2">Add New Backend Server</h2>
         <form action="{{ url_for('admin_add_server') }}" method="post">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div class="grid grid-cols-1 md:grid-cols-5 gap-4">
                 <div>
                     <label for="server_name" class="block text-sm font-medium text-current">Server Name</label>
-                    <input type="text" name="server_name" id="server_name" placeholder="e.g., Local Mac Studio" required class="mt-1 block w-full px-3 py-2 bg-white/10 border border-white/20 rounded-md shadow-sm text-current focus:outline-none focus:ring-[var(--color-primary-500)] focus:border-[var(--color-primary-500)] sm:text-sm">
+                    <input type="text" name="server_name" id="server_name" placeholder="e.g., Local Mac Studio" required class="mt-1 block w-full px-3 py-2 rounded-md shadow-sm">
                 </div>
                 <div>
                     <label for="server_url" class="block text-sm font-medium text-current">Server URL</label>
-                    <input type="url" name="server_url" id="server_url" placeholder="http://127.0.0.1:11434" required class="mt-1 block w-full px-3 py-2 bg-white/10 border border-white/20 rounded-md shadow-sm text-current focus:outline-none focus:ring-[var(--color-primary-500)] focus:border-[var(--color-primary-500)] sm:text-sm">
+                    <input type="url" name="server_url" id="server_url" placeholder="http://127.0.0.1:11434" required class="mt-1 block w-full px-3 py-2 rounded-md shadow-sm">
+                </div>
+                <div>
+                    <label for="server_type" class="block text-sm font-medium text-current">Server Type</label>
+                    <select name="server_type" id="server_type" class="mt-1 block w-full px-3 py-2 rounded-md shadow-sm">
+                        <option value="ollama" selected>Ollama</option>
+                        <option value="vllm">vLLM (OpenAI-Compatible)</option>
+                    </select>
+                </div>
+                 <div class="md:col-span-1">
+                    <label for="api_key" class="block text-sm font-medium text-current">API Key (Optional)</label>
+                    <input type="password" name="api_key" id="api_key" placeholder="Leave blank if not needed" class="mt-1 block w-full px-3 py-2 rounded-md shadow-sm">
                 </div>
                 <div class="flex items-end">
-                    <button type="submit" class="w-full justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-[var(--color-primary-600)] hover:bg-[var(--color-primary-700)] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[var(--color-primary-500)]">Add Server</button>
+                    <button type="submit" class="w-full justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-[var(--color-primary-600)] hover:bg-[var(--color-primary-700)]">Add Server</button>
                 </div>
             </div>
         </form>
@@ -35,9 +46,10 @@
                     <tr>
                         <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Name</th>
                         <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">URL</th>
+                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Type</th>
+                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">API Key</th>
                         <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Status</th>
                         <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Models</th>
-                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Created At</th>
                         <th scope="col" class="px-6 py-3 text-right text-xs font-medium text-gray-400 uppercase tracking-wider">Actions</th>
                     </tr>
                 </thead>
@@ -46,6 +58,19 @@
                     <tr>
                         <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-current">{{ server.name }}</td>
                         <td class="px-6 py-4 whitespace-nowrap text-sm font-mono">{{ server.url }}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm">
+                            <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full 
+                                {% if server.server_type == 'vllm' %}bg-purple-200 text-purple-800{% else %}bg-blue-200 text-blue-800{% endif %}">
+                                {{ server.server_type | upper }}
+                            </span>
+                        </td>
+                         <td class="px-6 py-4 whitespace-nowrap text-sm">
+                            {% if server.has_api_key %}
+                                <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-gray-200 text-gray-800">Configured</span>
+                            {% else %}
+                                <span class="text-gray-500">-</span>
+                            {% endif %}
+                        </td>
                         <td class="px-6 py-4 whitespace-nowrap text-sm">
                              {% if server.last_error %}
                                 <button
@@ -65,13 +90,13 @@
                                 <span class="text-xs text-gray-400 block">(updated {{ server.models_last_updated.strftime('%Y-%m-%d %H:%M') }})</span>
                             {% endif %}
                         </td>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm">{{ server.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
                         <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                             <div class="flex justify-end gap-4">
+                                <a href="{{ url_for('admin_edit_server_form', server_id=server.id) }}" class="text-yellow-400 hover:text-yellow-600">Edit</a>
                                 <a href="{{ url_for('admin_manage_server_models', server_id=server.id) }}" class="text-[var(--color-primary-500)] hover:text-[var(--color-primary-700)]">Manage Models</a>
                                 <form action="{{ url_for('admin_refresh_models', server_id=server.id) }}" method="post" class="inline">
                                     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                                    <button type="submit" class="text-blue-400 hover:text-blue-600">Refresh List</button>
+                                    <button type="submit" class="text-blue-400 hover:text-blue-600">Refresh</button>
                                 </form>
                                 <form action="{{ url_for('admin_delete_server', server_id=server.id) }}" method="post" onsubmit="return confirm('Are you sure you want to delete this server?');" class="inline">
                                     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -82,7 +107,7 @@
                     </tr>
                     {% else %}
                     <tr>
-                        <td colspan="6" class="px-6 py-4 text-center">No servers configured.</td>
+                        <td colspan="7" class="px-6 py-4 text-center">No servers configured.</td>
                     </tr>
                     {% endfor %}
                 </tbody>

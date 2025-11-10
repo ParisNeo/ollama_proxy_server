@@ -70,11 +70,17 @@ class OllamaServer(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, nullable=False)
     url = Column(String, unique=True, nullable=False)
+    server_type = Column(String, nullable=False, default="ollama", server_default="ollama")
+    encrypted_api_key = Column(String, nullable=True)
     is_active = Column(Boolean, default=True)
     available_models = Column(JSON, nullable=True)
     models_last_updated = Column(DateTime, nullable=True)
     last_error = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+    @property
+    def has_api_key(self) -> bool:
+        return bool(self.encrypted_api_key)
 
 class AppSettings(Base):
     __tablename__ = "app_settings"

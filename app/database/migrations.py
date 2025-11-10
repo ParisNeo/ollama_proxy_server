@@ -379,6 +379,8 @@ async def run_all_migrations(engine: AsyncEngine) -> None:
                 "available_models": "JSON",
                 "models_last_updated": "DATETIME",
                 "last_error": "VARCHAR",
+                "server_type": "VARCHAR DEFAULT 'ollama' NOT NULL",
+                "encrypted_api_key": "VARCHAR",
             },
             "api_keys": {
                 "is_active": "BOOLEAN DEFAULT 1 NOT NULL",

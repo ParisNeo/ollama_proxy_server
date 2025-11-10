@@ -275,3 +275,28 @@ body.sidebar-collapsed #sidebar-open-btn { display: block; }
 .img-preview-container { position: relative; }
 .img-preview { max-height: 72px; max-width: 72px; border-radius: 0.375rem; object-fit: cover; }
 .remove-img-btn { position: absolute; top: -0.5rem; right: -0.5rem; background-color: #ef4444; color: white; border-radius: 9999px; width: 1.25rem; height: 1.25rem; display: flex; align-items: center; justify-content: center; font-size: 0.75rem; cursor: pointer; border: 1px solid white; }
+
+/* --- Image Annotation Styles --- */
+.annotation-box {
+    position: absolute;
+    border: 2px solid #ff00ff;
+    box-shadow: 0 0 10px rgba(255, 0, 255, 0.7);
+    pointer-events: none;
+}
+.annotation-label {
+    position: absolute;
+    top: -20px;
+    left: 0;
+    background-color: #ff00ff;
+    color: white;
+    padding: 2px 6px;
+    font-size: 12px;
+    font-weight: bold;
+    white-space: nowrap;
+    border-radius: 3px;
+}
+
+/* --- Fix for extra space under chat images --- */
+.annotated-image-container img, .image-message-container img {
+    display: block; /* Removes the extra space reserved for text descenders */
+}

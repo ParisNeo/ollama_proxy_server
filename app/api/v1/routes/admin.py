@@ -12,11 +12,11 @@ import os
 import json 
 import numpy as np
 from sklearn.decomposition import PCA
-from pydantic import BaseModel, conlist
+from pydantic import BaseModel, conlist, AnyHttpUrl
 import base64
 
 from fastapi import APIRouter, Depends, Request, Form, HTTPException, status, Query, UploadFile, File
-from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, StreamingResponse 
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, StreamingResponse, Response 
 from fastapi.templating import Jinja2Templates
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -28,7 +28,7 @@ from app.database.session import get_db
 from app.database.models import User
 from app.crud import user_crud, apikey_crud, log_crud, server_crud, settings_crud
 from app.schema.user import UserCreate
-from app.schema.server import ServerCreate
+from app.schema.server import ServerCreate, ServerUpdate
 from app.schema.settings import AppSettingsModel
 from app.api.v1.dependencies import get_csrf_token, validate_csrf_token, login_rate_limiter, validate_csrf_token_header
 from app.core.benchmarks import PREBUILT_BENCHMARKS
@@ -47,7 +47,7 @@ UPLOADS_DIR = Path("app/static/uploads")
 SSL_DIR = Path(".ssl")
 
 
-# ... (existing functions from get_system_info down to admin_add_server remain the same) ...
+# ... (existing functions from get_system_info down to admin_help_page remain the same) ...
 
 # --- Sync helper for system info (to be run in threadpool) ---
 def get_system_info():
@@ -290,15 +290,26 @@ async def admin_server_management(request: Request, db: AsyncSession = Depends(g
     return templates.TemplateResponse("admin/servers.html", context)
 
 @router.post("/servers/add", name="admin_add_server", dependencies=[Depends(validate_csrf_token)])
-async def admin_add_server(request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user), server_name: str = Form(...), server_url: str = Form(...)):
+async def admin_add_server(
+    request: Request, 
+    db: AsyncSession = Depends(get_db), 
+    admin_user: User = Depends(require_admin_user), 
+    server_name: str = Form(...), 
+    server_url: str = Form(...), 
+    server_type: str = Form(...),
+    api_key: Optional[str] = Form(None)
+):
     existing_server = await server_crud.get_server_by_url(db, url=server_url)
-    if existing_server: flash(request, f"Server with URL '{server_url}' already exists.", "error")
+    if existing_server:
+        flash(request, f"Server with URL '{server_url}' already exists.", "error")
     else:
         try:
-            server_in = ServerCreate(name=server_name, url=server_url)
+            server_in = ServerCreate(name=server_name, url=server_url, server_type=server_type, api_key=api_key)
             await server_crud.create_server(db, server=server_in)
-            flash(request, f"Server '{server_name}' added successfully.", "success")
-        except Exception: flash(request, "Invalid URL format.", "error")
+            flash(request, f"Server '{server_name}' ({server_type}) added successfully.", "success")
+        except Exception as e:
+            logger.error(f"Error adding server: {e}")
+            flash(request, "Invalid URL format or server type.", "error")
     return RedirectResponse(url=request.url_for("admin_servers"), status_code=status.HTTP_303_SEE_OTHER)
 
 @router.post("/servers/{server_id}/delete", name="admin_delete_server", dependencies=[Depends(validate_csrf_token)])
@@ -316,6 +327,45 @@ async def admin_refresh_models(request: Request, server_id: int, db: AsyncSessio
     else:
         flash(request, f"Failed to fetch models: {result['error']}", "error")
     return RedirectResponse(url=request.url_for("admin_servers"), status_code=status.HTTP_303_SEE_OTHER)
+
+@router.get("/servers/{server_id}/edit", response_class=HTMLResponse, name="admin_edit_server_form")
+async def admin_edit_server_form(request: Request, server_id: int, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
+    server = await server_crud.get_server_by_id(db, server_id=server_id)
+    if not server:
+        raise HTTPException(status_code=404, detail="Server not found")
+    context = get_template_context(request)
+    context["server"] = server
+    context["csrf_token"] = await get_csrf_token(request)
+    return templates.TemplateResponse("admin/edit_server.html", context)
+
+@router.post("/servers/{server_id}/edit", name="admin_edit_server_post", dependencies=[Depends(validate_csrf_token)])
+async def admin_edit_server_post(
+    request: Request,
+    server_id: int,
+    db: AsyncSession = Depends(get_db),
+    admin_user: User = Depends(require_admin_user),
+    name: str = Form(...),
+    url: str = Form(...),
+    server_type: str = Form(...),
+    api_key: Optional[str] = Form(None),
+    remove_api_key: Optional[bool] = Form(False)
+):
+    update_data = {"name": name, "url": AnyHttpUrl(url), "server_type": server_type}
+
+    if remove_api_key:
+        update_data["api_key"] = ""
+    elif api_key is not None and api_key != "":
+        update_data["api_key"] = api_key
+
+    server_update = ServerUpdate(**update_data)
+    
+    updated_server = await server_crud.update_server(db, server_id=server_id, server_update=server_update)
+    if not updated_server:
+        raise HTTPException(status_code=404, detail="Server not found")
+    
+    flash(request, f"Server '{name}' updated successfully.", "success")
+    return RedirectResponse(url=request.url_for("admin_servers"), status_code=status.HTTP_303_SEE_OTHER)
+
 
 # --- NEW SERVER MODEL MANAGEMENT ROUTES ---
 
@@ -458,6 +508,7 @@ async def admin_playground_ui(
     context = get_template_context(request)
     context["models"] = await server_crud.get_all_available_model_names(db, filter_type='chat')
     context["selected_model"] = model
+    context["csrf_token"] = await get_csrf_token(request)
     return templates.TemplateResponse("admin/model_playground.html", context)
 
 
@@ -507,28 +558,63 @@ async def admin_playground_stream(
         else:
             target_server = servers_with_model[0]
         
-        chat_url = f"{target_server.url.rstrip('/')}/api/chat"
-        payload = {"model": model_name, "messages": messages, "stream": True}
+        # This is essentially a mini-proxy just for the playground
+        # It needs to do the same translation as the main proxy
+        if target_server.server_type == 'vllm':
+            from app.core.vllm_translator import translate_ollama_to_vllm_chat, vllm_stream_to_ollama_stream
+            
+            chat_url = f"{target_server.url.rstrip('/')}/v1/chat/completions"
+            payload = translate_ollama_to_vllm_chat({"model": model_name, "messages": messages, "stream": True})
+            
+            from app.crud.server_crud import _get_auth_headers
+            headers = _get_auth_headers(target_server)
 
-        async def event_stream():
-            try:
-                async with http_client.stream("POST", chat_url, json=payload, timeout=600.0) as response:
-                    if response.status_code != 200:
-                        error_body = await response.aread()
-                        error_text = error_body.decode('utf-8')
-                        logger.error(f"Ollama backend returned error {response.status_code}: {error_text}")
-                        error_payload = {"error": f"Ollama server error: {error_text}"}
-                        yield json.dumps(error_payload).encode('utf-8')
-                        return
+            async def event_stream_vllm():
+                try:
+                    async with http_client.stream("POST", chat_url, json=payload, timeout=600.0, headers=headers) as response:
+                        if response.status_code != 200:
+                            error_body = await response.aread()
+                            error_text = error_body.decode('utf-8')
+                            logger.error(f"vLLM backend returned error {response.status_code}: {error_text}")
+                            error_payload = {"error": f"vLLM server error: {error_text}"}
+                            yield json.dumps(error_payload).encode('utf-8')
+                            return
+                        
+                        async for chunk in vllm_stream_to_ollama_stream(response.aiter_text(), model_name):
+                            yield chunk
+                except Exception as e:
+                    logger.error(f"Error streaming from vLLM backend: {e}", exc_info=True)
+                    error_payload = {"error": "Failed to stream from backend server.", "details": str(e)}
+                    yield json.dumps(error_payload).encode('utf-8')
+            
+            return StreamingResponse(event_stream_vllm(), media_type="application/x-ndjson")
 
-                    async for chunk in response.aiter_bytes():
-                        yield chunk
-            except Exception as e:
-                logger.error(f"Error streaming from Ollama backend: {e}", exc_info=True)
-                error_payload = {"error": "Failed to stream from backend server.", "details": str(e)}
-                yield json.dumps(error_payload).encode('utf-8')
-        
-        return StreamingResponse(event_stream(), media_type="application/x-ndjson")
+        else: # Ollama server
+            chat_url = f"{target_server.url.rstrip('/')}/api/chat"
+            payload = {"model": model_name, "messages": messages, "stream": True}
+            
+            from app.crud.server_crud import _get_auth_headers
+            headers = _get_auth_headers(target_server)
+
+            async def event_stream_ollama():
+                try:
+                    async with http_client.stream("POST", chat_url, json=payload, timeout=600.0, headers=headers) as response:
+                        if response.status_code != 200:
+                            error_body = await response.aread()
+                            error_text = error_body.decode('utf-8')
+                            logger.error(f"Ollama backend returned error {response.status_code}: {error_text}")
+                            error_payload = {"error": f"Ollama server error: {error_text}"}
+                            yield json.dumps(error_payload).encode('utf-8')
+                            return
+
+                        async for chunk in response.aiter_bytes():
+                            yield chunk
+                except Exception as e:
+                    logger.error(f"Error streaming from Ollama backend: {e}", exc_info=True)
+                    error_payload = {"error": "Failed to stream from backend server.", "details": str(e)}
+                    yield json.dumps(error_payload).encode('utf-8')
+            
+            return StreamingResponse(event_stream_ollama(), media_type="application/x-ndjson")
 
     except Exception as e:
         logger.error(f"Error in chat stream endpoint: {e}", exc_info=True)
@@ -549,7 +635,21 @@ async def admin_embedding_playground_ui(
 
 @router.get("/embedding-playground/prebuilt", name="admin_get_prebuilt_benchmarks")
 async def admin_get_prebuilt_benchmarks(admin_user: User = Depends(require_admin_user)):
-    return JSONResponse(PREBUILT_BENCHMARKS)
+    all_benchmarks = list(PREBUILT_BENCHMARKS)
+    benchmarks_dir = Path("benchmarks")
+    if benchmarks_dir.is_dir():
+        for filepath in benchmarks_dir.glob("*.json"):
+            try:
+                with open(filepath, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    if "name" in data and "groups" in data and isinstance(data["groups"], list):
+                        all_benchmarks.append(data)
+                    else:
+                        logger.warning(f"Skipping invalid benchmark file: {filepath.name}")
+            except Exception as e:
+                logger.error(f"Failed to load benchmark file {filepath.name}: {e}")
+    return JSONResponse(all_benchmarks)
+
 
 @router.get("/playground/test-prompts", name="admin_get_test_prompts")
 async def admin_get_test_prompts(admin_user: User = Depends(require_admin_user)):
@@ -557,25 +657,34 @@ async def admin_get_test_prompts(admin_user: User = Depends(require_admin_user))
     
 async def get_embedding(
     http_client: httpx.AsyncClient, 
-    server_url: str, 
+    server: "OllamaServer", 
     model_name: str, 
     prompt: str
 ) -> List[float]:
-    """Helper to get a single embedding from an Ollama server."""
+    """Helper to get a single embedding from a server."""
+    from app.crud.server_crud import _get_auth_headers
+    headers = _get_auth_headers(server)
     try:
-        response = await http_client.post(
-            f"{server_url.rstrip('/')}/api/embeddings",
-            json={"model": model_name, "prompt": prompt},
-            timeout=60.0,
-        )
-        response.raise_for_status()
-        return response.json()["embedding"]
+        if server.server_type == 'vllm':
+            from app.core.vllm_translator import translate_ollama_to_vllm_embeddings, translate_vllm_to_ollama_embeddings
+            url = f"{server.url.rstrip('/')}/v1/embeddings"
+            payload = translate_ollama_to_vllm_embeddings({"model": model_name, "prompt": prompt})
+            response = await http_client.post(url, json=payload, timeout=60.0, headers=headers)
+            response.raise_for_status()
+            return translate_vllm_to_ollama_embeddings(response.json())["embedding"]
+        else: # Ollama
+            url = f"{server.url.rstrip('/')}/api/embeddings"
+            payload = {"model": model_name, "prompt": prompt}
+            response = await http_client.post(url, json=payload, timeout=60.0, headers=headers)
+            response.raise_for_status()
+            return response.json()["embedding"]
+
     except httpx.HTTPStatusError as e:
         logger.error(f"Error getting embedding for model {model_name}: {e.response.text}")
-        raise HTTPException(status_code=e.response.status_code, detail=f"Ollama server error: {e.response.text}")
+        raise HTTPException(status_code=e.response.status_code, detail=f"Backend server error: {e.response.text}")
     except Exception as e:
-        logger.error(f"Failed to connect to Ollama server at {server_url}: {e}")
-        raise HTTPException(status_code=500, detail=f"Could not connect to Ollama server to get embedding: {e}")
+        logger.error(f"Failed to connect to backend server at {server.url}: {e}")
+        raise HTTPException(status_code=500, detail=f"Could not connect to backend server to get embedding: {e}")
 
 class BenchmarkGroup(BaseModel):
     id: str
@@ -615,7 +724,7 @@ async def admin_run_embedding_benchmark(
         server = servers[0]
         
         # Fetch all embeddings for this model concurrently
-        tasks = {text: get_embedding(http_client, server.url, model_name, text) for text in all_texts}
+        tasks = {text: get_embedding(http_client, server, model_name, text) for text in all_texts}
         results = await asyncio.gather(*tasks.values(), return_exceptions=True)
         
         embeddings_map = {text: result for text, result in zip(tasks.keys(), results)}

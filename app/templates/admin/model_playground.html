@@ -15,6 +15,13 @@
             </div>
         </div>
         <div class="flex items-center gap-2">
+            <!-- NEW: Image Annotation Toggle -->
+            <div id="image-annotation-toggle-container" class="flex items-center gap-2 text-sm pr-2 border-r border-gray-600" title="Toggle image annotation mode. This adds a special system prompt to enable object detection and bounding box drawing on images.">
+                <span class="text-gray-400">Annotate Image</span>
+                <button type="button" id="image-annotation-toggle" class="relative inline-flex flex-shrink-0 h-6 w-11 border-2 border-transparent rounded-full cursor-pointer transition-colors ease-in-out duration-200 focus:outline-none bg-gray-600">
+                    <span id="image-annotation-toggle-knob" class="pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow-lg transform ring-0 transition ease-in-out duration-200 translate-x-0"></span>
+                </button>
+            </div>
             <button id="system-prompt-btn" title="Set System Prompt" class="p-2 rounded hover:bg-white/10">
                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
             </button>
@@ -63,6 +70,93 @@
 
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <script>
+    function drawAnnotations(annotations, imageContainer) {
+        // Clear previous annotations
+        imageContainer.querySelectorAll('.annotation-box').forEach(el => el.remove());
+        
+        annotations.forEach(ann => {
+            if (!ann.box || ann.box.length !== 4) return;
+            const [x_min, y_min, x_max, y_max] = ann.box;
+            
+            const box = document.createElement('div');
+            box.className = 'annotation-box';
+            box.style.left = `${x_min * 100}%`;
+            box.style.top = `${y_min * 100}%`;
+            box.style.width = `${(x_max - x_min) * 100}%`;
+            box.style.height = `${(y_max - y_min) * 100}%`;
+            
+            const label = document.createElement('span');
+            label.className = 'annotation-label';
+            label.textContent = ann.class;
+            
+            box.appendChild(label);
+            imageContainer.appendChild(box);
+        });
+    }
+
+    async function saveAnnotatedImage(imageUrl, annotations) {
+        const loadImage = (src) => {
+            return new Promise((resolve, reject) => {
+                const img = new Image();
+                img.crossOrigin = "anonymous";
+                img.onload = () => resolve(img);
+                img.onerror = (err) => reject(err);
+                img.src = src;
+            });
+        };
+
+        try {
+            const image = await loadImage(imageUrl);
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            canvas.width = image.naturalWidth;
+            canvas.height = image.naturalHeight;
+
+            // Draw original image
+            ctx.drawImage(image, 0, 0);
+
+            // Draw annotations
+            annotations.forEach(ann => {
+                if (!ann.box || ann.box.length !== 4) return;
+                const [x_min, y_min, x_max, y_max] = ann.box;
+                
+                const x = x_min * canvas.width;
+                const y = y_min * canvas.height;
+                const width = (x_max - x_min) * canvas.width;
+                const height = (y_max - y_min) * canvas.height;
+
+                // Draw box
+                ctx.strokeStyle = '#ff00ff';
+                ctx.lineWidth = Math.max(2, canvas.width * 0.005); // Dynamic line width
+                ctx.strokeRect(x, y, width, height);
+
+                // Draw label
+                const label = ann.class;
+                const fontSize = Math.max(14, Math.round(canvas.width * 0.02));
+                ctx.font = `bold ${fontSize}px sans-serif`;
+                const textMetrics = ctx.measureText(label);
+                const padding = fontSize * 0.4;
+                
+                ctx.fillStyle = '#ff00ff';
+                ctx.fillRect(x, y - fontSize - padding, textMetrics.width + (padding*2), fontSize + padding);
+                
+                ctx.fillStyle = 'white';
+                ctx.textBaseline = 'top';
+                ctx.fillText(label, x + padding, y - fontSize);
+            });
+
+            // Trigger download
+            const link = document.createElement('a');
+            link.download = `annotated-image-${Date.now()}.png`;
+            link.href = canvas.toDataURL('image/png');
+            link.click();
+
+        } catch (error) {
+            console.error('Failed to load image for saving.', error);
+            alert('Failed to load image for saving.');
+        }
+    }
+
 document.addEventListener('DOMContentLoaded', () => {
     // --- Marked.js & Renderer Setup ---
     const renderer = new marked.Renderer();
@@ -111,16 +205,32 @@ document.addEventListener('DOMContentLoaded', () => {
     const attachImgBtn = document.getElementById('attach-img-btn');
     const imageInput = document.getElementById('image-input');
     const imagePreviews = document.getElementById('image-previews');
+    const annotationToggle = document.getElementById('image-annotation-toggle');
+    const annotationToggleKnob = document.getElementById('image-annotation-toggle-knob');
 
-    // --- State ---
+    // --- Constants & State ---
+    const ANNOTATION_PROMPT = "You are a specialized AI assistant for image object detection. When the user asks you to find objects in the image or asks a question about objects in the image, your function is to identify them and provide their bounding box coordinates, then answer any subsequent questions.\n\nCRITICAL INSTRUCTION: Your response MUST contain a single JSON object wrapped in <annotate> tags. You may add conversational text AFTER the closing </annotate> tag if needed to answer a user's question, but the JSON part is mandatory.\n\nThe JSON object must be an array of annotation objects. Each annotation object requires two keys:\n1. \"class\": (string) The name of the detected object class.\n2. \"box\": (array of 4 numbers) The normalized bounding box coordinates [x_min, y_min, x_max, y_max].\n\nMANDATORY COORDINATE SYSTEM: You MUST use normalized coordinates. This means all coordinate values must be between 0.0 and 1.0.\n- (0.0, 0.0) represents the top-left corner of the image.\n- (1.0, 1.0) represents the bottom-right corner of the image.\n- Pixel values are FORBIDDEN and will be rejected. For example, a coordinate like [120, 250, 300, 450] is INCORRECT. A correct coordinate would be [0.1, 0.2, 0.3, 0.4].\n\nExample of a PERFECT response for just annotation:\n<annotate>\n[\n  {\"box\": [0.1, 0.2, 0.3, 0.4], \"class\": \"cat\"},\n  {\"box\": [0.5, 0.6, 0.7, 0.8], \"class\": \"dog\"}\n]\n</annotate>\n\nExample of a response answering a question:\n<annotate>\n[\n  {\"box\": [0.1, 0.2, 0.3, 0.4], \"class\": \"cat\"}\n]\n</annotate>\nYes, there is a cat in the image, located in the upper left area.\n\nIf you do not find any of the requested objects, you MUST return an empty array: <annotate>[]</annotate>";
+    
+    const PREBUILT_SYSTEM_PROMPTS = [
+        { name: "Standard Assistant", prompt: "You are a helpful, respectful and honest assistant." },
+        { name: "Chain of Thought", prompt: "When you are asked a question, first provide a step-by-step plan of how you will answer the question. Then, produce the answer, explaining your reasoning at each step." },
+        { name: "Image Bounding Box Detection", prompt: ANNOTATION_PROMPT },
+        { name: "Python Expert", prompt: "You are an expert Python programmer. Provide concise, efficient, and well-documented code. Your answers should only contain code, unless asked otherwise." },
+        { name: "Creative Writer", prompt: "You are a creative writer, tasked with writing a compelling and imaginative story based on the user's prompt. Focus on vivid descriptions and engaging narrative." }
+    ];
+    
     let messages = [];
     let isLoading = false;
+    let abortController = null;
     let attachedImages = [];
-    let systemPrompt = '';
+    let lastSentImageURL = null;
+    let userSystemPrompt = '';
+    let isAnnotationMode = false;
     const CUSTOM_PROMPTS_KEY = 'ollama_proxy_custom_prompts';
     const LAST_MODEL_KEY = 'ollama_proxy_last_model';
     const LAST_SYSTEM_PROMPT_KEY = 'ollama_proxy_last_system_prompt';
     const CUSTOM_SYSTEM_PROMPTS_KEY = 'ollama_proxy_custom_system_prompts';
+    const ANNOTATION_MODE_KEY = 'ollama_proxy_annotation_mode';
 
     // --- Image Handling ---
     function handleImageFiles(files) {
@@ -225,20 +335,24 @@ document.addEventListener('DOMContentLoaded', () => {
         container.innerHTML = listHtml;
     }
 
-    // --- System Prompt Modal ---
+    // --- System Prompt & Annotation Logic ---
+    function getFinalSystemPrompt() {
+        if (isAnnotationMode) {
+            if (userSystemPrompt) {
+                return `${userSystemPrompt}\n\n${ANNOTATION_PROMPT}`;
+            }
+            return ANNOTATION_PROMPT;
+        }
+        return userSystemPrompt;
+    }
+    
     function showSystemPromptModal() {
-        const PREBUILT_SYSTEM_PROMPTS = [
-            { name: "Standard Assistant", prompt: "You are a helpful, respectful and honest assistant." },
-            { name: "Chain of Thought", prompt: "When you are asked a question, first provide a step-by-step plan of how you will answer the question. Then, produce the answer, explaining your reasoning at each step." },
-            { name: "Python Expert", prompt: "You are an expert Python programmer. Provide concise, efficient, and well-documented code. Your answers should only contain code, unless asked otherwise." },
-            { name: "Creative Writer", prompt: "You are a creative writer, tasked with writing a compelling and imaginative story based on the user's prompt. Focus on vivid descriptions and engaging narrative." }
-        ];
         const customSystemPrompts = JSON.parse(localStorage.getItem(CUSTOM_SYSTEM_PROMPTS_KEY) || '[]');
         
         let modalBody = `<div class="space-y-4">
             <div>
                 <label for="system-prompt-textarea" class="block text-sm font-medium mb-1">Current System Prompt</label>
-                <textarea id="system-prompt-textarea" rows="6" class="w-full p-2 rounded-md">${systemPrompt}</textarea>
+                <textarea id="system-prompt-textarea" rows="6" class="w-full p-2 rounded-md">${userSystemPrompt}</textarea>
             </div>
             <div class="flex flex-wrap gap-2 items-center">
                 <div class="relative">
@@ -276,7 +390,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function updateSystemPromptIndicator() {
-        if (systemPrompt) {
+        const finalPrompt = getFinalSystemPrompt();
+        if (finalPrompt) {
             systemPromptIndicator.classList.remove('hidden');
             systemPromptIndicator.classList.add('flex');
         } else {
@@ -285,16 +400,36 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
     
+    function updateAnnotationToggleUI() {
+        if (isAnnotationMode) {
+            annotationToggle.classList.remove('bg-gray-600');
+            annotationToggle.classList.add('bg-[var(--color-primary-600)]');
+            annotationToggleKnob.classList.remove('translate-x-0');
+            annotationToggleKnob.classList.add('translate-x-5');
+        } else {
+            annotationToggle.classList.add('bg-gray-600');
+            annotationToggle.classList.remove('bg-[var(--color-primary-600)]');
+            annotationToggleKnob.classList.add('translate-x-0');
+            annotationToggleKnob.classList.remove('translate-x-5');
+        }
+    }
+
     // --- Core Chat Functions ---
     async function fetchStreamedResponse() {
         if (isLoading) return;
+        abortController = new AbortController();
         toggleLoading(true);
-        renderChat(); // Shows current messages and adds placeholder
+        renderChat();
 
         const botMessageWrapper = findLastBotMessageWrapper();
         const botContentElement = botMessageWrapper.querySelector('.message-content');
         const botStatsElement = botMessageWrapper.querySelector('.message-stats');
         
+        const isScrolledToBottom = () => {
+            // Check if user is near the bottom of the chat container
+            return chatContainer.scrollHeight - chatContainer.clientHeight <= chatContainer.scrollTop + 50;
+        };
+
         let fullResponse = '';
         let firstChunk = true;
         const startTime = performance.now();
@@ -302,16 +437,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const messagesForApi = messages.map(msg => Array.isArray(msg.content) && !msg.content.some(item => item.type === 'image_url') ? { ...msg, content: msg.content.find(item => item.type === 'text')?.text || '' } : msg);
         
-        // Inject system prompt if it's the first user message of a conversation
-        if (systemPrompt && messages.length === 1 && messages[0].role === 'user') {
-            messagesForApi.unshift({ role: "system", content: systemPrompt });
+        const finalSystemPrompt = getFinalSystemPrompt();
+        if (finalSystemPrompt && messages.length === 1 && messages[0].role === 'user') {
+            messagesForApi.unshift({ role: "system", content: finalSystemPrompt });
         }
 
         try {
             const response = await fetch("{{ url_for('admin_playground_stream') }}", {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': '{{ csrf_token }}' },
                 body: JSON.stringify({ model: modelSelector.value, messages: messagesForApi }),
+                signal: abortController.signal
             });
             if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
 
@@ -319,6 +455,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const decoder = new TextDecoder();
 
             while (true) {
+                const shouldScroll = isScrolledToBottom(); // Check before DOM change
                 const { value, done } = await reader.read();
                 if (done) break;
                 
@@ -330,7 +467,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         const data = JSON.parse(line);
                         if (firstChunk && data.message?.content) {
                             firstChunk = false;
-                            botContentElement.innerHTML = ''; // Clear spinner
+                            botContentElement.innerHTML = '';
                             const ttft = Math.round(performance.now() - startTime);
                             botStatsElement.innerHTML = `<span>TTFT: ${ttft}ms</span>`;
                             botStatsElement.classList.remove('hidden');
@@ -345,21 +482,28 @@ document.addEventListener('DOMContentLoaded', () => {
                             botStatsElement.innerHTML = `${botStatsElement.innerHTML} | <span>Speed: ${tokensPerSecond} t/s</span>`;
                         }
                         if (data.error) throw new Error(data.details || data.error);
-                    } catch (err) { /* Ignore JSON parse errors for partial chunks */ }
+                    } catch (err) { /* Ignore */ }
                 }
-                chatContainer.scrollTop = chatContainer.scrollHeight;
+                if (shouldScroll) {
+                    chatContainer.scrollTop = chatContainer.scrollHeight;
+                }
             }
         } catch (error) {
-            streamError = error;
-            console.error('Error during chat stream:', error);
-            botContentElement.innerHTML = `<p class="text-red-400"><strong>Error:</strong> ${error.message}</p>`;
-            botStatsElement.classList.add('hidden');
+            if (error.name === 'AbortError') {
+                console.log('Stream cancelled by user.');
+                streamError = null;
+                fullResponse += "\n\n*[Generation stopped by user]*";
+            } else {
+                streamError = error;
+                console.error('Error during chat stream:', error);
+                botContentElement.innerHTML = `<p class="text-red-400"><strong>Error:</strong> ${error.message}</p>`;
+                botStatsElement.classList.add('hidden');
+            }
         } finally {
             toggleLoading(false);
             if (!streamError) {
                 messages.push({ role: 'assistant', content: fullResponse });
             }
-            // Final re-render to attach all buttons correctly
             renderChat(); 
             chatContainer.scrollTop = chatContainer.scrollHeight;
         }
@@ -372,7 +516,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
         let content = [];
         if(userInput) content.push({ type: 'text', text: userInput });
-        attachedImages.forEach(img => content.push({ type: 'image_url', image_url: { url: img }}));
+        if (attachedImages.length > 0) {
+            lastSentImageURL = attachedImages[attachedImages.length - 1]; // Store last image for annotation
+            attachedImages.forEach(img => content.push({ type: 'image_url', image_url: { url: img }}));
+        }
         
         messages.push({ role: 'user', content: content });
         
@@ -392,6 +539,22 @@ document.addEventListener('DOMContentLoaded', () => {
         let finalHtml = contentString.replace(thinkRegex, (match, thinkContent) => {
             return `<details class="think-block"><summary>Thoughts</summary><div>${marked.parse(thinkContent)}</div></details>`;
         });
+
+        const annotationRegex = /<annotate>([\s\S]*?)<\/annotate>/g;
+        finalHtml = finalHtml.replace(annotationRegex, (match, annotationJson) => {
+            const safeJson = annotationJson.replace(/'/g, "&apos;");
+            if (!lastSentImageURL) return `<div class="text-red-400">Error: Could not find an image to annotate.</div>`;
+            const uniqueId = `annotation-container-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+            
+            return `<div id="${uniqueId}" class="annotated-image-container relative mt-2" data-annotations='${safeJson}'>
+                        <img src="${lastSentImageURL}" class="block max-w-full h-auto rounded-md">
+                        <div class="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                           <button class="save-annotation-btn p-2 rounded-md bg-gray-800/80 hover:bg-gray-700 text-white" title="Save Annotated Image">
+                               <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                           </button>
+                        </div>
+                    </div>`;
+        });
         
         container.innerHTML = marked.parse(finalHtml);
     }
@@ -407,6 +570,7 @@ document.addEventListener('DOMContentLoaded', () => {
             appendMessage('assistant', '', true, messages.length);
         }
         highlightAndMathify(chatContainer);
+        processAnnotations();
     }
     
     function appendMessage(role, content, isPlaceholder = false, messageIndex) {
@@ -449,7 +613,10 @@ document.addEventListener('DOMContentLoaded', () => {
                             textContent = part.text;
                             contentDiv.insertAdjacentHTML('beforeend', marked.parse(part.text));
                         } else if (part.type === 'image_url') {
-                            contentDiv.insertAdjacentHTML('beforeend', `<img src="${part.image_url.url}" class="max-w-full h-auto rounded-md mt-2">`);
+                            const imageContainer = document.createElement('div');
+                            imageContainer.className = 'image-message-container';
+                            imageContainer.innerHTML = `<img src="${part.image_url.url}" class="block max-w-full h-auto rounded-md mt-2">`;
+                            contentDiv.appendChild(imageContainer);
                         }
                     });
                 } else if (typeof content === 'string') {
@@ -472,6 +639,25 @@ document.addEventListener('DOMContentLoaded', () => {
         messageWrapper.appendChild(contentWrapper);
         chatContainer.appendChild(messageWrapper);
     }
+
+    function processAnnotations() {
+        chatContainer.querySelectorAll('.annotated-image-container').forEach(container => {
+            if (container.dataset.processed) return;
+            
+            const annotationsJson = container.dataset.annotations.replace(/&apos;/g, "'");
+            try {
+                const annotations = JSON.parse(annotationsJson);
+                drawAnnotations(annotations, container);
+                container.dataset.processed = "true";
+            } catch (e) {
+                console.error("Failed to parse or draw annotation JSON:", e);
+                const errorP = document.createElement('p');
+                errorP.className = 'text-red-400 text-xs italic mt-1';
+                errorP.textContent = 'Error rendering annotations.';
+                container.appendChild(errorP);
+            }
+        });
+    }
     
     function findLastBotMessageWrapper() {
         const wrappers = chatContainer.querySelectorAll('.message-wrapper');
@@ -480,9 +666,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function toggleLoading(state) {
         isLoading = state;
-        sendBtn.disabled = state;
-        sendBtn.innerHTML = state ? '<svg class="animate-spin h-5 w-5 mx-auto" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>' : 'Send';
         messageInput.disabled = state;
+        if (state) {
+            sendBtn.innerHTML = `<svg class="w-5 h-5 mr-1" fill="currentColor" viewBox="0 0 20 20"><path d="M5 3a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2V5a2 2 0 00-2-2H5z"></path></svg> Stop`;
+            sendBtn.classList.remove('bg-[var(--color-primary-600)]', 'hover:bg-[var(--color-primary-700)]');
+            sendBtn.classList.add('bg-red-600', 'hover:bg-red-700');
+            sendBtn.type = 'button';
+        } else {
+            sendBtn.innerHTML = 'Send';
+            sendBtn.classList.add('bg-[var(--color-primary-600)]', 'hover:bg-[var(--color-primary-700)]');
+            sendBtn.classList.remove('bg-red-600', 'hover:bg-red-700');
+            sendBtn.type = 'submit';
+            abortController = null;
+        }
     }
 
     function exportChat() {
@@ -593,12 +789,24 @@ document.addEventListener('DOMContentLoaded', () => {
     attachImgBtn.addEventListener('click', () => imageInput.click());
     imageInput.addEventListener('change', (e) => handleImageFiles(e.target.files));
 
+    sendBtn.addEventListener('click', () => {
+        if (isLoading && abortController) {
+            abortController.abort();
+        }
+    });
+
     modelSelector.addEventListener('change', () => {
         localStorage.setItem(LAST_MODEL_KEY, modelSelector.value);
     });
+    
+    annotationToggle.addEventListener('click', () => {
+        isAnnotationMode = !isAnnotationMode;
+        localStorage.setItem(ANNOTATION_MODE_KEY, isAnnotationMode);
+        updateAnnotationToggleUI();
+        updateSystemPromptIndicator();
+    });
 
     document.addEventListener('click', async e => {
-        // --- Message Actions ---
         const copyBtn = e.target.closest('.copy-btn');
         if (copyBtn) {
             const contentDiv = copyBtn.closest('.rounded-lg').querySelector('.message-content');
@@ -632,8 +840,21 @@ document.addEventListener('DOMContentLoaded', () => {
                 messages.splice(messageIndex); fetchStreamedResponse();
             } return;
         }
+        const saveAnnotationBtn = e.target.closest('.save-annotation-btn');
+        if (saveAnnotationBtn) {
+            const container = saveAnnotationBtn.closest('.annotated-image-container');
+            const image = container.querySelector('img');
+            const annotationsJson = container.dataset.annotations.replace(/&apos;/g, "'");
+            try {
+                const annotations = JSON.parse(annotationsJson);
+                await saveAnnotatedImage(image.src, annotations);
+            } catch(err) {
+                console.error("Failed to process annotations for saving:", err);
+                alert("Could not save annotated image due to an error.");
+            }
+            return;
+        }
 
-        // --- Prompt Modal Actions ---
         if (e.target.classList.contains('use-prompt-btn')) {
             messageInput.value = unescape(e.target.dataset.prompt);
             document.getElementById('modal-close-btn').click();
@@ -657,7 +878,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 showTestPrompts();
             }
         }
-        // --- System Prompt Modal Actions ---
         if (e.target.id === 'load-system-prompt-btn') {
             document.getElementById('system-prompt-dropdown').classList.toggle('hidden');
         }
@@ -667,13 +887,13 @@ document.addEventListener('DOMContentLoaded', () => {
             document.getElementById('system-prompt-dropdown').classList.add('hidden');
         }
         if (e.target.id === 'apply-system-prompt-btn') {
-            systemPrompt = document.getElementById('system-prompt-textarea').value.trim();
-            localStorage.setItem(LAST_SYSTEM_PROMPT_KEY, systemPrompt);
+            userSystemPrompt = document.getElementById('system-prompt-textarea').value.trim();
+            localStorage.setItem(LAST_SYSTEM_PROMPT_KEY, userSystemPrompt);
             updateSystemPromptIndicator();
             document.getElementById('modal-close-btn').click();
         }
         if (e.target.id === 'clear-system-prompt-btn') {
-            systemPrompt = '';
+            userSystemPrompt = '';
             localStorage.removeItem(LAST_SYSTEM_PROMPT_KEY);
             updateSystemPromptIndicator();
             document.getElementById('modal-close-btn').click();
@@ -705,7 +925,9 @@ document.addEventListener('DOMContentLoaded', () => {
     if (lastModel && modelSelector.querySelector(`option[value="${lastModel}"]`)) {
         modelSelector.value = lastModel;
     }
-    systemPrompt = localStorage.getItem(LAST_SYSTEM_PROMPT_KEY) || '';
+    userSystemPrompt = localStorage.getItem(LAST_SYSTEM_PROMPT_KEY) || '';
+    isAnnotationMode = localStorage.getItem(ANNOTATION_MODE_KEY) === 'true';
+    updateAnnotationToggleUI();
     updateSystemPromptIndicator();
 });
 </script>

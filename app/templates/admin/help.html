@@ -63,34 +63,45 @@
             <div class="space-y-4 text-current">
                 <p>The main dashboard provides a real-time overview of your proxy server and connected Ollama instances.</p>
                 <ul class="list-disc list-inside space-y-3 pl-4">
-                    <li><strong>System Status:</strong> These gauges show the live CPU, Memory, and Disk usage of the machine running the proxy server. This helps you monitor server health at a glance.</li>
-                    <li><strong>Active Ollama Models:</strong> This table shows all models that are currently loaded into memory on your backend Ollama servers (equivalent to running `ollama ps`). It includes details like which server is running the model, its size, context length, and when it will expire from memory.</li>
+                    <li><strong>System Status:</strong> These gauges show the live CPU, Memory, and Disk usage of the machine running the proxy server.</li>
+                    <li><strong>Active Ollama Models:</strong> This table shows all models currently loaded into memory on your backend Ollama servers. You can see which server is running the model, its size, and even unload it directly from the dashboard.</li>
+                    <li><strong>Load Balancer Status:</strong> This panel shows the health of all configured backend servers. "Online" means the proxy can reach the server, while "Offline" indicates a connection issue.</li>
+                    <li><strong>Rate Limit Queue Status:</strong> If you're using Redis, this shows a live view of API keys that are actively being rate-limited, how close they are to their limit, and when their usage window will reset.</li>
                 </ul>
             </div>
         </div>
 
-        <!-- Core Concepts Section -->
-        <div id="concepts" class="card-style scroll-mt-20">
-            <h2 class="card-header text-2xl font-bold mb-6 pb-2">💡 Core Concepts</h2>
-            <div class="space-y-6 text-current">
+        <!-- Playgrounds & Benchmarking Section -->
+        <div id="benchmarking" class="card-style scroll-mt-20">
+            <h2 class="card-header text-2xl font-bold mb-6 pb-2">🧪 Playgrounds & Benchmarking: Test Your Models</h2>
+            <div class="space-y-8 text-current">
+                <p>The playgrounds are powerful tools for interacting with and evaluating your models directly within the UI.</p>
+                
                 <div>
-                    <h4 class="font-semibold text-lg">🛡️ API Key Authentication</h4>
-                    <p>Every request to the proxy must include a valid API key. This is the primary security feature, preventing unauthorized access to your models.</p>
+                    <h3 class="text-xl font-semibold mb-2">Chat Playground</h3>
+                    <p>This is your interactive command center for testing conversational models.</p>
+                    <ul class="list-disc list-inside space-y-2 mt-3 pl-4">
+                        <li><strong>Real-time Interaction:</strong> Chat with any available model and see responses stream in token by token.</li>
+                        <li><strong>Multi-modal Support:</strong> Simply paste an image into the chat box or use the attach button to send images along with your text prompts.</li>
+                        <li><strong>System Prompts:</strong> Use the settings icon (<svg class="w-4 h-4 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>) to set a system prompt, defining the model's persona or rules. We've included powerful presets like "Chain of Thought" and "Image Bounding Box Detection".</li>
+                        <li><strong>Message Controls:</strong> Hover over any message to Copy, Edit, Delete, or Regenerate. Editing a message forks the conversation from that point.</li>
+                        <li><strong>Import/Export:</strong> Save your entire chat history to a JSON file or load a previous conversation.</li>
+                    </ul>
                 </div>
+
                 <div>
-                    <h4 class="font-semibold text-lg">⚖️ Load Balancing</h4>
-                    <p>When a request is received, the proxy distributes it among all active backend servers in a round-robin fashion. This balances the load and improves availability.</p>
-                </div>
-                <div>
-                    <h4 class="font-semibold text-lg">🧠 Smart Model Routing</h4>
-                    <p>When you request a specific model (e.g., <code class="inline-code">"llama3"</code>), the proxy is intelligent. It first looks up which of your backend servers have that model available and only routes the request to one of them. This ensures your request never fails because it was sent to a server without the right model.</p>
-                    <div class="mt-3 p-3 rounded-md text-sm info-box">
-                        <strong>Important:</strong> For Smart Routing to work, you must periodically click the <strong>"Refresh Models"</strong> button on the <a href="{{ url_for('admin_servers') }}" class="font-semibold underline">Server Management</a> page. This keeps the proxy's catalog of available models up to date.
-                    </div>
-                </div>
-                <div>
-                    <h4 class="font-semibold text-lg">🌐 Federated Model Listing</h4>
-                    <p>The standard <code class="inline-code">/api/tags</code> endpoint is enhanced. When you call it through the proxy, it contacts all active backend servers, gathers their model lists, and returns a single, de-duplicated list of all unique models available across your entire setup.</p>
+                    <h3 class="text-xl font-semibold mb-2">Embedding Playground</h3>
+                    <p>This tool is for developers and data scientists who want to visually understand how different embedding models work. It helps you answer the question: "Does my model understand that 'king' is to 'queen' as 'man' is to 'woman'?"</p>
+                    <ul class="list-disc list-inside space-y-2 mt-3 pl-4">
+                        <li><strong>How it Works:</strong> You define groups of related words ("concepts"). The playground fetches the embeddings (numerical representations) for each text from the models you select. It then uses a dimensionality reduction algorithm (PCA) to project these complex vectors into a 2D space, which is then plotted on a graph.</li>
+                        <li><strong>Interpreting the Results:</strong> On the graph, texts with similar meanings should appear clustered together. Well-defined, tight clusters indicate that the model has a good grasp of semantic similarity for those concepts.</li>
+                        <li><strong>Pre-built & Custom Benchmarks:</strong>
+                            <ul class="list-['-_'] list-inside pl-4">
+                                <li>Use the **"Load Pre-built"** button to load example benchmarks. Any `.json` file you add to the `benchmarks/` folder in the project's root will automatically appear in this list.</li>
+                                <li>You can also create your own benchmark in the UI and **Save to File**, or load one from your computer.</li>
+                            </ul>
+                        </li>
+                    </ul>
                 </div>
             </div>
         </div>
@@ -101,32 +112,23 @@
             <div class="space-y-8 text-current">
                 <div>
                     <h3 class="text-xl font-semibold mb-2">Endpoint Blocking</h3>
-                    <p>This is a critical security layer to prevent abuse. By default, the proxy **blocks** API key holders from accessing sensitive Ollama endpoints like <code class="inline-code">/api/pull</code>, <code class="inline-code">/api/delete</code>, and <code class="inline-code">/api/create</code>.</p>
-                    <ul class="list-disc list-inside space-y-2 mt-3 pl-4">
-                        <li><strong>Prevents DoS Attacks:</strong> Stops users from initiating large model downloads that could saturate your server's bandwidth and disk space.</li>
-                        <li><strong>Protects Your Models:</strong> Prevents unauthorized users from deleting or modifying models on your backend servers.</li>
-                        <li><strong>Admin Control:</strong> These actions can only be performed by an authenticated admin through the secure <a href="{{ url_for('admin_servers') }}" class="font-semibold text-[var(--color-primary-600)] hover:underline">Server Management</a> interface.</li>
-                    </ul>
+                    <p>This is a critical security layer. By default, the proxy **blocks** API key holders from accessing sensitive Ollama endpoints like <code class="inline-code">/api/pull</code>, <code class="inline-code">/api/delete</code>, and <code class="inline-code">/api/create</code>. This prevents users from consuming excessive resources or modifying your backend servers.</p>
                      <div class="mt-4 p-3 rounded-md text-sm info-box">
                         <strong>Customizable:</strong> You can change the list of blocked endpoints in the <a href="{{ url_for('admin_settings') }}" class="font-semibold underline">Settings</a> page under "Endpoint Security".
                     </div>
                 </div>
                 <div>
                     <h3 class="text-xl font-semibold mb-2">HTTPS/SSL Encryption</h3>
-                    <p>Encrypt all traffic between your users and the proxy. In the Settings page, you can either **upload your certificate files** directly or provide the file paths if they're already on the server. A restart is required to apply changes.</p>
+                    <p>Encrypt all traffic by uploading your certificate files or providing file paths in the Settings page. A restart is required to apply changes.</p>
                     <p class="mt-2">For local testing, you can generate a self-signed certificate with OpenSSL:</p>
                      <div class="code-block-wrapper mt-2">
                         <pre><code class="language-bash">openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -sha256 -days 365 -nodes -subj "/CN=localhost"</code></pre>
                         <button class="copy-button">Copy</button>
                     </div>
                 </div>
-                <div>
-                    <h3 class="text-xl font-semibold mb-2">IP Filtering</h3>
-                    <p>You can create an "allow list" to ensure only specific IP addresses or ranges can access the proxy, and a "deny list" to explicitly block malicious actors. This is configured in the Settings page.</p>
-                </div>
                  <div>
                     <h3 class="text-xl font-semibold mb-2">Rate Limiting & Brute-Force Protection</h3>
-                    <p>When Redis is enabled, you can set global or per-key rate limits to prevent a single user from overwhelming the system. The proxy also automatically blocks IPs that have too many failed admin login attempts.</p>
+                    <p>When Redis is enabled, you can set global or per-key rate limits. The proxy also automatically blocks IPs that have too many failed admin login attempts.</p>
                 </div>
             </div>
         </div>
@@ -173,12 +175,8 @@ data = {
     "stream": False
 }
 
-try:
-    response = requests.post(proxy_url, headers=headers, data=json.dumps(data))
-    response.raise_for_status() # Raises an exception for bad status codes
-    print(response.json())
-except requests.exceptions.RequestException as e:
-    print(f"An error occurred: {e}")
+response = requests.post(proxy_url, headers=headers, data=json.dumps(data))
+print(response.json())
 </code></pre>
                         <button class="copy-button">Copy</button>
                     </div>
@@ -192,10 +190,10 @@ except requests.exceptions.RequestException as e:
             <div class="space-y-6 text-current">
                 <div>
                     <h3 class="text-xl font-semibold mb-2">Why Do I Need Redis?</h3>
-                    <p>Redis is an in-memory database that is extremely fast. This application uses it for two optional but important security features:</p>
+                    <p>Redis is an in-memory database that provides high-speed data access. This application uses it for two optional but important security features:</p>
                     <ul class="list-disc list-inside space-y-2 mt-2 pl-4">
-                        <li><strong>API Rate Limiting:</strong> Prevents abuse by limiting the number of requests a single API key can make in a given time frame.</li>
-                        <li><strong>Brute-Force Protection:</strong> Temporarily locks an IP address after too many failed login attempts to the admin panel.</li>
+                        <li><strong>API Rate Limiting:</strong> Prevents abuse by limiting how many requests a key can make in a given time.</li>
+                        <li><strong>Brute-Force Protection:</strong> Temporarily locks an IP address after too many failed admin logins.</li>
                     </ul>
                     <div class="mt-4 p-3 rounded-md text-sm warning-box">
                         <strong>Note:</strong> The proxy will work perfectly without Redis, but these security features will be disabled.
@@ -204,52 +202,15 @@ except requests.exceptions.RequestException as e:
 
                 <div>
                     <h3 class="text-xl font-semibold mb-2">Installation</h3>
-                    <p class="mb-4">The easiest way to run Redis on any platform is with Docker. If you don't use Docker, choose your OS below.</p>
-                    <div class="space-y-6">
-                        <div>
-                            <h4 class="font-semibold text-lg">🐳 Docker (Recommended)</h4>
-                            <p>This single command will download and run a Redis container that restarts automatically.</p>
-                            <div class="code-block-wrapper mt-2">
-                                <pre><code class="language-bash">docker run -d --name redis-stack -p 6379:6379 --restart always redis/redis-stack:latest</code></pre>
-                                 <button class="copy-button">Copy</button>
-                            </div>
-                        </div>
-                        <div>
-                            <h4 class="font-semibold text-lg">🐧 Windows (via WSL 2)</h4>
-                            <p>Redis is not officially supported on Windows, but it runs perfectly under the Windows Subsystem for Linux (WSL).</p>
-                            <ol class="list-decimal list-inside space-y-2 mt-2 pl-4">
-                                <li>Open PowerShell as an Administrator and run: <code class="inline-code">wsl --install</code></li>
-                                <li>After it's done, open your new Linux terminal (e.g., Ubuntu) and run:</li>
-                            </ol>
-                            <div class="code-block-wrapper mt-2">
-                                <pre><code class="language-bash">sudo apt update && sudo apt upgrade
-sudo apt install redis-server
-sudo service redis-server start</code></pre>
-                                <button class="copy-button">Copy</button>
-                            </div>
-                        </div>
-                         <div>
-                            <h4 class="font-semibold text-lg">🍏 macOS (via Homebrew)</h4>
-                            <div class="code-block-wrapper mt-2">
-                                <pre><code class="language-bash">brew install redis
-brew services start redis</code></pre>
-                                <button class="copy-button">Copy</button>
-                            </div>
-                        </div>
-                         <div>
-                            <h4 class="font-semibold text-lg">🐧 Linux (Ubuntu/Debian)</h4>
-                            <div class="code-block-wrapper mt-2">
-                                <pre><code class="language-bash">sudo apt-get install redis-server
-sudo systemctl enable --now redis-server</code></pre>
-                                 <button class="copy-button">Copy</button>
-                            </div>
-                        </div>
+                    <p class="mb-4">The easiest way to run Redis on any platform is with Docker.</p>
+                    <div class="code-block-wrapper mt-2">
+                        <pre><code class="language-bash">docker run -d --name redis-stack -p 6379:6379 --restart always redis/redis-stack:latest</code></pre>
+                         <button class="copy-button">Copy</button>
                     </div>
                 </div>
-                
                  <div>
                     <h3 class="text-xl font-semibold mb-2">Configuration</h3>
-                    <p>Once Redis is running, go to the <a href="{{ url_for('admin_settings') }}" class="font-semibold text-[var(--color-primary-600)] hover:underline">Settings</a> page in the admin UI and enter your Redis connection details (the defaults are usually fine for a local install). Save the settings, and the proxy will attempt to connect automatically.</p>
+                    <p>Once Redis is running, go to the <a href="{{ url_for('admin_settings') }}" class="font-semibold text-[var(--color-primary-600)] hover:underline">Settings</a> page, enter your Redis connection details, and save. The proxy will connect automatically.</p>
                 </div>
             </div>
         </div>
@@ -277,7 +238,7 @@ sudo systemctl enable --now redis-server</code></pre>
                     <ul class="space-y-2">
                         <li><a href="#getting-started" class="toc-link">Getting Started</a></li>
                         <li><a href="#dashboard" class="toc-link">The Dashboard</a></li>
-                        <li><a href="#concepts" class="toc-link">Core Concepts</a></li>
+                        <li><a href="#benchmarking" class="toc-link">Playgrounds & Benchmarking</a></li>
                         <li><a href="#security" class="toc-link">Security Features</a></li>
                         <li><a href="#examples" class="toc-link">Usage Examples</a></li>
                         <li><a href="#redis-setup" class="toc-link">Redis Setup</a></li>
@@ -315,11 +276,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const observer = new IntersectionObserver((entries) => {
         let visibleSectionId = null;
+        let maxRatio = 0;
         entries.forEach(entry => {
-            if (entry.isIntersecting && (!visibleSectionId || entry.intersectionRatio > 0.5)) {
+            if (entry.isIntersecting && entry.intersectionRatio > maxRatio) {
+                maxRatio = entry.intersectionRatio;
                 visibleSectionId = entry.target.getAttribute('id');
             }
         });
+        
+        if (!visibleSectionId && entries.length > 0 && entries[0].isIntersecting) {
+             visibleSectionId = entries[0].target.getAttribute('id');
+        }
 
         if (visibleSectionId) {
              tocLinks.forEach(link => {
@@ -331,7 +298,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }, {
         rootMargin: '-20% 0px -70% 0px',
-        threshold: [0, 0.5, 1]
+        threshold: [0.1, 0.5, 0.9]
     });
 
     sections.forEach(section => {

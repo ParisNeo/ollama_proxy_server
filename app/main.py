@@ -118,6 +118,10 @@ async def lifespan(app: FastAPI):
     ssl_dir.mkdir(exist_ok=True)
     logger.info(f"SSL storage directory is at: {ssl_dir.resolve()}")
 
+    benchmarks_dir = Path("benchmarks")
+    benchmarks_dir.mkdir(exist_ok=True)
+    logger.info(f"Benchmarks directory is at: {benchmarks_dir.resolve()}")
+
     if settings.ADMIN_PASSWORD == "changeme":
         logger.critical("FATAL: The admin password is set to the default value 'changeme'.")
         logger.critical("Please change ADMIN_PASSWORD in your .env file or run the setup wizard and restart.")

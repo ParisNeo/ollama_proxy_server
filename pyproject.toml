@@ -28,6 +28,7 @@ passlib = {extras = ["bcrypt"], version = "^1.7.4"}
 psutil = "^5.9.8"
 numpy = "^1.26.4"
 scikit-learn = "^1.5.0"
+cryptography = "^42.0.8"
 
 
 [tool.poetry.group.dev.dependencies]

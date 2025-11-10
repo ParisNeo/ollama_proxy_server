@@ -3,7 +3,7 @@ import json
 import logging
 from typing import List, Tuple, Optional
 from fastapi import APIRouter, Depends, Request, Response, HTTPException, status
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, JSONResponse
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,6 +13,13 @@ from app.database.models import APIKey, OllamaServer
 from app.crud import log_crud, server_crud
 from app.core.retry import retry_with_backoff, RetryConfig
 from app.schema.settings import AppSettingsModel
+from app.core.encryption import decrypt_data
+from app.core.vllm_translator import (
+    translate_ollama_to_vllm_chat,
+    translate_ollama_to_vllm_embeddings,
+    translate_vllm_to_ollama_embeddings,
+    vllm_stream_to_ollama_stream
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(dependencies=[Depends(ip_filter), Depends(rate_limiter)])
@@ -68,29 +75,20 @@ async def _send_backend_request(
     """
     Internal function to send a single request to a backend server.
     This function is wrapped by retry logic.
-
-    Args:
-        http_client: The HTTP client to use
-        server: The server to send the request to
-        path: The API path
-        method: HTTP method
-        headers: Request headers
-        query_params: Query parameters
-        body_bytes: Request body
-
-    Returns:
-        The HTTP response from the backend server
-
-    Raises:
-        Exception on any connection or HTTP error
     """
     normalized_url = server.url.rstrip('/')
     backend_url = f"{normalized_url}/api/{path}"
 
+    request_headers = headers.copy()
+    if server.encrypted_api_key:
+        api_key = decrypt_data(server.encrypted_api_key)
+        if api_key:
+            request_headers["Authorization"] = f"Bearer {api_key}"
+
     backend_request = http_client.build_request(
         method=method,
         url=backend_url,
-        headers=headers,
+        headers=request_headers,
         params=query_params,
         content=body_bytes
     )
@@ -118,24 +116,6 @@ async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer
     """
     Core reverse proxy logic with retry support. Forwards the request to a backend
     Ollama server and streams the response back. Returns the response and the chosen server.
-
-    Features:
-    - Round-robin load balancing across available servers
-    - Automatic retries with exponential backoff on failures
-    - Falls back to other servers if one is unavailable
-    - Configurable retry behavior via app settings
-
-    Args:
-        request: The original FastAPI request
-        path: The path to proxy to
-        servers: List of servers to choose from
-        body_bytes: Pre-read request body (if already read for model extraction)
-
-    Returns:
-        Tuple of (Response, OllamaServer) - the streaming response and the server that handled it
-
-    Raises:
-        HTTPException: If all retry attempts fail across all available servers
     """
     http_client: AsyncClient = request.app.state.http_client
     app_settings: AppSettingsModel = request.app.state.settings
@@ -154,7 +134,6 @@ async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer
     headers = {k: v for k, v in request.headers.items() if k.lower() != 'host'}
 
     # Try each server in round-robin fashion
-    # If we have N servers, we'll try each one with retries before giving up
     num_servers = len(servers)
     servers_tried = []
 
@@ -171,7 +150,19 @@ async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer
             f"({server_attempt + 1}/{num_servers})"
         )
 
-        # Attempt request with retries to this specific server
+        # --- BRANCH: Handle vLLM servers differently ---
+        if chosen_server.server_type == 'vllm':
+            try:
+                # vLLM translation doesn't use the retry logic wrapper in the same way
+                response = await _proxy_to_vllm(request, chosen_server, path, body_bytes)
+                return response, chosen_server
+            except HTTPException:
+                raise # Re-raise HTTP exceptions from the vLLM proxy
+            except Exception as e:
+                logger.warning(f"vLLM server '{chosen_server.name}' failed: {e}. Trying next server.")
+                continue # Try next server
+
+        # --- Ollama server logic (with retries) ---
         retry_result = await retry_with_backoff(
             _send_backend_request,
             http_client=http_client,
@@ -219,6 +210,80 @@ async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer
         detail=f"All backend servers unavailable. Tried: {', '.join(servers_tried)}"
     )
 
+
+async def _proxy_to_vllm(
+    request: Request,
+    server: OllamaServer,
+    path: str,
+    body_bytes: bytes
+) -> Response:
+    """
+    Handles proxying a request to a vLLM server, including payload and response translation.
+    """
+    http_client: AsyncClient = request.app.state.http_client
+    
+    try:
+        ollama_payload = json.loads(body_bytes) if body_bytes else {}
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+
+    model_name = ollama_payload.get("model")
+    
+    headers = {}
+    if server.encrypted_api_key:
+        api_key = decrypt_data(server.encrypted_api_key)
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+
+    # Translate path and payload based on the endpoint
+    if path == "chat":
+        vllm_path = "v1/chat/completions"
+        vllm_payload = translate_ollama_to_vllm_chat(ollama_payload)
+    elif path == "embeddings":
+        vllm_path = "v1/embeddings"
+        vllm_payload = translate_ollama_to_vllm_embeddings(ollama_payload)
+    else:
+        raise HTTPException(status_code=404, detail=f"Endpoint '/api/{path}' not supported for vLLM servers.")
+        
+    backend_url = f"{server.url.rstrip('/')}/{vllm_path}"
+    is_streaming = vllm_payload.get("stream", False)
+
+    try:
+        if is_streaming:
+            async def stream_generator():
+                async with http_client.stream("POST", backend_url, json=vllm_payload, timeout=600.0, headers=headers) as vllm_response:
+                    if vllm_response.status_code != 200:
+                        error_body = await vllm_response.aread()
+                        logger.error(f"vLLM server error ({vllm_response.status_code}): {error_body.decode()}")
+                        # Yield a single error chunk in Ollama format
+                        error_chunk = {"error": f"vLLM server error: {error_body.decode()}"}
+                        yield (json.dumps(error_chunk) + '\n').encode('utf-8')
+                        return
+                    
+                    async for chunk in vllm_stream_to_ollama_stream(vllm_response.aiter_text(), model_name):
+                        yield chunk
+            
+            return StreamingResponse(stream_generator(), media_type="application/x-ndjson")
+        else: # Non-streaming
+            response = await http_client.post(backend_url, json=vllm_payload, timeout=600.0, headers=headers)
+            response.raise_for_status()
+            vllm_data = response.json()
+            
+            if path == "embeddings":
+                ollama_data = translate_vllm_to_ollama_embeddings(vllm_data)
+                return JSONResponse(content=ollama_data)
+            # Add non-streaming chat translation if needed
+            raise NotImplementedError("Non-streaming chat for vLLM not yet implemented.")
+
+    except httpx.HTTPStatusError as e:
+        error_detail = e.response.text
+        logger.error(f"vLLM request failed with status {e.response.status_code}: {error_detail}")
+        raise HTTPException(status_code=e.response.status_code, detail=f"vLLM server error: {error_detail}")
+    except Exception as e:
+        logger.error(f"Error proxying to vLLM server {server.name}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to communicate with vLLM server: {e}")
+
+
 @router.get("/tags")
 async def federate_models(
     request: Request,
@@ -227,27 +292,42 @@ async def federate_models(
     servers: List[OllamaServer] = Depends(get_active_servers),
 ):
     """
-    Aggregates models from all configured Ollama backends.
+    Aggregates models from all configured backends (Ollama and vLLM).
     """
     http_client: AsyncClient = request.app.state.http_client
     
-    async def fetch_models(server_url: str):
+    async def fetch_models(server: OllamaServer):
+        headers = {}
+        if server.encrypted_api_key:
+            api_key_dec = decrypt_data(server.encrypted_api_key)
+            if api_key_dec:
+                headers["Authorization"] = f"Bearer {api_key_dec}"
+
         try:
-            normalized_url = server_url.rstrip('/')
-            response = await http_client.get(f"{normalized_url}/api/tags")
-            response.raise_for_status()
-            return response.json().get("models", [])
+            if server.server_type == 'vllm':
+                endpoint = f"{server.url.rstrip('/')}/v1/models"
+                response = await http_client.get(endpoint, headers=headers)
+                response.raise_for_status()
+                models_data = response.json().get("data", [])
+                # Normalize to Ollama's format
+                return [{"name": model.get("id")} for model in models_data if model.get("id")]
+            else: # ollama
+                endpoint = f"{server.url.rstrip('/')}/api/tags"
+                response = await http_client.get(endpoint, headers=headers)
+                response.raise_for_status()
+                return response.json().get("models", [])
         except Exception as e:
-            logger.error(f"Failed to fetch models from {server_url}: {e}")
+            logger.error(f"Failed to fetch models from {server.url}: {e}")
             return []
 
-    tasks = [fetch_models(server.url) for server in servers]
+    tasks = [fetch_models(server) for server in servers]
     results = await asyncio.gather(*tasks)
 
     all_models = {}
     for model_list in results:
         for model in model_list:
-            all_models[model['name']] = model
+            if "name" in model:
+                all_models[model['name']] = model
 
     await log_crud.create_usage_log(
         db=db, api_key_id=api_key.id, endpoint="/api/tags", status_code=200, server_id=None
@@ -266,8 +346,8 @@ async def proxy_ollama(
     servers: List[OllamaServer] = Depends(get_active_servers),
 ):
     """
-    A catch-all route that proxies all other requests to the Ollama backend.
-    Uses smart routing to select servers that have the requested model.
+    A catch-all route that proxies all other requests to the backend.
+    Uses smart routing and translates requests for vLLM servers.
     """
     # --- Endpoint Security Check ---
     blocked_paths = {p.strip().lstrip('/') for p in settings.blocked_ollama_endpoints.split(',') if p.strip()}
