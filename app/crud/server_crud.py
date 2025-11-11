@@ -68,7 +68,13 @@ async def update_server(db: AsyncSession, server_id: int, server_update: ServerU
         
     for key, value in update_data.items():
         if value is not None:
-            setattr(db_server, key, value)
+            # FIX: The value for 'url' from Pydantic is a Url object, not a string.
+            # SQLAlchemy's DB driver for SQLite cannot handle this type.
+            # We must convert it to a string before setting it on the model.
+            if key == "url":
+                setattr(db_server, key, str(value))
+            else:
+                setattr(db_server, key, value)
             
     await db.commit()
     await db.refresh(db_server)

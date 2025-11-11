@@ -346,7 +346,7 @@ async def admin_edit_server_post(
     api_key: Optional[str] = Form(None),
     remove_api_key: Optional[bool] = Form(False)
 ):
-    update_data = {"name": name, "url": AnyHttpUrl(url), "server_type": server_type}
+    update_data = {"name": name, "url": url, "server_type": server_type}
 
     if remove_api_key:
         update_data["api_key"] = ""
