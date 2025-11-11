@@ -6,13 +6,26 @@
 {% block header_title %}{% endblock %}
 
 {% block content %}
-{# The classes below are optimized for maximum space:
-   - Negative top margin (-mt-16) reclaims space from the empty title block in base.html.
-   - Negative horizontal margins (-mx-6, md:-mx-10) expand the card to fill the parent's padding.
-   - Height calculation (h-[...]) is adjusted to fill most of the vertical viewport.
-   - Rounding is adjusted for a full-bleed look on small screens.
-#}
-<div class="flex flex-col h-[calc(100vh-8rem)] -mt-16 -mx-6 md:-mx-10 card-style p-0 rounded-none md:rounded-lg">
+<style>
+    /* Make the playground's parent containers fill the height and disable their scrolling/padding */
+    main {
+        overflow-y: hidden !important;
+        padding: 0 !important;
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+    }
+    main > .max-w-7xl {
+        max-width: none !important;
+        margin: 0 !important;
+        height: 100%;
+        flex-grow: 1;
+        display: flex;
+        flex-direction: column;
+    }
+</style>
+
+<div class="flex flex-col h-full card-style p-0 rounded-none">
     <!-- Header -->
     <div class="card-header p-2 md:p-4 flex items-center justify-between flex-shrink-0">
         <div class="flex items-center gap-2 md:gap-4">
@@ -23,17 +36,34 @@
             </div>
         </div>
         <div class="flex items-center gap-2">
-            <div id="thinking-toggle-container" class="hidden md:flex items-center gap-2 text-sm pr-2 border-r border-gray-600" title="Enable model thinking. For supported models, this will show the reasoning trace before the final answer.">
+            <div id="thinking-toggle-container" class="hidden md:flex items-center gap-2 text-sm pr-2 border-r border-gray-600" title="Enable model thinking. This will show the reasoning trace before the final answer.">
                 <span class="text-gray-400">Thinking</span>
                 <button type="button" id="thinking-toggle" class="relative inline-flex flex-shrink-0 h-6 w-11 border-2 border-transparent rounded-full cursor-pointer transition-colors ease-in-out duration-200 focus:outline-none bg-gray-600">
                     <span id="thinking-toggle-knob" class="pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow-lg transform ring-0 transition ease-in-out duration-200 translate-x-0"></span>
                 </button>
+            </div>
+            <div id="thinking-level-container" class="hidden md:flex items-center gap-2 text-sm pr-2 border-r border-gray-600" title="Set the thinking trace length for GPT-OSS models.">
+                <span class="text-gray-400">Think Level</span>
+                <select id="thinking-level-select" class="px-2 py-1 rounded-md text-sm">
+                    <option value="low">Low</option>
+                    <option value="medium" selected>Medium</option>
+                    <option value="high">High</option>
+                </select>
             </div>
             <div id="image-annotation-toggle-container" class="hidden md:flex items-center gap-2 text-sm pr-2 border-r border-gray-600" title="Toggle image annotation mode. This adds a special system prompt to enable object detection and bounding box drawing on images.">
                 <span class="text-gray-400">Annotate</span>
                 <button type="button" id="image-annotation-toggle" class="relative inline-flex flex-shrink-0 h-6 w-11 border-2 border-transparent rounded-full cursor-pointer transition-colors ease-in-out duration-200 focus:outline-none bg-gray-600">
                     <span id="image-annotation-toggle-knob" class="pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow-lg transform ring-0 transition ease-in-out duration-200 translate-x-0"></span>
                 </button>
+            </div>
+            <div class="relative" id="add-message-menu-container">
+                <button id="add-message-btn" title="Add Message" class="p-2 rounded hover:bg-white/10">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v3m0 0v3m0-3h3m-3 0H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                </button>
+                <div id="add-message-dropdown" class="absolute bottom-full right-0 mb-2 w-48 rounded-md shadow-lg bg-gray-800 ring-1 ring-black ring-opacity-5 hidden z-10">
+                    <a href="#" id="add-user-msg-btn" class="block px-4 py-2 text-sm text-gray-300 hover:bg-gray-700">Add User Message</a>
+                    <a href="#" id="add-ai-msg-btn" class="block px-4 py-2 text-sm text-gray-300 hover:bg-gray-700">Add AI Message</a>
+                </div>
             </div>
             <button id="system-prompt-btn" title="Set System Prompt" class="p-2 rounded hover:bg-white/10">
                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
@@ -147,8 +177,17 @@ document.addEventListener('DOMContentLoaded', () => {
     const docPreviews = document.getElementById('doc-previews');
     const annotationToggle = document.getElementById('image-annotation-toggle');
     const annotationToggleKnob = document.getElementById('image-annotation-toggle-knob');
+    const thinkingToggleContainer = document.getElementById('thinking-toggle-container');
     const thinkingToggle = document.getElementById('thinking-toggle');
     const thinkingToggleKnob = document.getElementById('thinking-toggle-knob');
+    const thinkingLevelContainer = document.getElementById('thinking-level-container');
+    const thinkingLevelSelect = document.getElementById('thinking-level-select');
+    const addMessageMenuContainer = document.getElementById('add-message-menu-container');
+    const addMessageBtn = document.getElementById('add-message-btn');
+    const addMessageDropdown = document.getElementById('add-message-dropdown');
+    const addUserMsgBtn = document.getElementById('add-user-msg-btn');
+    const addAiMsgBtn = document.getElementById('add-ai-msg-btn');
+
 
     // --- Constants & State ---
     const ANNOTATION_PROMPT = "You are a specialized AI assistant for image object detection. When the user asks you to find objects in the image or asks a question about objects in the image, your function is to identify them and provide their bounding box coordinates, then answer any subsequent questions.\n\nCRITICAL INSTRUCTION: Your response MUST contain a single JSON object wrapped in <annotate> tags. You may add conversational text AFTER the closing </annotate> tag if needed to answer a user's question, but the JSON part is mandatory.\n\nThe JSON object must be an array of annotation objects. Each annotation object requires two keys:\n1. \"class\": (string) The name of the detected object class.\n2. \"box\": (array of 4 numbers) The normalized bounding box coordinates [x_min, y_min, x_max, y_max].\n\nMANDATORY COORDINATE SYSTEM: You MUST use normalized coordinates. This means all coordinate values must be between 0.0 and 1.0.\n- (0.0, 0.0) represents the top-left corner of the image.\n- (1.0, 1.0) represents the bottom-right corner of the image.\n- Pixel values are FORBIDDEN and will be rejected. For example, a coordinate like [120, 250, 300, 450] is INCORRECT. A correct coordinate would be [0.1, 0.2, 0.3, 0.4].\n\nExample of a PERFECT response for just annotation:\n<annotate>\n[\n  {\"box\": [0.1, 0.2, 0.3, 0.4], \"class\": \"cat\"},\n  {\"box\": [0.5, 0.6, 0.7, 0.8], \"class\": \"dog\"}\n]\n</annotate>\n\nExample of a response answering a question:\n<annotate>\n[\n  {\"box\": [0.1, 0.2, 0.3, 0.4], \"class\": \"cat\"}\n]\n</annotate>\nYes, there is a cat in the image, located in the upper left area.\n\nIf you do not find any of the requested objects, you MUST return an empty array: <annotate>[]</annotate>";
@@ -376,7 +415,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function updateSystemPromptIndicator() {
         const finalPrompt = getFinalSystemPrompt();
-        if (finalPrompt || isThinkingMode) { // Also show indicator if thinking is on
+        if (finalPrompt) {
             systemPromptIndicator.classList.remove('hidden');
             systemPromptIndicator.classList.add('flex');
         } else {
@@ -443,15 +482,28 @@ document.addEventListener('DOMContentLoaded', () => {
             messagesForApi.unshift({ role: "system", content: finalSystemPrompt });
         }
 
+        const body = { 
+            model: modelSelector.value, 
+            messages: messagesForApi
+        };
+
+        let thinkOption = null;
+        if (!thinkingToggleContainer.classList.contains('hidden') && isThinkingMode) {
+            if (!thinkingLevelContainer.classList.contains('hidden')) {
+                thinkOption = thinkingLevelSelect.value;
+            } else {
+                thinkOption = true;
+            }
+        }
+        if (thinkOption !== null) {
+            body.think_option = thinkOption;
+        }
+
         try {
             const response = await fetch("{{ url_for('admin_playground_stream') }}", {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': '{{ csrf_token }}' },
-                body: JSON.stringify({ 
-                    model: modelSelector.value, 
-                    messages: messagesForApi,
-                    thinking_enabled: isThinkingMode
-                }),
+                body: JSON.stringify(body),
                 signal: abortController.signal
             });
             if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
@@ -570,15 +622,29 @@ document.addEventListener('DOMContentLoaded', () => {
         const contentString = String(rawContent || '');
         container.dataset.rawContent = rawContent;
 
-        let finalHtml = contentString;
+        // Split content by special tags, keeping the tags as delimiters. This is more robust.
+        const parts = contentString.split(/(<think>[\s\S]*?<\/think>|<think>[\s\S]*|<annotate>[\s\S]*?<\/annotate>)/g);
         
-        const annotationRegex = /<annotate>([\s\S]*?)<\/annotate>/g;
-        finalHtml = finalHtml.replace(annotationRegex, (match, annotationJson) => {
-            const safeJson = annotationJson.replace(/'/g, "&apos;");
-            if (!lastSentImageURL) return `<div class="text-red-400">Error: Could not find an image to annotate.</div>`;
-            const uniqueId = `annotation-container-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
-            
-            return `<div id="${uniqueId}" class="annotated-image-container relative mt-2 group" data-annotations='${safeJson}'>
+        let finalHtml = '';
+        for (const part of parts) {
+            if (!part) continue;
+
+            if (part.startsWith('<think>')) {
+                if (part.endsWith('</think>')) { // Closed block
+                    const thinkContent = part.slice(7, -8);
+                    finalHtml += `<details class="think-block"><summary>Thoughts</summary><div>${marked.parse(thinkContent.trim())}</div></details>`;
+                } else { // Unclosed (streaming) block
+                    const thinkContent = part.slice(7);
+                    finalHtml += `<details class="think-block" open><summary class="flex items-center gap-2">Thinking <svg class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg></summary><div>${marked.parse(thinkContent.trim())}</div></details>`;
+                }
+            } else if (part.startsWith('<annotate>')) {
+                const annotationJson = part.slice(10, -11);
+                const safeJson = annotationJson.replace(/'/g, "&apos;");
+                if (!lastSentImageURL) {
+                    finalHtml += `<div class="text-red-400">Error: Could not find an image to annotate.</div>`;
+                } else {
+                    const uniqueId = `annotation-container-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+                    finalHtml += `<div id="${uniqueId}" class="annotated-image-container relative mt-2 group" data-annotations='${safeJson}'>
                         <img src="${lastSentImageURL}" class="block max-w-full h-auto rounded-md">
                         <div class="annotation-overlay"></div>
                         <div class="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -587,25 +653,14 @@ document.addEventListener('DOMContentLoaded', () => {
                            </button>
                         </div>
                     </div>`;
-        });
-        
-        // Now, parse everything for markdown, and handle think tags for UI
-        let parsedHtml = marked.parse(finalHtml);
-        
-        const unclosedThinkRegex = /&lt;think&gt;([\s\S]*)/;
-        if (unclosedThinkRegex.test(parsedHtml)) {
-             parsedHtml = parsedHtml.replace(unclosedThinkRegex, (match, thinkContent) => {
-                return `<details class="think-block" open><summary class="flex items-center gap-2">Thinking <svg class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg></summary><div>${thinkContent}</div></details>`;
-             });
+                }
+            } else {
+                finalHtml += marked.parse(part);
+            }
         }
-
-        const closedThinkRegex = /&lt;think&gt;([\s\S]*?)&lt;\/think&gt;/g;
-        parsedHtml = parsedHtml.replace(closedThinkRegex, (match, thinkContent) => {
-            return `<details class="think-block"><summary>Thoughts</summary><div>${thinkContent}</div></details>`;
-        });
-
-        container.innerHTML = parsedHtml;
+        container.innerHTML = finalHtml;
     }
+
 
     function renderChat() {
         chatContainer.innerHTML = '';
@@ -953,10 +1008,17 @@ document.addEventListener('DOMContentLoaded', () => {
         textarea.rows = Math.max(5, (textarea.value.match(/\n/g) || []).length + 1);
         const buttonGroup = document.createElement('div');
         buttonGroup.className = 'flex justify-end gap-2 mt-2';
+        
+        const saveAndSubmitBtn = document.createElement('button');
+        saveAndSubmitBtn.textContent = 'Save & Submit';
+        saveAndSubmitBtn.className = 'py-1 px-3 bg-green-600 text-white rounded hover:bg-green-700 text-sm';
+        saveAndSubmitBtn.onclick = () => saveAndSubmitEdit(messageIndex, textarea.value);
+        
         const saveBtn = document.createElement('button');
-        saveBtn.textContent = 'Save & Submit';
-        saveBtn.className = 'py-1 px-3 bg-green-600 text-white rounded hover:bg-green-700 text-sm';
+        saveBtn.textContent = 'Save';
+        saveBtn.className = 'py-1 px-3 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm';
         saveBtn.onclick = () => saveEdit(messageIndex, textarea.value);
+        
         const cancelBtn = document.createElement('button');
         cancelBtn.textContent = 'Cancel';
         cancelBtn.className = 'py-1 px-3 bg-gray-600 text-white rounded hover:bg-gray-700 text-sm';
@@ -965,15 +1027,17 @@ document.addEventListener('DOMContentLoaded', () => {
             contentDiv.style.display = 'block';
             contentWrapper.querySelector('.message-actions').style.display = 'flex';
         };
+
         buttonGroup.appendChild(cancelBtn);
         buttonGroup.appendChild(saveBtn);
+        buttonGroup.appendChild(saveAndSubmitBtn);
         editContainer.appendChild(textarea);
         editContainer.appendChild(buttonGroup);
         contentWrapper.appendChild(editContainer);
+        textarea.focus();
     }
-
+    
     function saveEdit(messageIndex, newContent) {
-        messages.splice(messageIndex + 1); // Remove all subsequent messages
         const oldMessage = messages[messageIndex];
         if (Array.isArray(oldMessage.content)) {
             const textPart = oldMessage.content.find(p => p.type === 'text');
@@ -981,8 +1045,45 @@ document.addEventListener('DOMContentLoaded', () => {
         } else {
             oldMessage.content = newContent;
         }
+        renderChat();
+    }
+    
+    function saveAndSubmitEdit(messageIndex, newContent) {
+        messages.splice(messageIndex + 1); // Remove all subsequent messages
+        saveEdit(messageIndex, newContent);
         fetchStreamedResponse();
     }
+    
+    function insertEditableMessage(role) {
+        messages.push({ role: role, content: 'New message...' });
+        renderChat();
+        const newMessageWrapper = chatContainer.lastElementChild;
+        if (newMessageWrapper) {
+            enterEditMode(newMessageWrapper, messages.length - 1);
+        }
+    }
+    
+    function updateThinkingControls() {
+        const simpleThinkModels = ['qwen', 'deepseek'];
+        const gptOssKeyword = 'gpt-oss';
+        const selectedModel = modelSelector.value.toLowerCase();
+
+        const isGptOss = selectedModel.includes(gptOssKeyword);
+        const isSimpleThink = simpleThinkModels.some(keyword => selectedModel.includes(keyword));
+
+        thinkingToggleContainer.classList.add('hidden');
+        thinkingLevelContainer.classList.add('hidden');
+
+        if (isGptOss) {
+            thinkingToggleContainer.classList.remove('hidden');
+            if (isThinkingMode) {
+                thinkingLevelContainer.classList.remove('hidden');
+            }
+        } else if (isSimpleThink) {
+            thinkingToggleContainer.classList.remove('hidden');
+        }
+    }
+
 
     // --- Event Listeners & Init ---
     messageInput.addEventListener('input', () => { messageInput.style.height = 'auto'; messageInput.style.height = `${Math.min(messageInput.scrollHeight, 200)}px`; });
@@ -1000,6 +1101,10 @@ document.addEventListener('DOMContentLoaded', () => {
     imageInput.addEventListener('change', (e) => handleImageFiles(e.target.files));
     attachDocBtn.addEventListener('click', () => docInput.click());
     docInput.addEventListener('change', (e) => handleDocFiles(e.target.files));
+    addMessageBtn.addEventListener('click', (e) => { e.stopPropagation(); addMessageDropdown.classList.toggle('hidden'); });
+    addUserMsgBtn.addEventListener('click', (e) => { e.preventDefault(); insertEditableMessage('user'); addMessageDropdown.classList.add('hidden'); });
+    addAiMsgBtn.addEventListener('click', (e) => { e.preventDefault(); insertEditableMessage('assistant'); addMessageDropdown.classList.add('hidden'); });
+    document.addEventListener('click', (e) => { if (!addMessageMenuContainer.contains(e.target)) addMessageDropdown.classList.add('hidden'); });
 
     sendBtn.addEventListener('click', () => {
         if (isLoading && abortController) {
@@ -1009,6 +1114,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     modelSelector.addEventListener('change', () => {
         localStorage.setItem(LAST_MODEL_KEY, modelSelector.value);
+        updateThinkingControls();
     });
     
     annotationToggle.addEventListener('click', () => {
@@ -1022,7 +1128,7 @@ document.addEventListener('DOMContentLoaded', () => {
         isThinkingMode = !isThinkingMode;
         localStorage.setItem(THINKING_MODE_KEY, isThinkingMode);
         updateThinkingToggleUI();
-        updateSystemPromptIndicator();
+        updateThinkingControls();
     });
 
     document.addEventListener('click', async e => {
@@ -1172,6 +1278,7 @@ document.addEventListener('DOMContentLoaded', () => {
     updateThinkingToggleUI();
     updateSystemPromptIndicator();
     updateGlobalStats();
+    updateThinkingControls(); // Initial check for think controls
 });
 </script>
 {% endblock %}

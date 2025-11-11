@@ -2,7 +2,7 @@
 import logging
 import json
 import time
-from typing import Optional
+from typing import Optional, Union
 
 from fastapi import APIRouter, Depends, Request, HTTPException, Query
 from fastapi.responses import JSONResponse, StreamingResponse, HTMLResponse, Response
@@ -45,7 +45,7 @@ async def admin_playground_stream(
         data = await request.json()
         model_name = data.get("model")
         messages = data.get("messages")
-        thinking_enabled = data.get("thinking_enabled", False)
+        think_option = data.get("think_option") # Can be True, "low", "medium", "high"
         
         if not model_name or not messages:
             return JSONResponse({"error": "Model and messages are required."}, status_code=400)
@@ -88,7 +88,7 @@ async def admin_playground_stream(
                 "messages": messages,
                 "stream": True,
             }
-            if thinking_enabled:
+            if think_option is True:
                 ollama_payload["think"] = True
             
             payload = translate_ollama_to_vllm_chat(ollama_payload)
@@ -119,20 +119,15 @@ async def admin_playground_stream(
         else: # Ollama server
             chat_url = f"{target_server.url.rstrip('/')}/api/chat"
             payload = {"model": model_name, "messages": messages, "stream": True}
-            if thinking_enabled:
+
+            if think_option:
                 model_name_lower = model_name.lower()
-                # List of keywords for models known to support the 'think' parameter.
                 supported_think_models = ["qwen", "gpt-oss", "deepseek"]
 
                 if any(keyword in model_name_lower for keyword in supported_think_models):
-                    if "gpt-oss" in model_name_lower:
-                        payload["think"] = "medium"  # Use "medium" for GPT-OSS models
-                    else:
-                        payload["think"] = True
+                    payload["think"] = think_option
                 else:
-                    # For models not in the list, we don't send the 'think' parameter
-                    # to avoid errors with unsupported models.
-                    logger.warning(f"Model '{model_name}' is not in the known list for 'think' support. The 'think' parameter will not be sent from the playground.")
+                    logger.warning(f"Frontend requested thinking for '{model_name}', but it's not in the known support list. Ignoring 'think' parameter.")
 
             from app.crud.server_crud import _get_auth_headers
             headers = _get_auth_headers(target_server)
