@@ -86,8 +86,11 @@ call .\%VENV_DIR%\Scripts\activate.bat
 echo [INFO] Setting Python Path...
 set PYTHONPATH=.
 
+echo.
 echo [INFO] Starting Ollama Proxy Server...
-echo To stop the server, simply close this window or press Ctrl+C.
+echo [INFO] Note: Uvicorn uses a logger named 'uvicorn.error' for general server messages.
+echo [INFO] This does NOT necessarily indicate an error.
+echo [INFO] To stop the server, simply close this window or press Ctrl+C.
 echo.
 
 python app/main.py

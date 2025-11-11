@@ -4,14 +4,20 @@ Main entry point for the Ollama Proxy Server.
 This version removes Alembic and uses SQLAlchemy's create_all
 to initialize the database on startup.
 """
-
 import logging
+import os
+import sys
+from pydantic import BaseModel, ConfigDict
+
+# --- Suppress Pydantic 'model_' namespace warning ---
+# This must be at the very top, before other app modules are imported.
+# It prevents warnings when a Pydantic model field name starts with "model_".
+BaseModel.model_config = ConfigDict(protected_namespaces=())
+
 import httpx
 import redis.asyncio as redis
 from contextlib import asynccontextmanager
-import sys 
 import json
-import os
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -39,12 +45,19 @@ setup_logging(settings.LOG_LEVEL)
 logger = logging.getLogger(__name__)
 os.environ.setdefault("PASSLIB_DISABLE_WARNINGS", "1")
 
+_db_initialized = False
 async def init_db():
     """
     Creates all database tables based on the SQLAlchemy models.
     Runs migrations first to ensure backward compatibility with older database schemas.
+    This function is designed to run only once.
     """
-    logger.info("Initializing database schema if it doesn't exist...")
+    global _db_initialized
+    if _db_initialized:
+        logger.debug("Database already initialized, skipping.")
+        return
+
+    logger.info("Initializing database schema...")
 
     # Run migrations first to add any missing columns to existing tables
     await run_all_migrations(engine)
@@ -52,6 +65,8 @@ async def init_db():
     # Then create any missing tables
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+    
+    _db_initialized = True
     logger.info("Database schema is ready.")
 
 from sqlalchemy.exc import IntegrityError
@@ -238,14 +253,12 @@ if __name__ == "__main__":
         ssl_keyfile = None
         ssl_certfile = None
         
-        # Use the app's own DB session management to get settings
         try:
-            # Run init_db which includes migrations and create_all
+            # Run init_db once to ensure DB exists for reading SSL settings.
             await init_db()
             async with AsyncSessionLocal() as db:
                 db_settings_obj = await settings_crud.get_app_settings(db)
                 if not db_settings_obj:
-                    # This ensures settings exist if the DB was just created
                     db_settings_obj = await settings_crud.create_initial_settings(db)
 
                 if db_settings_obj:
@@ -258,7 +271,6 @@ if __name__ == "__main__":
                         if key_path.is_file() and cert_path.is_file():
                             ssl_keyfile = str(key_path)
                             ssl_certfile = str(cert_path)
-                            logger.info(f"Uvicorn starting with HTTPS enabled.")
                         else:
                             if not key_path.is_file():
                                 logger.warning(f"SSL key file not found at '{key_path}'. Starting without HTTPS.")
@@ -267,7 +279,26 @@ if __name__ == "__main__":
         except Exception as e:
                 logger.info(f"Could not load SSL settings from DB (this is normal on first run). Reason: {e}")
 
-        # Correct way to run uvicorn programmatically from an async function
+        # --- User-friendly startup banner ---
+        protocol = "https" if ssl_keyfile and ssl_certfile else "http"
+        
+        # This function will be called after Uvicorn starts up
+        def after_start():
+            print("\n" + "="*60)
+            print("🚀 Ollama Proxy Fortress is running! 🚀")
+            print("="*60)
+            print(f"✅ Version: {settings.APP_VERSION}")
+            print(f"✅ Mode: {'Production (HTTPS)' if protocol == 'https' else 'Development (HTTP)'}")
+            print(f"✅ Listening on port: {port}")
+            print("\nTo access the admin dashboard, open your web browser to:")
+            print(f"    {protocol}://127.0.0.1:{port}/admin/dashboard")
+            print(f"    or {protocol}://localhost:{port}/admin/dashboard")
+            print("\nTo stop the server, press CTRL+C in this window.")
+            print("="*60 + "\n")
+            print("Note: Log messages from 'uvicorn.error' are for general server events and do not necessarily indicate an error.\n")
+
+
+        # Correct way to run uvicorn programmatically
         config = uvicorn.Config(
             "app.main:app",
             host="0.0.0.0",
@@ -277,6 +308,14 @@ if __name__ == "__main__":
             log_config=None, # Let our custom logging handle it
         )
         server = uvicorn.Server(config)
+        
+        # A bit of a workaround to print banner after Uvicorn's own startup messages
+        original_startup = server.startup
+        async def new_startup(*args, **kwargs):
+            await original_startup(*args, **kwargs)
+            after_start()
+        server.startup = new_startup
+
         await server.serve()
 
     asyncio.run(run_server())

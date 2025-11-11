@@ -96,6 +96,10 @@
             <div class="w-full flex-shrink-0">
                 {% if request.state.user %}
                 <div class="p-4 border-t border-white/10">
+                    <div class="pb-3 mb-3 border-b border-white/10 text-xs text-gray-400">
+                        <p>{{ request.app.state.settings.branding_title }} v{{ request.app.version }}</p>
+                        <p class="truncate">Powered by ParisNeo's Ollama Proxy Fortress</p>
+                    </div>
                     <p class="text-sm whitespace-nowrap">Welcome, <span class="font-semibold">{{ request.state.user.username }}</span></p>
                     {% if is_redis_connected %}
                     <div class="flex items-center mt-2 text-xs text-green-400">
@@ -117,20 +121,13 @@
             </div>
         </div>
         <div class="flex-1 flex flex-col bg-transparent">
-            <header class="bg-transparent p-4 flex items-center justify-center flex-shrink-0 h-16">
-                 <h1 class="text-xl font-semibold text-current text-center">{% block header_title %}{% endblock %}</h1>
-            </header>
             <main class="flex-1 p-6 md:p-10 overflow-y-auto">
                 {% include 'partials/_flash_messages.html' %}
                 <div class="max-w-7xl mx-auto">
+                    <h1 class="text-2xl font-bold text-current mb-8">{% block header_title %}{% endblock %}</h1>
                     {% block content %}{% endblock %}
                 </div>
             </main>
-            <footer class="bg-transparent p-4 text-center text-sm text-gray-400 flex-shrink-0">
-                {{ request.app.state.settings.branding_title }} v{{ request.app.version }}
-                <br>
-                <span class="text-xs">Powered by ParisNeo's Ollama Proxy Fortress</span>
-            </footer>
         </div>
     </div>
 

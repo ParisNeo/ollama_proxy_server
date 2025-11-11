@@ -1,8 +1,11 @@
 # 📁 app/schema/settings.py
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, ConfigDict
 from typing import List, Optional, Dict
 
 class AppSettingsModel(BaseModel):
+    # This prevents the Pydantic warning about "model_" prefixed fields.
+    model_config = ConfigDict(protected_namespaces=())
+
     # --- BRANDING SETTINGS ---
     branding_title: str = "Ollama Proxy"
     branding_logo_url: Optional[str] = Field(default=None, validate_default=True)
@@ -86,8 +89,3 @@ class AppSettingsModel(BaseModel):
         if v == "":
             return None
         return v
-
-    class Config:
-        from_attributes = True
-        protected_namespaces = ()
-
