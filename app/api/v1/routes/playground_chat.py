@@ -82,10 +82,16 @@ async def admin_playground_stream(
             from app.core.vllm_translator import translate_ollama_to_vllm_chat, vllm_stream_to_ollama_stream
             
             chat_url = f"{target_server.url.rstrip('/')}/v1/chat/completions"
-            payload = translate_ollama_to_vllm_chat(
-                {"model": model_name, "messages": messages, "stream": True}, 
-                thinking_enabled=thinking_enabled
-            )
+            
+            ollama_payload = {
+                "model": model_name,
+                "messages": messages,
+                "stream": True,
+            }
+            if thinking_enabled:
+                ollama_payload["think"] = True
+            
+            payload = translate_ollama_to_vllm_chat(ollama_payload)
             
             from app.crud.server_crud import _get_auth_headers
             headers = _get_auth_headers(target_server)
@@ -114,7 +120,19 @@ async def admin_playground_stream(
             chat_url = f"{target_server.url.rstrip('/')}/api/chat"
             payload = {"model": model_name, "messages": messages, "stream": True}
             if thinking_enabled:
-                payload["think"] = True
+                model_name_lower = model_name.lower()
+                # List of keywords for models known to support the 'think' parameter.
+                supported_think_models = ["qwen", "gpt-oss", "deepseek"]
+
+                if any(keyword in model_name_lower for keyword in supported_think_models):
+                    if "gpt-oss" in model_name_lower:
+                        payload["think"] = "medium"  # Use "medium" for GPT-OSS models
+                    else:
+                        payload["think"] = True
+                else:
+                    # For models not in the list, we don't send the 'think' parameter
+                    # to avoid errors with unsupported models.
+                    logger.warning(f"Model '{model_name}' is not in the known list for 'think' support. The 'think' parameter will not be sent from the playground.")
 
             from app.crud.server_crud import _get_auth_headers
             headers = _get_auth_headers(target_server)

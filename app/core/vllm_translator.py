@@ -28,7 +28,7 @@ THINK_TOOL = {
 }
 
 # --- Request Translation ---
-def translate_ollama_to_vllm_chat(ollama_payload: Dict[str, Any], thinking_enabled: bool = False) -> Dict[str, Any]:
+def translate_ollama_to_vllm_chat(ollama_payload: Dict[str, Any]) -> Dict[str, Any]:
     vllm_payload = {
         "model": ollama_payload.get("model"),
         "stream": ollama_payload.get("stream", False),
@@ -38,8 +38,11 @@ def translate_ollama_to_vllm_chat(ollama_payload: Dict[str, Any], thinking_enabl
     
     # Check for and handle Chain-of-Thought prompt for vLLM
     final_messages = []
+    
+    is_thinking_on = ollama_payload.get("think") is True
+
     # Inject CoT prompt if thinking is enabled for a non-native model
-    if thinking_enabled:
+    if is_thinking_on:
         has_system_prompt = False
         for message in messages:
             if message.get("role") == "system":

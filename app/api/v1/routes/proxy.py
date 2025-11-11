@@ -456,6 +456,25 @@ async def proxy_ollama(
                 model_name = body["model"]
         except (json.JSONDecodeError, Exception):
             pass
+
+    # Handle 'think' parameter based on model support
+    if model_name and isinstance(body, dict) and "think" in body:
+        model_name_lower = model_name.lower()
+        supported_think_models = ["qwen", "gpt-oss", "deepseek"]
+        
+        is_supported = any(keyword in model_name_lower for keyword in supported_think_models)
+
+        if is_supported:
+            # Handle special case for gpt-oss which requires string values if boolean `true` is passed
+            if "gpt-oss" in model_name_lower and body.get("think") is True:
+                logger.info(f"Translating 'think: true' to 'think: \"medium\"' for GPT-OSS model '{model_name}'")
+                body["think"] = "medium"
+                body_bytes = json.dumps(body).encode('utf-8')
+        else:
+            # If the model is not supported, remove the 'think' parameter to avoid errors.
+            logger.warning(f"Model '{model_name}' is not in the known list for 'think' support. Removing 'think' parameter from request to avoid errors.")
+            del body["think"]
+            body_bytes = json.dumps(body).encode('utf-8')
             
     # --- NEW: Handle 'auto' model routing ---
     if model_name == "auto":

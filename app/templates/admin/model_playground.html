@@ -23,7 +23,7 @@
             </div>
         </div>
         <div class="flex items-center gap-2">
-            <div id="thinking-toggle-container" class="hidden md:flex items-center gap-2 text-sm pr-2 border-r border-gray-600" title="Toggle Chain-of-Thought reasoning. When enabled, the model will try to show its thought process before answering.">
+            <div id="thinking-toggle-container" class="hidden md:flex items-center gap-2 text-sm pr-2 border-r border-gray-600" title="Enable model thinking. For supported models, this will show the reasoning trace before the final answer.">
                 <span class="text-gray-400">Thinking</span>
                 <button type="button" id="thinking-toggle" class="relative inline-flex flex-shrink-0 h-6 w-11 border-2 border-transparent rounded-full cursor-pointer transition-colors ease-in-out duration-200 focus:outline-none bg-gray-600">
                     <span id="thinking-toggle-knob" class="pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow-lg transform ring-0 transition ease-in-out duration-200 translate-x-0"></span>
@@ -152,7 +152,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- Constants & State ---
     const ANNOTATION_PROMPT = "You are a specialized AI assistant for image object detection. When the user asks you to find objects in the image or asks a question about objects in the image, your function is to identify them and provide their bounding box coordinates, then answer any subsequent questions.\n\nCRITICAL INSTRUCTION: Your response MUST contain a single JSON object wrapped in <annotate> tags. You may add conversational text AFTER the closing </annotate> tag if needed to answer a user's question, but the JSON part is mandatory.\n\nThe JSON object must be an array of annotation objects. Each annotation object requires two keys:\n1. \"class\": (string) The name of the detected object class.\n2. \"box\": (array of 4 numbers) The normalized bounding box coordinates [x_min, y_min, x_max, y_max].\n\nMANDATORY COORDINATE SYSTEM: You MUST use normalized coordinates. This means all coordinate values must be between 0.0 and 1.0.\n- (0.0, 0.0) represents the top-left corner of the image.\n- (1.0, 1.0) represents the bottom-right corner of the image.\n- Pixel values are FORBIDDEN and will be rejected. For example, a coordinate like [120, 250, 300, 450] is INCORRECT. A correct coordinate would be [0.1, 0.2, 0.3, 0.4].\n\nExample of a PERFECT response for just annotation:\n<annotate>\n[\n  {\"box\": [0.1, 0.2, 0.3, 0.4], \"class\": \"cat\"},\n  {\"box\": [0.5, 0.6, 0.7, 0.8], \"class\": \"dog\"}\n]\n</annotate>\n\nExample of a response answering a question:\n<annotate>\n[\n  {\"box\": [0.1, 0.2, 0.3, 0.4], \"class\": \"cat\"}\n]\n</annotate>\nYes, there is a cat in the image, located in the upper left area.\n\nIf you do not find any of the requested objects, you MUST return an empty array: <annotate>[]</annotate>";
-    const CHAIN_OF_THOUGHT_PROMPT = "When you are asked a question, first provide a step-by-step plan of how you will answer the question inside  tags. After the closing </think> tag, produce the final answer.";
     
     const PREBUILT_SYSTEM_PROMPTS = [
         { name: "Standard Assistant", prompt: "You are a helpful, respectful and honest assistant." },
@@ -326,9 +325,6 @@ document.addEventListener('DOMContentLoaded', () => {
         if (userSystemPrompt) {
             prompts.push(userSystemPrompt);
         }
-        if (isThinkingMode) {
-            prompts.push(CHAIN_OF_THOUGHT_PROMPT);
-        }
         if (isAnnotationMode) {
             prompts.push(ANNOTATION_PROMPT);
         }
@@ -380,7 +376,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function updateSystemPromptIndicator() {
         const finalPrompt = getFinalSystemPrompt();
-        if (finalPrompt) {
+        if (finalPrompt || isThinkingMode) { // Also show indicator if thinking is on
             systemPromptIndicator.classList.remove('hidden');
             systemPromptIndicator.classList.add('flex');
         } else {
