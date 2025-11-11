@@ -106,7 +106,8 @@ Simply double-click `run_windows.bat`.
 Open your terminal, navigate to the project folder, and run:
 ```bash
 chmod +x run.sh
-./run.sh```
+./run.sh
+```
 
 **That's it!** The server is now running. To stop it, just close the terminal window or press `Ctrl+C`.
 
@@ -168,7 +169,8 @@ If you prefer a container-based workflow, we've got you covered.
 
 **1. Build the Docker image:**
 ```bash
-docker build -t ollama-proxy-server .```
+docker build -t ollama-proxy-server .
+```
 
 **2. Run the container:**
 Create a `.env` file on your host machine, then run:
