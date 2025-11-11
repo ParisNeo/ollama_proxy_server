@@ -298,10 +298,12 @@ async def federate_models(
     """
     all_models = {}
     for server in servers:
-        if server.available_models:  # This is the JSON field from the DB
+        # The available_models field is a JSON list of dicts stored in the DB
+        if server.available_models:
             for model in server.available_models:
                 if isinstance(model, dict) and "name" in model:
-                    # Use the model's name as the key to ensure uniqueness
+                    # Use the model's name as the key to ensure uniqueness across servers.
+                    # The last server in the list with a given model name will win.
                     all_models[model['name']] = model
 
     # Add the 'auto' model to the list for clients to see, with details for compatibility
@@ -309,7 +311,7 @@ async def federate_models(
         "name": "auto",
         "modified_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "size": 0,
-        "digest": "auto",
+        "digest": "auto-digest-placeholder",
         "details": {
             "parent_model": "",
             "format": "proxy",

@@ -190,7 +190,93 @@ document.addEventListener('DOMContentLoaded', () => {
 
 
     // --- Constants & State ---
-    const ANNOTATION_PROMPT = "You are a specialized AI assistant for image object detection. When the user asks you to find objects in the image or asks a question about objects in the image, your function is to identify them and provide their bounding box coordinates, then answer any subsequent questions.\n\nCRITICAL INSTRUCTION: Your response MUST contain a single JSON object wrapped in <annotate> tags. You may add conversational text AFTER the closing </annotate> tag if needed to answer a user's question, but the JSON part is mandatory.\n\nThe JSON object must be an array of annotation objects. Each annotation object requires two keys:\n1. \"class\": (string) The name of the detected object class.\n2. \"box\": (array of 4 numbers) The normalized bounding box coordinates [x_min, y_min, x_max, y_max].\n\nMANDATORY COORDINATE SYSTEM: You MUST use normalized coordinates. This means all coordinate values must be between 0.0 and 1.0.\n- (0.0, 0.0) represents the top-left corner of the image.\n- (1.0, 1.0) represents the bottom-right corner of the image.\n- Pixel values are FORBIDDEN and will be rejected. For example, a coordinate like [120, 250, 300, 450] is INCORRECT. A correct coordinate would be [0.1, 0.2, 0.3, 0.4].\n\nExample of a PERFECT response for just annotation:\n<annotate>\n[\n  {\"box\": [0.1, 0.2, 0.3, 0.4], \"class\": \"cat\"},\n  {\"box\": [0.5, 0.6, 0.7, 0.8], \"class\": \"dog\"}\n]\n</annotate>\n\nExample of a response answering a question:\n<annotate>\n[\n  {\"box\": [0.1, 0.2, 0.3, 0.4], \"class\": \"cat\"}\n]\n</annotate>\nYes, there is a cat in the image, located in the upper left area.\n\nIf you do not find any of the requested objects, you MUST return an empty array: <annotate>[]</annotate>";
+    const ANNOTATION_PROMPT = `You are an advanced AI assistant for image analysis and annotation. Your primary function is to process images and return structured data for various tasks like object detection, text translation, and redaction.
+
+CRITICAL INSTRUCTIONS:
+1.  Your response MUST contain a single JSON array of annotation objects wrapped in <annotate> tags.
+2.  You can add conversational text AFTER the closing </annotate> tag to answer questions, but the JSON part is mandatory.
+3.  All coordinates MUST be normalized (values between 0.0 and 1.0). (0,0) is top-left, (1,1) is bottom-right.
+4.  If no objects are found or the task cannot be performed, return an empty array: <annotate>[]</annotate>
+
+SUPPORTED ANNOTATION SCHEMAS:
+
+1.  **Bounding Box (\`bbox\`)**: To draw a box around an object.
+    -   \`type\`: "bbox"
+    -   \`bbox\`: [x_min, y_min, x_max, y_max] (array of 4 numbers)
+    -   \`label\`: (string) The name of the object.
+    -   \`display\`: (optional object)
+        -   \`border_color\`: (string, hex code) e.g., "#ff00ff"
+        -   \`fill_opacity\`: (number, 0.0 to 1.0) Opacity of the box fill.
+
+    *Example*: Find a cat.
+    <annotate>
+    [
+      {"type": "bbox", "bbox": [0.1, 0.2, 0.4, 0.5], "label": "cat", "display": {"border_color": "#00ff00"}}
+    ]
+    </annotate>
+
+2.  **Point (\`point\`)**: To mark a specific point on the image.
+    -   \`type\`: "point"
+    -   \`coords\`: [x, y] (array of 2 numbers)
+    -   \`label\`: (string) The name of the point.
+    -   \`display\`: (optional object) with \`border_color\`.
+
+    *Example*: Mark the cat's eye.
+    <annotate>
+    [
+      {"type": "point", "coords": [0.25, 0.3], "label": "cat's left eye"}
+    ]
+    </annotate>
+
+3.  **Polygon (\`polygon\`)**: To outline a complex shape. (Note: The UI will render this as a dashed bounding box around the points).
+    -   \`type\`: "polygon"
+    -   \`points\`: [[x1, y1], [x2, y2], ...] (array of point arrays)
+    -   \`label\`: (string) The name of the shape.
+
+    *Example*: Outline the shape of the roof.
+    <annotate>
+    [
+      {"type": "polygon", "points": [[0.2, 0.1], [0.8, 0.1], [0.5, 0.4]], "label": "roof"}
+    ]
+    </annotate>
+
+4.  **Redaction (\`redaction\`)**: To blur a sensitive area.
+    -   \`type\`: "redaction"
+    -   \`bbox\`: [x_min, y_min, x_max, y_max]
+    -   \`action\`: "blur"
+    -   \`strength\`: (optional number) Blur intensity, e.g., 10.
+
+    *Example*: Hide the face.
+    <annotate>
+    [
+      {"type": "redaction", "bbox": [0.6, 0.2, 0.8, 0.4], "action": "blur", "strength": 8}
+    ]
+    </annotate>
+
+5.  **Replace (\`replace\`)**: To cover an area with a solid color and optional text.
+    -   \`type\`: "replace"
+    -   \`bbox\`: [x_min, y_min, x_max, y_max]
+    -   \`replacement_text\`: (string) Text to display in the box.
+    -   \`color\`: (optional string, hex code) Background color of the box.
+
+    *Example*: Cover the license plate.
+    <annotate>
+    [
+      {"type": "replace", "bbox": [0.4, 0.7, 0.6, 0.8], "replacement_text": "REDACTED", "color": "#000000"}
+    ]
+    </annotate>
+
+6.  **Translated Text (\`translated_text\`)**: To overlay translated text on the image.
+    -   \`type\`: "translated_text"
+    -   \`bbox\`: [x_min, y_min, x_max, y_max] (The box where the original text was).
+    -   \`translated_text\`: (string) The translated text.
+
+    *Example*: Translate the sign to Spanish.
+    <annotate>
+    [
+      {"type": "translated_text", "bbox": [0.3, 0.5, 0.7, 0.6], "translated_text": "Abierto"}
+    ]
+    </annotate>`;
     
     const PREBUILT_SYSTEM_PROMPTS = [
         { name: "Standard Assistant", prompt: "You are a helpful, respectful and honest assistant." },
@@ -783,7 +869,21 @@ document.addEventListener('DOMContentLoaded', () => {
     function drawAnnotations(annotations, overlay) {
         if (!overlay) return;
         overlay.innerHTML = '';
-        annotations.forEach(ann => {
+
+        // --- BACKWARD COMPATIBILITY SHIM ---
+        // Transform old format {"box": [...], "class": "..."} to new format
+        const transformedAnnotations = annotations.map(ann => {
+            if (ann.box && ann.class) {
+                return { type: 'bbox', bbox: ann.box, label: ann.class };
+            }
+            // If it has 'bbox' but no 'type', assume it's a bbox.
+            if (ann.bbox && !ann.type) {
+                ann.type = 'bbox';
+            }
+            return ann;
+        });
+
+        transformedAnnotations.forEach(ann => {
             const el = document.createElement('div');
             el.className = 'annotation-element';
             
