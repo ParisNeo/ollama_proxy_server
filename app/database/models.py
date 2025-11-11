@@ -86,3 +86,16 @@ class AppSettings(Base):
     __tablename__ = "app_settings"
     id = Column(Integer, primary_key=True)
     settings_data = Column(JSON, nullable=False)
+
+class ModelMetadata(Base):
+    __tablename__ = "model_metadata"
+    id = Column(Integer, primary_key=True, index=True)
+    model_name = Column(String, unique=True, index=True, nullable=False)
+    description = Column(String, nullable=True)
+    supports_images = Column(Boolean, default=False, nullable=False)
+    is_code_model = Column(Boolean, default=False, nullable=False)
+    is_chat_model = Column(Boolean, default=True, nullable=False)
+    is_fast_model = Column(Boolean, default=False, nullable=False)
+    priority = Column(Integer, default=10, nullable=False)
+    
+    __table_args__ = (UniqueConstraint("model_name", name="uq_model_name"),)

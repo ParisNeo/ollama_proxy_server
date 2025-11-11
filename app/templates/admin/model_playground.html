@@ -15,7 +15,12 @@
             </div>
         </div>
         <div class="flex items-center gap-2">
-            <!-- NEW: Image Annotation Toggle -->
+            <div id="thinking-toggle-container" class="flex items-center gap-2 text-sm pr-2 border-r border-gray-600" title="Toggle Chain-of-Thought reasoning. When enabled, the model will try to show its thought process before answering.">
+                <span class="text-gray-400">Thinking</span>
+                <button type="button" id="thinking-toggle" class="relative inline-flex flex-shrink-0 h-6 w-11 border-2 border-transparent rounded-full cursor-pointer transition-colors ease-in-out duration-200 focus:outline-none bg-gray-600">
+                    <span id="thinking-toggle-knob" class="pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow-lg transform ring-0 transition ease-in-out duration-200 translate-x-0"></span>
+                </button>
+            </div>
             <div id="image-annotation-toggle-container" class="flex items-center gap-2 text-sm pr-2 border-r border-gray-600" title="Toggle image annotation mode. This adds a special system prompt to enable object detection and bounding box drawing on images.">
                 <span class="text-gray-400">Annotate Image</span>
                 <button type="button" id="image-annotation-toggle" class="relative inline-flex flex-shrink-0 h-6 w-11 border-2 border-transparent rounded-full cursor-pointer transition-colors ease-in-out duration-200 focus:outline-none bg-gray-600">
@@ -53,15 +58,26 @@
         <!-- Messages will be injected here -->
         <div class="text-center text-gray-400">Select a model, paste an image, or start chatting.</div>
     </div>
+    
+    <!-- Global Stats Bar -->
+    <div id="stats-bar" class="p-2 flex-shrink-0 border-t border-b border-white/10 text-xs text-gray-400 flex items-center justify-center gap-6">
+        <div>Mean TTFT: <span id="mean-ttft" class="font-semibold text-gray-300">N/A</span></div>
+        <div>Mean TPS: <span id="mean-tps" class="font-semibold text-gray-300">N/A</span></div>
+    </div>
 
     <!-- Message Input -->
-    <div class="p-4 flex-shrink-0 border-t border-white/10">
+    <div class="p-4 flex-shrink-0">
+        <div id="doc-previews" class="doc-previews"></div>
         <div id="image-previews" class="image-previews"></div>
         <form id="chat-form" class="flex items-end gap-4">
             <button type="button" id="attach-img-btn" class="p-2 rounded-md hover:bg-white/10 flex-shrink-0" title="Attach Image">
                 <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
             </button>
             <input type="file" id="image-input" class="hidden" multiple accept="image/*">
+            <button type="button" id="attach-doc-btn" class="p-2 rounded-md hover:bg-white/10 flex-shrink-0" title="Attach Document">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+            </button>
+            <input type="file" id="doc-input" class="hidden" multiple accept=".txt,.md,.json,.csv,.py,.js,.html,.css,.xml,.yaml,.yml,.log,.ini,.toml,.sh,.bat">
             <textarea id="message-input" placeholder="Type your message here, or paste an image..." rows="1" class="flex-grow block w-full px-3 py-2 rounded-md shadow-sm focus:outline-none focus:ring-[var(--color-primary-500)] focus:border-[var(--color-primary-500)] sm:text-sm resize-none"></textarea>
             <button type="submit" id="send-btn" class="justify-center py-2 px-6 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-[var(--color-primary-600)] hover:bg-[var(--color-primary-700)] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[var(--color-primary-500)] self-end">Send</button>
         </form>
@@ -205,11 +221,17 @@ document.addEventListener('DOMContentLoaded', () => {
     const attachImgBtn = document.getElementById('attach-img-btn');
     const imageInput = document.getElementById('image-input');
     const imagePreviews = document.getElementById('image-previews');
+    const attachDocBtn = document.getElementById('attach-doc-btn');
+    const docInput = document.getElementById('doc-input');
+    const docPreviews = document.getElementById('doc-previews');
     const annotationToggle = document.getElementById('image-annotation-toggle');
     const annotationToggleKnob = document.getElementById('image-annotation-toggle-knob');
+    const thinkingToggle = document.getElementById('thinking-toggle');
+    const thinkingToggleKnob = document.getElementById('thinking-toggle-knob');
 
     // --- Constants & State ---
     const ANNOTATION_PROMPT = "You are a specialized AI assistant for image object detection. When the user asks you to find objects in the image or asks a question about objects in the image, your function is to identify them and provide their bounding box coordinates, then answer any subsequent questions.\n\nCRITICAL INSTRUCTION: Your response MUST contain a single JSON object wrapped in <annotate> tags. You may add conversational text AFTER the closing </annotate> tag if needed to answer a user's question, but the JSON part is mandatory.\n\nThe JSON object must be an array of annotation objects. Each annotation object requires two keys:\n1. \"class\": (string) The name of the detected object class.\n2. \"box\": (array of 4 numbers) The normalized bounding box coordinates [x_min, y_min, x_max, y_max].\n\nMANDATORY COORDINATE SYSTEM: You MUST use normalized coordinates. This means all coordinate values must be between 0.0 and 1.0.\n- (0.0, 0.0) represents the top-left corner of the image.\n- (1.0, 1.0) represents the bottom-right corner of the image.\n- Pixel values are FORBIDDEN and will be rejected. For example, a coordinate like [120, 250, 300, 450] is INCORRECT. A correct coordinate would be [0.1, 0.2, 0.3, 0.4].\n\nExample of a PERFECT response for just annotation:\n<annotate>\n[\n  {\"box\": [0.1, 0.2, 0.3, 0.4], \"class\": \"cat\"},\n  {\"box\": [0.5, 0.6, 0.7, 0.8], \"class\": \"dog\"}\n]\n</annotate>\n\nExample of a response answering a question:\n<annotate>\n[\n  {\"box\": [0.1, 0.2, 0.3, 0.4], \"class\": \"cat\"}\n]\n</annotate>\nYes, there is a cat in the image, located in the upper left area.\n\nIf you do not find any of the requested objects, you MUST return an empty array: <annotate>[]</annotate>";
+    const CHAIN_OF_THOUGHT_PROMPT = "When you are asked a question, first provide a step-by-step plan of how you will answer the question inside  tags. After the closing </think> tag, produce the final answer.";
     
     const PREBUILT_SYSTEM_PROMPTS = [
         { name: "Standard Assistant", prompt: "You are a helpful, respectful and honest assistant." },
@@ -223,16 +245,28 @@ document.addEventListener('DOMContentLoaded', () => {
     let isLoading = false;
     let abortController = null;
     let attachedImages = [];
+    let attachedDocs = [];
     let lastSentImageURL = null;
     let userSystemPrompt = '';
     let isAnnotationMode = false;
+    let isThinkingMode = false;
     const CUSTOM_PROMPTS_KEY = 'ollama_proxy_custom_prompts';
     const LAST_MODEL_KEY = 'ollama_proxy_last_model';
     const LAST_SYSTEM_PROMPT_KEY = 'ollama_proxy_last_system_prompt';
     const CUSTOM_SYSTEM_PROMPTS_KEY = 'ollama_proxy_custom_system_prompts';
     const ANNOTATION_MODE_KEY = 'ollama_proxy_annotation_mode';
+    const THINKING_MODE_KEY = 'ollama_proxy_thinking_mode';
+    const langExtMap = {
+        python: 'py', py: 'py', javascript: 'js', js: 'js', typescript: 'ts',
+        ts: 'ts', html: 'html', css: 'css', json: 'json', markdown: 'md', md: 'md',
+        bash: 'sh', sh: 'sh', shell: 'sh', sql: 'sql', yaml: 'yaml', yml: 'yml',
+        dockerfile: 'Dockerfile', java: 'java', c: 'c', cpp: 'cpp', csharp: 'cs',
+        go: 'go', rust: 'rs', ruby: 'rb', php: 'php', perl: 'pl', xml: 'xml',
+        ini: 'ini', toml: 'toml', plaintext: 'txt', text: 'txt', txt: 'txt'
+    };
 
-    // --- Image Handling ---
+
+    // --- File & Image Handling ---
     function handleImageFiles(files) {
         for (const file of files) {
             if (!file.type.startsWith('image/')){ continue }
@@ -246,6 +280,22 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             };
             reader.readAsDataURL(file);
+        }
+    }
+    
+    function handleDocFiles(files) {
+        for (const file of files) {
+            const reader = new FileReader();
+            reader.onload = e => {
+                if (attachedDocs.length < 5) {
+                    attachedDocs.push({ name: file.name, content: e.target.result });
+                    renderDocPreviews();
+                } else {
+                    alert("You can attach a maximum of 5 documents.");
+                }
+            };
+            reader.onerror = () => alert(`Error reading file ${file.name}`);
+            reader.readAsText(file);
         }
     }
 
@@ -267,6 +317,20 @@ document.addEventListener('DOMContentLoaded', () => {
             previewContainer.appendChild(img);
             previewContainer.appendChild(removeBtn);
             imagePreviews.appendChild(previewContainer);
+        });
+    }
+    
+    function renderDocPreviews() {
+        docPreviews.innerHTML = '';
+        attachedDocs.forEach((doc, index) => {
+            const el = document.createElement('div');
+            el.className = 'doc-preview-container';
+            el.innerHTML = `
+                <svg class="w-4 h-4 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                <span class="doc-preview-name" title="${doc.name}">${doc.name}</span>
+                <button class="remove-doc-btn" data-index="${index}" title="Remove file">&times;</button>
+            `;
+            docPreviews.appendChild(el);
         });
     }
 
@@ -337,13 +401,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- System Prompt & Annotation Logic ---
     function getFinalSystemPrompt() {
-        if (isAnnotationMode) {
-            if (userSystemPrompt) {
-                return `${userSystemPrompt}\n\n${ANNOTATION_PROMPT}`;
-            }
-            return ANNOTATION_PROMPT;
+        const prompts = [];
+        if (userSystemPrompt) {
+            prompts.push(userSystemPrompt);
         }
-        return userSystemPrompt;
+        if (isThinkingMode) {
+            prompts.push(CHAIN_OF_THOUGHT_PROMPT);
+        }
+        if (isAnnotationMode) {
+            prompts.push(ANNOTATION_PROMPT);
+        }
+        return prompts.join('\n\n');
     }
     
     function showSystemPromptModal() {
@@ -413,6 +481,20 @@ document.addEventListener('DOMContentLoaded', () => {
             annotationToggleKnob.classList.remove('translate-x-5');
         }
     }
+    
+    function updateThinkingToggleUI() {
+        if (isThinkingMode) {
+            thinkingToggle.classList.remove('bg-gray-600');
+            thinkingToggle.classList.add('bg-[var(--color-primary-600)]');
+            thinkingToggleKnob.classList.remove('translate-x-0');
+            thinkingToggleKnob.classList.add('translate-x-5');
+        } else {
+            thinkingToggle.classList.add('bg-gray-600');
+            thinkingToggle.classList.remove('bg-[var(--color-primary-600)]');
+            thinkingToggleKnob.classList.add('translate-x-0');
+            thinkingToggleKnob.classList.remove('translate-x-5');
+        }
+    }
 
     // --- Core Chat Functions ---
     async function fetchStreamedResponse() {
@@ -426,7 +508,6 @@ document.addEventListener('DOMContentLoaded', () => {
         const botStatsElement = botMessageWrapper.querySelector('.message-stats');
         
         const isScrolledToBottom = () => {
-            // Check if user is near the bottom of the chat container
             return chatContainer.scrollHeight - chatContainer.clientHeight <= chatContainer.scrollTop + 50;
         };
 
@@ -434,6 +515,9 @@ document.addEventListener('DOMContentLoaded', () => {
         let firstChunk = true;
         const startTime = performance.now();
         let streamError = null;
+        let currentTTFT = null;
+        let currentTPS = null;
+        let buffer = '';
 
         const messagesForApi = messages.map(msg => Array.isArray(msg.content) && !msg.content.some(item => item.type === 'image_url') ? { ...msg, content: msg.content.find(item => item.type === 'text')?.text || '' } : msg);
         
@@ -446,7 +530,11 @@ document.addEventListener('DOMContentLoaded', () => {
             const response = await fetch("{{ url_for('admin_playground_stream') }}", {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': '{{ csrf_token }}' },
-                body: JSON.stringify({ model: modelSelector.value, messages: messagesForApi }),
+                body: JSON.stringify({ 
+                    model: modelSelector.value, 
+                    messages: messagesForApi,
+                    thinking_enabled: isThinkingMode
+                }),
                 signal: abortController.signal
             });
             if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
@@ -459,30 +547,45 @@ document.addEventListener('DOMContentLoaded', () => {
                 const { value, done } = await reader.read();
                 if (done) break;
                 
-                const chunk = decoder.decode(value, { stream: true });
-                const lines = chunk.split('\n').filter(line => line.trim() !== '');
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop(); // Keep partial line for next chunk
 
                 for (const line of lines) {
+                    if (line.trim() === '') continue;
                     try {
                         const data = JSON.parse(line);
-                        if (firstChunk && data.message?.content) {
+
+                        if (firstChunk && data.message && typeof data.message.content === 'string') {
                             firstChunk = false;
-                            botContentElement.innerHTML = '';
-                            const ttft = Math.round(performance.now() - startTime);
-                            botStatsElement.innerHTML = `<span>TTFT: ${ttft}ms</span>`;
-                            botStatsElement.classList.remove('hidden');
+                            botContentElement.innerHTML = ''; // Clear placeholder on first message with a content key
                         }
-                        if (data.message?.content) {
+
+                        if (data.message?.content) { // Process only non-empty content for stats and rendering
+                            if (currentTTFT === null) { // If TTFT not set, this is the first real token
+                                const ttft = Math.round(performance.now() - startTime);
+                                currentTTFT = ttft;
+                                botStatsElement.innerHTML = `<span>TTFT: ${ttft}ms</span>`;
+                                botStatsElement.classList.remove('hidden');
+                            }
                             fullResponse += data.message.content;
                             renderBotMessage(botContentElement, fullResponse);
                             highlightAndMathify(botContentElement);
                         }
-                        if (data.done && data.eval_count && data.eval_duration > 0) {
-                            const tokensPerSecond = (data.eval_count / (data.eval_duration / 1e9)).toFixed(2);
-                            botStatsElement.innerHTML = `${botStatsElement.innerHTML} | <span>Speed: ${tokensPerSecond} t/s</span>`;
+                        
+                        if (data.done && data.hasOwnProperty('eval_count') && data.hasOwnProperty('eval_duration')) {
+                            const tokensPerSecond = data.eval_duration > 0 ? (data.eval_count / (data.eval_duration / 1e9)) : 0;
+                            currentTPS = tokensPerSecond;
+                            if (botStatsElement.innerHTML.includes('TTFT')) {
+                                botStatsElement.innerHTML += ` | <span>Speed: ${tokensPerSecond.toFixed(2)} t/s</span>`;
+                            } else {
+                                botStatsElement.innerHTML = `<span>Speed: ${tokensPerSecond.toFixed(2)} t/s</span>`;
+                                botStatsElement.classList.remove('hidden');
+                            }
                         }
+
                         if (data.error) throw new Error(data.details || data.error);
-                    } catch (err) { /* Ignore */ }
+                    } catch (err) { console.warn("JSON parsing error in stream, probably a partial chunk. Buffering.", err) }
                 }
                 if (shouldScroll) {
                     chatContainer.scrollTop = chatContainer.scrollHeight;
@@ -502,7 +605,12 @@ document.addEventListener('DOMContentLoaded', () => {
         } finally {
             toggleLoading(false);
             if (!streamError) {
-                messages.push({ role: 'assistant', content: fullResponse });
+                messages.push({
+                    role: 'assistant',
+                    content: fullResponse,
+                    stats: (currentTTFT !== null && currentTPS !== null) ? { ttft: currentTTFT, tps: currentTPS } : null
+                });
+                updateGlobalStats();
             }
             renderChat(); 
             chatContainer.scrollTop = chatContainer.scrollHeight;
@@ -512,10 +620,18 @@ document.addEventListener('DOMContentLoaded', () => {
     async function handleChatSubmit(e) {
         if (e) e.preventDefault();
         const userInput = messageInput.value.trim();
-        if ((!userInput && attachedImages.length === 0) || isLoading) return;
+        if ((!userInput && attachedImages.length === 0 && attachedDocs.length === 0) || isLoading) return;
 
         let content = [];
-        if(userInput) content.push({ type: 'text', text: userInput });
+        let textForContent = userInput;
+        
+        if (attachedDocs.length > 0) {
+            const fileContentPrefix = attachedDocs.map(doc => `File content from "${doc.name}":\n\`\`\`\n${doc.content}\n\`\`\``).join('\n\n');
+            textForContent = `${fileContentPrefix}\n\n${textForContent}`;
+        }
+        
+        if (textForContent) content.push({ type: 'text', text: textForContent });
+        
         if (attachedImages.length > 0) {
             lastSentImageURL = attachedImages[attachedImages.length - 1]; // Store last image for annotation
             attachedImages.forEach(img => content.push({ type: 'image_url', image_url: { url: img }}));
@@ -526,7 +642,9 @@ document.addEventListener('DOMContentLoaded', () => {
         messageInput.value = '';
         messageInput.style.height = 'auto';
         attachedImages = [];
+        attachedDocs = [];
         renderImagePreviews();
+        renderDocPreviews();
 
         await fetchStreamedResponse();
     }
@@ -534,11 +652,27 @@ document.addEventListener('DOMContentLoaded', () => {
     function renderBotMessage(container, rawContent) {
         const contentString = String(rawContent || '');
         container.dataset.rawContent = rawContent;
-    
-        const thinkRegex = /<think>([\s\S]*?)<\/think>/g;
-        let finalHtml = contentString.replace(thinkRegex, (match, thinkContent) => {
-            return `<details class="think-block"><summary>Thoughts</summary><div>${marked.parse(thinkContent)}</div></details>`;
-        });
+
+        let finalHtml = '';
+        let remainingContent = contentString;
+        
+        const thinkStartTag = '<think>';
+        const thinkEndTag = '</think>';
+
+        // This loop handles multiple, completed think blocks
+        while (remainingContent.includes(thinkStartTag) && remainingContent.includes(thinkEndTag, remainingContent.indexOf(thinkStartTag))) {
+            const startIndex = remainingContent.indexOf(thinkStartTag);
+            const endIndex = remainingContent.indexOf(thinkEndTag, startIndex);
+
+            const regularPart = remainingContent.substring(0, startIndex);
+            finalHtml += regularPart; // Keep it raw for now
+            
+            const thinkContent = remainingContent.substring(startIndex, endIndex + thinkEndTag.length);
+            finalHtml += thinkContent; 
+            
+            remainingContent = remainingContent.substring(endIndex + thinkEndTag.length);
+        }
+        finalHtml += remainingContent;
 
         const annotationRegex = /<annotate>([\s\S]*?)<\/annotate>/g;
         finalHtml = finalHtml.replace(annotationRegex, (match, annotationJson) => {
@@ -556,7 +690,23 @@ document.addEventListener('DOMContentLoaded', () => {
                     </div>`;
         });
         
-        container.innerHTML = marked.parse(finalHtml);
+        // Now, parse everything for markdown, and handle think tags for UI
+        let parsedHtml = marked.parse(finalHtml);
+        
+        const unclosedThinkRegex = /&lt;think&gt;([\s\S]*)/;
+        if (unclosedThinkRegex.test(parsedHtml)) {
+             parsedHtml = parsedHtml.replace(unclosedThinkRegex, (match, thinkContent) => {
+                return `<details class="think-block" open><summary class="flex items-center gap-2">Thinking <svg class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg></summary><div>${thinkContent}`;
+             });
+             // Because marked adds a closing </p>, we might need to add a closing </div> and </details> but it often works out
+        }
+
+        const closedThinkRegex = /&lt;think&gt;([\s\S]*?)&lt;\/think&gt;/g;
+        parsedHtml = parsedHtml.replace(closedThinkRegex, (match, thinkContent) => {
+            return `<details class="think-block"><summary>Thoughts</summary><div>${thinkContent}</div></details>`;
+        });
+
+        container.innerHTML = parsedHtml;
     }
 
     function renderChat() {
@@ -565,15 +715,15 @@ document.addEventListener('DOMContentLoaded', () => {
             chatContainer.innerHTML = '<div class="text-center text-gray-400">Select a model and start chatting.</div>';
             return;
         }
-        messages.forEach((msg, index) => appendMessage(msg.role, msg.content, false, index));
+        messages.forEach((msg, index) => appendMessage(msg.role, msg.content, msg.stats, false, index));
         if (isLoading) {
-            appendMessage('assistant', '', true, messages.length);
+            appendMessage('assistant', '', null, true, messages.length);
         }
         highlightAndMathify(chatContainer);
         processAnnotations();
     }
     
-    function appendMessage(role, content, isPlaceholder = false, messageIndex) {
+    function appendMessage(role, content, stats, isPlaceholder = false, messageIndex) {
         const messageWrapper = document.createElement('div');
         messageWrapper.className = `flex gap-4 message-wrapper group ${role === 'user' ? 'justify-end' : 'justify-start'}`;
         messageWrapper.dataset.messageIndex = messageIndex;
@@ -604,6 +754,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
             if (role === 'assistant') {
                 renderBotMessage(contentDiv, content);
+                if (stats && stats.ttft !== null && stats.tps !== null) {
+                    statsDiv.innerHTML = `<span>TTFT: ${stats.ttft}ms</span> | <span>Speed: ${stats.tps.toFixed(2)} t/s</span>`;
+                    statsDiv.classList.remove('hidden');
+                }
             } else {
                 let textContent = '';
                 contentDiv.innerHTML = ''; 
@@ -625,11 +779,24 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 contentDiv.dataset.rawContent = textContent;
             }
-            contentWrapper.querySelectorAll('.code-block-wrapper').forEach(wrapper => {
+
+            contentDiv.querySelectorAll('.code-block-wrapper').forEach(wrapper => {
+                const btnContainer = document.createElement('div');
+                btnContainer.className = 'playground-code-actions';
+
                 const copyBtn = document.createElement('button');
-                copyBtn.className = 'copy-button';
-                copyBtn.textContent = 'Copy';
-                wrapper.appendChild(copyBtn);
+                copyBtn.className = 'playground-code-btn copy-code-btn';
+                copyBtn.title = 'Copy code';
+                copyBtn.innerHTML = `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>`;
+
+                const saveBtn = document.createElement('button');
+                saveBtn.className = 'playground-code-btn save-code-btn';
+                saveBtn.title = 'Save as file';
+                saveBtn.innerHTML = `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>`;
+
+                btnContainer.appendChild(copyBtn);
+                btnContainer.appendChild(saveBtn);
+                wrapper.appendChild(btnContainer);
             });
         }
 
@@ -680,6 +847,27 @@ document.addEventListener('DOMContentLoaded', () => {
             abortController = null;
         }
     }
+    
+    function updateGlobalStats() {
+        const stats = messages.filter(m => m.role === 'assistant' && m.stats).map(m => m.stats);
+        const meanTTFTEl = document.getElementById('mean-ttft');
+        const meanTPSEl = document.getElementById('mean-tps');
+
+        if (stats.length === 0) {
+            meanTTFTEl.textContent = 'N/A';
+            meanTPSEl.textContent = 'N/A';
+            return;
+        }
+
+        const totalTTFT = stats.reduce((sum, s) => sum + s.ttft, 0);
+        const totalTPS = stats.reduce((sum, s) => sum + s.tps, 0);
+
+        const meanTTFT = totalTTFT / stats.length;
+        const meanTPS = totalTPS / stats.length;
+
+        meanTTFTEl.textContent = `${Math.round(meanTTFT)} ms`;
+        meanTPSEl.textContent = `${meanTPS.toFixed(2)} t/s`;
+    }
 
     function exportChat() {
         if (messages.length === 0) return;
@@ -702,6 +890,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (Array.isArray(imported) && imported.every(m => m.role && m.content !== undefined)) {
                     messages = imported;
                     renderChat();
+                    updateGlobalStats();
                 } else { alert('Invalid chat file format.'); }
             } catch (error) { alert('Failed to read or parse chat file.'); }
         };
@@ -710,10 +899,10 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function copyToClipboard(text, button) {
-        const originalText = button.textContent || button.innerHTML;
+        const originalContent = button.innerHTML;
         navigator.clipboard.writeText(text).then(() => {
-            button.textContent = 'Copied!';
-            setTimeout(() => { button.innerHTML = originalText; }, 2000);
+            button.innerHTML = 'Copied!';
+            setTimeout(() => { button.innerHTML = originalContent; }, 2000);
         }).catch(() => { // Fallback for http or other issues
             const textArea = document.createElement('textarea');
             textArea.value = text;
@@ -722,8 +911,8 @@ document.addEventListener('DOMContentLoaded', () => {
             textArea.focus(); textArea.select();
             try {
                 document.execCommand('copy');
-                button.textContent = 'Copied!';
-                setTimeout(() => { button.innerHTML = originalText; }, 2000);
+                button.innerHTML = 'Copied!';
+                setTimeout(() => { button.innerHTML = originalContent; }, 2000);
             } catch (err) { alert('Failed to copy'); }
             document.body.removeChild(textArea);
         });
@@ -778,7 +967,7 @@ document.addEventListener('DOMContentLoaded', () => {
     messageInput.addEventListener('input', () => { messageInput.style.height = 'auto'; messageInput.style.height = `${Math.min(messageInput.scrollHeight, 200)}px`; });
     messageInput.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); chatForm.dispatchEvent(new Event('submit', { cancelable: true })); } });
     messageInput.addEventListener('paste', handlePaste);
-    clearChatBtn.addEventListener('click', () => { messages = []; attachedImages = []; renderChat(); renderImagePreviews(); chatContainer.innerHTML = '<div class="text-center text-gray-400">Chat cleared.</div>'; });
+    clearChatBtn.addEventListener('click', () => { messages = []; attachedImages = []; attachedDocs = []; renderChat(); renderImagePreviews(); renderDocPreviews(); updateGlobalStats(); chatContainer.innerHTML = '<div class="text-center text-gray-400">Chat cleared.</div>'; });
     exportChatBtn.addEventListener('click', exportChat);
     importChatBtn.addEventListener('click', () => importChatInput.click());
     importChatInput.addEventListener('change', importChat);
@@ -788,6 +977,8 @@ document.addEventListener('DOMContentLoaded', () => {
     systemPromptIndicator.addEventListener('click', showSystemPromptModal);
     attachImgBtn.addEventListener('click', () => imageInput.click());
     imageInput.addEventListener('change', (e) => handleImageFiles(e.target.files));
+    attachDocBtn.addEventListener('click', () => docInput.click());
+    docInput.addEventListener('change', (e) => handleDocFiles(e.target.files));
 
     sendBtn.addEventListener('click', () => {
         if (isLoading && abortController) {
@@ -805,6 +996,13 @@ document.addEventListener('DOMContentLoaded', () => {
         updateAnnotationToggleUI();
         updateSystemPromptIndicator();
     });
+    
+    thinkingToggle.addEventListener('click', () => {
+        isThinkingMode = !isThinkingMode;
+        localStorage.setItem(THINKING_MODE_KEY, isThinkingMode);
+        updateThinkingToggleUI();
+        updateSystemPromptIndicator();
+    });
 
     document.addEventListener('click', async e => {
         const copyBtn = e.target.closest('.copy-btn');
@@ -812,11 +1010,32 @@ document.addEventListener('DOMContentLoaded', () => {
             const contentDiv = copyBtn.closest('.rounded-lg').querySelector('.message-content');
             copyToClipboard(contentDiv.dataset.rawContent || '', copyBtn); return;
         }
-        const codeCopyBtn = e.target.closest('.code-block-wrapper .copy-button');
+        
+        const codeCopyBtn = e.target.closest('.copy-code-btn');
         if (codeCopyBtn) {
             const codeEl = codeCopyBtn.closest('.code-block-wrapper').querySelector('code');
             copyToClipboard(codeEl.innerText, codeCopyBtn); return;
         }
+        
+        const saveBtn = e.target.closest('.save-code-btn');
+        if (saveBtn) {
+            const codeEl = saveBtn.closest('.code-block-wrapper').querySelector('code');
+            const codeContent = codeEl.innerText;
+            const lang = [...codeEl.classList].find(c => c.startsWith('language-'))?.replace('language-', '') || 'txt';
+            const extension = langExtMap[lang.toLowerCase()] || lang || 'txt';
+            
+            const blob = new Blob([codeContent], { type: 'text/plain;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `snippet.${extension}`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            return;
+        }
+
         const editBtn = e.target.closest('.edit-btn');
         if (editBtn) {
             const messageWrapper = editBtn.closest('.message-wrapper');
@@ -828,7 +1047,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const messageWrapper = deleteBtn.closest('.message-wrapper');
             const messageIndex = parseInt(messageWrapper.dataset.messageIndex, 10);
             if (!isNaN(messageIndex) && confirm('Are you sure you want to delete this message and all subsequent messages?')) {
-                messages.splice(messageIndex); renderChat();
+                messages.splice(messageIndex); renderChat(); updateGlobalStats();
             } return;
         }
         const regenerateBtn = e.target.closest('.regenerate-btn');
@@ -852,6 +1071,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 console.error("Failed to process annotations for saving:", err);
                 alert("Could not save annotated image due to an error.");
             }
+            return;
+        }
+        
+        const removeDocBtn = e.target.closest('.remove-doc-btn');
+        if (removeDocBtn) {
+            const index = parseInt(removeDocBtn.dataset.index, 10);
+            attachedDocs.splice(index, 1);
+            renderDocPreviews();
             return;
         }
 
@@ -927,8 +1154,11 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     userSystemPrompt = localStorage.getItem(LAST_SYSTEM_PROMPT_KEY) || '';
     isAnnotationMode = localStorage.getItem(ANNOTATION_MODE_KEY) === 'true';
+    isThinkingMode = localStorage.getItem(THINKING_MODE_KEY) === 'true';
     updateAnnotationToggleUI();
+    updateThinkingToggleUI();
     updateSystemPromptIndicator();
+    updateGlobalStats();
 });
 </script>
 {% endblock %}

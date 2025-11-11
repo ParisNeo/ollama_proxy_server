@@ -24,6 +24,8 @@ from app.core.logging_config import setup_logging
 from app.api.v1.routes.health import router as health_router
 from app.api.v1.routes.proxy import router as proxy_router
 from app.api.v1.routes.admin import router as admin_router
+from app.api.v1.routes.playground_chat import router as playground_chat_router
+from app.api.v1.routes.playground_embedding import router as playground_embedding_router
 from app.database.session import AsyncSessionLocal, engine
 from app.database.base import Base
 from app.database.migrations import run_all_migrations
@@ -217,6 +219,8 @@ app.mount("/static", StaticFiles(directory="app/static"), name="static")
 app.include_router(health_router, prefix="/api/v1", tags=["Health"])
 app.include_router(proxy_router, prefix="/api", tags=["Ollama Proxy"])
 app.include_router(admin_router, prefix="/admin", tags=["Admin UI"], include_in_schema=False)
+app.include_router(playground_chat_router, prefix="/admin", tags=["Admin UI"], include_in_schema=False)
+app.include_router(playground_embedding_router, prefix="/admin", tags=["Admin UI"], include_in_schema=False)
 
 @app.get("/", include_in_schema=False, summary="Root")
 def read_root():

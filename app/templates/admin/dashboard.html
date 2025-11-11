@@ -48,9 +48,9 @@
         </div>
     </div>
     
-    <!-- Active Ollama Models -->
+    <!-- Active Models -->
     <div class="card-style">
-        <h2 class="card-header text-2xl font-bold mb-4 pb-2">Active Ollama Models</h2>
+        <h2 class="card-header text-2xl font-bold mb-4 pb-2">Active Models</h2>
         <div class="overflow-x-auto">
             <table class="min-w-full">
                 <thead>
@@ -144,22 +144,30 @@ document.addEventListener('DOMContentLoaded', () => {
         const csrfToken = "{{ csrf_token }}";
         tbody.innerHTML = '';
         if (models.length === 0) {
-            tbody.innerHTML = `<tr><td colspan="6" class="px-6 py-10 text-center text-gray-400">No models are currently running on active servers.</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="6" class="px-6 py-10 text-center text-gray-400">No models are currently running or available on active servers.</td></tr>`;
             return;
         }
         models.forEach(model => {
             const sizeGb = (model.size / (1024 ** 3)).toFixed(2);
-            const expiresDate = new Date(model.expires_at);
-            const now = new Date();
-            const diffSeconds = Math.round((expiresDate - now) / 1000);
+            const isOllamaModel = model.expires_at && !String(model.expires_at).startsWith('N/A');
+
             let expiresIn = 'N/A';
-            if (diffSeconds > 0) {
-                const minutes = Math.floor(diffSeconds / 60);
-                const seconds = diffSeconds % 60;
-                expiresIn = `${minutes}m ${seconds}s`;
+            if (isOllamaModel) {
+                const expiresDate = new Date(model.expires_at);
+                const now = new Date();
+                const diffSeconds = Math.round((expiresDate - now) / 1000);
+                if (diffSeconds > 0) {
+                    const minutes = Math.floor(diffSeconds / 60);
+                    const seconds = diffSeconds % 60;
+                    expiresIn = `${minutes}m ${seconds}s`;
+                }
+            } else if (model.expires_at) {
+                expiresIn = model.expires_at;
             }
+
             const placement = model.size_vram > 0 ? '<span class="gpu-badge">GPU</span>' : '<span class="cpu-badge">CPU</span>';
             const chatUrl = `{{ url_for('admin_playground') }}?model=${encodeURIComponent(model.name)}`;
+            
             const unloadForm = `
                 <form action="{{ url_for('admin_unload_model_dashboard') }}" method="post" class="inline">
                     <input type="hidden" name="csrf_token" value="${csrfToken}">
@@ -173,12 +181,12 @@ document.addEventListener('DOMContentLoaded', () => {
                     <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-current">${model.name}</td>
                     <td class="px-6 py-4 whitespace-nowrap text-sm">${model.server_name}</td>
                     <td class="px-6 py-4 whitespace-nowrap text-sm">${placement}</td>
-                    <td class="px-6 py-4 whitespace-nowrap text-sm">${sizeGb} GB</td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm">${sizeGb > 0 ? (sizeGb + ' GB') : 'N/A'}</td>
                     <td class="px-6 py-4 whitespace-nowrap text-sm">${expiresIn}</td>
                     <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                         <div class="flex justify-end gap-4">
                             <a href="${chatUrl}" class="text-[var(--color-primary-500)] hover:text-[var(--color-primary-700)]">Chat</a>
-                            ${unloadForm}
+                            ${ isOllamaModel ? unloadForm : '' }
                         </div>
                     </td>
                 </tr>`;

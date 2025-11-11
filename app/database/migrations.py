@@ -392,6 +392,16 @@ async def run_all_migrations(engine: AsyncEngine) -> None:
                 "model": "VARCHAR",
                 "server_id": "INTEGER",
             },
+            "model_metadata": {
+                "id": "INTEGER NOT NULL PRIMARY KEY",
+                "model_name": "VARCHAR NOT NULL",
+                "description": "VARCHAR",
+                "supports_images": "BOOLEAN NOT NULL DEFAULT 0",
+                "is_code_model": "BOOLEAN NOT NULL DEFAULT 0",
+                "is_chat_model": "BOOLEAN NOT NULL DEFAULT 1",
+                "is_fast_model": "BOOLEAN NOT NULL DEFAULT 0",
+                "priority": "INTEGER NOT NULL DEFAULT 10",
+            },
         }
 
         # Auto-migrate all tables
@@ -432,6 +442,7 @@ async def create_missing_indexes(engine: AsyncEngine) -> None:
 
     indexes = [
         ("ix_usage_logs_model", "usage_logs", "model"),
+        ("ix_model_metadata_model_name", "model_metadata", "model_name"),
     ]
 
     async with engine.begin() as conn:

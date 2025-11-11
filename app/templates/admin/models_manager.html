@@ -1,0 +1,73 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Models Manager{% endblock %}
+{% block header_title %}Models Manager & Auto-Routing{% endblock %}
+
+{% block content %}
+<div class="space-y-8">
+    <div class="card-style">
+        <h2 class="card-header text-2xl font-bold mb-4 pb-2">About the 'auto' Model</h2>
+        <p class="text-current">
+            The Models Manager allows you to configure rules for a virtual model named <code class="inline-code">auto</code>.
+            When a user makes a request to the model "auto", the proxy will analyze their prompt and intelligently route it to the best-suited model based on the capabilities and priorities you define below.
+        </p>
+        <p class="mt-2 text-sm text-gray-400">
+            For example, if a prompt contains an image, it will only be routed to models you've marked as "Supports Images". Among the eligible models, the one with the lowest priority number will be chosen first.
+        </p>
+    </div>
+
+    <form action="{{ url_for('admin_update_model_metadata') }}" method="post" class="card-style">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <h2 class="card-header text-2xl font-bold mb-4 pb-2">Configure Model Capabilities</h2>
+        
+        <div class="overflow-x-auto">
+            <table class="min-w-full">
+                <thead>
+                    <tr>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Model Name</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Description</th>
+                        <th class="px-4 py-3 text-center text-xs font-medium text-gray-400 uppercase tracking-wider">Supports Images</th>
+                        <th class="px-4 py-3 text-center text-xs font-medium text-gray-400 uppercase tracking-wider">Code Model</th>
+                        <th class="px-4 py-3 text-center text-xs font-medium text-gray-400 uppercase tracking-wider">Fast Model</th>
+                        <th class="px-4 py-3 text-center text-xs font-medium text-gray-400 uppercase tracking-wider">Priority</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-white/10">
+                    {% for meta in metadata_list %}
+                    <tr class="align-top">
+                        <td class="px-4 py-4 whitespace-nowrap text-sm font-medium text-current font-mono">{{ meta.model_name }}</td>
+                        <td class="px-4 py-4 whitespace-nowrap">
+                            <input type="text" name="description_{{ meta.id }}" value="{{ meta.description or '' }}" placeholder="A short description..." class="w-full min-w-48 px-2 py-1 rounded-md shadow-sm sm:text-sm">
+                        </td>
+                        <td class="px-4 py-4 whitespace-nowrap text-center">
+                            <input type="checkbox" name="supports_images_{{ meta.id }}" value="true" class="h-5 w-5 rounded text-[var(--color-primary-600)]" {% if meta.supports_images %}checked{% endif %}>
+                        </td>
+                        <td class="px-4 py-4 whitespace-nowrap text-center">
+                            <input type="checkbox" name="is_code_model_{{ meta.id }}" value="true" class="h-5 w-5 rounded text-[var(--color-primary-600)]" {% if meta.is_code_model %}checked{% endif %}>
+                        </td>
+                        <td class="px-4 py-4 whitespace-nowrap text-center">
+                            <input type="checkbox" name="is_fast_model_{{ meta.id }}" value="true" class="h-5 w-5 rounded text-[var(--color-primary-600)]" {% if meta.is_fast_model %}checked{% endif %}>
+                        </td>
+                        <td class="px-4 py-4 whitespace-nowrap text-center">
+                             <input type="number" name="priority_{{ meta.id }}" value="{{ meta.priority }}" class="w-20 px-2 py-1 rounded-md shadow-sm sm:text-sm text-center">
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="6" class="px-6 py-10 text-center text-gray-400">
+                           No models found across any active servers. Go to the <a href="{{ url_for('admin_servers') }}" class="font-semibold text-[var(--color-primary-500)] hover:underline">Server Management</a> page and refresh your servers to discover models.
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <div class="flex justify-end pt-6 border-t border-white/10 mt-6">
+            <button type="submit" class="w-full md:w-auto justify-center py-2 px-6 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-[var(--color-primary-600)] hover:bg-[var(--color-primary-700)] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[var(--color-primary-500)]">
+                Save All Changes
+            </button>
+        </div>
+    </form>
+</div>
+{% endblock %}

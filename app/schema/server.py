@@ -1,4 +1,4 @@
-from pydantic import BaseModel, AnyHttpUrl, Field
+from pydantic import BaseModel, AnyHttpUrl, Field, ConfigDict
 import datetime
 from typing import Literal, Optional
 
@@ -23,5 +23,4 @@ class Server(ServerBase):
     has_api_key: bool = False
     created_at: datetime.datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True, protected_namespaces=())

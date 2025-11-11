@@ -1,7 +1,8 @@
 import asyncio
 import json
 import logging
-from typing import List, Tuple, Optional
+import datetime
+from typing import List, Tuple, Optional, Dict, Any
 from fastapi import APIRouter, Depends, Request, Response, HTTPException, status
 from fastapi.responses import StreamingResponse, JSONResponse
 from httpx import AsyncClient
@@ -10,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database.session import get_db
 from app.api.v1.dependencies import get_valid_api_key, rate_limiter, ip_filter, get_settings
 from app.database.models import APIKey, OllamaServer
-from app.crud import log_crud, server_crud
+from app.crud import log_crud, server_crud, model_metadata_crud
 from app.core.retry import retry_with_backoff, RetryConfig
 from app.schema.settings import AppSettingsModel
 from app.core.encryption import decrypt_data
@@ -309,8 +310,19 @@ async def federate_models(
                 response = await http_client.get(endpoint, headers=headers)
                 response.raise_for_status()
                 models_data = response.json().get("data", [])
-                # Normalize to Ollama's format
-                return [{"name": model.get("id")} for model in models_data if model.get("id")]
+                # Normalize to Ollama's format for better client compatibility
+                normalized_models = []
+                for model in models_data:
+                    if model_id := model.get("id"):
+                        normalized_models.append({
+                            "name": model_id,
+                            "modified_at": datetime.datetime.fromtimestamp(
+                                model.get("created", 0), tz=datetime.timezone.utc
+                            ).isoformat(),
+                            "size": 0,  # Size is not available from the vLLM API
+                            "digest": "" # Digest is not available from the vLLM API
+                        })
+                return normalized_models
             else: # ollama
                 endpoint = f"{server.url.rstrip('/')}/api/tags"
                 response = await http_client.get(endpoint, headers=headers)
@@ -329,11 +341,81 @@ async def federate_models(
             if "name" in model:
                 all_models[model['name']] = model
 
+    # Add the 'auto' model to the list for clients to see
+    all_models["auto"] = {
+        "name": "auto",
+        "modified_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "size": 0,
+        "digest": "auto"
+    }
+
     await log_crud.create_usage_log(
         db=db, api_key_id=api_key.id, endpoint="/api/tags", status_code=200, server_id=None
     )
     
     return {"models": list(all_models.values())}
+
+
+async def _select_auto_model(db: AsyncSession, body: Dict[str, Any]) -> Optional[str]:
+    """Selects the best model based on metadata and request content."""
+    
+    # 1. Determine request characteristics
+    has_images = "images" in body and body["images"]
+    
+    prompt_content = ""
+    if "prompt" in body: # generate endpoint
+        prompt_content = body["prompt"]
+    elif "messages" in body: # chat endpoint
+        last_message = body["messages"][-1] if body["messages"] else {}
+        if isinstance(last_message.get("content"), str):
+            prompt_content = last_message["content"]
+        elif isinstance(last_message.get("content"), list): # multimodal chat
+             text_part = next((p.get("text", "") for p in last_message["content"] if p.get("type") == "text"), "")
+             prompt_content = text_part
+
+    code_keywords = ["def ", "class ", "import ", "const ", "let ", "var ", "function ", "public static void", "int main("]
+    contains_code = any(kw.lower() in prompt_content.lower() for kw in code_keywords)
+
+    # 2. Get all model metadata and available models
+    all_metadata = await model_metadata_crud.get_all_metadata(db)
+    all_available_models = await server_crud.get_all_available_model_names(db)
+    available_metadata = [m for m in all_metadata if m.model_name in all_available_models]
+
+    if not available_metadata:
+        logger.warning("Auto-routing failed: No models with metadata are available on active servers.")
+        return None
+
+    # 3. Filter models based on characteristics
+    candidate_models = available_metadata
+
+    if has_images:
+        logger.info("Auto-routing: Filtering for models that support images.")
+        candidate_models = [m for m in candidate_models if m.supports_images]
+    
+    if contains_code:
+        logger.info("Auto-routing: Filtering for code models.")
+        code_models = [m for m in candidate_models if m.is_code_model]
+        if code_models:
+            candidate_models = code_models
+
+    if body.get("options", {}).get("fast_model"):
+        logger.info("Auto-routing: Filtering for fast models.")
+        fast_models = [m for m in candidate_models if m.is_fast_model]
+        if fast_models:
+            candidate_models = fast_models
+
+    if not candidate_models:
+        logger.warning("Auto-routing: No models matched the request criteria. Falling back to the highest priority model available.")
+        candidate_models = available_metadata
+
+    if not candidate_models:
+        return None
+
+    # 4. The list is already sorted by priority from the CRUD function.
+    best_model = candidate_models[0]
+    logger.info(f"Auto-routing selected model '{best_model.model_name}' with priority {best_model.priority}.")
+    
+    return best_model.model_name
 
 
 @router.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"])
@@ -365,6 +447,7 @@ async def proxy_ollama(
     # Try to extract model name from request body
     body_bytes = await request.body()
     model_name = None
+    body = {}
 
     if body_bytes:
         try:
@@ -373,6 +456,20 @@ async def proxy_ollama(
                 model_name = body["model"]
         except (json.JSONDecodeError, Exception):
             pass
+            
+    # --- NEW: Handle 'auto' model routing ---
+    if model_name == "auto":
+        chosen_model_name = await _select_auto_model(db, body)
+        if not chosen_model_name:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Auto-routing could not find an available and suitable model."
+            )
+        
+        # Override the model in the request and continue
+        model_name = chosen_model_name
+        body["model"] = model_name
+        body_bytes = json.dumps(body).encode('utf-8')
 
     # Smart routing: filter servers by model availability
     candidate_servers = servers

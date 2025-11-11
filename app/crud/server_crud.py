@@ -335,35 +335,53 @@ async def get_all_available_model_names(db: AsyncSession, filter_type: Optional[
     
     return sorted(list(all_models))
 
-async def get_ollama_ps_all_servers(db: AsyncSession, http_client: httpx.AsyncClient) -> List[Dict[str, Any]]:
+async def get_active_models_all_servers(db: AsyncSession, http_client: httpx.AsyncClient) -> List[Dict[str, Any]]:
     """
-    Fetches running models (`/api/ps`) from all active Ollama servers.
+    Fetches running models (`/api/ps`) from active Ollama servers and
+    lists available models from active vLLM servers as they are always 'active'.
     """
-    active_servers = [s for s in await get_servers(db) if s.is_active and s.server_type == 'ollama']
-    if not active_servers:
-        return []
-
-    async def fetch_ps(server: OllamaServer):
-        try:
-            headers = _get_auth_headers(server)
-            ps_url = f"{server.url.rstrip('/')}/api/ps"
-            response = await http_client.get(ps_url, timeout=5.0, headers=headers)
-            response.raise_for_status()
-            data = response.json()
-            # Add server info to each running model
-            for model in data.get("models", []):
-                model["server_name"] = server.name
-            return data.get("models", [])
-        except Exception as e:
-            logger.error(f"Failed to fetch running models from server '{server.name}': {e}")
-            return []
-
-    tasks = [fetch_ps(server) for server in active_servers]
-    results = await asyncio.gather(*tasks)
+    servers = await get_servers(db)
+    active_servers = [s for s in servers if s.is_active]
     
-    # Flatten the list of lists
-    all_running_models = [model for sublist in results for model in sublist]
-    return all_running_models
+    ollama_servers = [s for s in active_servers if s.server_type == 'ollama']
+    vllm_servers = [s for s in active_servers if s.server_type == 'vllm']
+    
+    all_models = []
+
+    # 1. Fetch actively running models from Ollama servers
+    if ollama_servers:
+        async def fetch_ps(server: OllamaServer):
+            try:
+                headers = _get_auth_headers(server)
+                ps_url = f"{server.url.rstrip('/')}/api/ps"
+                response = await http_client.get(ps_url, timeout=5.0, headers=headers)
+                response.raise_for_status()
+                data = response.json()
+                # Add server info to each running model
+                for model in data.get("models", []):
+                    model["server_name"] = server.name
+                return data.get("models", [])
+            except Exception as e:
+                logger.error(f"Failed to fetch running models from server '{server.name}': {e}")
+                return []
+
+        tasks = [fetch_ps(server) for server in ollama_servers]
+        results = await asyncio.gather(*tasks)
+        ollama_running_models = [model for sublist in results for model in sublist]
+        all_models.extend(ollama_running_models)
+
+    # 2. Add available models from vLLM servers
+    for server in vllm_servers:
+        if server.available_models:
+            for model_info in server.available_models:
+                all_models.append({
+                    "name": model_info.get("name"),
+                    "server_name": server.name,
+                    "size": model_info.get("size", 0),
+                    "size_vram": 1,  # Assume GPU placement for vLLM
+                    "expires_at": "N/A (Always Active)",
+                })
+    return all_models
 
 async def refresh_all_server_models(db: AsyncSession) -> dict:
     """

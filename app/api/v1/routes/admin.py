@@ -9,14 +9,10 @@ import asyncio
 import secrets
 from pathlib import Path
 import os
-import json 
-import numpy as np
-from sklearn.decomposition import PCA
-from pydantic import BaseModel, conlist, AnyHttpUrl
-import base64
+from pydantic import AnyHttpUrl
 
 from fastapi import APIRouter, Depends, Request, Form, HTTPException, status, Query, UploadFile, File
-from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, StreamingResponse, Response 
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -26,13 +22,11 @@ from app.core.config import settings
 from app.core.security import verify_password
 from app.database.session import get_db
 from app.database.models import User
-from app.crud import user_crud, apikey_crud, log_crud, server_crud, settings_crud
+from app.crud import user_crud, apikey_crud, log_crud, server_crud, settings_crud, model_metadata_crud
 from app.schema.user import UserCreate
 from app.schema.server import ServerCreate, ServerUpdate
 from app.schema.settings import AppSettingsModel
-from app.api.v1.dependencies import get_csrf_token, validate_csrf_token, login_rate_limiter, validate_csrf_token_header
-from app.core.benchmarks import PREBUILT_BENCHMARKS
-from app.core.test_prompts import PREBUILT_TEST_PROMPTS
+from app.api.v1.dependencies import get_csrf_token, validate_csrf_token, login_rate_limiter
 
 
 logger = logging.getLogger(__name__)
@@ -46,8 +40,6 @@ ALLOWED_LOGO_TYPES = ["image/png", "image/jpeg", "image/gif", "image/svg+xml", "
 UPLOADS_DIR = Path("app/static/uploads")
 SSL_DIR = Path(".ssl")
 
-
-# ... (existing functions from get_system_info down to admin_help_page remain the same) ...
 
 # --- Sync helper for system info (to be run in threadpool) ---
 def get_system_info():
@@ -148,7 +140,11 @@ def get_flashed_messages(request: Request): return request.session.pop("_message
 templates.env.globals["get_flashed_messages"] = get_flashed_messages
 async def get_current_user_from_cookie(request: Request, db: AsyncSession = Depends(get_db)) -> User | None:
     user_id = request.session.get("user_id")
-    if user_id: return await user_crud.get_user_by_id(db, user_id=user_id)
+    if user_id: 
+        user = await user_crud.get_user_by_id(db, user_id=user_id)
+        if user:
+            db.expunge(user) # Detach the user object from the session to prevent lazy loading errors in templates.
+        return user
     return None
 async def require_admin_user(request: Request, current_user: Union[User, None] = Depends(get_current_user_from_cookie)) -> User:
     if not current_user or not current_user.is_admin: raise HTTPException(status_code=status.HTTP_303_SEE_OTHER, detail="Not authorized", headers={"Location": str(request.url_for("admin_login"))})
@@ -214,8 +210,8 @@ async def get_system_and_ollama_info(
     # Run blocking psutil calls in a threadpool to avoid blocking the event loop
     system_info_task = run_in_threadpool(get_system_info)
     
-    # Fetch ollama ps info, server health, and server load concurrently
-    running_models_task = server_crud.get_ollama_ps_all_servers(db, http_client)
+    # Fetch active models, server health, and server load concurrently
+    running_models_task = server_crud.get_active_models_all_servers(db, http_client)
     server_health_task = server_crud.check_all_servers_health(db, http_client)
     server_load_task = log_crud.get_server_load_stats(db)
     
@@ -497,273 +493,56 @@ async def admin_unload_model_dashboard(
     
     return RedirectResponse(url=request.url_for("admin_dashboard"), status_code=status.HTTP_303_SEE_OTHER)
 
-# --- MODEL PLAYGROUND ROUTES ---
-@router.get("/playground", response_class=HTMLResponse, name="admin_playground")
-async def admin_playground_ui(
-    request: Request,
-    db: AsyncSession = Depends(get_db),
-    admin_user: User = Depends(require_admin_user),
-    model: Optional[str] = Query(None)
-):
-    context = get_template_context(request)
-    context["models"] = await server_crud.get_all_available_model_names(db, filter_type='chat')
-    context["selected_model"] = model
-    context["csrf_token"] = await get_csrf_token(request)
-    return templates.TemplateResponse("admin/model_playground.html", context)
-
-
-@router.post("/playground-stream", name="admin_playground_stream", dependencies=[Depends(validate_csrf_token_header)])
-async def admin_playground_stream(
-    request: Request,
-    db: AsyncSession = Depends(get_db),
-    admin_user: User = Depends(require_admin_user)
-):
-    try:
-        data = await request.json()
-        model_name = data.get("model")
-        messages = data.get("messages")
-        
-        if not model_name or not messages:
-            return JSONResponse({"error": "Model and messages are required."}, status_code=400)
-
-        # Handle base64 images, converting them to the format Ollama expects
-        for msg in messages:
-            if isinstance(msg.get("content"), list):
-                new_content = []
-                images_list = []
-                for item in msg["content"]:
-                    if item.get("type") == "text":
-                        new_content.append(item["text"])
-                    elif item.get("type") == "image_url":
-                        # data:image/jpeg;base64, -> just the base64 part
-                        base64_str = item["image_url"]["url"].split(",")[-1]
-                        images_list.append(base64_str)
-                
-                msg["content"] = " ".join(new_content)
-                if images_list:
-                    msg["images"] = images_list
-
-
-        http_client: httpx.AsyncClient = request.app.state.http_client
-        
-        # Find a server with the model
-        servers_with_model = await server_crud.get_servers_with_model(db, model_name)
-        if not servers_with_model:
-            # Fallback to any active server if model not in DB list
-            active_servers = [s for s in await server_crud.get_servers(db) if s.is_active]
-            if not active_servers:
-                error_payload = {"error": "No active backend servers available."}
-                return Response(json.dumps(error_payload), media_type="application/x-ndjson", status_code=503)
-            target_server = active_servers[0]
-        else:
-            target_server = servers_with_model[0]
-        
-        # This is essentially a mini-proxy just for the playground
-        # It needs to do the same translation as the main proxy
-        if target_server.server_type == 'vllm':
-            from app.core.vllm_translator import translate_ollama_to_vllm_chat, vllm_stream_to_ollama_stream
-            
-            chat_url = f"{target_server.url.rstrip('/')}/v1/chat/completions"
-            payload = translate_ollama_to_vllm_chat({"model": model_name, "messages": messages, "stream": True})
-            
-            from app.crud.server_crud import _get_auth_headers
-            headers = _get_auth_headers(target_server)
-
-            async def event_stream_vllm():
-                try:
-                    async with http_client.stream("POST", chat_url, json=payload, timeout=600.0, headers=headers) as response:
-                        if response.status_code != 200:
-                            error_body = await response.aread()
-                            error_text = error_body.decode('utf-8')
-                            logger.error(f"vLLM backend returned error {response.status_code}: {error_text}")
-                            error_payload = {"error": f"vLLM server error: {error_text}"}
-                            yield json.dumps(error_payload).encode('utf-8')
-                            return
-                        
-                        async for chunk in vllm_stream_to_ollama_stream(response.aiter_text(), model_name):
-                            yield chunk
-                except Exception as e:
-                    logger.error(f"Error streaming from vLLM backend: {e}", exc_info=True)
-                    error_payload = {"error": "Failed to stream from backend server.", "details": str(e)}
-                    yield json.dumps(error_payload).encode('utf-8')
-            
-            return StreamingResponse(event_stream_vllm(), media_type="application/x-ndjson")
-
-        else: # Ollama server
-            chat_url = f"{target_server.url.rstrip('/')}/api/chat"
-            payload = {"model": model_name, "messages": messages, "stream": True}
-            
-            from app.crud.server_crud import _get_auth_headers
-            headers = _get_auth_headers(target_server)
-
-            async def event_stream_ollama():
-                try:
-                    async with http_client.stream("POST", chat_url, json=payload, timeout=600.0, headers=headers) as response:
-                        if response.status_code != 200:
-                            error_body = await response.aread()
-                            error_text = error_body.decode('utf-8')
-                            logger.error(f"Ollama backend returned error {response.status_code}: {error_text}")
-                            error_payload = {"error": f"Ollama server error: {error_text}"}
-                            yield json.dumps(error_payload).encode('utf-8')
-                            return
-
-                        async for chunk in response.aiter_bytes():
-                            yield chunk
-                except Exception as e:
-                    logger.error(f"Error streaming from Ollama backend: {e}", exc_info=True)
-                    error_payload = {"error": "Failed to stream from backend server.", "details": str(e)}
-                    yield json.dumps(error_payload).encode('utf-8')
-            
-            return StreamingResponse(event_stream_ollama(), media_type="application/x-ndjson")
-
-    except Exception as e:
-        logger.error(f"Error in chat stream endpoint: {e}", exc_info=True)
-        return JSONResponse({"error": "An internal error occurred."}, status_code=500)
-
-
-# --- NEW EMBEDDING PLAYGROUND ROUTES ---
-@router.get("/embedding-playground", response_class=HTMLResponse, name="admin_embedding_playground")
-async def admin_embedding_playground_ui(
-    request: Request,
-    db: AsyncSession = Depends(get_db),
+# --- MODELS MANAGER ROUTES (NEW) ---
+@router.get("/models-manager", response_class=HTMLResponse, name="admin_models_manager")
+async def admin_models_manager_page(
+    request: Request, 
+    db: AsyncSession = Depends(get_db), 
     admin_user: User = Depends(require_admin_user)
 ):
     context = get_template_context(request)
-    context["models"] = await server_crud.get_all_available_model_names(db, filter_type='embedding')
+    
+    # Ensure metadata exists for all discovered models
+    all_model_names = await server_crud.get_all_available_model_names(db)
+    for model_name in all_model_names:
+        await model_metadata_crud.get_or_create_metadata(db, model_name=model_name)
+        
+    context["metadata_list"] = await model_metadata_crud.get_all_metadata(db)
     context["csrf_token"] = await get_csrf_token(request)
-    return templates.TemplateResponse("admin/embedding_playground.html", context)
+    return templates.TemplateResponse("admin/models_manager.html", context)
 
-@router.get("/embedding-playground/prebuilt", name="admin_get_prebuilt_benchmarks")
-async def admin_get_prebuilt_benchmarks(admin_user: User = Depends(require_admin_user)):
-    all_benchmarks = list(PREBUILT_BENCHMARKS)
-    benchmarks_dir = Path("benchmarks")
-    if benchmarks_dir.is_dir():
-        for filepath in benchmarks_dir.glob("*.json"):
-            try:
-                with open(filepath, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                    if "name" in data and "groups" in data and isinstance(data["groups"], list):
-                        all_benchmarks.append(data)
-                    else:
-                        logger.warning(f"Skipping invalid benchmark file: {filepath.name}")
-            except Exception as e:
-                logger.error(f"Failed to load benchmark file {filepath.name}: {e}")
-    return JSONResponse(all_benchmarks)
-
-
-@router.get("/playground/test-prompts", name="admin_get_test_prompts")
-async def admin_get_test_prompts(admin_user: User = Depends(require_admin_user)):
-    return JSONResponse(PREBUILT_TEST_PROMPTS)
-    
-async def get_embedding(
-    http_client: httpx.AsyncClient, 
-    server: "OllamaServer", 
-    model_name: str, 
-    prompt: str
-) -> List[float]:
-    """Helper to get a single embedding from a server."""
-    from app.crud.server_crud import _get_auth_headers
-    headers = _get_auth_headers(server)
-    try:
-        if server.server_type == 'vllm':
-            from app.core.vllm_translator import translate_ollama_to_vllm_embeddings, translate_vllm_to_ollama_embeddings
-            url = f"{server.url.rstrip('/')}/v1/embeddings"
-            payload = translate_ollama_to_vllm_embeddings({"model": model_name, "prompt": prompt})
-            response = await http_client.post(url, json=payload, timeout=60.0, headers=headers)
-            response.raise_for_status()
-            return translate_vllm_to_ollama_embeddings(response.json())["embedding"]
-        else: # Ollama
-            url = f"{server.url.rstrip('/')}/api/embeddings"
-            payload = {"model": model_name, "prompt": prompt}
-            response = await http_client.post(url, json=payload, timeout=60.0, headers=headers)
-            response.raise_for_status()
-            return response.json()["embedding"]
-
-    except httpx.HTTPStatusError as e:
-        logger.error(f"Error getting embedding for model {model_name}: {e.response.text}")
-        raise HTTPException(status_code=e.response.status_code, detail=f"Backend server error: {e.response.text}")
-    except Exception as e:
-        logger.error(f"Failed to connect to backend server at {server.url}: {e}")
-        raise HTTPException(status_code=500, detail=f"Could not connect to backend server to get embedding: {e}")
-
-class BenchmarkGroup(BaseModel):
-    id: str
-    name: str
-    color: str
-    texts: List[str]
-
-class BenchmarkPayload(BaseModel):
-    name: str
-    groups: List[BenchmarkGroup]
-
-class BenchmarkRequest(BaseModel):
-    models: conlist(str, min_length=1)
-    benchmark: BenchmarkPayload
-
-@router.post("/embedding-playground/benchmark", name="admin_run_embedding_benchmark")
-async def admin_run_embedding_benchmark(
-    request_data: BenchmarkRequest,
-    request: Request,
-    db: AsyncSession = Depends(get_db),
-    admin_user: User = Depends(require_admin_user),
-    csrf_valid: bool = Depends(validate_csrf_token_header)
+@router.post("/models-manager/update", name="admin_update_model_metadata", dependencies=[Depends(validate_csrf_token)])
+async def admin_update_model_metadata(
+    request: Request, 
+    db: AsyncSession = Depends(get_db), 
+    admin_user: User = Depends(require_admin_user)
 ):
-    http_client: httpx.AsyncClient = request.app.state.http_client
-
-    all_texts = {text for group in request_data.benchmark.groups for text in group.texts}
+    form_data = await request.form()
     
-    model_embeddings = {}
+    # A set to keep track of which models were in the form
+    updated_model_ids = set()
     
-    for model_name in request_data.models:
-        servers = await server_crud.get_servers_with_model(db, model_name)
-        if not servers:
-            # This case should be handled on the client, but as a fallback:
-            model_embeddings[model_name] = {"error": "Model not found on any active server."}
-            continue
-        
-        server = servers[0]
-        
-        # Fetch all embeddings for this model concurrently
-        tasks = {text: get_embedding(http_client, server, model_name, text) for text in all_texts}
-        results = await asyncio.gather(*tasks.values(), return_exceptions=True)
-        
-        embeddings_map = {text: result for text, result in zip(tasks.keys(), results)}
-        model_embeddings[model_name] = embeddings_map
-
-    # Process results and run PCA
-    response_data = {"models": {}, "groups": request_data.benchmark.model_dump()["groups"]}
-    
-    for model_name, embeddings_map in model_embeddings.items():
-        if "error" in embeddings_map:
-            response_data["models"][model_name] = {"error": embeddings_map["error"]}
-            continue
+    # Loop through form data to find metadata fields
+    for key, value in form_data.items():
+        if key.startswith("description_"):
+            meta_id = int(key.split("_")[1])
+            updated_model_ids.add(meta_id)
             
-        points = []
-        vectors = []
-        labels = []
-        
-        for group in request_data.benchmark.groups:
-            for text in group.texts:
-                vector = embeddings_map.get(text)
-                if isinstance(vector, list):
-                    points.append({"label": text, "group_id": group.id})
-                    vectors.append(vector)
-                    labels.append(group.name)
+    # Now process each model found in the form
+    for meta_id in updated_model_ids:
+        metadata = await db.get(model_metadata_crud.ModelMetadata, meta_id)
+        if metadata:
+            update_data = {
+                "description": form_data.get(f"description_{meta_id}", "").strip(),
+                "supports_images": f"supports_images_{meta_id}" in form_data,
+                "is_code_model": f"is_code_model_{meta_id}" in form_data,
+                "is_fast_model": f"is_fast_model_{meta_id}" in form_data,
+                "priority": int(form_data.get(f"priority_{meta_id}", 10)),
+            }
+            await model_metadata_crud.update_metadata(db, model_name=metadata.model_name, **update_data)
 
-        if len(vectors) < 2:
-            response_data["models"][model_name] = {"error": "Not enough valid data points for analysis."}
-            continue
-
-        pca = PCA(n_components=2)
-        reduced_vectors = pca.fit_transform(np.array(vectors))
-        
-        for i, point in enumerate(points):
-            point['x'] = float(reduced_vectors[i, 0])
-            point['y'] = float(reduced_vectors[i, 1])
-            
-        response_data["models"][model_name] = {"points": points}
-        
-    return JSONResponse(response_data)
+    flash(request, "Model metadata updated successfully.", "success")
+    return RedirectResponse(url=request.url_for("admin_models_manager"), status_code=status.HTTP_303_SEE_OTHER)
 
 
 @router.get("/settings", response_class=HTMLResponse, name="admin_settings")
