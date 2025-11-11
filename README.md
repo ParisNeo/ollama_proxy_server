@@ -3,7 +3,7 @@
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 ![Python Version](https://img.shields.io/badge/python-3.11+-blue.svg)
 ![Built with](https://img.shields.io/badge/Built%20with-FastAPI-brightgreen)
-![Release](https://img.shields.io/badge/release-v8.0.0-blue)
+![Release](https://img.shields.io/badge/release-v9.0.0-blue)
 [![GitHub stars](https://img.shields.io/github/stars/ParisNeo/ollama_proxy_server.svg?style=social&label=Star)](https://github.com/ParisNeo/ollama_proxy_server/stargazers/)
 
 Stop exposing your local AI to the world. **Ollama Proxy Fortress** is the ultimate security and management layer for your Ollama instances, designed to be set up in **60 seconds** by anyone, on any operating system.

@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "ollama-proxy-server"
-version = "8.0.0"
+version = "9.0.0"
 description = "A secure, high-performance FastAPI-based proxy and load balancer for Ollama."
 authors = ["ParisNeo <parisneo_ai@gmail.com>"]
 license = "Apache-2.0"
