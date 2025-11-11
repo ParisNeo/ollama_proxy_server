@@ -293,60 +293,31 @@ async def federate_models(
     servers: List[OllamaServer] = Depends(get_active_servers),
 ):
     """
-    Aggregates models from all configured backends (Ollama and vLLM).
+    Aggregates models from all configured backends (Ollama and vLLM)
+    using the cached model data from the database for efficiency.
     """
-    http_client: AsyncClient = request.app.state.http_client
-    
-    async def fetch_models(server: OllamaServer):
-        headers = {}
-        if server.encrypted_api_key:
-            api_key_dec = decrypt_data(server.encrypted_api_key)
-            if api_key_dec:
-                headers["Authorization"] = f"Bearer {api_key_dec}"
-
-        try:
-            if server.server_type == 'vllm':
-                endpoint = f"{server.url.rstrip('/')}/v1/models"
-                response = await http_client.get(endpoint, headers=headers)
-                response.raise_for_status()
-                models_data = response.json().get("data", [])
-                # Normalize to Ollama's format for better client compatibility
-                normalized_models = []
-                for model in models_data:
-                    if model_id := model.get("id"):
-                        normalized_models.append({
-                            "name": model_id,
-                            "modified_at": datetime.datetime.fromtimestamp(
-                                model.get("created", 0), tz=datetime.timezone.utc
-                            ).isoformat(),
-                            "size": 0,  # Size is not available from the vLLM API
-                            "digest": "" # Digest is not available from the vLLM API
-                        })
-                return normalized_models
-            else: # ollama
-                endpoint = f"{server.url.rstrip('/')}/api/tags"
-                response = await http_client.get(endpoint, headers=headers)
-                response.raise_for_status()
-                return response.json().get("models", [])
-        except Exception as e:
-            logger.error(f"Failed to fetch models from {server.url}: {e}")
-            return []
-
-    tasks = [fetch_models(server) for server in servers]
-    results = await asyncio.gather(*tasks)
-
     all_models = {}
-    for model_list in results:
-        for model in model_list:
-            if "name" in model:
-                all_models[model['name']] = model
+    for server in servers:
+        if server.available_models:  # This is the JSON field from the DB
+            for model in server.available_models:
+                if isinstance(model, dict) and "name" in model:
+                    # Use the model's name as the key to ensure uniqueness
+                    all_models[model['name']] = model
 
-    # Add the 'auto' model to the list for clients to see
+    # Add the 'auto' model to the list for clients to see, with details for compatibility
     all_models["auto"] = {
         "name": "auto",
         "modified_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "size": 0,
-        "digest": "auto"
+        "digest": "auto",
+        "details": {
+            "parent_model": "",
+            "format": "proxy",
+            "family": "auto",
+            "families": ["auto"],
+            "parameter_size": "N/A",
+            "quantization_level": "N/A"
+        }
     }
 
     await log_crud.create_usage_log(

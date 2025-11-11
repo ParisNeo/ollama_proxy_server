@@ -106,12 +106,26 @@ async def fetch_and_update_models(db: AsyncSession, server_id: int) -> dict:
                 data = response.json()
                 models_data = data.get("data", [])
                 for model in models_data:
+                    model_id = model.get("id")
+                    if not model_id: continue
+                    
+                    family = model_id.split(':')[0].split('-')[0] # Best guess for family
+
                     models.append({
-                        "name": model.get("id"),
+                        "name": model_id,
                         "size": 0,  # Not available from vLLM API
                         "modified_at": datetime.datetime.fromtimestamp(
                             model.get("created", 0), tz=datetime.timezone.utc
                         ).isoformat(),
+                        "digest": model_id, # Use ID as a stand-in for digest
+                        "details": {
+                            "parent_model": "",
+                            "format": "vllm",
+                            "family": family,
+                            "families": [family] if family else None,
+                            "parameter_size": "N/A",
+                            "quantization_level": "N/A"
+                        }
                     })
             else:  # Default to "ollama"
                 endpoint_url = f"{server.url.rstrip('/')}/api/tags"
