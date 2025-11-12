@@ -69,9 +69,13 @@
                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0 3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
             </button>
             <select id="model-selector" class="px-3 py-2 rounded-md shadow-sm focus:outline-none focus:ring-[var(--color-primary-500)] focus:border-[var(--color-primary-500)] sm:text-sm">
-                {% if models %}
-                    {% for model in models %}
-                    <option value="{{ model }}" {% if model == selected_model %}selected{% endif %}>{{ model }}</option>
+                {% if model_groups %}
+                    {% for server_name, models in model_groups.items() %}
+                        <optgroup label="{{ server_name }}">
+                        {% for model in models %}
+                            <option value="{{ model }}" {% if model == selected_model %}selected{% endif %}>{{ model }}</option>
+                        {% endfor %}
+                        </optgroup>
                     {% endfor %}
                 {% else %}
                     <option value="" disabled>No chat models found</option>
@@ -639,7 +643,7 @@ SUPPORTED ANNOTATION SCHEMAS:
                                 botStatsElement.classList.remove('hidden');
                             }
                             fullResponse += data.message.content;
-                            renderBotMessage(botContentElement, fullResponse);
+                            renderBotMessage(botContentElement, fullResponse, lastSentImageURL);
                             highlightAndMathify(botContentElement);
                         }
                         
@@ -675,11 +679,15 @@ SUPPORTED ANNOTATION SCHEMAS:
         } finally {
             toggleLoading(false);
             if (!streamError) {
-                messages.push({
+                const newMessage = {
                     role: 'assistant',
                     content: fullResponse,
                     stats: (currentTTFT !== null && currentTPS !== null) ? { ttft: currentTTFT, tps: currentTPS } : null
-                });
+                };
+                if (fullResponse.includes('<annotate>')) {
+                    newMessage.annotated_image_url = lastSentImageURL;
+                }
+                messages.push(newMessage);
                 updateGlobalStats();
             }
             renderChat(); 
@@ -719,7 +727,7 @@ SUPPORTED ANNOTATION SCHEMAS:
         await fetchStreamedResponse();
     }
     
-    function renderBotMessage(container, rawContent) {
+    function renderBotMessage(container, rawContent, imageUrlForAnnotation) {
         const contentString = String(rawContent || '');
         container.dataset.rawContent = rawContent;
 
@@ -741,12 +749,12 @@ SUPPORTED ANNOTATION SCHEMAS:
             } else if (part.startsWith('<annotate>')) {
                 const annotationJson = part.slice(10, -11);
                 const safeJson = annotationJson.replace(/'/g, "&apos;");
-                if (!lastSentImageURL) {
-                    finalHtml += `<div class="text-red-400">Error: Could not find an image to annotate.</div>`;
+                if (!imageUrlForAnnotation) {
+                    finalHtml += `<div class="text-red-400">Error: Could not find an image to annotate for this message.</div>`;
                 } else {
                     const uniqueId = `annotation-container-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
-                    finalHtml += `<div id="${uniqueId}" class="annotated-image-container relative mt-2 group" data-annotations='${safeJson}'>
-                        <img src="${lastSentImageURL}" class="block max-w-full h-auto rounded-md">
+                    finalHtml += `<div id="${uniqueId}" class="annotated-image-container relative mt-2 group" data-annotations='${safeJson}' data-image-url="${imageUrlForAnnotation}">
+                        <img src="${imageUrlForAnnotation}" class="block max-w-full h-auto rounded-md">
                         <div class="annotation-overlay"></div>
                         <div class="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
                            <button class="save-annotation-btn p-2 rounded-md bg-gray-800/80 hover:bg-gray-700 text-white" title="Save Annotated Image">
@@ -769,15 +777,16 @@ SUPPORTED ANNOTATION SCHEMAS:
             chatContainer.innerHTML = '<div class="text-center text-gray-400">Select a model and start chatting.</div>';
             return;
         }
-        messages.forEach((msg, index) => appendMessage(msg.role, msg.content, msg.stats, false, index));
+        messages.forEach((msg, index) => appendMessage(msg, index));
         if (isLoading) {
-            appendMessage('assistant', '', null, true, messages.length);
+            appendMessage({role: 'assistant', content: ''}, messages.length, true);
         }
         highlightAndMathify(chatContainer);
         processAnnotations();
     }
     
-    function appendMessage(role, content, stats, isPlaceholder = false, messageIndex) {
+    function appendMessage(msg, messageIndex, isPlaceholder = false) {
+        const { role, content, stats } = msg;
         const messageWrapper = document.createElement('div');
         messageWrapper.className = `flex gap-4 message-wrapper group ${role === 'user' ? 'justify-end' : 'justify-start'}`;
         messageWrapper.dataset.messageIndex = messageIndex;
@@ -807,7 +816,7 @@ SUPPORTED ANNOTATION SCHEMAS:
             actionsDiv.innerHTML = actionsHTML;
 
             if (role === 'assistant') {
-                renderBotMessage(contentDiv, content);
+                renderBotMessage(contentDiv, content, msg.annotated_image_url);
                 if (stats && stats.ttft !== null && stats.tps !== null) {
                     statsDiv.innerHTML = `<span>TTFT: ${stats.ttft}ms</span> | <span>Speed: ${stats.tps.toFixed(2)} t/s</span>`;
                     statsDiv.classList.remove('hidden');
@@ -1210,13 +1219,12 @@ SUPPORTED ANNOTATION SCHEMAS:
         thinkingToggleContainer.classList.add('hidden');
         thinkingLevelContainer.classList.add('hidden');
 
-        if (isGptOss) {
+        if (isGptOss || isSimpleThink) {
             thinkingToggleContainer.classList.remove('hidden');
-            if (isThinkingMode) {
-                thinkingLevelContainer.classList.remove('hidden');
-            }
-        } else if (isSimpleThink) {
-            thinkingToggleContainer.classList.remove('hidden');
+        }
+
+        if (isGptOss && isThinkingMode) {
+            thinkingLevelContainer.classList.remove('hidden');
         }
     }
 
@@ -1325,7 +1333,8 @@ SUPPORTED ANNOTATION SCHEMAS:
         const saveAnnotationBtn = e.target.closest('.save-annotation-btn');
         if (saveAnnotationBtn) {
             const container = saveAnnotationBtn.closest('.annotated-image-container');
-            await saveAnnotatedImage(lastSentImageURL, container);
+            const imageUrl = container.dataset.imageUrl;
+            await saveAnnotatedImage(imageUrl, container);
             return;
         }
         

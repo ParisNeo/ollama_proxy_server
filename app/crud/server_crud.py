@@ -68,13 +68,7 @@ async def update_server(db: AsyncSession, server_id: int, server_update: ServerU
         
     for key, value in update_data.items():
         if value is not None:
-            # FIX: The value for 'url' from Pydantic is a Url object, not a string.
-            # SQLAlchemy's DB driver for SQLite cannot handle this type.
-            # We must convert it to a string before setting it on the model.
-            if key == "url":
-                setattr(db_server, key, str(value))
-            else:
-                setattr(db_server, key, value)
+            setattr(db_server, key, value)
             
     await db.commit()
     await db.refresh(db_server)
@@ -281,48 +275,28 @@ async def unload_model_on_server(http_client: httpx.AsyncClient, server: OllamaS
         logger.error(f"{error_msg} on server '{server.name}'")
         return {"success": False, "message": error_msg}
 
-def get_model_names_from_server(server: OllamaServer) -> set[str]:
-    """
-    Extract all model names from a server's available_models field.
-    Returns a set of model names for fast lookup.
-    """
-    if not server.available_models:
-        return set()
-
-    model_names = set()
-    for model in server.available_models:
-        if isinstance(model, dict) and "name" in model:
-            # Add both the full name and any base name (without tags)
-            full_name = model["name"]
-            model_names.add(full_name)
-
-            # Also add the base name without version tag (e.g., "llama2" from "llama2:latest")
-            if ":" in full_name:
-                base_name = full_name.split(":")[0]
-                model_names.add(base_name)
-
-    return model_names
-
 async def get_servers_with_model(db: AsyncSession, model_name: str) -> list[OllamaServer]:
     """
-    Get all active servers that have the specified model available.
-
-    Args:
-        db: Database session
-        model_name: Name of the model to search for (can be with or without tag)
-
-    Returns:
-        List of OllamaServer instances that have the model
+    Get all active servers that have the specified model available, using flexible matching.
     """
     servers = await get_servers(db)
     active_servers = [s for s in servers if s.is_active]
 
     servers_with_model = []
     for server in active_servers:
-        available_models = get_model_names_from_server(server)
-        if model_name in available_models:
-            servers_with_model.append(server)
-
+        if server.available_models:
+            for model_data in server.available_models:
+                if isinstance(model_data, dict) and "name" in model_data:
+                    available_model_name = model_data["name"]
+                    # Flexible matching:
+                    # 1. Exact match (e.g., "llama3:8b" == "llama3:8b")
+                    # 2. Prefix match (e.g., "llama3" matches "llama3:8b")
+                    # 3. Substring match for vLLM (e.g., "Llama-2-7b" matches "models--meta-llama--Llama-2-7b-chat-hf")
+                    if (available_model_name == model_name or 
+                        available_model_name.startswith(f"{model_name}:") or
+                        (server.server_type == 'vllm' and model_name in available_model_name)):
+                        servers_with_model.append(server)
+                        break  # Found on this server, move to the next
     return servers_with_model
 
 def is_embedding_model(model_name: str) -> bool:
@@ -341,7 +315,16 @@ async def get_all_available_model_names(db: AsyncSession, filter_type: Optional[
     for server in active_servers:
         if not server.available_models:
             continue
-        for model in server.available_models:
+        
+        models_list = server.available_models
+        if isinstance(models_list, str):
+            try:
+                models_list = json.loads(models_list)
+            except json.JSONDecodeError:
+                logger.warning(f"Could not parse available_models JSON for server {server.name} in get_all_available_model_names")
+                continue
+
+        for model in models_list:
             if isinstance(model, dict) and "name" in model:
                 model_name = model["name"]
                 is_embed = is_embedding_model(model_name)
@@ -354,6 +337,55 @@ async def get_all_available_model_names(db: AsyncSession, filter_type: Optional[
                     all_models.add(model_name)
     
     return sorted(list(all_models))
+
+async def get_all_models_grouped_by_server(db: AsyncSession, filter_type: Optional[str] = None) -> Dict[str, List[str]]:
+    """
+    Gets all available model names, grouped by their server, and includes proxy-native models.
+    """
+    servers = await get_servers(db)
+    active_servers = [s for s in servers if s.is_active]
+
+    grouped_models = {}
+    for server in active_servers:
+        server_models = []
+        if server.available_models:
+            models_list = server.available_models
+            if isinstance(models_list, str):
+                try:
+                    models_list = json.loads(models_list)
+                except json.JSONDecodeError:
+                    logger.warning(f"Could not parse available_models JSON for server {server.name} in get_all_models_grouped_by_server")
+                    continue
+                    
+            for model in models_list:
+                if isinstance(model, dict) and "name" in model:
+                    model_name = model["name"]
+                    is_embed = is_embedding_model(model_name)
+                    
+                    should_add = False
+                    if filter_type == 'embedding' and is_embed:
+                        should_add = True
+                    elif filter_type == 'chat' and not is_embed:
+                        should_add = True
+                    elif filter_type is None:
+                        should_add = True
+                    
+                    if should_add:
+                        server_models.append(model_name)
+        
+        if server_models:
+            grouped_models[server.name] = sorted(server_models)
+
+    # Create a new dictionary to control order and add proxy-native models like 'auto'
+    final_grouped_models = {}
+    if filter_type == 'chat' or filter_type is None:
+        final_grouped_models["Proxy Features"] = ["auto"]
+    
+    # Merge the server-specific models after the proxy features
+    final_grouped_models.update(grouped_models)
+            
+    return final_grouped_models
+
 
 async def get_active_models_all_servers(db: AsyncSession, http_client: httpx.AsyncClient) -> List[Dict[str, Any]]:
     """

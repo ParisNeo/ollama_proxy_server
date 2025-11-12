@@ -15,6 +15,7 @@ from app.crud import server_crud
 from app.api.v1.dependencies import validate_csrf_token_header
 from app.api.v1.routes.admin import require_admin_user, get_template_context, templates
 from app.core.test_prompts import PREBUILT_TEST_PROMPTS
+from app.api.v1.routes.proxy import _select_auto_model
 
 
 logger = logging.getLogger(__name__)
@@ -29,7 +30,7 @@ async def admin_playground_ui(
 ):
     from app.api.v1.dependencies import get_csrf_token
     context = get_template_context(request)
-    context["models"] = await server_crud.get_all_available_model_names(db, filter_type='chat')
+    context["model_groups"] = await server_crud.get_all_models_grouped_by_server(db, filter_type='chat')
     context["selected_model"] = model
     context["csrf_token"] = await get_csrf_token(request)
     return templates.TemplateResponse("admin/model_playground.html", context)
@@ -49,6 +50,17 @@ async def admin_playground_stream(
         
         if not model_name or not messages:
             return JSONResponse({"error": "Model and messages are required."}, status_code=400)
+
+        # --- NEW: Handle 'auto' model routing ---
+        if model_name == "auto":
+            resolved_model = await _select_auto_model(db, data)
+            if not resolved_model:
+                error_payload = {"error": "Auto-routing could not find a suitable model."}
+                return Response(json.dumps(error_payload), media_type="application/x-ndjson", status_code=503)
+            
+            logger.info(f"Playground 'auto' model resolved to -> '{resolved_model}'")
+            model_name = resolved_model
+        # --- END NEW ---
 
         # Handle base64 images, converting them to the format Ollama expects
         for msg in messages:

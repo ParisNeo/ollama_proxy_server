@@ -299,8 +299,18 @@ async def federate_models(
     all_models = {}
     for server in servers:
         # The available_models field is a JSON list of dicts stored in the DB
-        if server.available_models:
-            for model in server.available_models:
+        models_list = server.available_models
+        
+        # Robustly handle if models are stored as a JSON string
+        if isinstance(models_list, str):
+            try:
+                models_list = json.loads(models_list)
+            except json.JSONDecodeError:
+                logger.warning(f"Could not parse available_models JSON for server {server.name}")
+                continue
+
+        if models_list and isinstance(models_list, list):
+            for model in models_list:
                 if isinstance(model, dict) and "name" in model:
                     # Use the model's name as the key to ensure uniqueness across servers.
                     # The last server in the list with a given model name will win.

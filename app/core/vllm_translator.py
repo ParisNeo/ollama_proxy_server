@@ -87,88 +87,113 @@ async def vllm_stream_to_ollama_stream(vllm_stream: AsyncGenerator[str, None], m
     in_tool_call = False
     start_time = time.monotonic()
     total_eval_text = ""
+    buffer = ""
 
-    async for chunk in vllm_stream:
-        if chunk.strip() == "data: [DONE]":
+    async for text_chunk in vllm_stream:
+        buffer += text_chunk
+        lines = buffer.split('\n')
+        buffer = lines.pop() # Keep any partial line for the next chunk
+
+        for line in lines:
+            if not line.strip():
+                continue
+
+            if line.strip() == "data: [DONE]":
+                end_time = time.monotonic()
+                eval_duration_ns = (end_time - start_time) * 1_000_000_000
+                eval_count = len(total_eval_text) // 4
+                
+                final_done_chunk = { 
+                    "model": model_name, 
+                    "done": True,
+                    "eval_count": eval_count,
+                    "eval_duration": int(eval_duration_ns)
+                }
+                yield (json.dumps(final_done_chunk) + '\n').encode('utf-8')
+                return # End of stream, stop the generator.
+
+            if not line.startswith("data: "):
+                continue
+
+            try:
+                data_str = line.lstrip("data: ").strip()
+                if not data_str:
+                    continue
+                
+                data = json.loads(data_str)
+                delta = data.get("choices", [{}])[0].get("delta", {})
+                finish_reason = data.get("choices", [{}])[0].get("finish_reason")
+
+                # --- Handle Tool Call for "thinking" ---
+                if "tool_calls" in delta:
+                    if not in_tool_call:
+                        in_tool_call = True
+                        # Yield <think> start tag as a separate message
+                        start_think_chunk = {
+                            "model": model_name, "created_at": data.get("created"),
+                            "message": {"role": "assistant", "content": "<think>"}, "done": False
+                        }
+                        yield (json.dumps(start_think_chunk) + '\n').encode('utf-8')
+                    
+                    tool_call_part = delta["tool_calls"][0].get("function", {}).get("arguments", "")
+                    if tool_call_part:
+                        tool_call_buffer += tool_call_part
+                
+                # --- Process completed tool call ---
+                if in_tool_call and finish_reason == "tool_calls":
+                    try:
+                        args = json.loads(tool_call_buffer)
+                        steps = args.get("steps", [])
+                        thinking_content = '\n'.join(steps) if isinstance(steps, list) else str(steps)
+                        total_eval_text += thinking_content
+                        
+                        # Yield the content of the thought
+                        ollama_chunk = {
+                            "model": model_name, "created_at": data.get("created"),
+                            "message": {"role": "assistant", "content": thinking_content}, "done": False,
+                        }
+                        yield (json.dumps(ollama_chunk) + '\n').encode('utf-8')
+                        
+                        # Yield the closing </think> tag
+                        end_think_chunk = {
+                            "model": model_name, "created_at": data.get("created"),
+                            "message": {"role": "assistant", "content": "</think>"}, "done": False
+                        }
+                        yield (json.dumps(end_think_chunk) + '\n').encode('utf-8')
+                        
+                    except json.JSONDecodeError as e:
+                        logger.error(f"Failed to parse tool call arguments: {tool_call_buffer}. Error: {e}")
+                    
+                    tool_call_buffer = ""
+                    in_tool_call = False
+                    if "content" not in delta or not delta.get("content"):
+                        continue
+
+                # --- Handle regular content ---
+                if content := delta.get("content"):
+                    total_eval_text += content
+                    ollama_chunk = {
+                        "model": model_name, "created_at": data.get("created"),
+                        "message": {"role": "assistant", "content": content}, "done": False,
+                    }
+                    yield (json.dumps(ollama_chunk) + '\n').encode('utf-8')
+
+            except (json.JSONDecodeError, IndexError) as e:
+                logger.warning(f"Could not parse VLLM stream chunk: {line}. Error: {e}")
+                continue
+    
+    # Process any final data left in the buffer. This is a safeguard.
+    if buffer.strip():
+        line = buffer.strip()
+        if line.strip() == "data: [DONE]":
             end_time = time.monotonic()
             eval_duration_ns = (end_time - start_time) * 1_000_000_000
             eval_count = len(total_eval_text) // 4
-            
             final_done_chunk = { 
-                "model": model_name, 
-                "done": True,
-                "eval_count": eval_count,
-                "eval_duration": int(eval_duration_ns)
+                "model": model_name, "done": True,
+                "eval_count": eval_count, "eval_duration": int(eval_duration_ns)
             }
             yield (json.dumps(final_done_chunk) + '\n').encode('utf-8')
-            break
-
-        if not chunk.startswith("data: "):
-            continue
-
-        try:
-            data_str = chunk.lstrip("data: ").strip()
-            data = json.loads(data_str)
-            delta = data.get("choices", [{}])[0].get("delta", {})
-            finish_reason = data.get("choices", [{}])[0].get("finish_reason")
-
-            # --- Handle Tool Call for "thinking" ---
-            if "tool_calls" in delta:
-                if not in_tool_call:
-                    in_tool_call = True
-                    # Yield <think> start tag as a separate message
-                    start_think_chunk = {
-                        "model": model_name, "created_at": data.get("created"),
-                        "message": {"role": "assistant", "content": "<think>"}, "done": False
-                    }
-                    yield (json.dumps(start_think_chunk) + '\n').encode('utf-8')
-                
-                tool_call_part = delta["tool_calls"][0].get("function", {}).get("arguments", "")
-                if tool_call_part:
-                    tool_call_buffer += tool_call_part
-            
-            # --- Process completed tool call ---
-            if in_tool_call and finish_reason == "tool_calls":
-                try:
-                    args = json.loads(tool_call_buffer)
-                    steps = args.get("steps", [])
-                    thinking_content = '\n'.join(steps) if isinstance(steps, list) else str(steps)
-                    total_eval_text += thinking_content
-                    
-                    # Yield the content of the thought
-                    ollama_chunk = {
-                        "model": model_name, "created_at": data.get("created"),
-                        "message": {"role": "assistant", "content": thinking_content}, "done": False,
-                    }
-                    yield (json.dumps(ollama_chunk) + '\n').encode('utf-8')
-                    
-                    # Yield the closing </think> tag
-                    end_think_chunk = {
-                        "model": model_name, "created_at": data.get("created"),
-                        "message": {"role": "assistant", "content": "</think>"}, "done": False
-                    }
-                    yield (json.dumps(end_think_chunk) + '\n').encode('utf-8')
-                    
-                except json.JSONDecodeError as e:
-                    logger.error(f"Failed to parse tool call arguments: {tool_call_buffer}. Error: {e}")
-                
-                tool_call_buffer = ""
-                in_tool_call = False
-                if "content" not in delta or not delta.get("content"):
-                    continue
-
-            # --- Handle regular content ---
-            if content := delta.get("content"):
-                total_eval_text += content
-                ollama_chunk = {
-                    "model": model_name, "created_at": data.get("created"),
-                    "message": {"role": "assistant", "content": content}, "done": False,
-                }
-                yield (json.dumps(ollama_chunk) + '\n').encode('utf-8')
-
-        except (json.JSONDecodeError, IndexError) as e:
-            logger.warning(f"Could not parse VLLM stream chunk: {chunk}. Error: {e}")
-            continue
 
 
 def translate_vllm_to_ollama_embeddings(vllm_payload: Dict[str, Any]) -> Dict[str, Any]:
