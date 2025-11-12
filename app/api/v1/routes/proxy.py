@@ -289,36 +289,59 @@ async def _proxy_to_vllm(
 async def federate_models(
     request: Request,
     api_key: APIKey = Depends(get_valid_api_key),
-    db: AsyncSession = Depends(get_db),
-    servers: List[OllamaServer] = Depends(get_active_servers),
+    db: AsyncSession = Depends(get_db)
 ):
     """
     Aggregates models from all configured backends (Ollama and vLLM)
     using the cached model data from the database for efficiency.
     """
+    logger.info("--- /tags endpoint: Starting model federation ---")
+    all_servers = await server_crud.get_servers(db)
+    servers = [s for s in all_servers if s.is_active]
+    logger.info(f"/tags: Found {len(servers)} active servers.")
+
     all_models = {}
     for server in servers:
-        # The available_models field is a JSON list of dicts stored in the DB
-        models_list = server.available_models
+        logger.info(f"/tags: Processing server '{server.name}' (type: {server.server_type})")
+        models_list = server.available_models or []
         
-        # Robustly handle if models are stored as a JSON string
+        raw_models_repr = repr(models_list)
+        if len(raw_models_repr) > 300:
+            raw_models_repr = raw_models_repr[:300] + '... (truncated)'
+        logger.info(f"/tags: Raw 'available_models' for '{server.name}': {raw_models_repr}")
+
         if isinstance(models_list, str):
             try:
                 models_list = json.loads(models_list)
+                logger.info(f"/tags: Successfully parsed JSON string for '{server.name}'")
             except json.JSONDecodeError:
-                logger.warning(f"Could not parse available_models JSON for server {server.name}")
+                logger.warning(f"/tags: Could not parse available_models JSON for server {server.name}")
                 continue
 
-        if models_list and isinstance(models_list, list):
-            for model in models_list:
-                if isinstance(model, dict) and "name" in model:
-                    # Use the model's name as the key to ensure uniqueness across servers.
-                    # The last server in the list with a given model name will win.
-                    all_models[model['name']] = model
+        if not isinstance(models_list, list):
+            logger.warning(f"/tags: Field available_models for server {server.name} is not a list. Type is {type(models_list)}")
+            continue
+
+        model_count_on_server = 0
+        for model in models_list:
+            if isinstance(model, dict) and "name" in model:
+                # --- FIX: Ensure 'model' key exists for compatibility with Ollama clients ---
+                if "model" not in model:
+                    model["model"] = model["name"]
+                # --- END FIX ---
+                all_models[model['name']] = model
+                model_count_on_server += 1
+            else:
+                logger.warning(f"/tags: Invalid model format found for server '{server.name}': {model}")
+        
+        logger.info(f"/tags: Added {model_count_on_server} models from server '{server.name}'")
+
+    logger.info(f"/tags: Total unique models before adding 'auto': {len(all_models)}")
 
     # Add the 'auto' model to the list for clients to see, with details for compatibility
     all_models["auto"] = {
         "name": "auto",
+        "model": "auto",
         "modified_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "size": 0,
         "digest": "auto-digest-placeholder",
@@ -336,7 +359,10 @@ async def federate_models(
         db=db, api_key_id=api_key.id, endpoint="/api/tags", status_code=200, server_id=None
     )
     
-    return {"models": list(all_models.values())}
+    final_model_list = list(all_models.values())
+    logger.info("--- /tags endpoint: Finished model federation ---")
+
+    return {"models": final_model_list}
 
 
 async def _select_auto_model(db: AsyncSession, body: Dict[str, Any]) -> Optional[str]:
