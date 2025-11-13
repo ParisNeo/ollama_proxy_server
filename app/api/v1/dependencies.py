@@ -10,7 +10,7 @@ import secrets
 from typing import Optional
 
 import redis.asyncio as redis
-from fastapi import Depends, Form, HTTPException, Header, Request, status
+from fastapi import Depends, Form, Header, HTTPException, Request, status
 from fastapi.security import APIKeyHeader
 from sqlalchemy.ext.asyncio import AsyncSession
 

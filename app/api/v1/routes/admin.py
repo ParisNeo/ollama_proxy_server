@@ -19,19 +19,16 @@ from typing import Any, Dict, List, Optional, Union
 import httpx
 import psutil
 import redis.asyncio as redis
-from fastapi import (APIRouter, Depends, File, Form, HTTPException, Query,
-                     Request, UploadFile, status)
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.v1.dependencies import (get_csrf_token, login_rate_limiter,
-                                     validate_csrf_token)
+from app.api.v1.dependencies import get_csrf_token, login_rate_limiter, validate_csrf_token
 from app.core.config import settings
 from app.core.security import verify_password
-from app.crud import (apikey_crud, log_crud, model_metadata_crud, server_crud,
-                      settings_crud, user_crud)
+from app.crud import apikey_crud, log_crud, model_metadata_crud, server_crud, settings_crud, user_crud
 from app.database.models import User
 from app.database.session import get_db
 from app.schema.server import ServerCreate, ServerUpdate

@@ -43,6 +43,7 @@ flake8-import-order = "^0.18.2"
 flake8-bugbear = "^24.8.19"
 pylint = "^3.2.6"
 ruff = "^0.5.7"
+isort = "^5.13.2"
 tox = "^4.16.0"
 tox-gh-actions = "^3.2.0"
 bandit = "^1.7.9"
@@ -69,6 +70,6 @@ profile = "black"
 line_length = 180
 
 [tool.flake8]
-ignore = ["I201", "I200"]
+ignore = ["I201", "I200", "I101"]
 extend-immutable-calls = ["fastapi.Depends", "fastapi.params.Depends"]
 max-line-length = 180

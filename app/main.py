@@ -24,8 +24,7 @@ from starlette.responses import RedirectResponse
 from app.api.v1.routes.admin import router as admin_router
 from app.api.v1.routes.health import router as health_router
 from app.api.v1.routes.playground_chat import router as playground_chat_router
-from app.api.v1.routes.playground_embedding import \
-    router as playground_embedding_router
+from app.api.v1.routes.playground_embedding import router as playground_embedding_router
 from app.api.v1.routes.proxy import router as proxy_router
 from app.core.config import settings
 from app.core.logging_config import setup_logging

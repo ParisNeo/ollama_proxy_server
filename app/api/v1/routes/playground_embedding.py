@@ -16,8 +16,7 @@ from sklearn.decomposition import PCA
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.dependencies import validate_csrf_token_header
-from app.api.v1.routes.admin import (get_template_context, require_admin_user,
-                                     templates)
+from app.api.v1.routes.admin import get_template_context, require_admin_user, templates
 from app.core.benchmarks import PREBUILT_BENCHMARKS
 from app.crud import server_crud
 from app.database.models import OllamaServer, User
@@ -60,9 +59,7 @@ async def get_embedding(http_client: httpx.AsyncClient, server: OllamaServer, mo
     headers = _get_auth_headers(server)
     try:
         if server.server_type == "vllm":
-            from app.core.vllm_translator import (
-                translate_ollama_to_vllm_embeddings,
-                translate_vllm_to_ollama_embeddings)
+            from app.core.vllm_translator import translate_ollama_to_vllm_embeddings, translate_vllm_to_ollama_embeddings
 
             url = f"{server.url.rstrip('/')}/v1/embeddings"
             payload = translate_ollama_to_vllm_embeddings({"model": model_name, "prompt": prompt})
