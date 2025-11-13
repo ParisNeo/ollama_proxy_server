@@ -1,0 +1,236 @@
+stages:
+  - lint
+  - test
+  - security-bandit
+  - security-safety
+  - build
+
+variables:
+  POETRY_CACHE_DIR: "$CI_PROJECT_DIR/.cache/poetry"
+  POETRY_VIRTUALENVS_IN_PROJECT: "true"
+
+cache:
+  paths:
+    - .cache/poetry
+    - .venv/
+    - .tox/
+
+.lint-template: &lint-template
+  stage: lint
+  before_script:
+    - python -m pip install --upgrade pip
+    - pip install poetry
+    - poetry config cache-dir $POETRY_CACHE_DIR
+    - poetry install --with dev
+  script:
+    - poetry run tox -e flake8,pylint,ruff
+  artifacts:
+    reports:
+      junit: reports/
+    paths:
+      - .tox/
+    expire_in: 1 week
+  only:
+    - merge_requests
+    - main
+    - develop
+
+.test-template: &test-template
+  stage: test
+  before_script:
+    - python -m pip install --upgrade pip
+    - pip install poetry
+    - poetry config cache-dir $POETRY_CACHE_DIR
+    - poetry install --with dev
+  script:
+    - poetry run pytest --cov=app --cov-report=xml --cov-report=html --cov-report=term-missing
+  artifacts:
+    reports:
+      junit: reports/
+      coverage_report:
+        coverage_format: cobertura
+        path: coverage.xml
+    paths:
+      - coverage.xml
+      - htmlcov/
+      - .tox/
+    expire_in: 1 week
+  only:
+    - merge_requests
+    - main
+    - develop
+
+# Linux jobs
+lint-linux:
+  <<: *lint-template
+  image: python:3.12-slim
+  tags:
+    - linux
+    - docker
+
+test-linux-311:
+  <<: *test-template
+  image: python:3.11-slim
+  variables:
+    PYTHON_VERSION: "311"
+  tags:
+    - linux
+    - docker
+
+test-linux-312:
+  <<: *test-template
+  image: python:3.12-slim
+  variables:
+    PYTHON_VERSION: "312"
+  tags:
+    - linux
+    - docker
+
+test-linux-313:
+  <<: *test-template
+  image: python:3.13-slim
+  variables:
+    PYTHON_VERSION: "313"
+  tags:
+    - linux
+    - docker
+
+# Windows jobs
+lint-windows:
+  <<: *lint-template
+  tags:
+    - windows
+    - shell
+
+test-windows-311:
+  <<: *test-template
+  tags:
+    - windows
+    - shell
+  variables:
+    PYTHON_VERSION: "311"
+
+test-windows-312:
+  <<: *test-template
+  tags:
+    - windows
+    - shell
+  variables:
+    PYTHON_VERSION: "312"
+
+test-windows-313:
+  <<: *test-template
+  tags:
+    - windows
+    - shell
+  variables:
+    PYTHON_VERSION: "313"
+
+# macOS jobs
+lint-macos:
+  <<: *lint-template
+  tags:
+    - macos
+    - shell
+
+test-macos-311:
+  <<: *test-template
+  tags:
+    - macos
+    - shell
+  variables:
+    PYTHON_VERSION: "311"
+
+test-macos-312:
+  <<: *test-template
+  tags:
+    - macos
+    - shell
+  variables:
+    PYTHON_VERSION: "312"
+
+test-macos-313:
+  <<: *test-template
+  tags:
+    - macos
+    - shell
+  variables:
+    PYTHON_VERSION: "313"
+
+# Security checks - Bandit
+security-bandit:
+  stage: security-bandit
+  image: python:3.12-slim
+  before_script:
+    - python -m pip install --upgrade pip
+    - pip install poetry
+    - poetry config cache-dir $POETRY_CACHE_DIR
+    - poetry install --with dev
+  script:
+    - poetry run tox -e security-bandit
+  artifacts:
+    reports:
+      sast: gl-sast-report.json
+    paths:
+      - bandit-report.json
+    expire_in: 1 week
+  only:
+    - merge_requests
+    - main
+    - develop
+  tags:
+    - linux
+    - docker
+
+# Security checks - Safety
+security-safety:
+  stage: security-safety
+  image: python:3.12-slim
+  before_script:
+    - python -m pip install --upgrade pip
+    - pip install poetry
+    - poetry config cache-dir $POETRY_CACHE_DIR
+    - poetry install --with dev
+  script:
+    - poetry run tox -e security-safety
+  artifacts:
+    paths:
+      - safety-report.json
+    expire_in: 1 week
+  only:
+    - merge_requests
+    - main
+    - develop
+  tags:
+    - linux
+    - docker
+
+# Build stage
+build:
+  stage: build
+  image: python:3.12-slim
+  before_script:
+    - python -m pip install --upgrade pip
+    - pip install poetry
+    - poetry config cache-dir $POETRY_CACHE_DIR
+    - poetry install --with dev
+  script:
+    - poetry build
+    - poetry run twine check dist/*
+  artifacts:
+    paths:
+      - dist/
+    expire_in: 1 week
+  only:
+    - main
+    - develop
+  tags:
+    - linux
+    - docker
+  dependencies:
+    - lint-linux
+    - test-linux-311
+    - test-linux-312
+    - test-linux-313
+    - security-bandit
+    - security-safety
