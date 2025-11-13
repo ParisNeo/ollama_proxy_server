@@ -2,20 +2,20 @@
 import logging
 import json
 import asyncio
-from typing import List, Dict, Any, Optional
+from typing import List
 from pathlib import Path
 
 import numpy as np
 from sklearn.decomposition import PCA
-from pydantic import BaseModel, conlist, AnyHttpUrl
+from pydantic import BaseModel, Field
 import httpx
 
-from fastapi import APIRouter, Depends, Request, HTTPException, Query
+from fastapi import APIRouter, Depends, Request, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.session import get_db
-from app.database.models import User
+from app.database.models import User, OllamaServer
 from app.crud import server_crud
 from app.api.v1.dependencies import validate_csrf_token_header
 from app.api.v1.routes.admin import require_admin_user, get_template_context, templates
@@ -40,12 +40,12 @@ class BenchmarkPayload(BaseModel):
 
 
 class BenchmarkRequest(BaseModel):
-    models: conlist(str, min_length=1)
+    models: list[str] = Field(..., min_length=1)
     benchmark: BenchmarkPayload
 
 
 # --- Helper Function ---
-async def get_embedding(http_client: httpx.AsyncClient, server: "OllamaServer", model_name: str, prompt: str) -> List[float]:
+async def get_embedding(http_client: httpx.AsyncClient, server: OllamaServer, model_name: str, prompt: str) -> List[float]:
     """Helper to get a single embedding from a server."""
     from app.crud.server_crud import _get_auth_headers
 

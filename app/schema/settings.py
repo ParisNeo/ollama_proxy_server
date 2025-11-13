@@ -1,6 +1,6 @@
 # 📁 app/schema/settings.py
 from pydantic import BaseModel, Field, field_validator, ConfigDict
-from typing import List, Optional, Dict
+from typing import Optional, Dict
 
 
 class AppSettingsModel(BaseModel):

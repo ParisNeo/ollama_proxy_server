@@ -14,7 +14,6 @@ Features
 import logging
 import logging.config
 import os
-import sys
 from pythonjsonlogger import jsonlogger
 
 

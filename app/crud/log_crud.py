@@ -1,6 +1,6 @@
 # app/crud/log_crud.py
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import func, select, text, Date  # <-- Import Date
+from sqlalchemy import func, select, Date  # <-- Import Date
 from app.database.models import UsageLog, APIKey, User, OllamaServer
 import datetime
 

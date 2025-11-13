@@ -1,11 +1,10 @@
-import asyncio
 import json
 import logging
 import datetime
 from typing import List, Tuple, Optional, Dict, Any
 from fastapi import APIRouter, Depends, Request, Response, HTTPException, status
 from fastapi.responses import StreamingResponse, JSONResponse
-from httpx import AsyncClient
+import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.session import get_db
@@ -58,7 +57,7 @@ async def extract_model_from_request(request: Request) -> Optional[str]:
     return None
 
 
-async def _send_backend_request(http_client: AsyncClient, server: OllamaServer, path: str, method: str, headers: dict, query_params, body_bytes: bytes):
+async def _send_backend_request(http_client: httpx.AsyncClient, server: OllamaServer, path: str, method: str, headers: dict, query_params, body_bytes: bytes):
     """
     Internal function to send a single request to a backend server.
     This function is wrapped by retry logic.
@@ -95,7 +94,7 @@ async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer
     Core reverse proxy logic with retry support. Forwards the request to a backend
     Ollama server and streams the response back. Returns the response and the chosen server.
     """
-    http_client: AsyncClient = request.app.state.http_client
+    http_client: httpx.AsyncClient = request.app.state.http_client
     app_settings: AppSettingsModel = request.app.state.settings
 
     # Get retry configuration from app settings
@@ -173,7 +172,7 @@ async def _proxy_to_vllm(request: Request, server: OllamaServer, path: str, body
     """
     Handles proxying a request to a vLLM server, including payload and response translation.
     """
-    http_client: AsyncClient = request.app.state.http_client
+    http_client: httpx.AsyncClient = request.app.state.http_client
 
     try:
         ollama_payload = json.loads(body_bytes) if body_bytes else {}

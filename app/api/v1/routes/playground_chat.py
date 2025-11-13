@@ -2,9 +2,9 @@
 import logging
 import json
 import time
-from typing import Optional, Union
+from typing import Optional
 
-from fastapi import APIRouter, Depends, Request, HTTPException, Query
+from fastapi import APIRouter, Depends, Request, Query
 from fastapi.responses import JSONResponse, StreamingResponse, HTMLResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 import httpx

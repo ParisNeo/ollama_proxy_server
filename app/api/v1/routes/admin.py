@@ -9,14 +9,12 @@ import asyncio
 import secrets
 from pathlib import Path
 import os
-from pydantic import AnyHttpUrl
 
 from fastapi import APIRouter, Depends, Request, Form, HTTPException, status, Query, UploadFile, File
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.exc import IntegrityError
 
 from app.core.config import settings
 from app.core.security import verify_password

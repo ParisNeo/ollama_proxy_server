@@ -3,7 +3,6 @@ from fastapi import Depends, HTTPException, status, Request, Form, Header
 from fastapi.security import APIKeyHeader
 from sqlalchemy.ext.asyncio import AsyncSession
 import redis.asyncio as redis
-import time
 import secrets
 
 from app.schema.settings import AppSettingsModel  # <-- NEW

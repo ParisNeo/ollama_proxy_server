@@ -4,26 +4,21 @@ Main entry point for the Ollama Proxy Server.
 This version removes Alembic and uses SQLAlchemy's create_all
 to initialize the database on startup.
 """
+
 import logging
 import os
 import sys
-from pydantic import BaseModel, ConfigDict
-
-# --- Suppress Pydantic 'model_' namespace warning ---
-# This must be at the very top, before other app modules are imported.
-# It prevents warnings when a Pydantic model field name starts with "model_".
-BaseModel.model_config = ConfigDict(protected_namespaces=())
+from contextlib import asynccontextmanager
+from pathlib import Path
 
 import httpx
 import redis.asyncio as redis
-from contextlib import asynccontextmanager
-import json
-from pathlib import Path
-
+from pydantic import BaseModel, ConfigDict
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
-from starlette.responses import RedirectResponse, Response
+from starlette.responses import RedirectResponse
+from sqlalchemy.exc import IntegrityError
 
 from app.core.config import settings
 from app.core.logging_config import setup_logging
@@ -37,8 +32,12 @@ from app.database.base import Base
 from app.database.migrations import run_all_migrations
 from app.crud import user_crud, server_crud, settings_crud
 from app.schema.user import UserCreate
-from app.schema.server import ServerCreate
 from app.schema.settings import AppSettingsModel
+
+# --- Suppress Pydantic 'model_' namespace warning ---
+# This must be at the very top, before other app modules are imported.
+# It prevents warnings when a Pydantic model field name starts with "model_".
+BaseModel.model_config = ConfigDict(protected_namespaces=())
 
 # --- Logging and Passlib setup ---
 setup_logging(settings.LOG_LEVEL)
@@ -70,9 +69,6 @@ async def init_db():
 
     _db_initialized = True
     logger.info("Database schema is ready.")
-
-
-from sqlalchemy.exc import IntegrityError
 
 
 async def create_initial_admin_user() -> None:

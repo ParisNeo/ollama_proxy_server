@@ -1,6 +1,5 @@
 from sqlalchemy.future import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import update
 from typing import List, Optional
 
 from app.database.models import ModelMetadata

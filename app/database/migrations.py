@@ -4,8 +4,8 @@ Handles schema updates when upgrading from older versions.
 """
 
 import logging
-from typing import Dict, Set, List
-from sqlalchemy import text, inspect
+from typing import Dict, Set
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 logger = logging.getLogger(__name__)
