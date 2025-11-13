@@ -6,6 +6,7 @@ authors = ["ParisNeo <parisneo_ai@gmail.com>"]
 license = "Apache-2.0"
 readme = "README.md"
 repository = "https://github.com/ParisNeo/ollama_proxy_server"
+packages = [{include = "app"}]
 
 [tool.poetry.dependencies]
 python = "^3.11"
@@ -34,7 +35,30 @@ cryptography = "^42.0.8"
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.2.2"
 pytest-asyncio = "^0.23.7"
+pytest-cov = "^5.0.0"
 black = "^24.4.2"
+flake8 = "^7.1.0"
+flake8-docstrings = "^1.7.0"
+flake8-import-order = "^0.18.2"
+flake8-bugbear = "^24.8.19"
+pylint = "^3.2.6"
+ruff = "^0.5.7"
+tox = "^4.16.0"
+tox-gh-actions = "^3.2.0"
+bandit = "^1.7.9"
+safety = "^3.2.4"
+
+[tool.black]
+line-length = 180
+
+[tool.ruff]
+line-length = 180
+
+[tool.pylint.messages_control]
+disable = ["C0301", "C0302", "C0303", "C0304", "C0305"]
+
+[tool.pylint.format]
+max-line-length = 180
 
 [build-system]
 requires = ["poetry-core"]
