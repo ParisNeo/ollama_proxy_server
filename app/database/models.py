@@ -36,10 +36,10 @@ class APIKey(Base):
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     expires_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
-    
+
     is_active = Column(Boolean, default=True, nullable=False)
     is_revoked = Column(Boolean, default=False, nullable=False)
-    
+
     rate_limit_requests = Column(Integer, nullable=True)
     rate_limit_window_minutes = Column(Integer, nullable=True)
 
@@ -82,10 +82,12 @@ class OllamaServer(Base):
     def has_api_key(self) -> bool:
         return bool(self.encrypted_api_key)
 
+
 class AppSettings(Base):
     __tablename__ = "app_settings"
     id = Column(Integer, primary_key=True)
     settings_data = Column(JSON, nullable=False)
+
 
 class ModelMetadata(Base):
     __tablename__ = "model_metadata"
@@ -97,5 +99,5 @@ class ModelMetadata(Base):
     is_chat_model = Column(Boolean, default=True, nullable=False)
     is_fast_model = Column(Boolean, default=False, nullable=False)
     priority = Column(Integer, default=10, nullable=False)
-    
+
     __table_args__ = (UniqueConstraint("model_name", name="uq_model_name"),)

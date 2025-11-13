@@ -25,11 +25,7 @@ async def get_api_keys_for_user(db: AsyncSession, user_id: int) -> list[APIKey]:
 
 
 async def create_api_key(
-    db: AsyncSession, 
-    user_id: int, 
-    key_name: str,
-    rate_limit_requests: Optional[int] = None,
-    rate_limit_window_minutes: Optional[int] = None
+    db: AsyncSession, user_id: int, key_name: str, rate_limit_requests: Optional[int] = None, rate_limit_window_minutes: Optional[int] = None
 ) -> (str, APIKey):
     """
     Generates a new API key, stores its hash, and returns the plain key and the DB object.
@@ -39,7 +35,7 @@ async def create_api_key(
     # This makes the '_' a reliable delimiter.
     prefix_random_part = secrets.token_hex(8)
     prefix = f"op_{prefix_random_part}"
-    
+
     secret = secrets.token_hex(24)
     plain_key = f"{prefix}_{secret}"
     # --- END FIX ---
@@ -47,12 +43,7 @@ async def create_api_key(
     hashed_key = get_api_key_hash(secret)
 
     db_api_key = APIKey(
-        key_name=key_name,
-        hashed_key=hashed_key,
-        key_prefix=prefix,
-        user_id=user_id,
-        rate_limit_requests=rate_limit_requests,
-        rate_limit_window_minutes=rate_limit_window_minutes
+        key_name=key_name, hashed_key=hashed_key, key_prefix=prefix, user_id=user_id, rate_limit_requests=rate_limit_requests, rate_limit_window_minutes=rate_limit_window_minutes
     )
     db.add(db_api_key)
     await db.commit()
@@ -61,15 +52,11 @@ async def create_api_key(
 
 
 async def revoke_api_key(db: AsyncSession, key_id: int) -> APIKey | None:
-    stmt = (
-        update(APIKey)
-        .where(APIKey.id == key_id)
-        .values(is_revoked=True, is_active=False) # Revoking also deactivates
-        .returning(APIKey)
-    )
+    stmt = update(APIKey).where(APIKey.id == key_id).values(is_revoked=True, is_active=False).returning(APIKey)  # Revoking also deactivates
     result = await db.execute(stmt)
     await db.commit()
     return result.scalars().first()
+
 
 async def toggle_api_key_active(db: AsyncSession, key_id: int) -> APIKey | None:
     """Toggles the is_active status of an API key."""
@@ -81,6 +68,7 @@ async def toggle_api_key_active(db: AsyncSession, key_id: int) -> APIKey | None:
     await db.commit()
     await db.refresh(key)
     return key
+
 
 async def get_api_key_by_name_and_user_id(db: AsyncSession, *, key_name: str, user_id: int) -> APIKey | None:
     """Gets an API key by its name for a specific user."""

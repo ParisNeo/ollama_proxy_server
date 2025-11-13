@@ -1,6 +1,7 @@
 from typing import Optional
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+
 class Settings(BaseSettings):
     # --- Bootstrap Settings ---
     # These are the only settings read from the .env file.
@@ -18,7 +19,8 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         case_sensitive = True
-        extra = 'ignore'  # <-- THIS IS THE FIX
+        extra = "ignore"  # <-- THIS IS THE FIX
+
 
 # This `settings` object is now only used for bootstrapping.
 # The rest of the app will use settings loaded from the DB.

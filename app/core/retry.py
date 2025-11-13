@@ -10,12 +10,13 @@ from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
-T = TypeVar('T')
+T = TypeVar("T")
 
 
 @dataclass
 class RetryConfig:
     """Configuration for retry behavior."""
+
     max_retries: int = 5
     total_timeout_seconds: float = 2.0
     base_delay_ms: int = 50
@@ -33,6 +34,7 @@ class RetryConfig:
 @dataclass
 class RetryResult:
     """Result of a retry operation."""
+
     success: bool
     result: Optional[any] = None
     attempts: int = 0
@@ -44,14 +46,7 @@ class RetryResult:
             self.errors = []
 
 
-async def retry_with_backoff(
-    func: Callable,
-    *args,
-    config: RetryConfig,
-    retry_on_exceptions: tuple = (Exception,),
-    operation_name: str = "operation",
-    **kwargs
-) -> RetryResult:
+async def retry_with_backoff(func: Callable, *args, config: RetryConfig, retry_on_exceptions: tuple = (Exception,), operation_name: str = "operation", **kwargs) -> RetryResult:
     """
     Executes a function with exponential backoff retry logic.
 
@@ -79,36 +74,22 @@ async def retry_with_backoff(
         # Check if we've exceeded the total timeout budget
         elapsed = time.time() - start_time
         if elapsed >= config.total_timeout_seconds:
-            logger.warning(
-                f"{operation_name}: Exceeded total timeout of {config.total_timeout_seconds}s "
-                f"after {attempt} attempts"
-            )
+            logger.warning(f"{operation_name}: Exceeded total timeout of {config.total_timeout_seconds}s " f"after {attempt} attempts")
             break
 
         try:
             # Attempt the operation
             if attempt > 0:
-                logger.debug(
-                    f"{operation_name}: Retry attempt {attempt}/{config.max_retries}"
-                )
+                logger.debug(f"{operation_name}: Retry attempt {attempt}/{config.max_retries}")
 
             result = await func(*args, **kwargs)
 
             # Success!
             total_duration_ms = (time.time() - start_time) * 1000
             if attempt > 0:
-                logger.info(
-                    f"{operation_name}: Succeeded on attempt {attempt + 1} "
-                    f"after {total_duration_ms:.1f}ms"
-                )
+                logger.info(f"{operation_name}: Succeeded on attempt {attempt + 1} " f"after {total_duration_ms:.1f}ms")
 
-            return RetryResult(
-                success=True,
-                result=result,
-                attempts=attempt + 1,
-                total_duration_ms=total_duration_ms,
-                errors=errors
-            )
+            return RetryResult(success=True, result=result, attempts=attempt + 1, total_duration_ms=total_duration_ms, errors=errors)
 
         except retry_on_exceptions as e:
             error_msg = f"Attempt {attempt + 1}: {type(e).__name__}: {str(e)}"
@@ -123,7 +104,7 @@ async def retry_with_backoff(
             # Calculate backoff delay with exponential growth
             if attempt < config.max_retries:
                 # Exponential backoff: base_delay * (2 ^ attempt)
-                delay_ms = config.base_delay_ms * (2 ** attempt)
+                delay_ms = config.base_delay_ms * (2**attempt)
                 delay_seconds = delay_ms / 1000.0
 
                 # Don't sleep if it would exceed the total timeout
@@ -131,18 +112,13 @@ async def retry_with_backoff(
                 remaining_time = config.total_timeout_seconds - elapsed
 
                 if remaining_time <= 0:
-                    logger.debug(
-                        f"{operation_name}: No time remaining for retry delay"
-                    )
+                    logger.debug(f"{operation_name}: No time remaining for retry delay")
                     break
 
                 # Cap the delay to remaining time
                 actual_delay = min(delay_seconds, remaining_time)
 
-                logger.debug(
-                    f"{operation_name}: Waiting {actual_delay * 1000:.1f}ms before retry "
-                    f"({remaining_time:.2f}s remaining of {config.total_timeout_seconds}s budget)"
-                )
+                logger.debug(f"{operation_name}: Waiting {actual_delay * 1000:.1f}ms before retry " f"({remaining_time:.2f}s remaining of {config.total_timeout_seconds}s budget)")
 
                 await asyncio.sleep(actual_delay)
 
@@ -153,23 +129,10 @@ async def retry_with_backoff(
         f"in {total_duration_ms:.1f}ms. Errors: {errors[-3:]}"  # Show last 3 errors
     )
 
-    return RetryResult(
-        success=False,
-        result=None,
-        attempts=attempt + 1,
-        total_duration_ms=total_duration_ms,
-        errors=errors
-    )
+    return RetryResult(success=False, result=None, attempts=attempt + 1, total_duration_ms=total_duration_ms, errors=errors)
 
 
-async def retry_async_generator(
-    func: Callable,
-    *args,
-    config: RetryConfig,
-    retry_on_exceptions: tuple = (Exception,),
-    operation_name: str = "operation",
-    **kwargs
-):
+async def retry_async_generator(func: Callable, *args, config: RetryConfig, retry_on_exceptions: tuple = (Exception,), operation_name: str = "operation", **kwargs):
     """
     Wrapper for async generator functions with retry logic.
 
@@ -179,14 +142,7 @@ async def retry_async_generator(
     Yields items from the async generator, retrying the initial
     connection if it fails.
     """
-    result = await retry_with_backoff(
-        func,
-        *args,
-        config=config,
-        retry_on_exceptions=retry_on_exceptions,
-        operation_name=operation_name,
-        **kwargs
-    )
+    result = await retry_with_backoff(func, *args, config=config, retry_on_exceptions=retry_on_exceptions, operation_name=operation_name, **kwargs)
 
     if not result.success:
         # Re-raise the last error

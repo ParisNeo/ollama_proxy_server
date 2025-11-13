@@ -15,6 +15,7 @@ except Exception as e:
     logger.error(f"Failed to initialize Fernet for encryption: {e}")
     fernet = None
 
+
 def encrypt_data(data: str) -> str:
     """Encrypts a string."""
     if not fernet:
@@ -22,6 +23,7 @@ def encrypt_data(data: str) -> str:
     if not data:
         return ""
     return fernet.encrypt(data.encode()).decode()
+
 
 def decrypt_data(encrypted_data: str) -> str:
     """Decrypts a string."""
