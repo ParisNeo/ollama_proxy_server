@@ -123,7 +123,8 @@ async def retry_with_backoff(func: Callable, *args, config: RetryConfig, retry_o
     # All retries exhausted
     total_duration_ms = (time.time() - start_time) * 1000
     logger.error(
-        f"{operation_name}: Failed after {attempt + 1} attempts " f"in {total_duration_ms:.1f}ms. Errors: {errors[-3:]}"  # Show last 3 errors
+        f"{operation_name}: Failed after {attempt + 1} attempts "
+        f"in {total_duration_ms:.1f}ms. Errors: {errors[-3:]}"  # Show last 3 errors
     )
 
     return RetryResult(success=False, result=None, attempts=attempt + 1, total_duration_ms=total_duration_ms, errors=errors)
