@@ -12,7 +12,7 @@ class Settings(BaseSettings):
 
     # --- App Info (Hardcoded) ---
     APP_NAME: str = "Ollama Proxy Server"
-    APP_VERSION: str = "8.0.0"
+    APP_VERSION: str = "9.0.0"
     LOG_LEVEL: str = "info"
 
     class Config:

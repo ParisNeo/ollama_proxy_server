@@ -1,21 +1,18 @@
 # --- Build Stage ---
-FROM python:3.11-slim as builder
+FROM python:3.13-slim AS builder
 
 # Set working directory
 WORKDIR /app
 
 # Install poetry
-RUN pip install poetry
+RUN pip install poetry gunicorn
 
 # Copy only dependency-defining files
-COPY poetry.lock pyproject.toml ./
+COPY pyproject.toml ./
 
 # Install dependencies, without dev dependencies, into a virtual environment
 RUN poetry config virtualenvs.create false && \
-    poetry install --no-dev --no-interaction --no-ansi
-
-# --- Final Stage ---
-FROM python:3.11-slim
+    poetry install --without dev --no-root --no-interaction --no-ansi
 
 # Set a non-root user
 RUN addgroup --system app && adduser --system --group app
@@ -24,10 +21,6 @@ USER app
 # Set working directory
 WORKDIR /home/app
 
-# Copy virtual environment from builder stage
-COPY --from=builder /app ./
-
-# Copy application code
 COPY ./app ./app
 COPY gunicorn_conf.py .
 

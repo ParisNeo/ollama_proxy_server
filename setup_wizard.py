@@ -56,7 +56,7 @@ def create_env_file():
     try:
         with open(".env", "w", encoding="utf-8") as f:
             f.write('APP_NAME="Ollama Proxy Server"\n')
-            f.write('APP_VERSION="8.0.0"\n')
+            f.write('APP_VERSION="9.0.0"\n')
             f.write('LOG_LEVEL="info"\n')
             f.write(f'PROXY_PORT="{config["PROXY_PORT"]}"\n')
             f.write(f'OLLAMA_SERVERS="{config["OLLAMA_SERVERS"]}"\n')
