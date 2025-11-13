@@ -1,6 +1,7 @@
 # app/main.py
 """
 Main entry point for the Ollama Proxy Server.
+
 This version removes Alembic and uses SQLAlchemy's create_all
 to initialize the database on startup.
 """
@@ -13,26 +14,27 @@ from pathlib import Path
 
 import httpx
 import redis.asyncio as redis
-from pydantic import BaseModel, ConfigDict
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, ConfigDict
+from sqlalchemy.exc import IntegrityError
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.responses import RedirectResponse
-from sqlalchemy.exc import IntegrityError
 
+from app.api.v1.routes.admin import router as admin_router
+from app.api.v1.routes.health import router as health_router
+from app.api.v1.routes.playground_chat import router as playground_chat_router
+from app.api.v1.routes.playground_embedding import \
+    router as playground_embedding_router
+from app.api.v1.routes.proxy import router as proxy_router
 from app.core.config import settings
 from app.core.logging_config import setup_logging
-from app.api.v1.routes.health import router as health_router
-from app.api.v1.routes.proxy import router as proxy_router
-from app.api.v1.routes.admin import router as admin_router
-from app.api.v1.routes.playground_chat import router as playground_chat_router
-from app.api.v1.routes.playground_embedding import router as playground_embedding_router
-from app.database.session import AsyncSessionLocal, engine
+from app.crud import server_crud, settings_crud, user_crud
 from app.database.base import Base
 from app.database.migrations import run_all_migrations
-from app.crud import user_crud, server_crud, settings_crud
-from app.schema.user import UserCreate
+from app.database.session import AsyncSessionLocal, engine
 from app.schema.settings import AppSettingsModel
+from app.schema.user import UserCreate
 
 # --- Suppress Pydantic 'model_' namespace warning ---
 # This must be at the very top, before other app modules are imported.
@@ -49,7 +51,8 @@ _db_initialized = False
 
 async def init_db():
     """
-    Creates all database tables based on the SQLAlchemy models.
+    Create all database tables based on SQLAlchemy models.
+
     Runs migrations first to ensure backward compatibility with older database schemas.
     This function is designed to run only once.
     """
@@ -72,6 +75,7 @@ async def init_db():
 
 
 async def create_initial_admin_user() -> None:
+    """Create initial admin user if no users exist."""
     async with AsyncSessionLocal() as db:
         admin_user = await user_crud.get_user_by_username(db, username=settings.ADMIN_USER)
         if admin_user:
@@ -87,9 +91,7 @@ async def create_initial_admin_user() -> None:
 
 
 async def periodic_model_refresh(app: FastAPI) -> None:
-    """
-    Background task that periodically refreshes model lists for all servers.
-    """
+    """Background task that periodically refreshes model lists for all servers."""
     import asyncio
 
     while True:
@@ -122,6 +124,7 @@ async def periodic_model_refresh(app: FastAPI) -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """Application lifespan manager."""
     # ---------- Startup ----------
     logger.info("Starting up Ollama Proxy Server…")
 
@@ -215,6 +218,7 @@ app.add_middleware(SessionMiddleware, secret_key=settings.SECRET_KEY)
 
 @app.middleware("http")
 async def add_security_headers(request: Request, call_next):
+    """Add security headers to the response."""
     response = await call_next(request)
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
@@ -243,17 +247,17 @@ app.include_router(playground_embedding_router, prefix="/admin", tags=["Admin UI
 
 @app.get("/", include_in_schema=False, summary="Root")
 def read_root():
+    """Redirect root to admin dashboard."""
     return RedirectResponse(url="/admin/dashboard")
 
 
 if __name__ == "__main__":
-    import uvicorn
     import asyncio
 
+    import uvicorn
+
     async def run_server():
-        """
-        Connects to the DB to get settings and starts Uvicorn programmatically.
-        """
+        """Connect to the DB to get settings and start Uvicorn programmatically."""
         port = settings.PROXY_PORT
         ssl_keyfile = None
         ssl_certfile = None

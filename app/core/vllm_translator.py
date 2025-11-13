@@ -1,8 +1,10 @@
+"""VLLM translation utilities for Ollama Proxy Server."""
+
 import json
 import logging
-from typing import Dict, Any, AsyncGenerator
 import time
 from datetime import datetime, timezone
+from typing import Any, AsyncGenerator, Dict
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +35,7 @@ THINK_TOOL = {
 
 # --- Request Translation ---
 def translate_ollama_to_vllm_chat(ollama_payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Translate Ollama chat payload to VLLM format."""
     vllm_payload = {
         "model": ollama_payload.get("model"),
         "stream": ollama_payload.get("stream", False),
@@ -74,6 +77,7 @@ def translate_ollama_to_vllm_chat(ollama_payload: Dict[str, Any]) -> Dict[str, A
 
 
 def translate_ollama_to_vllm_embeddings(ollama_payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Translate Ollama embeddings payload to VLLM format."""
     return {
         "model": ollama_payload.get("model"),
         "input": ollama_payload.get("prompt"),
@@ -82,8 +86,8 @@ def translate_ollama_to_vllm_embeddings(ollama_payload: Dict[str, Any]) -> Dict[
 
 # --- Response Translation ---
 async def vllm_stream_to_ollama_stream(vllm_stream: AsyncGenerator[str, None], model_name: str) -> AsyncGenerator[bytes, None]:
-    """
-    Translates a vLLM/OpenAI SSE stream into an Ollama-compatible SSE stream.
+    """Translate VLLM/OpenAI SSE stream to Ollama-compatible SSE stream.
+
     Handles regular content and tool calls for "thinking".
     """
     tool_call_buffer = ""
@@ -93,7 +97,7 @@ async def vllm_stream_to_ollama_stream(vllm_stream: AsyncGenerator[str, None], m
     buffer = ""
 
     def get_iso_timestamp(ts: int | None) -> str:
-        """Converts a Unix timestamp to an ISO 8601 string, ensuring Z-suffix for UTC."""
+        """Convert Unix timestamp to ISO 8601 string with UTC Z-suffix."""
         if ts is None:
             dt_obj = datetime.now(timezone.utc)
         else:
@@ -129,7 +133,7 @@ async def vllm_stream_to_ollama_stream(vllm_stream: AsyncGenerator[str, None], m
                 continue
 
             try:
-                data_str = line.lstrip("data: ").strip()
+                data_str = line.removeprefix("data: ").strip()
                 if not data_str:
                     continue
 
@@ -218,6 +222,7 @@ async def vllm_stream_to_ollama_stream(vllm_stream: AsyncGenerator[str, None], m
 
 
 def translate_vllm_to_ollama_embeddings(vllm_payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Translate VLLM embeddings payload to Ollama format."""
     embedding_data = vllm_payload.get("data", [])
     embedding = embedding_data[0].get("embedding") if embedding_data else []
     return {"embedding": embedding}

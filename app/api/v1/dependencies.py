@@ -1,22 +1,36 @@
+"""
+Dependencies module for the Ollama Proxy Server API v1.
+
+This module provides common dependencies used across API routes including
+authentication, rate limiting, and database session management.
+"""
+
 import logging
-from fastapi import Depends, HTTPException, status, Request, Form, Header
+import secrets
+from typing import Optional
+
+import redis.asyncio as redis
+from fastapi import Depends, Form, HTTPException, Header, Request, status
 from fastapi.security import APIKeyHeader
 from sqlalchemy.ext.asyncio import AsyncSession
-import redis.asyncio as redis
-import secrets
 
-from app.schema.settings import AppSettingsModel  # <-- NEW
-from app.database.session import get_db
-from app.crud import apikey_crud
 from app.core.security import verify_api_key
+from app.crud import apikey_crud
 from app.database.models import APIKey
+from app.database.session import get_db
+from app.schema.settings import AppSettingsModel
 
 logger = logging.getLogger(__name__)
 api_key_header = APIKeyHeader(name="Authorization", auto_error=False)
 
+# Module-level constants for default arguments to avoid B008 issues
+DEFAULT_CSRF_TOKEN_FORM = Form(...)
+DEFAULT_CSRF_TOKEN_HEADER = Header(..., alias="X-CSRF-Token")
 
-# --- NEW: Dependency to get DB-loaded settings ---
+
+# --- Dependency to get DB-loaded settings ---
 def get_settings(request: Request) -> AppSettingsModel:
+    """Get application settings from request state."""
     return request.app.state.settings
 
 
@@ -28,7 +42,7 @@ async def get_csrf_token(request: Request) -> str:
     return request.session["csrf_token"]
 
 
-async def validate_csrf_token(request: Request, csrf_token: str = Form(...)):
+async def validate_csrf_token(request: Request, csrf_token: str = DEFAULT_CSRF_TOKEN_FORM):
     """Dependency to validate CSRF token from a form submission."""
     stored_token = await get_csrf_token(request)
     if not stored_token or not secrets.compare_digest(csrf_token, stored_token):
@@ -36,7 +50,7 @@ async def validate_csrf_token(request: Request, csrf_token: str = Form(...)):
     return True
 
 
-async def validate_csrf_token_header(request: Request, x_csrf_token: str = Header(..., alias="X-CSRF-Token")):
+async def validate_csrf_token_header(request: Request, x_csrf_token: str = DEFAULT_CSRF_TOKEN_HEADER):
     """Dependency to validate CSRF token from an X-CSRF-Token header for AJAX/fetch requests."""
     stored_token = await get_csrf_token(request)
     if not stored_token or not secrets.compare_digest(x_csrf_token, stored_token):
@@ -46,6 +60,7 @@ async def validate_csrf_token_header(request: Request, x_csrf_token: str = Heade
 
 # --- Login Rate Limiting Dependency ---
 async def login_rate_limiter(request: Request):
+    """Rate limiter for login attempts to prevent brute force attacks."""
     redis_client: redis.Redis = request.app.state.redis
     if not redis_client:
         return True
@@ -64,7 +79,8 @@ async def login_rate_limiter(request: Request):
 
 
 # --- IP Filtering Dependency ---
-async def ip_filter(request: Request, settings: AppSettingsModel = Depends(get_settings)):
+async def ip_filter(request: Request, settings: AppSettingsModel = Depends(get_settings)):  # noqa: B008
+    """Filter requests based on allowed IP addresses."""
     client_ip = request.client.host
     allowed_ips = [ip.strip() for ip in settings.allowed_ips.split(",") if ip.strip()]
     denied_ips = [ip.strip() for ip in settings.denied_ips.split(",") if ip.strip()]
@@ -81,9 +97,10 @@ async def ip_filter(request: Request, settings: AppSettingsModel = Depends(get_s
 # --- API Key Authentication Dependency ---
 async def get_valid_api_key(
     request: Request,
-    db: AsyncSession = Depends(get_db),
-    auth_header: str = Depends(api_key_header),
+    db: AsyncSession = Depends(get_db),  # noqa: B008
+    auth_header: Optional[str] = Depends(api_key_header),  # noqa: B008
 ) -> APIKey:
+    """Validate API key from Authorization header and return API key object."""
     if not auth_header:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -131,9 +148,10 @@ async def get_valid_api_key(
 # --- Rate Limiting Dependency ---
 async def rate_limiter(
     request: Request,
-    api_key: APIKey = Depends(get_valid_api_key),
-    settings: AppSettingsModel = Depends(get_settings),
+    api_key: APIKey = Depends(get_valid_api_key),  # noqa: B008
+    settings: AppSettingsModel = Depends(get_settings),  # noqa: B008
 ):
+    """Rate limiter for API requests based on API key settings."""
     redis_client: redis.Redis = request.app.state.redis
     if not redis_client:
         return True
@@ -160,3 +178,9 @@ async def rate_limiter(
     except Exception as e:
         logger.error(f"Could not connect to Redis for rate limiting: {e}")
     return True
+
+
+# Module-level constants for default arguments to avoid B008 issues
+DEFAULT_API_KEY_HEADER = Depends(api_key_header)
+DEFAULT_GET_DB = Depends(get_db)
+DEFAULT_GET_SETTINGS = Depends(get_settings)

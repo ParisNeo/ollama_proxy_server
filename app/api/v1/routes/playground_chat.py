@@ -1,29 +1,36 @@
 # app/api/v1/routes/playground_chat.py
-import logging
+"""Chat playground routes for Ollama Proxy Server."""
+
 import json
+import logging
 import time
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Request, Query
-from fastapi.responses import JSONResponse, StreamingResponse, HTMLResponse, Response
-from sqlalchemy.ext.asyncio import AsyncSession
 import httpx
+from fastapi import APIRouter, Depends, Query, Request
+from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database.session import get_db
-from app.database.models import User
-from app.crud import server_crud
 from app.api.v1.dependencies import validate_csrf_token_header
-from app.api.v1.routes.admin import require_admin_user, get_template_context, templates
-from app.core.test_prompts import PREBUILT_TEST_PROMPTS
+from app.api.v1.routes.admin import get_template_context, require_admin_user, templates
 from app.api.v1.routes.proxy import _select_auto_model
-
+from app.core.test_prompts import PREBUILT_TEST_PROMPTS
+from app.crud import server_crud
+from app.database.models import User
+from app.database.session import get_db
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
 @router.get("/playground", response_class=HTMLResponse, name="admin_playground")
-async def admin_playground_ui(request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user), model: Optional[str] = Query(None)):
+async def admin_playground_ui(
+    request: Request,
+    db: AsyncSession = Depends(get_db),  # noqa: B008
+    admin_user: User = Depends(require_admin_user),  # noqa: B008
+    model: Optional[str] = Query(None),  # noqa: B008
+):
+    """Render admin playground UI."""
     from app.api.v1.dependencies import get_csrf_token
 
     context = get_template_context(request)
@@ -33,8 +40,9 @@ async def admin_playground_ui(request: Request, db: AsyncSession = Depends(get_d
     return templates.TemplateResponse("admin/model_playground.html", context)
 
 
-@router.post("/playground-stream", name="admin_playground_stream", dependencies=[Depends(validate_csrf_token_header)])
-async def admin_playground_stream(request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
+@router.post("/playground-stream", name="admin_playground_stream", dependencies=[Depends(validate_csrf_token_header)])  # noqa: B008
+async def admin_playground_stream(request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):  # noqa: B008
+    """Handle playground streaming requests."""
     try:
         data = await request.json()
         model_name = data.get("model")
@@ -172,7 +180,7 @@ async def admin_playground_stream(request: Request, db: AsyncSession = Depends(g
                                         think_content = message["thinking"]
                                         if not thinking_block_open:
                                             thinking_block_open = True
-                                            think_content = "<think>" + think_content
+                                            think_content = "</think>" + think_content
 
                                         # Modify chunk to look like a content chunk for the UI
                                         data["message"]["content"] = think_content
@@ -245,5 +253,6 @@ async def admin_playground_stream(request: Request, db: AsyncSession = Depends(g
 
 
 @router.get("/playground/test-prompts", name="admin_get_test_prompts")
-async def admin_get_test_prompts(admin_user: User = Depends(require_admin_user)):
+async def admin_get_test_prompts(admin_user: User = Depends(require_admin_user)):  # noqa: B008
+    """Get test prompts for playground."""
     return JSONResponse(PREBUILT_TEST_PROMPTS)

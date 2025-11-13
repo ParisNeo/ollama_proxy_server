@@ -1,26 +1,30 @@
-from sqlalchemy.future import select
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import func
-from app.database.models import User, APIKey, UsageLog
-from app.schema.user import UserCreate
-from app.core.security import get_password_hash
+"""User CRUD operations for Ollama Proxy Server."""
+
 from typing import Optional
+
+from sqlalchemy import func
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.future import select
+
+from app.core.security import get_password_hash
+from app.database.models import APIKey, UsageLog, User
+from app.schema.user import UserCreate
 
 
 async def get_user_by_username(db: AsyncSession, username: str) -> User | None:
+    """Get user by username from database."""
     result = await db.execute(select(User).filter(User.username == username))
     return result.scalars().first()
 
 
 async def get_user_by_id(db: AsyncSession, user_id: int) -> User | None:
+    """Get user by ID from database."""
     result = await db.execute(select(User).filter(User.id == user_id))
     return result.scalars().first()
 
 
 async def get_users(db: AsyncSession, skip: int = 0, limit: int = 100, sort_by: str = "username", sort_order: str = "asc") -> list:
-    """
-    Retrieves a list of users along with their statistics, with sorting.
-    """
+    """Retrieve a list of users along with their statistics, with sorting."""
     # Subquery to find the last usage time for each user
     last_used_subq = (
         select(APIKey.user_id, func.max(UsageLog.request_timestamp).label("last_used")).join(UsageLog, APIKey.id == UsageLog.api_key_id).group_by(APIKey.user_id).subquery()
@@ -63,6 +67,7 @@ async def get_users(db: AsyncSession, skip: int = 0, limit: int = 100, sort_by: 
 
 
 async def create_user(db: AsyncSession, user: UserCreate, is_admin: bool = False) -> User:
+    """Create a new user in the database."""
     hashed_password = get_password_hash(user.password)
     db_user = User(
         username=user.username,
@@ -76,7 +81,7 @@ async def create_user(db: AsyncSession, user: UserCreate, is_admin: bool = False
 
 
 async def update_user(db: AsyncSession, user_id: int, username: str, password: Optional[str] = None) -> User | None:
-    """Updates a user's username and optionally their password."""
+    """Update a user's username and optionally their password."""
     user = await get_user_by_id(db, user_id=user_id)
     if not user:
         return None
@@ -91,6 +96,7 @@ async def update_user(db: AsyncSession, user_id: int, username: str, password: O
 
 
 async def delete_user(db: AsyncSession, user_id: int) -> User | None:
+    """Delete a user from database."""
     user = await get_user_by_id(db, user_id=user_id)
     if user:
         await db.delete(user)

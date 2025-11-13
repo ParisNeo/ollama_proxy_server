@@ -1,4 +1,5 @@
 # app/core/benchmarks.py
+"""Prebuilt benchmarks for testing embedding models."""
 
 PREBUILT_BENCHMARKS = [
     {

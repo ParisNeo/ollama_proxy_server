@@ -1,16 +1,25 @@
+"""API key Pydantic schemas for Ollama Proxy Server."""
+
 import datetime
+
 from pydantic import BaseModel
 
 
 class APIKeyBase(BaseModel):
+    """Base API key schema."""
+
     key_name: str
 
 
 class APIKeyCreate(APIKeyBase):
+    """API key creation schema."""
+
     pass
 
 
 class APIKey(APIKeyBase):
+    """API key schema."""
+
     id: int
     key_prefix: str
     user_id: int
@@ -19,4 +28,6 @@ class APIKey(APIKeyBase):
     created_at: datetime.datetime
 
     class Config:
+        """Pydantic configuration."""
+
         from_attributes = True

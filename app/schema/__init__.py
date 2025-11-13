@@ -1,1 +1,1 @@
-# Pydantic schemas module initialization
+"""Pydantic schemas module initialization for Ollama Proxy Server."""

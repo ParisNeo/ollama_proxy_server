@@ -1,4 +1,7 @@
+"""Settings CRUD operations for Ollama Proxy Server."""
+
 import json
+
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
@@ -7,13 +10,13 @@ from app.schema.settings import AppSettingsModel
 
 
 async def get_app_settings(db: AsyncSession) -> AppSettings | None:
-    """Retrieves the application settings from the database."""
+    """Retrieve the application settings from the database."""
     result = await db.execute(select(AppSettings).filter(AppSettings.id == 1))
     return result.scalars().first()
 
 
 async def update_app_settings(db: AsyncSession, settings_data: AppSettingsModel) -> AppSettings:
-    """Updates the application settings in the database."""
+    """Update the application settings in the database."""
     db_settings = await get_app_settings(db)
     if not db_settings:
         db_settings = AppSettings(id=1)
@@ -28,7 +31,7 @@ async def update_app_settings(db: AsyncSession, settings_data: AppSettingsModel)
 
 
 async def create_initial_settings(db: AsyncSession) -> AppSettings:
-    """Creates the very first default settings if none exist."""
+    """Create the very first default settings if none exist."""
     existing_settings = await get_app_settings(db)
     if existing_settings:
         return existing_settings

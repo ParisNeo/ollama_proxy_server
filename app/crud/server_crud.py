@@ -1,14 +1,19 @@
-from sqlalchemy.future import select
+# app/crud/server_crud.py
+"""Server CRUD operations for Ollama Proxy Server."""
+
+import asyncio
+import datetime
+import json
+import logging
+from typing import Any, Dict, List, Optional
+
+import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.future import select
+
+from app.core.encryption import decrypt_data, encrypt_data
 from app.database.models import OllamaServer
 from app.schema.server import ServerCreate, ServerUpdate
-from app.core.encryption import encrypt_data, decrypt_data
-import httpx
-import logging
-import datetime
-from typing import Optional, List, Dict, Any
-import asyncio
-import json
 
 logger = logging.getLogger(__name__)
 
@@ -23,21 +28,25 @@ def _get_auth_headers(server: OllamaServer) -> Dict[str, str]:
 
 
 async def get_server_by_id(db: AsyncSession, server_id: int) -> OllamaServer | None:
+    """Get server by ID from database."""
     result = await db.execute(select(OllamaServer).filter(OllamaServer.id == server_id))
     return result.scalars().first()
 
 
 async def get_server_by_url(db: AsyncSession, url: str) -> OllamaServer | None:
+    """Get server by URL from database."""
     result = await db.execute(select(OllamaServer).filter(OllamaServer.url == url))
     return result.scalars().first()
 
 
 async def get_server_by_name(db: AsyncSession, name: str) -> OllamaServer | None:
+    """Get server by name from database."""
     result = await db.execute(select(OllamaServer).filter(OllamaServer.name == name))
     return result.scalars().first()
 
 
 async def get_servers(db: AsyncSession, skip: int = 0, limit: Optional[int] = None) -> list[OllamaServer]:
+    """Get all servers from database with optional pagination."""
     query = select(OllamaServer).order_by(OllamaServer.created_at.desc()).offset(skip)
     if limit is not None:
         query = query.limit(limit)
@@ -46,6 +55,7 @@ async def get_servers(db: AsyncSession, skip: int = 0, limit: Optional[int] = No
 
 
 async def create_server(db: AsyncSession, server: ServerCreate) -> OllamaServer:
+    """Create a new server in the database."""
     encrypted_key = encrypt_data(server.api_key) if server.api_key else None
     db_server = OllamaServer(name=server.name, url=str(server.url), server_type=server.server_type, encrypted_api_key=encrypted_key)
     db.add(db_server)
@@ -55,6 +65,7 @@ async def create_server(db: AsyncSession, server: ServerCreate) -> OllamaServer:
 
 
 async def update_server(db: AsyncSession, server_id: int, server_update: ServerUpdate) -> OllamaServer | None:
+    """Update an existing server in the database."""
     db_server = await get_server_by_id(db, server_id)
     if not db_server:
         return None
@@ -82,6 +93,7 @@ async def update_server(db: AsyncSession, server_id: int, server_update: ServerU
 
 
 async def delete_server(db: AsyncSession, server_id: int) -> OllamaServer | None:
+    """Delete a server from database."""
     result = await db.execute(select(OllamaServer).filter(OllamaServer.id == server_id))
     server = result.scalars().first()
     if server:
@@ -91,8 +103,8 @@ async def delete_server(db: AsyncSession, server_id: int) -> OllamaServer | None
 
 
 async def fetch_and_update_models(db: AsyncSession, server_id: int) -> dict:
-    """
-    Fetches the list of available models from a server and updates the database.
+    """Fetch the list of available models from a server and update the database.
+
     Handles both Ollama and vLLM (OpenAI-compatible) servers.
 
     Returns a dict with 'success' (bool), 'models' (list), and optionally 'error' (str)
@@ -168,7 +180,7 @@ async def fetch_and_update_models(db: AsyncSession, server_id: int) -> dict:
 
 
 async def pull_model_on_server(http_client: httpx.AsyncClient, server: OllamaServer, model_name: str) -> dict:
-    """Pulls a model on a specific Ollama server."""
+    """Pull a model on a specific Ollama server."""
     if server.server_type == "vllm":
         return {"success": False, "message": "Pulling models is not supported for vLLM servers."}
 
@@ -200,7 +212,7 @@ async def pull_model_on_server(http_client: httpx.AsyncClient, server: OllamaSer
 
 
 async def delete_model_on_server(http_client: httpx.AsyncClient, server: OllamaServer, model_name: str) -> dict:
-    """Deletes a model from a specific Ollama server."""
+    """Delete a model from a specific Ollama server."""
     if server.server_type == "vllm":
         return {"success": False, "message": "Deleting models is not supported for vLLM servers."}
 
@@ -229,7 +241,7 @@ async def delete_model_on_server(http_client: httpx.AsyncClient, server: OllamaS
 
 
 async def load_model_on_server(http_client: httpx.AsyncClient, server: OllamaServer, model_name: str) -> dict:
-    """Sends a dummy request to a server to load a model into memory."""
+    """Send a dummy request to a server to load a model into memory."""
     if server.server_type == "vllm":
         return {"success": False, "message": "Explicit model loading is not applicable for vLLM servers."}
 
@@ -257,7 +269,7 @@ async def load_model_on_server(http_client: httpx.AsyncClient, server: OllamaSer
 
 
 async def unload_model_on_server(http_client: httpx.AsyncClient, server: OllamaServer, model_name: str) -> dict:
-    """Sends a request to a server to unload a model from memory."""
+    """Send a request to a server to unload a model from memory."""
     if server.server_type == "vllm":
         return {"success": False, "message": "Explicit model unloading is not applicable for vLLM servers."}
 
@@ -288,9 +300,7 @@ async def unload_model_on_server(http_client: httpx.AsyncClient, server: OllamaS
 
 
 async def get_servers_with_model(db: AsyncSession, model_name: str) -> list[OllamaServer]:
-    """
-    Get all active servers that have the specified model available, using flexible matching.
-    """
+    """Get all active servers that have the specified model available, using flexible matching."""
     servers = await get_servers(db)
     active_servers = [s for s in servers if s.is_active]
 
@@ -320,8 +330,8 @@ def is_embedding_model(model_name: str) -> bool:
 
 
 async def get_all_available_model_names(db: AsyncSession, filter_type: Optional[str] = None) -> List[str]:
-    """
-    Gets a unique, sorted list of all model names across all active servers.
+    """Get a unique, sorted list of all model names across all active servers.
+
     Can be filtered by type ('chat' or 'embedding').
     """
     servers = await get_servers(db)
@@ -356,9 +366,7 @@ async def get_all_available_model_names(db: AsyncSession, filter_type: Optional[
 
 
 async def get_all_models_grouped_by_server(db: AsyncSession, filter_type: Optional[str] = None) -> Dict[str, List[str]]:
-    """
-    Gets all available model names, grouped by their server, and includes proxy-native models.
-    """
+    """Get all available model names, grouped by their server, and includes proxy-native models."""
     servers = await get_servers(db)
     active_servers = [s for s in servers if s.is_active]
 
@@ -405,9 +413,9 @@ async def get_all_models_grouped_by_server(db: AsyncSession, filter_type: Option
 
 
 async def get_active_models_all_servers(db: AsyncSession, http_client: httpx.AsyncClient) -> List[Dict[str, Any]]:
-    """
-    Fetches running models (`/api/ps`) from active Ollama servers and
-    lists available models from active vLLM servers as they are always 'active'.
+    """Fetch running models (`/api/ps`) from active Ollama servers and.
+
+    list available models from active vLLM servers as they are always 'active'.
     """
     servers = await get_servers(db)
     active_servers = [s for s in servers if s.is_active]
@@ -457,8 +465,7 @@ async def get_active_models_all_servers(db: AsyncSession, http_client: httpx.Asy
 
 
 async def refresh_all_server_models(db: AsyncSession) -> dict:
-    """
-    Refreshes model lists for all active servers.
+    """Refresh model lists for all active servers.
 
     Returns:
         dict with 'total', 'success', 'failed' counts
@@ -482,7 +489,7 @@ async def refresh_all_server_models(db: AsyncSession) -> dict:
 
 
 async def check_server_health(http_client: httpx.AsyncClient, server: OllamaServer) -> Dict[str, Any]:
-    """Performs a quick health check on a single Ollama server."""
+    """Perform a quick health check on a single Ollama server."""
     headers = _get_auth_headers(server)
     try:
         ping_url = server.url.rstrip("/")
@@ -506,7 +513,7 @@ async def check_server_health(http_client: httpx.AsyncClient, server: OllamaServ
 
 
 async def check_all_servers_health(db: AsyncSession, http_client: httpx.AsyncClient) -> List[Dict[str, Any]]:
-    """Checks the health of all configured servers."""
+    """Check the health of all configured servers."""
     servers = await get_servers(db)
     if not servers:
         return []

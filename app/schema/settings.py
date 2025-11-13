@@ -1,9 +1,14 @@
-# 📁 app/schema/settings.py
-from pydantic import BaseModel, Field, field_validator, ConfigDict
-from typing import Optional, Dict
+# app/schema/settings.py
+"""Settings Pydantic schemas for Ollama Proxy Server."""
+
+from typing import Dict, Optional
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class AppSettingsModel(BaseModel):
+    """Application settings model."""
+
     # This prevents the Pydantic warning about "model_" prefixed fields.
     model_config = ConfigDict(protected_namespaces=())
 
@@ -15,9 +20,10 @@ class AppSettingsModel(BaseModel):
     ui_style: str = "dark-glass"  # 'dark-glass', 'dark-flat', 'light-glass', 'light-flat'
     selected_theme: str = "indigo"
 
-    # Static property, not stored in DB, but available for the app
+    # Static property, not stored in DB, but available for app
     @property
     def available_themes(self) -> Dict[str, Dict[str, str]]:
+        """Get available themes dictionary."""
         return {
             "indigo": {"500": "#6366f1", "600": "#4f46e5", "700": "#4338ca", "800": "#3730a3"},
             "sky": {"500": "#0ea5e9", "600": "#0284c7", "700": "#0369a1", "800": "#075985"},
@@ -69,6 +75,7 @@ class AppSettingsModel(BaseModel):
     @field_validator("branding_logo_url", "ssl_keyfile", "ssl_certfile")
     @classmethod
     def validate_empty_string_to_none(cls, v: Optional[str]) -> Optional[str]:
+        """Convert empty strings to None for optional fields."""
         if v == "":
             return None
         return v

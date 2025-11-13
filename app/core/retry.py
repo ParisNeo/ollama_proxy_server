@@ -1,12 +1,10 @@
-"""
-Retry utilities for backend server requests with exponential backoff.
-"""
+"""Retry utilities for backend server requests with exponential backoff."""
 
 import asyncio
 import logging
 import time
-from typing import Callable, TypeVar, Optional, List
 from dataclasses import dataclass
+from typing import Callable, List, Optional, TypeVar
 
 logger = logging.getLogger(__name__)
 
@@ -36,19 +34,19 @@ class RetryResult:
     """Result of a retry operation."""
 
     success: bool
-    result: Optional[any] = None
+    result: Optional[object] = None
     attempts: int = 0
     total_duration_ms: float = 0.0
-    errors: List[str] = None
+    errors: Optional[List[str]] = None
 
     def __post_init__(self):
+        """Initialize errors list if None."""
         if self.errors is None:
             self.errors = []
 
 
 async def retry_with_backoff(func: Callable, *args, config: RetryConfig, retry_on_exceptions: tuple = (Exception,), operation_name: str = "operation", **kwargs) -> RetryResult:
-    """
-    Executes a function with exponential backoff retry logic.
+    """Execute a function with exponential backoff retry logic.
 
     Args:
         func: Async function to execute
@@ -125,16 +123,14 @@ async def retry_with_backoff(func: Callable, *args, config: RetryConfig, retry_o
     # All retries exhausted
     total_duration_ms = (time.time() - start_time) * 1000
     logger.error(
-        f"{operation_name}: Failed after {attempt + 1} attempts "
-        f"in {total_duration_ms:.1f}ms. Errors: {errors[-3:]}"  # Show last 3 errors
+        f"{operation_name}: Failed after {attempt + 1} attempts " f"in {total_duration_ms:.1f}ms. Errors: {errors[-3:]}"  # Show last 3 errors
     )
 
     return RetryResult(success=False, result=None, attempts=attempt + 1, total_duration_ms=total_duration_ms, errors=errors)
 
 
 async def retry_async_generator(func: Callable, *args, config: RetryConfig, retry_on_exceptions: tuple = (Exception,), operation_name: str = "operation", **kwargs):
-    """
-    Wrapper for async generator functions with retry logic.
+    """Wrap async generator functions with retry logic.
 
     This is used for streaming responses where we want to retry
     the initial connection but stream once connected.
@@ -149,5 +145,6 @@ async def retry_async_generator(func: Callable, *args, config: RetryConfig, retr
         raise Exception(f"Failed after {result.attempts} attempts: {result.errors[-1] if result.errors else 'Unknown error'}")
 
     # If successful, the result should be an async generator
-    async for item in result.result:
-        yield item
+    if result.result is not None:
+        async for item in result.result:
+            yield item

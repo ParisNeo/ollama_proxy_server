@@ -1,8 +1,12 @@
 # app/core/encryption.py
-from cryptography.fernet import Fernet
-from app.core.config import settings
+"""Encryption utilities for Ollama Proxy Server."""
+
 import base64
 import logging
+
+from cryptography.fernet import Fernet
+
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -17,7 +21,7 @@ except Exception as e:
 
 
 def encrypt_data(data: str) -> str:
-    """Encrypts a string."""
+    """Encrypt data string."""
     if not fernet:
         raise RuntimeError("Encryption service is not initialized.")
     if not data:
@@ -26,6 +30,7 @@ def encrypt_data(data: str) -> str:
 
 
 def decrypt_data(encrypted_data: str) -> str:
+    """Decrypt encrypted data string."""
     """Decrypts a string."""
     if not fernet:
         raise RuntimeError("Encryption service is not initialized.")

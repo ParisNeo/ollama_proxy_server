@@ -1,7 +1,11 @@
+"""Configuration settings for Ollama Proxy Server."""
+
 from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
+    """Bootstrap settings for the application."""
+
     # --- Bootstrap Settings ---
     # These are the only settings read from the .env file.
     DATABASE_URL: str = "sqlite+aiosqlite:///./ollama_proxy.db"
@@ -15,10 +19,13 @@ class Settings(BaseSettings):
     APP_VERSION: str = "9.0.0"
     LOG_LEVEL: str = "info"
 
-    class Config:
-        env_file = ".env"
-        case_sensitive = True
-        extra = "ignore"  # <-- THIS IS THE FIX
+
+class Config:
+    """Pydantic configuration."""
+
+    env_file = ".env"
+    case_sensitive = True
+    extra = "ignore"  # <-- THIS IS THE FIX
 
 
 # This `settings` object is now only used for bootstrapping.

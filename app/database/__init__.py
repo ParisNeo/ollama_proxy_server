@@ -1,4 +1,5 @@
-# Database module initialization
+"""Database module initialization for Ollama Proxy Server."""
+
 __all__ = ["Base", "models"]
-from .base import Base
 from . import models
+from .base import Base

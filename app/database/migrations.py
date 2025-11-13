@@ -1,10 +1,11 @@
-"""
-Database migration utilities for backward compatibility.
+"""Database migration utilities for backward compatibility.
+
 Handles schema updates when upgrading from older versions.
 """
 
 import logging
 from typing import Dict, Set
+
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
@@ -12,8 +13,7 @@ logger = logging.getLogger(__name__)
 
 
 async def check_column_exists(engine: AsyncEngine, table_name: str, column_name: str) -> bool:
-    """
-    Check if a column exists in a table.
+    """Check if a column exists in a table.
 
     Args:
         engine: SQLAlchemy async engine
@@ -32,8 +32,7 @@ async def check_column_exists(engine: AsyncEngine, table_name: str, column_name:
 
 
 async def add_column_if_missing(engine: AsyncEngine, table_name: str, column_name: str, column_definition: str) -> bool:
-    """
-    Add a column to a table if it doesn't exist.
+    """Add a column to a table if it doesn't exist.
 
     Args:
         engine: SQLAlchemy async engine
@@ -58,8 +57,8 @@ async def add_column_if_missing(engine: AsyncEngine, table_name: str, column_nam
 
 
 async def migrate_ollama_servers_table(engine: AsyncEngine) -> None:
-    """
-    Migrate the ollama_servers table to add new columns if they don't exist.
+    """Migrate ollama_servers table to add new columns if they don't exist.
+
     This ensures backward compatibility with older database schemas.
     """
     logger.info("Checking ollama_servers table for missing columns...")
@@ -83,8 +82,8 @@ async def migrate_ollama_servers_table(engine: AsyncEngine) -> None:
 
 
 async def migrate_api_keys_table(engine: AsyncEngine) -> None:
-    """
-    Migrate the api_keys table to add new columns if they don't exist.
+    """Migrate the api_keys table to add new columns if they don't exist.
+
     This ensures backward compatibility with older database schemas.
     """
     logger.info("Checking api_keys table for missing columns...")
@@ -114,8 +113,8 @@ async def migrate_api_keys_table(engine: AsyncEngine) -> None:
 
 
 async def migrate_usage_logs_table(engine: AsyncEngine) -> None:
-    """
-    Migrate the usage_logs table to add new columns if they don't exist.
+    """Migrate the usage_logs table to add new columns if they don't exist.
+
     This ensures backward compatibility with older database schemas.
     """
     logger.info("Checking usage_logs table for missing columns...")
@@ -145,8 +144,8 @@ async def migrate_usage_logs_table(engine: AsyncEngine) -> None:
 
 
 async def migrate_app_settings_data(engine: AsyncEngine) -> None:
-    """
-    Migrate the app_settings table to add new fields to the JSON settings_data.
+    """Migrate app_settings table to add new fields to JSON settings_data.
+
     This ensures backward compatibility when new settings are added.
     """
     logger.info("Checking app_settings for missing configuration fields...")
@@ -251,8 +250,8 @@ async def auto_migrate_table(engine: AsyncEngine, table_name: str, expected_colu
 
 
 async def check_and_report_schema(engine: AsyncEngine) -> None:
-    """
-    Comprehensive schema check that reports all table structures.
+    """Comprehensive schema check that reports all table structures.
+
     Useful for debugging schema mismatches.
     """
     logger.info("=" * 60)
@@ -286,8 +285,8 @@ async def check_and_report_schema(engine: AsyncEngine) -> None:
 
 
 async def run_all_migrations(engine: AsyncEngine) -> None:
-    """
-    Run all database migrations to ensure backward compatibility.
+    """Run all database migrations to ensure backward compatibility.
+
     This function should be called before Base.metadata.create_all()
 
     This uses a centralized schema definition to automatically detect
@@ -358,8 +357,8 @@ async def run_all_migrations(engine: AsyncEngine) -> None:
 
 
 async def create_missing_indexes(engine: AsyncEngine) -> None:
-    """
-    Create any missing indexes that should exist.
+    """Create any missing indexes that should exist.
+
     SQLite will silently ignore if index already exists (using IF NOT EXISTS).
     """
     logger.info("Checking for missing indexes...")

@@ -1,38 +1,42 @@
+"""Proxy routes for Ollama Proxy Server."""
+
+import datetime
 import json
 import logging
-import datetime
-from typing import List, Tuple, Optional, Dict, Any
-from fastapi import APIRouter, Depends, Request, Response, HTTPException, status
-from fastapi.responses import StreamingResponse, JSONResponse
+from typing import Any, Dict, List, Optional, Tuple
+
 import httpx
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database.session import get_db
-from app.api.v1.dependencies import get_valid_api_key, rate_limiter, ip_filter, get_settings
-from app.database.models import APIKey, OllamaServer
-from app.crud import log_crud, server_crud, model_metadata_crud
-from app.core.retry import retry_with_backoff, RetryConfig
-from app.schema.settings import AppSettingsModel
+from app.api.v1.dependencies import get_settings, get_valid_api_key, ip_filter, rate_limiter
 from app.core.encryption import decrypt_data
+from app.core.retry import RetryConfig, retry_with_backoff
 from app.core.vllm_translator import translate_ollama_to_vllm_chat, translate_ollama_to_vllm_embeddings, translate_vllm_to_ollama_embeddings, vllm_stream_to_ollama_stream
+from app.crud import log_crud, model_metadata_crud, server_crud
+from app.database.models import APIKey, OllamaServer
+from app.database.session import get_db
+from app.schema.settings import AppSettingsModel
 
 logger = logging.getLogger(__name__)
 router = APIRouter(dependencies=[Depends(ip_filter), Depends(rate_limiter)])
 
 
 # --- Dependency to get active servers ---
-async def get_active_servers(db: AsyncSession = Depends(get_db)) -> List[OllamaServer]:
+async def get_active_servers(db: AsyncSession = Depends(get_db)) -> List[OllamaServer]:  # noqa: B008
+    """Get list of active servers from database."""
     servers = await server_crud.get_servers(db)
     active_servers = [s for s in servers if s.is_active]
     if not active_servers:
-        logger.error("No active Ollama backend servers are configured in the database.")
+        logger.error("No active Ollama backend servers are configured in database.")
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="No active backend servers available.")
     return active_servers
 
 
 async def extract_model_from_request(request: Request) -> Optional[str]:
-    """
-    Attempts to extract the model name from the request body.
+    """Extract model name from request body.
+
     Common endpoints that contain model info: /api/generate, /api/chat, /api/embeddings, /api/pull, etc.
 
     Returns the model name if found, otherwise None.
@@ -51,15 +55,15 @@ async def extract_model_from_request(request: Request) -> Optional[str]:
         if isinstance(body, dict) and "model" in body:
             return body["model"]
 
-    except (json.JSONDecodeError, UnicodeDecodeError, Exception) as e:
+    except (json.JSONDecodeError, Exception) as e:
         logger.debug(f"Could not extract model from request body: {e}")
 
     return None
 
 
 async def _send_backend_request(http_client: httpx.AsyncClient, server: OllamaServer, path: str, method: str, headers: dict, query_params, body_bytes: bytes):
-    """
-    Internal function to send a single request to a backend server.
+    """Send a single request to a backend server.
+
     This function is wrapped by retry logic.
     """
     normalized_url = server.url.rstrip("/")
@@ -73,13 +77,17 @@ async def _send_backend_request(http_client: httpx.AsyncClient, server: OllamaSe
 
     backend_request = http_client.build_request(method=method, url=backend_url, headers=request_headers, params=query_params, content=body_bytes)
 
+    """Send a single request to a backend server.
+
+    This function is wrapped by retry logic.
+    """
     try:
         backend_response = await http_client.send(backend_request, stream=True)
 
         # Consider 5xx errors as failures that should be retried
         if backend_response.status_code >= 500:
-            await backend_response.aclose()  # Clean up the response
-            raise Exception(f"Backend server returned {backend_response.status_code}: " f"{backend_response.reason_phrase}")
+            await backend_response.aclose()  # Clean up response
+            raise Exception(f"Backend server returned {backend_response.status_code}: {backend_response.reason_phrase}")
 
         return backend_response
 
@@ -90,6 +98,11 @@ async def _send_backend_request(http_client: httpx.AsyncClient, server: OllamaSe
 
 
 async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer], body_bytes: bytes = b"") -> Tuple[Response, OllamaServer]:
+    """Core reverse proxy logic with retry support.
+
+    Forwards request to a backend Ollama server and streams response back.
+    Returns response and chosen server.
+    """
     """
     Core reverse proxy logic with retry support. Forwards the request to a backend
     Ollama server and streams the response back. Returns the response and the chosen server.
@@ -169,9 +182,7 @@ async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer
 
 
 async def _proxy_to_vllm(request: Request, server: OllamaServer, path: str, body_bytes: bytes) -> Response:
-    """
-    Handles proxying a request to a vLLM server, including payload and response translation.
-    """
+    """Handle proxying a request to a vLLM server, including payload and response translation."""
     http_client: httpx.AsyncClient = request.app.state.http_client
 
     try:
@@ -238,10 +249,10 @@ async def _proxy_to_vllm(request: Request, server: OllamaServer, path: str, body
 
 
 @router.get("/tags")
-async def federate_models(request: Request, api_key: APIKey = Depends(get_valid_api_key), db: AsyncSession = Depends(get_db)):
-    """
-    Aggregates models from all configured backends (Ollama and vLLM)
-    using the cached model data from the database for efficiency.
+async def federate_models(request: Request, api_key: APIKey = Depends(get_valid_api_key), db: AsyncSession = Depends(get_db)):  # noqa: B008
+    """Aggregate models from all configured backends (Ollama and vLLM).
+
+    Uses cached model data from database for efficiency.
     """
     logger.info("--- /tags endpoint: Starting model federation ---")
     all_servers = await server_crud.get_servers(db)
@@ -296,7 +307,7 @@ async def federate_models(request: Request, api_key: APIKey = Depends(get_valid_
         "details": {"parent_model": "", "format": "proxy", "family": "auto", "families": ["auto"], "parameter_size": "N/A", "quantization_level": "N/A"},
     }
 
-    await log_crud.create_usage_log(db=db, api_key_id=api_key.id, endpoint="/api/tags", status_code=200, server_id=None)
+    await log_crud.create_usage_log(db=db, api_key_id=api_key.id, endpoint="/api/tags", status_code=200, server_id=None)  # noqa: B008
 
     final_model_list = list(all_models.values())
     logger.info("--- /tags endpoint: Finished model federation ---")
@@ -305,8 +316,7 @@ async def federate_models(request: Request, api_key: APIKey = Depends(get_valid_
 
 
 async def _select_auto_model(db: AsyncSession, body: Dict[str, Any]) -> Optional[str]:
-    """Selects the best model based on metadata and request content."""
-
+    """Select the best model based on metadata and request content."""
     # 1. Determine request characteristics
     has_images = "images" in body and body["images"]
 
@@ -370,13 +380,13 @@ async def _select_auto_model(db: AsyncSession, body: Dict[str, Any]) -> Optional
 async def proxy_ollama(
     request: Request,
     path: str,
-    api_key: APIKey = Depends(get_valid_api_key),
-    db: AsyncSession = Depends(get_db),
-    settings: AppSettingsModel = Depends(get_settings),
-    servers: List[OllamaServer] = Depends(get_active_servers),
+    api_key: APIKey = Depends(get_valid_api_key),  # noqa: B008
+    db: AsyncSession = Depends(get_db),  # noqa: B008
+    settings: AppSettingsModel = Depends(get_settings),  # noqa: B008
+    servers: List[OllamaServer] = Depends(get_active_servers),  # noqa: B008
 ):
-    """
-    A catch-all route that proxies all other requests to the backend.
+    """Proxy all other requests to the backend.
+
     Uses smart routing and translates requests for vLLM servers.
     """
     # --- Endpoint Security Check ---
@@ -450,6 +460,13 @@ async def proxy_ollama(
     # Proxy to one of the candidate servers
     response, chosen_server = await _reverse_proxy(request, path, candidate_servers, body_bytes)
 
-    await log_crud.create_usage_log(db=db, api_key_id=api_key.id, endpoint=f"/api/{path}", status_code=response.status_code, server_id=chosen_server.id, model=model_name)
+    await log_crud.create_usage_log(
+        db=db,  # noqa: B008
+        api_key_id=api_key.id,
+        endpoint=f"/api/{path}",
+        status_code=response.status_code,
+        server_id=chosen_server.id,
+        model=model_name,
+    )
 
     return response
