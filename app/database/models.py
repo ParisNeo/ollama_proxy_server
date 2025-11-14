@@ -1,19 +1,17 @@
+"""Database models for Ollama Proxy Server."""
+
+# # pylint: disable=too-few-public-methods
 import datetime
-from sqlalchemy import (
-    Column,
-    Integer,
-    String,
-    Boolean,
-    DateTime,
-    ForeignKey,
-    UniqueConstraint,
-    JSON,
-)
+
+from sqlalchemy import JSON, Boolean, Column, DateTime, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.orm import relationship
+
 from app.database.base import Base
 
 
 class User(Base):
+    """User model for Ollama Proxy Server."""
+
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -27,19 +25,21 @@ class User(Base):
 
 
 class APIKey(Base):
+    """API key model for Ollama Proxy Server."""
+
     __tablename__ = "api_keys"
 
     id = Column(Integer, primary_key=True, index=True)
     key_name = Column(String, nullable=False)
     hashed_key = Column(String, unique=True, index=True, nullable=False)
-    key_prefix = Column(String, unique=True, nullable=False)
+    key_prefix = Column(String, unique=True, index=True, nullable=False)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     expires_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
-    
+
     is_active = Column(Boolean, default=True, nullable=False)
     is_revoked = Column(Boolean, default=False, nullable=False)
-    
+
     rate_limit_requests = Column(Integer, nullable=True)
     rate_limit_window_minutes = Column(Integer, nullable=True)
 
@@ -50,6 +50,8 @@ class APIKey(Base):
 
 
 class UsageLog(Base):
+    """Usage log model for tracking API requests and responses."""
+
     __tablename__ = "usage_logs"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -65,6 +67,8 @@ class UsageLog(Base):
 
 
 class OllamaServer(Base):
+    """Ollama server model for managing remote server connections."""
+
     __tablename__ = "ollama_servers"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -80,14 +84,25 @@ class OllamaServer(Base):
 
     @property
     def has_api_key(self) -> bool:
+        """Check if the server has an API key configured.
+
+        Returns:
+            bool: True if an API key is present, False otherwise.
+        """
         return bool(self.encrypted_api_key)
 
+
 class AppSettings(Base):
+    """Application settings model for storing configuration data."""
+
     __tablename__ = "app_settings"
     id = Column(Integer, primary_key=True)
     settings_data = Column(JSON, nullable=False)
 
+
 class ModelMetadata(Base):
+    """Model metadata for storing information about available AI models."""
+
     __tablename__ = "model_metadata"
     id = Column(Integer, primary_key=True, index=True)
     model_name = Column(String, unique=True, index=True, nullable=False)
@@ -97,5 +112,5 @@ class ModelMetadata(Base):
     is_chat_model = Column(Boolean, default=True, nullable=False)
     is_fast_model = Column(Boolean, default=False, nullable=False)
     priority = Column(Integer, default=10, nullable=False)
-    
+
     __table_args__ = (UniqueConstraint("model_name", name="uq_model_name"),)
