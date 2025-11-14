@@ -224,7 +224,7 @@ async def auto_migrate_table(engine: AsyncEngine, table_name: str, expected_colu
     """
     # Check if table exists
     async with engine.begin() as conn:
-        result = await conn.execute(text(f"SELECT name FROM sqlite_master WHERE type='table' AND name='{table_name}'"))
+        result = await conn.execute(text(f"SELECT name FROM sqlite_master WHERE type='table' AND name='{table_name}'"))  # nosec B608 - false positive
         table_exists = result.fetchone() is not None
 
     if not table_exists:

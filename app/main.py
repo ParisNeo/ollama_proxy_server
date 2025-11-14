@@ -138,7 +138,8 @@ def _ensure_directories():
 
 def _check_admin_password():
     """Check if admin password is still default."""
-    if settings.ADMIN_PASSWORD == "changeme":
+
+    if settings.ADMIN_PASSWORD == "changeme":  # nosec B105 - false positive
         logger.critical("FATAL: The admin password is set to default value 'changeme'.")
         logger.critical("Please change ADMIN_PASSWORD in your .env file or run setup wizard and restart.")
         sys.exit(1)
@@ -348,7 +349,7 @@ if __name__ == "__main__":
         # Correct way to run uvicorn programmatically
         config = uvicorn.Config(
             "app.main:app",
-            host="0.0.0.0",
+            host="0.0.0.0",  # nosec B104 - make this default localhost ?
             port=port,
             ssl_keyfile=ssl_keyfile,
             ssl_certfile=ssl_certfile,

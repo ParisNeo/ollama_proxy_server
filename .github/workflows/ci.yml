@@ -2,9 +2,9 @@ name: CI/CD Pipeline
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [ main, develop, security ]
   pull_request:
-    branches: [ main, develop ]
+    branches: [ main, develop, security ]
 
 jobs:
   lint:
@@ -128,7 +128,7 @@ jobs:
       run: poetry install --with dev
 
     - name: Run bandit security check
-      run: poetry run tox -e security-bandit
+      run: poetry run -- tox -e security-bandit -- -f json -o bandit-report.json
 
     - name: Upload bandit report
       uses: actions/upload-artifact@v4
