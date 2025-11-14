@@ -22,7 +22,7 @@ class User(UserBase):
     is_active: bool
     is_admin: bool
 
-    class Config:
+    class Config:  # pylint: disable=too-few-public-methods
         """Pydantic configuration."""
 
         from_attributes = True

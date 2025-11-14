@@ -66,7 +66,7 @@ class AppSettingsModel(BaseModel):
 
     @field_validator("retry_total_timeout_seconds")
     @classmethod
-    def validate_retry_timeout(cls, v: float, info) -> float:
+    def validate_retry_timeout(cls, v: float, _info) -> float:
         """Ensure retry timeout is reasonable."""
         if v <= 0:
             raise ValueError("retry_total_timeout_seconds must be positive")

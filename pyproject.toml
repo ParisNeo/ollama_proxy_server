@@ -56,10 +56,11 @@ line-length = 180
 line-length = 180
 
 [tool.pylint.messages_control]
-disable = ["C0301", "C0302", "C0303", "C0304", "C0305"]
+disable = ["C0301", "C0302", "C0303", "C0304", "C0305", "W0511"]
 
 [tool.pylint.format]
 max-line-length = 180
+min-similarity-lines = 10
 
 [build-system]
 requires = ["poetry-core"]
@@ -70,6 +71,6 @@ profile = "black"
 line_length = 180
 
 [tool.flake8]
-ignore = ["I201", "I200", "I101"]
+ignore = ["I201", "I200", "I101", "D202"]
 extend-immutable-calls = ["fastapi.Depends", "fastapi.params.Depends"]
 max-line-length = 180

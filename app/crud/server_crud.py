@@ -160,19 +160,19 @@ async def fetch_and_update_models(db: AsyncSession, server_id: int) -> dict:
         await db.commit()
         await db.refresh(server)
 
-        logger.info(f"Successfully fetched {len(models)} models from {server.server_type} server '{server.name}'")
+        logger.info("Successfully fetched %s models from %s server '%s'", len(models), server.server_type, server.name)
         return {"success": True, "models": models, "error": None}
 
     except httpx.HTTPError as e:
         error_msg = f"HTTP error: {str(e)}"
-        logger.error(f"Failed to fetch models from server '{server.name}': {error_msg}")
+        logger.error("Failed to fetch models from server '%s': %s", server.name, error_msg)
         server.last_error = error_msg
         server.available_models = None
         await db.commit()
         return {"success": False, "error": error_msg, "models": []}
-    except Exception as e:
+    except Exception as e:  # pylint: disable=broad-exception-caught
         error_msg = f"Unexpected error: {str(e)}"
-        logger.error(f"Failed to fetch models from server '{server.name}': {error_msg}")
+        logger.error("Failed to fetch models from server '%s': %s", server.name, error_msg)
         server.last_error = error_msg
         server.available_models = None
         await db.commit()
@@ -194,20 +194,20 @@ async def pull_model_on_server(http_client: httpx.AsyncClient, server: OllamaSer
                 try:
                     line = json.loads(chunk)
                     # You could process status updates here if needed in the future
-                    logger.debug(f"Pull status for {model_name} on {server.name}: {line.get('status')}")
+                    logger.debug("Pull status for %s on %s: %s", model_name, server.name, line.get("status"))
                 except json.JSONDecodeError:
                     continue  # Ignore non-json chunks
 
         response.raise_for_status()  # Will raise an exception for 4xx/5xx responses
-        logger.info(f"Successfully pulled/updated model '{model_name}' on server '{server.name}'")
+        logger.info("Successfully pulled/updated model '%s' on server '%s'", model_name, server.name)
         return {"success": True, "message": f"Model '{model_name}' pulled/updated successfully."}
     except httpx.HTTPStatusError as e:
         error_msg = f"Failed to pull model '{model_name}': Server returned status {e.response.status_code}"
-        logger.error(f"{error_msg} on server '{server.name}'")
+        logger.error("%s on server '%s'", error_msg, server.name)
         return {"success": False, "message": error_msg}
-    except Exception as e:
+    except Exception as e:  # pylint: disable=broad-exception-caught
         error_msg = f"An unexpected error occurred while pulling model '{model_name}': {e}"
-        logger.error(f"{error_msg} on server '{server.name}'")
+        logger.error("%s on server '%s'", error_msg, server.name)
         return {"success": False, "message": error_msg}
 
 
@@ -224,7 +224,7 @@ async def delete_model_on_server(http_client: httpx.AsyncClient, server: OllamaS
         # This is compatible with a wider range of httpx versions.
         response = await http_client.request("DELETE", delete_url, json=payload, timeout=120.0, headers=headers)
         response.raise_for_status()
-        logger.info(f"Successfully deleted model '{model_name}' from server '{server.name}'")
+        logger.info("Successfully deleted model '%s' from server '%s'", model_name, server.name)
         return {"success": True, "message": f"Model '{model_name}' deleted successfully."}
     except httpx.HTTPStatusError as e:
         if e.response.status_code == 404:
@@ -232,11 +232,11 @@ async def delete_model_on_server(http_client: httpx.AsyncClient, server: OllamaS
             logger.warning(message)
             return {"success": True, "message": message}  # Treat not found as a success
         error_msg = f"Failed to delete model '{model_name}': Server returned status {e.response.status_code}"
-        logger.error(f"{error_msg} on server '{server.name}'")
+        logger.error("%s on server '%s'", error_msg, server.name)
         return {"success": False, "message": error_msg}
-    except Exception as e:
+    except Exception as e:  # pylint: disable=broad-exception-caught
         error_msg = f"An unexpected error occurred while deleting model '{model_name}': {e}"
-        logger.error(f"{error_msg} on server '{server.name}'")
+        logger.error("%s on server '%s'", error_msg, server.name)
         return {"success": False, "message": error_msg}
 
 
@@ -252,7 +252,7 @@ async def load_model_on_server(http_client: httpx.AsyncClient, server: OllamaSer
         # Use a timeout sufficient for model loading
         response = await http_client.post(generate_url, json=payload, timeout=300.0, headers=headers)
         response.raise_for_status()
-        logger.info(f"Successfully triggered load for model '{model_name}' on server '{server.name}'")
+        logger.info("Successfully triggered load for model '%s' on server '%s'", model_name, server.name)
         return {"success": True, "message": f"Model '{model_name}' is being loaded into memory."}
     except httpx.HTTPStatusError as e:
         try:
@@ -260,11 +260,11 @@ async def load_model_on_server(http_client: httpx.AsyncClient, server: OllamaSer
         except json.JSONDecodeError:
             error_detail = e.response.text
         error_msg = f"Failed to load model '{model_name}': Server returned status {e.response.status_code}: {error_detail}"
-        logger.error(f"{error_msg} on server '{server.name}'")
+        logger.error("%s on server '%s'", error_msg, server.name)
         return {"success": False, "message": error_msg}
-    except Exception as e:
+    except Exception as e:  # pylint: disable=broad-exception-caught
         error_msg = f"An unexpected error occurred while loading model '{model_name}': {e}"
-        logger.error(f"{error_msg} on server '{server.name}'")
+        logger.error("%s on server '%s'", error_msg, server.name)
         return {"success": False, "message": error_msg}
 
 
@@ -280,7 +280,7 @@ async def unload_model_on_server(http_client: httpx.AsyncClient, server: OllamaS
     try:
         response = await http_client.post(generate_url, json=payload, timeout=60.0, headers=headers)
         response.raise_for_status()
-        logger.info(f"Successfully triggered unload for model '{model_name}' on server '{server.name}'")
+        logger.info("Successfully triggered unload for model '%s' on server '%s'", model_name, server.name)
         return {"success": True, "message": f"Unload signal sent for model '{model_name}'. It will be removed from memory shortly."}
     except httpx.HTTPStatusError as e:
         # If the model isn't found (which can happen if it's not loaded), treat as success.
@@ -291,11 +291,11 @@ async def unload_model_on_server(http_client: httpx.AsyncClient, server: OllamaS
         except json.JSONDecodeError:
             error_detail = e.response.text
         error_msg = f"Failed to unload model '{model_name}': Server returned status {e.response.status_code}: {error_detail}"
-        logger.error(f"{error_msg} on server '{server.name}'")
+        logger.error("%s on server '%s'", error_msg, server.name)
         return {"success": False, "message": error_msg}
-    except Exception as e:
+    except Exception as e:  # pylint: disable=broad-exception-caught
         error_msg = f"An unexpected error occurred while unloading model '{model_name}': {e}"
-        logger.error(f"{error_msg} on server '{server.name}'")
+        logger.error("%s on server '%s'", error_msg, server.name)
         return {"success": False, "message": error_msg}
 
 
@@ -347,7 +347,7 @@ async def get_all_available_model_names(db: AsyncSession, filter_type: Optional[
             try:
                 models_list = json.loads(models_list)
             except json.JSONDecodeError:
-                logger.warning(f"Could not parse available_models JSON for server {server.name} in get_all_available_model_names")
+                logger.warning("Could not parse available_models JSON for server %s in get_all_available_model_names", server.name)
                 continue
 
         for model in models_list:
@@ -379,7 +379,7 @@ async def get_all_models_grouped_by_server(db: AsyncSession, filter_type: Option
                 try:
                     models_list = json.loads(models_list)
                 except json.JSONDecodeError:
-                    logger.warning(f"Could not parse available_models JSON for server {server.name} in get_all_models_grouped_by_server")
+                    logger.warning("Could not parse available_models JSON for server %s in get_all_models_grouped_by_server", server.name)
                     continue
 
             for model in models_list:
@@ -439,8 +439,8 @@ async def get_active_models_all_servers(db: AsyncSession, http_client: httpx.Asy
                 for model in data.get("models", []):
                     model["server_name"] = server.name
                 return data.get("models", [])
-            except Exception as e:
-                logger.error(f"Failed to fetch running models from server '{server.name}': {e}")
+            except Exception as e:  # pylint: disable=broad-exception-caught
+                logger.error("Failed to fetch running models from server '%s': %s", server.name, e)
                 return []
 
         tasks = [fetch_ps(server) for server in ollama_servers]
@@ -501,14 +501,14 @@ async def check_server_health(http_client: httpx.AsyncClient, server: OllamaServ
 
         if response.status_code == 200:
             return {"server_id": server.id, "name": server.name, "url": server.url, "status": "Online", "reason": None}
-        else:
-            return {"server_id": server.id, "name": server.name, "url": server.url, "status": "Offline", "reason": f"Status {response.status_code}"}
+
+        return {"server_id": server.id, "name": server.name, "url": server.url, "status": "Offline", "reason": f"Status {response.status_code}"}
 
     except httpx.RequestError as e:
-        logger.warning(f"Health check failed for server '{server.name}': {e}")
+        logger.warning("Health check failed for server '%s': %s", server.name, e)
         return {"server_id": server.id, "name": server.name, "url": server.url, "status": "Offline", "reason": str(e)}
-    except Exception as e:
-        logger.error(f"Unexpected error during health check for server '{server.name}': {e}")
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        logger.error("Unexpected error during health check for server '%s': %s", server.name, e)
         return {"server_id": server.id, "name": server.name, "url": server.url, "status": "Offline", "reason": "Unexpected error"}
 
 

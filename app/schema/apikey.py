@@ -14,8 +14,6 @@ class APIKeyBase(BaseModel):
 class APIKeyCreate(APIKeyBase):
     """API key creation schema."""
 
-    pass
-
 
 class APIKey(APIKeyBase):
     """API key schema."""
@@ -27,7 +25,7 @@ class APIKey(APIKeyBase):
     is_revoked: bool
     created_at: datetime.datetime
 
-    class Config:
+    class Config:  # pylint: disable=too-few-public-methods
         """Pydantic configuration."""
 
         from_attributes = True

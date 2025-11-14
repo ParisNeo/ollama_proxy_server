@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "info"
 
 
-class Config:
+class Config:  # pylint: disable=too-few-public-methods
     """Pydantic configuration."""
 
     env_file = ".env"

@@ -23,6 +23,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Reques
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.dependencies import get_csrf_token, login_rate_limiter, validate_csrf_token
@@ -83,7 +84,7 @@ def get_system_info():
 
 
 # --- Helper for Redis Rate Limit Scan ---
-async def get_active_rate_limits(redis_client: redis.Redis, db: AsyncSession, settings: AppSettingsModel) -> List[Dict[str, Any]]:
+async def get_active_rate_limits(redis_client: redis.Redis, db: AsyncSession, current_settings: AppSettingsModel) -> List[Dict[str, Any]]:
     """Get active rate limits from Redis."""
     if not redis_client:
         return []
@@ -103,8 +104,8 @@ async def get_active_rate_limits(redis_client: redis.Redis, db: AsyncSession, se
             # Fetch API key details from DB to get the specific rate limit
             api_key = await apikey_crud.get_api_key_by_prefix(db, prefix=prefix)
 
-            key_limit = settings.rate_limit_requests
-            key_window = settings.rate_limit_window_minutes
+            key_limit = current_settings.rate_limit_requests
+            key_window = current_settings.rate_limit_window_minutes
 
             if api_key:
                 if api_key.rate_limit_requests is not None:
@@ -114,11 +115,12 @@ async def get_active_rate_limits(redis_client: redis.Redis, db: AsyncSession, se
 
             if count is not None and ttl is not None:
                 limits.append({"prefix": prefix, "count": int(count), "ttl_seconds": int(ttl), "limit": key_limit, "window_minutes": key_window})
-        except Exception as e:
-            logger.warning(f"Could not parse rate limit key {key}: {e}")
+        except (redis.RedisError, ValueError, IndexError) as e:
+            logger.warning("Could not parse rate limit key %s: %s", key, e)
 
     # Sort by the percentage of the limit used
     def sort_key(item):
+        """Sort key for rate limits by percentage used."""
         if item["limit"] > 0:
             return item["count"] / item["limit"]
         return 0
@@ -193,8 +195,8 @@ async def admin_login_post(request: Request, db: AsyncSession = Depends(get_db),
             current_fails = await redis_client.incr(key)
             if current_fails == 1:
                 await redis_client.expire(key, 300)
-        except Exception as e:
-            logger.error(f"Redis failed during login attempt tracking: {e}")
+        except (redis.RedisError, ValueError, IndexError) as e:
+            logger.error("Redis failed during login attempt tracking: %s", e)
 
     if not is_valid:
         flash(request, "Invalid username or password", "error")
@@ -216,7 +218,7 @@ async def admin_logout(request: Request):
 
 
 @router.get("/dashboard", response_class=HTMLResponse, name="admin_dashboard")
-async def admin_dashboard(request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
+async def admin_dashboard(request: Request, _db: AsyncSession = Depends(get_db), _admin_user: User = Depends(require_admin_user)):
     """Render admin dashboard page."""
     context = get_template_context(request)
     context["csrf_token"] = await get_csrf_token(request)
@@ -225,7 +227,7 @@ async def admin_dashboard(request: Request, db: AsyncSession = Depends(get_db), 
 
 # --- API ENDPOINT FOR DYNAMIC DASHBOARD DATA ---
 @router.get("/system-info", response_class=JSONResponse, name="admin_system_info")
-async def get_system_and_ollama_info(request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
+async def get_system_and_ollama_info(request: Request, db: AsyncSession = Depends(get_db), _admin_user: User = Depends(require_admin_user)):
     """Get system and Ollama information for dashboard."""
     http_client: httpx.AsyncClient = request.app.state.http_client
     redis_client: redis.Redis = request.app.state.redis
@@ -234,17 +236,16 @@ async def get_system_and_ollama_info(request: Request, db: AsyncSession = Depend
     # Run blocking psutil calls in a threadpool to avoid blocking the event loop
     system_info_task = run_in_threadpool(get_system_info)
 
-    # Fetch active models, server health, and server load concurrently
-    running_models_task = server_crud.get_active_models_all_servers(db, http_client)
-    server_health_task = server_crud.check_all_servers_health(db, http_client)
-    server_load_task = log_crud.get_server_load_stats(db)
-
     # Fetch rate limit info from Redis if available
     rate_limit_task = get_active_rate_limits(redis_client, db, app_settings)
 
     # Await all tasks
     (system_info, running_models, server_health, server_load, rate_limits) = await asyncio.gather(
-        system_info_task, running_models_task, server_health_task, server_load_task, rate_limit_task
+        system_info_task,
+        server_crud.get_active_models_all_servers(db, http_client),
+        server_crud.check_all_servers_health(db, http_client),
+        log_crud.get_server_load_stats(db),
+        rate_limit_task,
     )
 
     # Combine server health and load data into a single structure
@@ -259,7 +260,7 @@ async def get_system_and_ollama_info(request: Request, db: AsyncSession = Depend
 async def admin_stats(
     request: Request,
     db: AsyncSession = Depends(get_db),
-    admin_user: User = Depends(require_admin_user),
+    _admin_user: User = Depends(require_admin_user),
     sort_by: str = DEFAULT_QUERY_REQUEST_COUNT,
     sort_order: str = DEFAULT_QUERY_DESC,
 ):
@@ -289,13 +290,13 @@ async def admin_stats(
 
 
 @router.get("/help", response_class=HTMLResponse, name="admin_help")
-async def admin_help_page(request: Request, admin_user: User = Depends(require_admin_user)):
+async def admin_help_page(request: Request, _admin_user: User = Depends(require_admin_user)):
     """Render admin help page."""
     return templates.TemplateResponse("admin/help.html", get_template_context(request))
 
 
 @router.get("/servers", response_class=HTMLResponse, name="admin_servers")
-async def admin_server_management(request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
+async def admin_server_management(request: Request, db: AsyncSession = Depends(get_db), _admin_user: User = Depends(require_admin_user)):
     """Render server management page."""
     context = get_template_context(request)
     context["servers"] = await server_crud.get_servers(db)
@@ -304,10 +305,10 @@ async def admin_server_management(request: Request, db: AsyncSession = Depends(g
 
 
 @router.post("/servers/add", name="admin_add_server", dependencies=[Depends(validate_csrf_token)])
-async def admin_add_server(
+async def admin_add_server(  # pylint: disable=too-many-arguments,too-many-positional-arguments
     request: Request,
     db: AsyncSession = Depends(get_db),
-    admin_user: User = Depends(require_admin_user),
+    _admin_user: User = Depends(require_admin_user),
     server_name: str = DEFAULT_FORM,
     server_url: str = DEFAULT_FORM,
     server_type: str = DEFAULT_FORM,
@@ -322,14 +323,14 @@ async def admin_add_server(
             server_in = ServerCreate(name=server_name, url=server_url, server_type=server_type, api_key=api_key)
             await server_crud.create_server(db, server=server_in)
             flash(request, f"Server '{server_name}' ({server_type}) added successfully.", "success")
-        except Exception as e:
-            logger.error(f"Error adding server: {e}")
+        except SQLAlchemyError as e:
+            logger.error("Error adding server: %s", e)
             flash(request, "Invalid URL format or server type.", "error")
     return RedirectResponse(url=request.url_for("admin_servers"), status_code=status.HTTP_303_SEE_OTHER)
 
 
 @router.post("/servers/{server_id}/delete", name="admin_delete_server", dependencies=[Depends(validate_csrf_token)])
-async def admin_delete_server(request: Request, server_id: int, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
+async def admin_delete_server(request: Request, server_id: int, db: AsyncSession = Depends(get_db), _admin_user: User = Depends(require_admin_user)):
     """Delete server."""
     await server_crud.delete_server(db, server_id=server_id)
     flash(request, "Server deleted successfully.", "success")
@@ -337,7 +338,7 @@ async def admin_delete_server(request: Request, server_id: int, db: AsyncSession
 
 
 @router.post("/servers/{server_id}/refresh-models", name="admin_refresh_models", dependencies=[Depends(validate_csrf_token)])
-async def admin_refresh_models(request: Request, server_id: int, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
+async def admin_refresh_models(request: Request, server_id: int, db: AsyncSession = Depends(get_db), _admin_user: User = Depends(require_admin_user)):
     """Refresh models for server."""
     result = await server_crud.fetch_and_update_models(db, server_id=server_id)
     if result["success"]:
@@ -349,7 +350,7 @@ async def admin_refresh_models(request: Request, server_id: int, db: AsyncSessio
 
 
 @router.get("/servers/{server_id}/edit", response_class=HTMLResponse, name="admin_edit_server_form")
-async def admin_edit_server_form(request: Request, server_id: int, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
+async def admin_edit_server_form(request: Request, server_id: int, db: AsyncSession = Depends(get_db), _admin_user: User = Depends(require_admin_user)):
     """Render server edit form."""
     server = await server_crud.get_server_by_id(db, server_id=server_id)
     if not server:
@@ -361,11 +362,11 @@ async def admin_edit_server_form(request: Request, server_id: int, db: AsyncSess
 
 
 @router.post("/servers/{server_id}/edit", name="admin_edit_server_post", dependencies=[Depends(validate_csrf_token)])
-async def admin_edit_server_post(
+async def admin_edit_server_post(  # pylint: disable=too-many-arguments,too-many-positional-arguments
     request: Request,
     server_id: int,
     db: AsyncSession = Depends(get_db),
-    admin_user: User = Depends(require_admin_user),
+    _admin_user: User = Depends(require_admin_user),
     name: str = DEFAULT_FORM,
     url: str = DEFAULT_FORM,
     server_type: str = DEFAULT_FORM,
@@ -394,7 +395,7 @@ async def admin_edit_server_post(
 
 
 @router.get("/servers/{server_id}/manage", response_class=HTMLResponse, name="admin_manage_server_models")
-async def admin_manage_server_models(request: Request, server_id: int, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
+async def admin_manage_server_models(request: Request, server_id: int, db: AsyncSession = Depends(get_db), _admin_user: User = Depends(require_admin_user)):
     """Render server model management page."""
     server = await server_crud.get_server_by_id(db, server_id=server_id)
     if not server:
@@ -407,7 +408,7 @@ async def admin_manage_server_models(request: Request, server_id: int, db: Async
 
 
 @router.post("/servers/{server_id}/pull", name="admin_pull_model", dependencies=[Depends(validate_csrf_token)])
-async def admin_pull_model(request: Request, server_id: int, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user), model_name: str = DEFAULT_FORM):
+async def admin_pull_model(request: Request, server_id: int, db: AsyncSession = Depends(get_db), _admin_user: User = Depends(require_admin_user), model_name: str = DEFAULT_FORM):
     """Pull model to server."""
     server = await server_crud.get_server_by_id(db, server_id=server_id)
     if not server:
@@ -429,7 +430,8 @@ async def admin_pull_model(request: Request, server_id: int, db: AsyncSession = 
 
 
 @router.post("/servers/{server_id}/delete-model", name="admin_delete_model", dependencies=[Depends(validate_csrf_token)])
-async def admin_delete_model(request: Request, server_id: int, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user), model_name: str = DEFAULT_FORM):
+async def admin_delete_model(request: Request, server_id: int, db: AsyncSession = Depends(get_db), _admin_user: User = Depends(require_admin_user), model_name: str = DEFAULT_FORM):
+    """Delete model from server."""
     server = await server_crud.get_server_by_id(db, server_id=server_id)
     if not server:
         raise HTTPException(status_code=404, detail="Server not found")
@@ -448,7 +450,8 @@ async def admin_delete_model(request: Request, server_id: int, db: AsyncSession 
 
 
 @router.post("/servers/{server_id}/load-model", name="admin_load_model", dependencies=[Depends(validate_csrf_token)])
-async def admin_load_model(request: Request, server_id: int, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user), model_name: str = DEFAULT_FORM):
+async def admin_load_model(request: Request, server_id: int, db: AsyncSession = Depends(get_db), _admin_user: User = Depends(require_admin_user), model_name: str = DEFAULT_FORM):
+    """Load model on server."""
     server = await server_crud.get_server_by_id(db, server_id=server_id)
     if not server:
         raise HTTPException(status_code=404, detail="Server not found")
@@ -462,7 +465,8 @@ async def admin_load_model(request: Request, server_id: int, db: AsyncSession = 
 
 
 @router.post("/servers/{server_id}/unload-model", name="admin_unload_model", dependencies=[Depends(validate_csrf_token)])
-async def admin_unload_model(request: Request, server_id: int, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user), model_name: str = DEFAULT_FORM):
+async def admin_unload_model(request: Request, server_id: int, db: AsyncSession = Depends(get_db), _admin_user: User = Depends(require_admin_user), model_name: str = DEFAULT_FORM):
+    """Unload model from server."""
     server = await server_crud.get_server_by_id(db, server_id=server_id)
     if not server:
         raise HTTPException(status_code=404, detail="Server not found")
@@ -478,8 +482,9 @@ async def admin_unload_model(request: Request, server_id: int, db: AsyncSession 
 # --- NEW: Unload model from Dashboard ---
 @router.post("/models/unload", name="admin_unload_model_dashboard", dependencies=[Depends(validate_csrf_token)])
 async def admin_unload_model_dashboard(
-    request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user), model_name: str = DEFAULT_FORM, server_name: str = DEFAULT_FORM
+    request: Request, db: AsyncSession = Depends(get_db), _admin_user: User = Depends(require_admin_user), model_name: str = DEFAULT_FORM, server_name: str = DEFAULT_FORM
 ):
+    """Unload model from dashboard."""
     server = await server_crud.get_server_by_name(db, name=server_name)
     if not server:
         flash(request, f"Server '{server_name}' not found.", "error")
@@ -497,7 +502,8 @@ async def admin_unload_model_dashboard(
 
 # --- MODELS MANAGER ROUTES (NEW) ---
 @router.get("/models-manager", response_class=HTMLResponse, name="admin_models_manager")
-async def admin_models_manager_page(request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
+async def admin_models_manager_page(request: Request, db: AsyncSession = Depends(get_db), _admin_user: User = Depends(require_admin_user)):
+    """Render models manager page."""
     context = get_template_context(request)
 
     # Ensure metadata exists for all discovered models
@@ -511,7 +517,8 @@ async def admin_models_manager_page(request: Request, db: AsyncSession = Depends
 
 
 @router.post("/models-manager/update", name="admin_update_model_metadata", dependencies=[Depends(validate_csrf_token)])
-async def admin_update_model_metadata(request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
+async def admin_update_model_metadata(request: Request, db: AsyncSession = Depends(get_db), _admin_user: User = Depends(require_admin_user)):
+    """Update model metadata."""
     form_data = await request.form()
 
     # A set to keep track of which models were in the form
@@ -541,7 +548,8 @@ async def admin_update_model_metadata(request: Request, db: AsyncSession = Depen
 
 
 @router.get("/settings", response_class=HTMLResponse, name="admin_settings")
-async def admin_settings_form(request: Request, admin_user: User = Depends(require_admin_user)):
+async def admin_settings_form(request: Request, _admin_user: User = Depends(require_admin_user)):
+    """Render settings form."""
     context = get_template_context(request)
     app_settings: AppSettingsModel = request.app.state.settings
     context["settings"] = app_settings
@@ -551,14 +559,16 @@ async def admin_settings_form(request: Request, admin_user: User = Depends(requi
 
 
 @router.post("/settings", name="admin_settings_post", dependencies=[Depends(validate_csrf_token)])
-async def admin_settings_post(
+async def admin_settings_post(  # pylint: disable=too-many-locals,too-many-statements
     request: Request,
     db: AsyncSession = Depends(get_db),
-    admin_user: User = Depends(require_admin_user),
+    _admin_user: User = Depends(require_admin_user),
     logo_file: UploadFile = DEFAULT_FILE,
     ssl_key_file: UploadFile = DEFAULT_FILE,
     ssl_cert_file: UploadFile = DEFAULT_FILE,
 ):
+    """Process settings form submission."""
+    # TODO: refactor to lower complexity
     current_settings: AppSettingsModel = request.app.state.settings
     form_data = await request.form()
 
@@ -590,8 +600,8 @@ async def admin_settings_post(
                     os.remove(old_logo_path)
             final_logo_url = f"/static/uploads/{secure_filename}"
             flash(request, "New logo uploaded successfully.", "success")
-        except Exception as e:
-            logger.error(f"Failed to save uploaded logo: {e}")
+        except (OSError, ValueError) as e:
+            logger.error("Failed to save uploaded logo: %s", e)
             flash(request, f"Error saving logo: {e}", "error")
     else:
         final_logo_url = form_data.get("branding_logo_url")
@@ -606,6 +616,7 @@ async def admin_settings_post(
         remove_flag: bool,
         file_type: str,  # 'key' or 'cert'
     ) -> (Optional[str], Optional[str]):
+        """Process SSL file upload."""
         managed_filename = f"uploaded_{file_type}.pem"
         managed_path = SSL_DIR / managed_filename
 
@@ -621,12 +632,12 @@ async def admin_settings_post(
             try:
                 content_bytes = await file_upload.read()
                 content_str = content_bytes.decode("utf-8")
-                with open(managed_path, "w") as f:
+                with open(managed_path, "w", encoding="utf-8") as f:
                     f.write(content_str)
                 flash(request, f"New SSL {file_type} file uploaded successfully.", "success")
                 return str(managed_path), content_str
-            except Exception as e:
-                logger.error(f"Failed to save uploaded SSL {file_type} file: {e}")
+            except (OSError, ValueError, UnicodeError) as e:
+                logger.error("Failed to save uploaded SSL %s file: %s", file_type, e)
                 flash(request, f"Error saving SSL {file_type} file: {e}", "error")
                 return current_path, current_content  # Revert on error
 
@@ -676,11 +687,11 @@ async def admin_settings_post(
         await settings_crud.update_app_settings(db, settings_data=updated_settings_data)
         request.app.state.settings = updated_settings_data
         flash(request, "Settings updated successfully. A restart is required for some changes (like HTTPS) to take effect.", "success")
-    except (ValueError, TypeError) as e:
-        logger.error(f"Invalid form data for settings: {e}")
+    except (ValueError, TypeError, SQLAlchemyError) as e:
+        logger.error("Invalid form data for settings: %s", e)
         flash(request, "Error: Invalid data provided for a setting (e.g., a port number was not a number).", "error")
-    except Exception as e:
-        logger.error(f"Failed to update settings: {e}", exc_info=True)
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        logger.error("Failed to update settings: %s", e, exc_info=True)
         flash(request, "An unexpected error occurred while saving settings.", "error")
 
     return RedirectResponse(url=request.url_for("admin_settings"), status_code=status.HTTP_303_SEE_OTHER)
@@ -693,10 +704,11 @@ async def admin_settings_post(
 async def admin_user_management(
     request: Request,
     db: AsyncSession = Depends(get_db),
-    admin_user: User = Depends(require_admin_user),
+    _admin_user: User = Depends(require_admin_user),
     sort_by: str = DEFAULT_QUERY_USERNAME,
     sort_order: str = DEFAULT_QUERY_ASC,
 ):
+    """Render user management page."""
     context = get_template_context(request)
     context["users"] = await user_crud.get_users(db, sort_by=sort_by, sort_order=sort_order)
     context["csrf_token"] = await get_csrf_token(request)
@@ -707,8 +719,9 @@ async def admin_user_management(
 
 @router.post("/users", name="create_new_user", dependencies=[Depends(validate_csrf_token)])
 async def create_new_user(
-    request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user), username: str = Form(...), password: str = Form(...)
+    request: Request, db: AsyncSession = Depends(get_db), _admin_user: User = Depends(require_admin_user), username: str = Form(...), password: str = Form(...)
 ):
+    """Create new user."""
     existing_user = await user_crud.get_user_by_username(db, username=username)
     if existing_user:
         flash(request, f"User '{username}' already exists.", "error")
@@ -720,7 +733,8 @@ async def create_new_user(
 
 
 @router.get("/users/{user_id}/edit", response_class=HTMLResponse, name="admin_edit_user_form")
-async def admin_edit_user_form(request: Request, user_id: int, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
+async def admin_edit_user_form(request: Request, user_id: int, db: AsyncSession = Depends(get_db), _admin_user: User = Depends(require_admin_user)):
+    """Render user edit form."""
     user = await user_crud.get_user_by_id(db, user_id=user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -735,10 +749,11 @@ async def admin_edit_user_post(
     request: Request,
     user_id: int,
     db: AsyncSession = Depends(get_db),
-    admin_user: User = Depends(require_admin_user),
+    _admin_user: User = Depends(require_admin_user),
     username: str = DEFAULT_FORM,
     password: Optional[str] = Form(None),
 ):
+    """Update user information."""
     # Check if the new username is already taken by another user
     existing_user = await user_crud.get_user_by_username(db, username=username)
     if existing_user and existing_user.id != user_id:
@@ -754,7 +769,8 @@ async def admin_edit_user_post(
 
 
 @router.get("/users/{user_id}", response_class=HTMLResponse, name="get_user_details")
-async def get_user_details(request: Request, user_id: int, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
+async def get_user_details(request: Request, user_id: int, db: AsyncSession = Depends(get_db), _admin_user: User = Depends(require_admin_user)):
+    """Display detailed information about a specific user."""
     context = get_template_context(request)
     user = await user_crud.get_user_by_id(db, user_id=user_id)
     if not user:
@@ -770,8 +786,9 @@ async def admin_user_stats(
     request: Request,
     user_id: int,
     db: AsyncSession = Depends(get_db),
-    admin_user: User = Depends(require_admin_user),
+    _admin_user: User = Depends(require_admin_user),
 ):
+    """Display usage statistics for a specific user."""
     user = await user_crud.get_user_by_id(db, user_id=user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -802,7 +819,7 @@ async def admin_user_stats(
 
 
 @router.post("/users/{user_id}/keys/create", name="admin_create_key", dependencies=[Depends(validate_csrf_token)])
-async def create_user_api_key(
+async def create_user_api_key(  # pylint: disable=too-many-arguments,too-many-positional-arguments
     request: Request,
     user_id: int,
     db: AsyncSession = Depends(get_db),
@@ -811,6 +828,7 @@ async def create_user_api_key(
     rate_limit_requests: Optional[int] = Form(None),
     rate_limit_window_minutes: Optional[int] = Form(None),
 ):
+    """Create a new API key for a specific user."""
     # --- FIX: Check for existing key with the same name for this user ---
     existing_key = await apikey_crud.get_api_key_by_name_and_user_id(db, key_name=key_name, user_id=user_id)
     if existing_key:
@@ -836,8 +854,9 @@ async def toggle_key_active_status(
     request: Request,
     key_id: int,
     db: AsyncSession = Depends(get_db),
-    admin_user: User = Depends(require_admin_user),
+    _admin_user: User = Depends(require_admin_user),
 ):
+    """Toggle the active status of an API key."""
     key = await apikey_crud.toggle_api_key_active(db, key_id=key_id)
     if not key:
         raise HTTPException(status_code=404, detail="API Key not found or already revoked")
@@ -852,8 +871,9 @@ async def revoke_user_api_key(
     request: Request,
     key_id: int,
     db: AsyncSession = Depends(get_db),
-    admin_user: User = Depends(require_admin_user),
+    _admin_user: User = Depends(require_admin_user),
 ):
+    """Revoke an API key."""
     key = await apikey_crud.get_api_key_by_id(db, key_id=key_id)
     if not key:
         raise HTTPException(status_code=404, detail="API Key not found")
@@ -864,7 +884,8 @@ async def revoke_user_api_key(
 
 
 @router.post("/users/{user_id}/delete", name="delete_user_account", dependencies=[Depends(validate_csrf_token)])
-async def delete_user_account(request: Request, user_id: int, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
+async def delete_user_account(request: Request, user_id: int, db: AsyncSession = Depends(get_db), _admin_user: User = Depends(require_admin_user)):
+    """Delete a user account."""
     user = await user_crud.get_user_by_id(db, user_id=user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")

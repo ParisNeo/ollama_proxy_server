@@ -1,5 +1,6 @@
 """Database models for Ollama Proxy Server."""
 
+# # pylint: disable=too-few-public-methods
 import datetime
 
 from sqlalchemy import JSON, Boolean, Column, DateTime, ForeignKey, Integer, String, UniqueConstraint

@@ -10,6 +10,8 @@ from app.core.security import get_password_hash
 from app.database.models import APIKey, UsageLog, User
 from app.schema.user import UserCreate
 
+func: callable
+
 
 async def get_user_by_username(db: AsyncSession, username: str) -> User | None:
     """Get user by username from database."""

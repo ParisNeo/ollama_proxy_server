@@ -6,6 +6,7 @@ This version removes Alembic and uses SQLAlchemy's create_all
 to initialize the database on startup.
 """
 
+import asyncio
 import logging
 import os
 import sys
@@ -31,7 +32,8 @@ from app.core.logging_config import setup_logging
 from app.crud import server_crud, settings_crud, user_crud
 from app.database.base import Base
 from app.database.migrations import run_all_migrations
-from app.database.session import AsyncSessionLocal, engine
+from app.database.session import ASYNC_SESSION_LOCAL_OLD as AsyncSessionLocal
+from app.database.session import engine
 from app.schema.settings import AppSettingsModel
 from app.schema.user import UserCreate
 
@@ -55,6 +57,7 @@ async def init_db():
     Runs migrations first to ensure backward compatibility with older database schemas.
     This function is designed to run only once.
     """
+    # pylint: disable=global-statement
     global _db_initialized
     if _db_initialized:
         logger.debug("Database already initialized, skipping.")
@@ -89,76 +92,87 @@ async def create_initial_admin_user() -> None:
             logger.info("Admin user was created concurrently by another worker.")
 
 
-async def periodic_model_refresh(app: FastAPI) -> None:
+async def periodic_model_refresh(_app: FastAPI) -> None:
     """Background task that periodically refreshes model lists for all servers."""
-    import asyncio
 
     while True:
         try:
             # Fetch the interval from app state so it can be updated live
-            app_settings: AppSettingsModel = app.state.settings
+            app_settings: AppSettingsModel = _app.state.settings
             interval_minutes = app_settings.model_update_interval_minutes
             interval_seconds = interval_minutes * 60
 
-            logger.info(f"Next model refresh in {interval_minutes} minutes.")
+            logger.info("Next model refresh in %s minutes.", interval_minutes)
             await asyncio.sleep(interval_seconds)
 
             logger.info("Running periodic model refresh for all servers...")
             async with AsyncSessionLocal() as db:
                 results = await server_crud.refresh_all_server_models(db)
 
-            logger.info(f"Model refresh completed: {results['success']}/{results['total']} servers updated successfully")
+            logger.info("Model refresh completed: %s/%s servers updated successfully", results["success"], results["total"])
 
             if results["failed"] > 0:
-                logger.warning(f"{results['failed']} server(s) failed to update:")
+                logger.warning("%s server(s) failed to update:", results["failed"])
                 for error in results["errors"]:
-                    logger.warning(f"  - {error['server_name']}: {error['error']}")
+                    logger.warning("  - %s: %s", error["server_name"], error["error"])
 
         except asyncio.CancelledError:
             logger.info("Periodic model refresh task cancelled")
             break
-        except Exception as e:
-            logger.error(f"Error in periodic model refresh: {e}", exc_info=True)
+        except (httpx.HTTPError, asyncio.TimeoutError, ConnectionError) as e:
+            logger.error("Error in periodic model refresh: %s", e, exc_info=True)
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Application lifespan manager."""
-    # ---------- Startup ----------
-    logger.info("Starting up Ollama Proxy Server…")
+def _ensure_directories():
+    """Ensure required directories exist."""
+    directories = [
+        (Path("app/static/uploads"), "Uploads"),
+        (Path(".ssl"), "SSL storage"),
+        (Path("benchmarks"), "Benchmarks"),
+    ]
 
-    # Ensure directories exist
-    uploads_dir = Path("app/static/uploads")
-    uploads_dir.mkdir(exist_ok=True)
-    logger.info(f"Uploads directory is at: {uploads_dir.resolve()}")
+    for directory, name in directories:
+        directory.mkdir(exist_ok=True)
+        logger.info("%s directory is at: %s", name, directory.resolve())
 
-    ssl_dir = Path(".ssl")
-    ssl_dir.mkdir(exist_ok=True)
-    logger.info(f"SSL storage directory is at: {ssl_dir.resolve()}")
 
-    benchmarks_dir = Path("benchmarks")
-    benchmarks_dir.mkdir(exist_ok=True)
-    logger.info(f"Benchmarks directory is at: {benchmarks_dir.resolve()}")
-
+def _check_admin_password():
+    """Check if admin password is still default."""
     if settings.ADMIN_PASSWORD == "changeme":
-        logger.critical("FATAL: The admin password is set to the default value 'changeme'.")
-        logger.critical("Please change ADMIN_PASSWORD in your .env file or run the setup wizard and restart.")
+        logger.critical("FATAL: The admin password is set to default value 'changeme'.")
+        logger.critical("Please change ADMIN_PASSWORD in your .env file or run setup wizard and restart.")
         sys.exit(1)
 
-    await init_db()
 
-    # --- NEW: Load settings from DB ---
-    async with AsyncSessionLocal() as db:
-        db_settings_obj = await settings_crud.create_initial_settings(db)
-        app.state.settings = AppSettingsModel.model_validate(db_settings_obj.settings_data)
+async def _setup_redis_connection(_app: FastAPI):
+    """Set up Redis connection if available."""
+    try:
+        db_settings: AppSettingsModel = _app.state.settings
+        if db_settings.redis_username and db_settings.redis_password:
+            credentials = f"{db_settings.redis_username}:{db_settings.redis_password}@"
+        elif db_settings.redis_username:
+            credentials = f"{db_settings.redis_username}@"
+        else:
+            credentials = ""
+        redis_url = f"redis://{credentials}{db_settings.redis_host}:{db_settings.redis_port}/0"
 
-    await create_initial_admin_user()
+        _app.state.redis = redis.from_url(redis_url, encoding="utf-8", decode_responses=True)
+        await _app.state.redis.ping()
+        logger.info("Successfully connected to Redis.")
+    except (redis.ConnectionError, redis.TimeoutError, ConnectionRefusedError) as exc:
+        logger.warning("Redis not available – rate limiting disabled. Reason: %s", exc)
+        _app.state.redis = None
 
-    # Configure HTTP client (timeouts are now hardcoded for simplicity)
+
+async def _setup_http_client(_app: FastAPI):
+    """Set up HTTP client with appropriate timeouts and limits."""
     timeout = httpx.Timeout(10.0, read=600.0, write=600.0, pool=60.0)
     limits = httpx.Limits(max_keepalive_connections=20, max_connections=100, keepalive_expiry=60.0)
-    app.state.http_client = httpx.AsyncClient(timeout=timeout, limits=limits)
+    _app.state.http_client = httpx.AsyncClient(timeout=timeout, limits=limits)
 
+
+async def setup_redis_connection(_app: FastAPI):
+    """Set up Redis connection if available."""
     try:
         db_settings: AppSettingsModel = app.state.settings
         if db_settings.redis_username and db_settings.redis_password:
@@ -169,38 +183,66 @@ async def lifespan(app: FastAPI):
             credentials = ""
         redis_url = f"redis://{credentials}{db_settings.redis_host}:{db_settings.redis_port}/0"
 
-        app.state.redis = redis.from_url(redis_url, encoding="utf-8", decode_responses=True)
-        await app.state.redis.ping()
+        _app.state.redis = redis.from_url(redis_url, encoding="utf-8", decode_responses=True)
+        await _app.state.redis.ping()
         logger.info("Successfully connected to Redis.")
-    except Exception as exc:
-        logger.warning(f"Redis not available – rate limiting disabled. Reason: {exc}")
-        app.state.redis = None
+    except (redis.ConnectionError, redis.TimeoutError, ConnectionRefusedError) as exc:
+        logger.warning("Redis not available – rate limiting disabled. Reason: %s", exc)
+        _app.state.redis = None
 
-    import asyncio
 
-    refresh_task = asyncio.create_task(periodic_model_refresh(app))
-    app.state.refresh_task = refresh_task
-
-    # Do initial model refresh on startup
+async def _perform_initial_model_refresh():
+    """Perform initial model refresh on startup."""
     logger.info("Performing initial model refresh on startup...")
     async with AsyncSessionLocal() as db:
         initial_results = await server_crud.refresh_all_server_models(db)
-    logger.info(f"Initial model refresh: {initial_results['success']}/{initial_results['total']} servers updated")
+    logger.info("Initial model refresh: %s/%s servers updated", initial_results["success"], initial_results["total"])
+
+
+async def _cleanup_resources(_app: FastAPI):
+    """Cleanup resources during shutdown."""
+    if hasattr(_app.state, "refresh_task"):
+        _app.state.refresh_task.cancel()
+        try:
+            await _app.state.refresh_task
+        except asyncio.CancelledError:
+            pass
+
+    await _app.state.http_client.aclose()
+    if _app.state.redis:
+        await _app.state.redis.close()
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """Application lifespan manager."""
+    # ---------- Startup ----------
+    logger.info("Starting up Ollama Proxy Server…")
+
+    _ensure_directories()
+    _check_admin_password()
+
+    await init_db()
+
+    # --- Load settings from DB ---
+    async with AsyncSessionLocal() as db:
+        db_settings_obj = await settings_crud.create_initial_settings(db)
+        _app.state.settings = AppSettingsModel.model_validate(db_settings_obj.settings_data)
+
+    await create_initial_admin_user()
+    await _setup_http_client(_app)
+    await setup_redis_connection(_app)
+
+    refresh_task = asyncio.create_task(periodic_model_refresh(_app))
+    _app.state.refresh_task = refresh_task
+
+    await _perform_initial_model_refresh()
 
     yield
 
     # ---------- Shutdown ----------
     logger.info("Shutting down…")
-    if hasattr(app.state, "refresh_task"):
-        app.state.refresh_task.cancel()
-        try:
-            await app.state.refresh_task
-        except asyncio.CancelledError:
-            pass
-
-    await app.state.http_client.aclose()
-    if app.state.redis:
-        await app.state.redis.close()
+    await _cleanup_resources(_app)
 
 
 app = FastAPI(
@@ -251,8 +293,6 @@ def read_root():
 
 
 if __name__ == "__main__":
-    import asyncio
-
     import uvicorn
 
     async def run_server():
@@ -281,11 +321,11 @@ if __name__ == "__main__":
                             ssl_certfile = str(cert_path)
                         else:
                             if not key_path.is_file():
-                                logger.warning(f"SSL key file not found at '{key_path}'. Starting without HTTPS.")
+                                logger.warning("SSL key file not found at '%s'. Starting without HTTPS.", key_path)
                             if not cert_path.is_file():
-                                logger.warning(f"SSL cert file not found at '{cert_path}'. Starting without HTTPS.")
-        except Exception as e:
-            logger.info(f"Could not load SSL settings from DB (this is normal on first run). Reason: {e}")
+                                logger.warning("SSL cert file not found at '%s'. Starting without HTTPS.", cert_path)
+        except OSError as e:
+            logger.info("Could not load SSL settings from DB (this is normal on first run). Reason: %s", e)
 
         # --- User-friendly startup banner ---
         protocol = "https" if ssl_keyfile and ssl_certfile else "http"

@@ -8,8 +8,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.models import APIKey, OllamaServer, UsageLog, User
 
+func: callable
 
-async def create_usage_log(db: AsyncSession, *, api_key_id: int, endpoint: str, status_code: int, server_id: int | None, model: str | None = None) -> UsageLog:
+
+async def create_usage_log(  # pylint: disable=too-many-arguments
+    db: AsyncSession, *, api_key_id: int, endpoint: str, status_code: int, server_id: int | None, model: str | None = None
+) -> UsageLog:
     """Create usage log entry in database."""
     db_log = UsageLog(api_key_id=api_key_id, endpoint=endpoint, status_code=status_code, server_id=server_id, model=model)
     db.add(db_log)
@@ -78,7 +82,7 @@ async def get_hourly_usage_stats(db: AsyncSession):
     # For PostgreSQL, you would use: func.extract('hour', UsageLog.request_timestamp)
     hour_extract = func.strftime("%H", UsageLog.request_timestamp)
 
-    stmt = select(hour_extract.label("hour"), func.count(UsageLog.id).label("request_count")).group_by("hour").order_by("hour")
+    stmt = select(hour_extract.label("hour"), func.count(UsageLog.id).label("request_count")).group_by("hour").order_by("hour")  # pylint: disable=not-callable
     result = await db.execute(stmt)
     # Ensure all 24 hours are present
     stats_dict = {row.hour: row.request_count for row in result.all()}

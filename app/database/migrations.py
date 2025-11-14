@@ -3,6 +3,7 @@
 Handles schema updates when upgrading from older versions.
 """
 
+import json
 import logging
 from typing import Dict, Set
 
@@ -46,14 +47,14 @@ async def add_column_if_missing(engine: AsyncEngine, table_name: str, column_nam
     exists = await check_column_exists(engine, table_name, column_name)
 
     if not exists:
-        logger.info(f"Adding missing column '{column_name}' to table '{table_name}'")
+        logger.info("Adding missing column '%s' to table '%s'", column_name, table_name)
         async with engine.begin() as conn:
             await conn.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_definition}"))
-        logger.info(f"Successfully added column '{column_name}' to table '{table_name}'")
+        logger.info("Successfully added column '%s' to table '%s'", column_name, table_name)
         return True
-    else:
-        logger.debug(f"Column '{column_name}' already exists in table '{table_name}'")
-        return False
+
+    logger.debug("Column '%s' already exists in table '%s'", column_name, table_name)
+    return False
 
 
 async def migrate_ollama_servers_table(engine: AsyncEngine) -> None:
@@ -137,8 +138,8 @@ async def migrate_usage_logs_table(engine: AsyncEngine) -> None:
         try:
             await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_usage_logs_model ON usage_logs (model)"))
             logger.info("Ensured index ix_usage_logs_model exists")
-        except Exception as e:
-            logger.debug(f"Index creation note: {e}")
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            logger.debug("Index creation note: %s", exc)
 
     logger.info("usage_logs table migration complete")
 
@@ -169,7 +170,6 @@ async def migrate_app_settings_data(engine: AsyncEngine) -> None:
             return
 
         settings_id, settings_json = row
-        import json
 
         settings_data = json.loads(settings_json) if settings_json else {}
 
@@ -182,7 +182,7 @@ async def migrate_app_settings_data(engine: AsyncEngine) -> None:
             if key not in settings_data:
                 settings_data[key] = default_value
                 updated = True
-                logger.info(f"Added missing setting '{key}' with default value: {default_value}")
+                logger.info("Added missing setting '%s' with default value: %s", key, default_value)
 
         # Update the database if any fields were added
         if updated:
@@ -228,7 +228,7 @@ async def auto_migrate_table(engine: AsyncEngine, table_name: str, expected_colu
         table_exists = result.fetchone() is not None
 
     if not table_exists:
-        logger.info(f"Table '{table_name}' does not exist yet, skipping auto-migration")
+        logger.info("Table '%s' does not exist yet, skipping auto-migration", table_name)
         return
 
     # Get existing columns
@@ -238,11 +238,11 @@ async def auto_migrate_table(engine: AsyncEngine, table_name: str, expected_colu
     missing_columns = set(expected_columns.keys()) - existing_columns
 
     if not missing_columns:
-        logger.debug(f"Table '{table_name}' has all expected columns")
+        logger.debug("Table '%s' has all expected columns", table_name)
         return
 
     # Add missing columns
-    logger.info(f"Table '{table_name}' is missing {len(missing_columns)} column(s): {missing_columns}")
+    logger.info("Table '%s' is missing %d column(s): %s", table_name, len(missing_columns), missing_columns)
 
     for col_name in missing_columns:
         col_definition = expected_columns[col_name]
@@ -267,7 +267,7 @@ async def check_and_report_schema(engine: AsyncEngine) -> None:
             if table_name.startswith("sqlite_"):
                 continue
 
-            logger.info(f"\nTable: {table_name}")
+            logger.info("\nTable: %s", table_name)
             logger.info("-" * 60)
 
             # Get columns for this table
@@ -275,11 +275,11 @@ async def check_and_report_schema(engine: AsyncEngine) -> None:
             columns = result.fetchall()
 
             for col in columns:
-                col_id, col_name, col_type, not_null, default_val, pk = col
+                _, col_name, col_type, not_null, default_val, pk = col
                 pk_marker = " [PK]" if pk else ""
                 null_marker = " NOT NULL" if not_null else ""
                 default_marker = f" DEFAULT {default_val}" if default_val else ""
-                logger.info(f"  - {col_name}: {col_type}{pk_marker}{null_marker}{default_marker}")
+                logger.info("  - %s: %s%s%s%s", col_name, col_type, pk_marker, null_marker, default_marker)
 
     logger.info("=" * 60)
 
@@ -329,7 +329,7 @@ async def run_all_migrations(engine: AsyncEngine) -> None:
 
         # Auto-migrate all tables
         for table_name, expected_columns in table_schemas.items():
-            logger.info(f"Checking table '{table_name}' for missing columns...")
+            logger.info("Checking table '%s' for missing columns...", table_name)
             await auto_migrate_table(engine, table_name, expected_columns)
 
         # Handle app_settings JSON data migration separately
@@ -345,14 +345,14 @@ async def run_all_migrations(engine: AsyncEngine) -> None:
         # Uncomment the next line if you want to see the full schema on startup
         # await check_and_report_schema(engine)
 
-    except Exception as e:
-        logger.error(f"Error running database migrations: {e}", exc_info=True)
+    except Exception as exc:
+        logger.error("Error running database migrations: %s", exc, exc_info=True)
         # Print schema report on error to help debugging
         try:
             logger.error("Generating schema report to help diagnose the issue...")
             await check_and_report_schema(engine)
-        except Exception as report_error:
-            logger.error(f"Could not generate schema report: {report_error}")
+        except Exception as report_error:  # pylint: disable=broad-exception-caught
+            logger.error("Could not generate schema report: %s", report_error)
         raise
 
 
@@ -372,8 +372,8 @@ async def create_missing_indexes(engine: AsyncEngine) -> None:
         for index_name, table_name, column_name in indexes:
             try:
                 await conn.execute(text(f"CREATE INDEX IF NOT EXISTS {index_name} ON {table_name} ({column_name})"))
-                logger.debug(f"Ensured index {index_name} exists on {table_name}.{column_name}")
-            except Exception as e:
-                logger.warning(f"Could not create index {index_name}: {e}")
+                logger.debug("Ensured index %s exists on %s.%s", index_name, table_name, column_name)
+            except Exception as exc:  # pylint: disable=broad-exception-caught
+                logger.warning("Could not create index %s: %s", index_name, exc)
 
     logger.info("Index check complete")

@@ -15,10 +15,12 @@ from pydantic import BaseModel, Field
 from sklearn.decomposition import PCA
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.v1.dependencies import validate_csrf_token_header
+from app.api.v1.dependencies import get_csrf_token, validate_csrf_token_header
 from app.api.v1.routes.admin import get_template_context, require_admin_user, templates
 from app.core.benchmarks import PREBUILT_BENCHMARKS
+from app.core.vllm_translator import translate_ollama_to_vllm_embeddings, translate_vllm_to_ollama_embeddings
 from app.crud import server_crud
+from app.crud.server_crud import _get_auth_headers
 from app.database.models import OllamaServer, User
 from app.database.session import get_db
 
@@ -52,41 +54,35 @@ class BenchmarkRequest(BaseModel):
 
 # --- Helper Function ---
 async def get_embedding(http_client: httpx.AsyncClient, server: OllamaServer, model_name: str, prompt: str) -> List[float]:
-    """Get embedding from server for given model and prompt."""
-    """Helper to get a single embedding from a server."""
-    from app.crud.server_crud import _get_auth_headers
-
+    """Get embedding from server for given model and prompt. Helper to get a single embedding from a server."""
     headers = _get_auth_headers(server)
     try:
         if server.server_type == "vllm":
-            from app.core.vllm_translator import translate_ollama_to_vllm_embeddings, translate_vllm_to_ollama_embeddings
-
             url = f"{server.url.rstrip('/')}/v1/embeddings"
             payload = translate_ollama_to_vllm_embeddings({"model": model_name, "prompt": prompt})
             response = await http_client.post(url, json=payload, timeout=60.0, headers=headers)
             response.raise_for_status()
             return translate_vllm_to_ollama_embeddings(response.json())["embedding"]
-        else:  # Ollama
-            url = f"{server.url.rstrip('/')}/api/embeddings"
-            payload = {"model": model_name, "prompt": prompt}
-            response = await http_client.post(url, json=payload, timeout=60.0, headers=headers)
-            response.raise_for_status()
-            return response.json()["embedding"]
+
+        # Ollama
+        url = f"{server.url.rstrip('/')}/api/embeddings"
+        payload = {"model": model_name, "prompt": prompt}
+        response = await http_client.post(url, json=payload, timeout=60.0, headers=headers)
+        response.raise_for_status()
+        return response.json()["embedding"]
 
     except httpx.HTTPStatusError as e:
-        logger.error(f"Error getting embedding for model {model_name}: {e.response.text}")
-        raise HTTPException(status_code=e.response.status_code, detail=f"Backend server error: {e.response.text}")
+        logger.error("Error getting embedding for model %s: %s", model_name, e.response.text)
+        raise HTTPException(status_code=e.response.status_code, detail=f"Backend server error: {e.response.text}") from e
     except Exception as e:
-        logger.error(f"Failed to connect to backend server at {server.url}: {e}")
-        raise HTTPException(status_code=500, detail=f"Could not connect to backend server to get embedding: {e}")
+        logger.error("Failed to connect to backend server at %s: %s", server.url, e)
+        raise HTTPException(status_code=500, detail=f"Could not connect to backend server to get embedding: {e}") from e
 
 
 # --- Routes ---
 @router.get("/embedding-playground", response_class=HTMLResponse, name="admin_embedding_playground")
-async def admin_embedding_playground_ui(request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):  # noqa: B008
+async def admin_embedding_playground_ui(request: Request, db: AsyncSession = Depends(get_db), _admin_user: User = Depends(require_admin_user)):  # noqa: B008
     """Render embedding playground UI."""
-    from app.api.v1.dependencies import get_csrf_token
-
     context = get_template_context(request)
     context["models"] = await server_crud.get_all_available_model_names(db, filter_type="embedding")
     context["csrf_token"] = await get_csrf_token(request)
@@ -94,7 +90,7 @@ async def admin_embedding_playground_ui(request: Request, db: AsyncSession = Dep
 
 
 @router.get("/embedding-playground/prebuilt", name="admin_get_prebuilt_benchmarks")
-async def admin_get_prebuilt_benchmarks(admin_user: User = Depends(require_admin_user)):  # noqa: B008
+async def admin_get_prebuilt_benchmarks(_admin_user: User = Depends(require_admin_user)):  # noqa: B008
     """Get prebuilt benchmarks for embedding playground."""
     all_benchmarks = list(PREBUILT_BENCHMARKS)
     benchmarks_dir = Path("benchmarks")
@@ -106,21 +102,22 @@ async def admin_get_prebuilt_benchmarks(admin_user: User = Depends(require_admin
                     if "name" in data and "groups" in data and isinstance(data["groups"], list):
                         all_benchmarks.append(data)
                     else:
-                        logger.warning(f"Skipping invalid benchmark file: {filepath.name}")
-            except Exception as e:
-                logger.error(f"Failed to load benchmark file {filepath.name}: {e}")
+                        logger.warning("Skipping invalid benchmark file: %s", filepath.name)
+            except (OSError, ValueError) as e:
+                logger.error("Failed to load benchmark file %s: %s", filepath.name, e)
     return JSONResponse(all_benchmarks)
 
 
 @router.post("/embedding-playground/benchmark", name="admin_run_embedding_benchmark")
-async def admin_run_embedding_benchmark(
+async def admin_run_embedding_benchmark(  # pylint: disable=too-many-locals
     request_data: BenchmarkRequest,
     request: Request,
     db: AsyncSession = Depends(get_db),  # noqa: B008
-    admin_user: User = Depends(require_admin_user),  # noqa: B008
-    csrf_valid: bool = Depends(validate_csrf_token_header),  # noqa: B008
+    _admin_user: User = Depends(require_admin_user),  # noqa: B008
+    _csrf_valid: bool = Depends(validate_csrf_token_header),  # noqa: B008
 ):
     """Run embedding benchmark for specified models."""
+    # TODO: refactor to lower complexity
     http_client: httpx.AsyncClient = request.app.state.http_client
 
     all_texts = {text for group in request_data.benchmark.groups for text in group.texts}
@@ -138,7 +135,7 @@ async def admin_run_embedding_benchmark(
         tasks = {text: get_embedding(http_client, server, model_name, text) for text in all_texts}
         results = await asyncio.gather(*tasks.values(), return_exceptions=True)
 
-        embeddings_map = {text: result for text, result in zip(tasks.keys(), results)}
+        embeddings_map = dict(zip(tasks.keys(), results))
         model_embeddings[model_name] = embeddings_map
 
     response_data = {"models": {}, "groups": request_data.benchmark.model_dump()["groups"]}

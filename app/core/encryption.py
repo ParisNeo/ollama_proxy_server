@@ -4,7 +4,7 @@
 import base64
 import logging
 
-from cryptography.fernet import Fernet
+from cryptography.fernet import Fernet, InvalidToken
 
 from app.core.config import settings
 
@@ -15,8 +15,8 @@ try:
     # Fernet key must be 32 bytes long.
     key = base64.urlsafe_b64encode(settings.SECRET_KEY.encode()[:32])
     fernet = Fernet(key)
-except Exception as e:
-    logger.error(f"Failed to initialize Fernet for encryption: {e}")
+except (ValueError, TypeError, AttributeError) as e:
+    logger.error("Failed to initialize Fernet for encryption: %s", e)
     fernet = None
 
 
@@ -31,14 +31,13 @@ def encrypt_data(data: str) -> str:
 
 def decrypt_data(encrypted_data: str) -> str:
     """Decrypt encrypted data string."""
-    """Decrypts a string."""
     if not fernet:
         raise RuntimeError("Encryption service is not initialized.")
     if not encrypted_data:
         return ""
     try:
         return fernet.decrypt(encrypted_data.encode()).decode()
-    except Exception:
+    except (InvalidToken, TypeError, UnicodeError):
         # If decryption fails (e.g., key changed, data corrupted), return empty
         logger.warning("Failed to decrypt data. Key may have changed or data is invalid.")
         return ""

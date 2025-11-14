@@ -4,7 +4,7 @@ import json
 import logging
 import time
 from datetime import datetime, timezone
-from typing import Any, AsyncGenerator, Dict
+from typing import Any, AsyncGenerator, AsyncIterator, Dict
 
 logger = logging.getLogger(__name__)
 
@@ -85,11 +85,14 @@ def translate_ollama_to_vllm_embeddings(ollama_payload: Dict[str, Any]) -> Dict[
 
 
 # --- Response Translation ---
-async def vllm_stream_to_ollama_stream(vllm_stream: AsyncGenerator[str, None], model_name: str) -> AsyncGenerator[bytes, None]:
+async def vllm_stream_to_ollama_stream(  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
+    vllm_stream: AsyncIterator[str], model_name: str
+) -> AsyncGenerator[bytes, None]:
     """Translate VLLM/OpenAI SSE stream to Ollama-compatible SSE stream.
 
     Handles regular content and tool calls for "thinking".
     """
+    # TODO: refactor to lower complexity
     tool_call_buffer = ""
     in_tool_call = False
     start_time = time.monotonic()
@@ -181,7 +184,7 @@ async def vllm_stream_to_ollama_stream(vllm_stream: AsyncGenerator[str, None], m
                         yield (json.dumps(end_think_chunk) + "\n").encode("utf-8")
 
                     except json.JSONDecodeError as e:
-                        logger.error(f"Failed to parse tool call arguments: {tool_call_buffer}. Error: {e}")
+                        logger.error("Failed to parse tool call arguments: %s. Error: %s", tool_call_buffer, e)
 
                     tool_call_buffer = ""
                     in_tool_call = False
@@ -200,7 +203,7 @@ async def vllm_stream_to_ollama_stream(vllm_stream: AsyncGenerator[str, None], m
                     yield (json.dumps(ollama_chunk) + "\n").encode("utf-8")
 
             except (json.JSONDecodeError, IndexError) as e:
-                logger.warning(f"Could not parse VLLM stream chunk: {line}. Error: {e}")
+                logger.warning("Could not parse VLLM stream chunk: %s. Error: %s", line, e)
                 continue
 
     # Process any final data left in the buffer. This is a safeguard.

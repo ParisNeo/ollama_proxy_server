@@ -73,8 +73,8 @@ async def login_rate_limiter(request: Request):
         if current_fails and int(current_fails) >= 5:
             ttl = await redis_client.ttl(key)
             raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=f"Too many failed login attempts. Try again in {ttl} seconds.")
-    except Exception as e:
-        logger.error(f"Could not connect to Redis for login rate limiting: {e}")
+    except (redis.ConnectionError, redis.TimeoutError) as e:
+        logger.error("Could not connect to Redis for login rate limiting: %s", e)
     return True
 
 
@@ -86,10 +86,10 @@ async def ip_filter(request: Request, settings: AppSettingsModel = Depends(get_s
     denied_ips = [ip.strip() for ip in settings.denied_ips.split(",") if ip.strip()]
 
     if "*" not in allowed_ips and allowed_ips and client_ip not in allowed_ips:
-        logger.warning(f"IP address {client_ip} denied by allow-list.")
+        logger.warning("IP address %s denied by allow-list.", client_ip)
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="IP address not allowed")
     if denied_ips and client_ip in denied_ips:
-        logger.warning(f"IP address {client_ip} denied by deny-list.")
+        logger.warning("IP address %s denied by deny-list.", client_ip)
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="IP address has been blocked")
     return True
 
@@ -117,28 +117,28 @@ async def get_valid_api_key(
 
     try:
         prefix, secret = api_key_str.rsplit("_", 1)
-    except ValueError:
+    except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid API key format",
-        )
+        ) from exc
 
     db_api_key = await apikey_crud.get_api_key_by_prefix(db, prefix=prefix)
 
     if not db_api_key:
-        logger.warning(f"API key with prefix '{prefix}' not found.")
+        logger.warning("API key with prefix '%s' not found.", prefix)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API Key")
 
     if db_api_key.is_revoked:
-        logger.warning(f"Attempt to use revoked API key with prefix '{prefix}'.")
+        logger.warning("Attempt to use revoked API key with prefix '%s'.", prefix)
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="API Key has been revoked")
 
     if not db_api_key.is_active:
-        logger.warning(f"Attempt to use disabled API key with prefix '{prefix}'.")
+        logger.warning("Attempt to use disabled API key with prefix '%s'.", prefix)
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="API Key is disabled")
 
     if not verify_api_key(secret, db_api_key.hashed_key):
-        logger.warning(f"Invalid secret for API key with prefix '{prefix}'.")
+        logger.warning("Invalid secret for API key with prefix '%s'.", prefix)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API Key")
 
     request.state.api_key = db_api_key
@@ -172,11 +172,11 @@ async def rate_limiter(
             await redis_client.expire(key, window)
 
         if current_requests > limit:
-            logger.warning(f"Rate limit exceeded for API key prefix: {api_key.key_prefix}")
+            logger.warning("Rate limit exceeded for API key prefix: %s", api_key.key_prefix)
             ttl = await redis_client.ttl(key)
             raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=f"Rate limit exceeded. Try again in {ttl} seconds.", headers={"Retry-After": str(ttl)})
-    except Exception as e:
-        logger.error(f"Could not connect to Redis for rate limiting: {e}")
+    except (redis.ConnectionError, redis.TimeoutError) as e:
+        logger.error("Could not connect to Redis for rate limiting: %s", e)
     return True
 
 

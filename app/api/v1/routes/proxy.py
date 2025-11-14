@@ -9,6 +9,7 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.requests import ClientDisconnect
 
 from app.api.v1.dependencies import get_settings, get_valid_api_key, ip_filter, rate_limiter
 from app.core.encryption import decrypt_data
@@ -55,13 +56,15 @@ async def extract_model_from_request(request: Request) -> Optional[str]:
         if isinstance(body, dict) and "model" in body:
             return body["model"]
 
-    except (json.JSONDecodeError, Exception) as e:
-        logger.debug(f"Could not extract model from request body: {e}")
+    except (json.JSONDecodeError, ClientDisconnect, RuntimeError) as e:
+        logger.debug("Could not extract model from request body: %s", e)
 
     return None
 
 
-async def _send_backend_request(http_client: httpx.AsyncClient, server: OllamaServer, path: str, method: str, headers: dict, query_params, body_bytes: bytes):
+async def _send_backend_request(
+    http_client: httpx.AsyncClient, server: OllamaServer, path: str, method: str, headers: dict, query_params, body_bytes: bytes
+):  # pylint: disable=too-many-arguments,too-many-positional-arguments
     """Send a single request to a backend server.
 
     This function is wrapped by retry logic.
@@ -76,42 +79,31 @@ async def _send_backend_request(http_client: httpx.AsyncClient, server: OllamaSe
             request_headers["Authorization"] = f"Bearer {api_key}"
 
     backend_request = http_client.build_request(method=method, url=backend_url, headers=request_headers, params=query_params, content=body_bytes)
-
-    """Send a single request to a backend server.
-
-    This function is wrapped by retry logic.
-    """
     try:
         backend_response = await http_client.send(backend_request, stream=True)
 
         # Consider 5xx errors as failures that should be retried
         if backend_response.status_code >= 500:
             await backend_response.aclose()  # Clean up response
-            raise Exception(f"Backend server returned {backend_response.status_code}: {backend_response.reason_phrase}")
+            raise HTTPException(status_code=503, detail=f"Backend server returned {backend_response.status_code}: {backend_response.reason_phrase}")
 
         return backend_response
 
     except Exception as e:
         # Log and re-raise for retry logic
-        logger.debug(f"Request to {server.url} failed: {type(e).__name__}: {str(e)}")
+        logger.debug("Request to %s failed: %s: %s", server.url, type(e).__name__, str(e))
         raise
 
 
 async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer], body_bytes: bytes = b"") -> Tuple[Response, OllamaServer]:
-    """Core reverse proxy logic with retry support.
+    """
+    Core reverse proxy logic with retry support.
 
     Forwards request to a backend Ollama server and streams response back.
     Returns response and chosen server.
     """
-    """
-    Core reverse proxy logic with retry support. Forwards the request to a backend
-    Ollama server and streams the response back. Returns the response and the chosen server.
-    """
-    http_client: httpx.AsyncClient = request.app.state.http_client
-    app_settings: AppSettingsModel = request.app.state.settings
 
-    # Get retry configuration from app settings
-    retry_config = RetryConfig(max_retries=app_settings.max_retries, total_timeout_seconds=app_settings.retry_total_timeout_seconds, base_delay_ms=app_settings.retry_base_delay_ms)
+    app_settings: AppSettingsModel = request.app.state.settings
 
     if not hasattr(request.app.state, "backend_server_index"):
         request.app.state.backend_server_index = 0
@@ -131,7 +123,7 @@ async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer
 
         servers_tried.append(chosen_server.name)
 
-        logger.info(f"Attempting request to server '{chosen_server.name}' " f"({server_attempt + 1}/{num_servers})")
+        logger.info("Attempting request to server '%s' (%s/%s)", chosen_server.name, server_attempt + 1, num_servers)
 
         # --- BRANCH: Handle vLLM servers differently ---
         if chosen_server.server_type == "vllm":
@@ -141,21 +133,23 @@ async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer
                 return response, chosen_server
             except HTTPException:
                 raise  # Re-raise HTTP exceptions from the vLLM proxy
-            except Exception as e:
-                logger.warning(f"vLLM server '{chosen_server.name}' failed: {e}. Trying next server.")
+            except Exception as e:  # pylint: disable=broad-exception-caught
+                logger.warning("vLLM server '%s' failed: %s. Trying next server.", chosen_server.name, e)
                 continue  # Try next server
 
         # --- Ollama server logic (with retries) ---
         retry_result = await retry_with_backoff(
             _send_backend_request,
-            http_client=http_client,
+            http_client=request.app.state.http_client,
             server=chosen_server,
             path=path,
             method=request.method,
             headers=headers,
             query_params=request.query_params,
             body_bytes=body_bytes,
-            config=retry_config,
+            config=RetryConfig(
+                max_retries=app_settings.max_retries, total_timeout_seconds=app_settings.retry_total_timeout_seconds, base_delay_ms=app_settings.retry_base_delay_ms
+            ),
             retry_on_exceptions=(Exception,),
             operation_name=f"Request to {chosen_server.name}",
         )
@@ -164,7 +158,7 @@ async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer
             # Success! Create streaming response
             backend_response = retry_result.result
 
-            logger.info(f"Successfully proxied to '{chosen_server.name}' " f"after {retry_result.attempts} attempt(s) " f"in {retry_result.total_duration_ms:.1f}ms")
+            logger.info("Successfully proxied to '%s' after %s attempt(s) in %.1fms", chosen_server.name, retry_result.attempts, retry_result.total_duration_ms)
 
             response = StreamingResponse(
                 backend_response.aiter_raw(),
@@ -172,23 +166,24 @@ async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer
                 headers=backend_response.headers,
             )
             return response, chosen_server
-        else:
-            # This server failed after all retries, try next server
-            logger.warning(f"Server '{chosen_server.name}' failed after {retry_result.attempts} " f"attempts. Trying next server if available.")
+
+        # This server failed after all retries, try next server
+        logger.warning("Server '%s' failed after %s attempts. Trying next server if available.", chosen_server.name, retry_result.attempts)
 
     # All servers exhausted
-    logger.error(f"All {num_servers} backend server(s) failed after retries. " f"Servers tried: {', '.join(servers_tried)}")
+    logger.error("All %s backend server(s) failed after retries. Servers tried: %s", num_servers, ", ".join(servers_tried))
     raise HTTPException(status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail=f"All backend servers unavailable. Tried: {', '.join(servers_tried)}")
 
 
-async def _proxy_to_vllm(request: Request, server: OllamaServer, path: str, body_bytes: bytes) -> Response:
+async def _proxy_to_vllm(request: Request, server: OllamaServer, path: str, body_bytes: bytes) -> Response:  # pylint: disable=too-many-locals
     """Handle proxying a request to a vLLM server, including payload and response translation."""
+    # TODO: refactor to lower complexity
     http_client: httpx.AsyncClient = request.app.state.http_client
 
     try:
         ollama_payload = json.loads(body_bytes) if body_bytes else {}
-    except json.JSONDecodeError:
-        raise HTTPException(status_code=400, detail="Invalid JSON body")
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail="Invalid JSON body") from exc
 
     model_name = ollama_payload.get("model")
 
@@ -218,7 +213,7 @@ async def _proxy_to_vllm(request: Request, server: OllamaServer, path: str, body
                 async with http_client.stream("POST", backend_url, json=vllm_payload, timeout=600.0, headers=headers) as vllm_response:
                     if vllm_response.status_code != 200:
                         error_body = await vllm_response.aread()
-                        logger.error(f"vLLM server error ({vllm_response.status_code}): {error_body.decode()}")
+                        logger.error("vLLM server error (%s): %s", vllm_response.status_code, error_body.decode())
                         # Yield a single error chunk in Ollama format
                         error_chunk = {"error": f"vLLM server error: {error_body.decode()}"}
                         yield (json.dumps(error_chunk) + "\n").encode("utf-8")
@@ -228,28 +223,29 @@ async def _proxy_to_vllm(request: Request, server: OllamaServer, path: str, body
                         yield chunk
 
             return StreamingResponse(stream_generator(), media_type="application/x-ndjson")
-        else:  # Non-streaming
-            response = await http_client.post(backend_url, json=vllm_payload, timeout=600.0, headers=headers)
-            response.raise_for_status()
-            vllm_data = response.json()
 
-            if path == "embeddings":
-                ollama_data = translate_vllm_to_ollama_embeddings(vllm_data)
-                return JSONResponse(content=ollama_data)
-            # Add non-streaming chat translation if needed
-            raise NotImplementedError("Non-streaming chat for vLLM not yet implemented.")
+        # Non-streaming
+        response = await http_client.post(backend_url, json=vllm_payload, timeout=600.0, headers=headers)
+        response.raise_for_status()
+        vllm_data = response.json()
+
+        if path == "embeddings":
+            ollama_data = translate_vllm_to_ollama_embeddings(vllm_data)
+            return JSONResponse(content=ollama_data)
+
+        raise NotImplementedError("Non-streaming chat for vLLM not yet implemented.")
 
     except httpx.HTTPStatusError as e:
         error_detail = e.response.text
-        logger.error(f"vLLM request failed with status {e.response.status_code}: {error_detail}")
-        raise HTTPException(status_code=e.response.status_code, detail=f"vLLM server error: {error_detail}")
+        logger.error("vLLM request failed with status %s: %s", e.response.status_code, error_detail)
+        raise HTTPException(status_code=e.response.status_code, detail=f"vLLM server error: {error_detail}") from e
     except Exception as e:
-        logger.error(f"Error proxying to vLLM server {server.name}: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to communicate with vLLM server: {e}")
+        logger.error("Error proxying to vLLM server %s: %s", server.name, e)
+        raise HTTPException(status_code=500, detail=f"Failed to communicate with vLLM server: {e}") from e
 
 
 @router.get("/tags")
-async def federate_models(request: Request, api_key: APIKey = Depends(get_valid_api_key), db: AsyncSession = Depends(get_db)):  # noqa: B008
+async def federate_models(_request: Request, api_key: APIKey = Depends(get_valid_api_key), db: AsyncSession = Depends(get_db)):  # noqa: B008
     """Aggregate models from all configured backends (Ollama and vLLM).
 
     Uses cached model data from database for efficiency.
@@ -257,28 +253,28 @@ async def federate_models(request: Request, api_key: APIKey = Depends(get_valid_
     logger.info("--- /tags endpoint: Starting model federation ---")
     all_servers = await server_crud.get_servers(db)
     servers = [s for s in all_servers if s.is_active]
-    logger.info(f"/tags: Found {len(servers)} active servers.")
+    logger.info("/tags: Found %d active servers.", len(servers))
 
     all_models = {}
     for server in servers:
-        logger.info(f"/tags: Processing server '{server.name}' (type: {server.server_type})")
+        logger.info("/tags: Processing server '%s' (type: %s)", server.name, server.server_type)
         models_list = server.available_models or []
 
         raw_models_repr = repr(models_list)
         if len(raw_models_repr) > 300:
             raw_models_repr = raw_models_repr[:300] + "... (truncated)"
-        logger.info(f"/tags: Raw 'available_models' for '{server.name}': {raw_models_repr}")
+        logger.info("/tags: Raw 'available_models' for '%s': %s", server.name, raw_models_repr)
 
         if isinstance(models_list, str):
             try:
                 models_list = json.loads(models_list)
-                logger.info(f"/tags: Successfully parsed JSON string for '{server.name}'")
+                logger.info("/tags: Successfully parsed JSON string for '%s'", server.name)
             except json.JSONDecodeError:
-                logger.warning(f"/tags: Could not parse available_models JSON for server {server.name}")
+                logger.warning("/tags: Could not parse available_models JSON for server %s", server.name)
                 continue
 
         if not isinstance(models_list, list):
-            logger.warning(f"/tags: Field available_models for server {server.name} is not a list. Type is {type(models_list)}")
+            logger.warning("/tags: Field available_models for server %s is not a list. Type is %s", server.name, type(models_list))
             continue
 
         model_count_on_server = 0
@@ -291,11 +287,11 @@ async def federate_models(request: Request, api_key: APIKey = Depends(get_valid_
                 all_models[model["name"]] = model
                 model_count_on_server += 1
             else:
-                logger.warning(f"/tags: Invalid model format found for server '{server.name}': {model}")
+                logger.warning("/tags: Invalid model format found for server '%s': %s", server.name, model)
 
-        logger.info(f"/tags: Added {model_count_on_server} models from server '{server.name}'")
+        logger.info("/tags: Added %d models from server '%s'", model_count_on_server, server.name)
 
-    logger.info(f"/tags: Total unique models before adding 'auto': {len(all_models)}")
+    logger.info("/tags: Total unique models before adding 'auto': %d", len(all_models))
 
     # Add the 'auto' model to the list for clients to see, with details for compatibility
     all_models["auto"] = {
@@ -371,13 +367,13 @@ async def _select_auto_model(db: AsyncSession, body: Dict[str, Any]) -> Optional
 
     # 4. The list is already sorted by priority from the CRUD function.
     best_model = candidate_models[0]
-    logger.info(f"Auto-routing selected model '{best_model.model_name}' with priority {best_model.priority}.")
+    logger.info("Auto-routing selected model '%s' with priority %d.", best_model.model_name, best_model.priority)
 
     return best_model.model_name
 
 
 @router.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"])
-async def proxy_ollama(
+async def proxy_ollama(  # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals,too-many-branches
     request: Request,
     path: str,
     api_key: APIKey = Depends(get_valid_api_key),  # noqa: B008
@@ -389,12 +385,13 @@ async def proxy_ollama(
 
     Uses smart routing and translates requests for vLLM servers.
     """
+    # TODO: refactor to lower complexity
     # --- Endpoint Security Check ---
     blocked_paths = {p.strip().lstrip("/") for p in settings.blocked_ollama_endpoints.split(",") if p.strip()}
     request_path = path.strip().lstrip("/")
 
     if request_path in blocked_paths:
-        logger.warning(f"Blocked attempt to access sensitive endpoint '/api/{request_path}' by API key {api_key.key_prefix}")
+        logger.warning("Blocked attempt to access sensitive endpoint '/api/%s' by API key %s", request_path, api_key.key_prefix)
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"Access to the endpoint '/api/{request_path}' is disabled by the proxy administrator.")
 
     # Try to extract model name from request body
@@ -407,7 +404,7 @@ async def proxy_ollama(
             body = json.loads(body_bytes)
             if isinstance(body, dict) and "model" in body:
                 model_name = body["model"]
-        except (json.JSONDecodeError, Exception):
+        except json.JSONDecodeError:
             pass
 
     # Handle 'think' parameter based on model support
@@ -420,12 +417,12 @@ async def proxy_ollama(
         if is_supported:
             # Handle special case for gpt-oss which requires string values if boolean `true` is passed
             if "gpt-oss" in model_name_lower and body.get("think") is True:
-                logger.info(f"Translating 'think: true' to 'think: \"medium\"' for GPT-OSS model '{model_name}'")
+                logger.info("Translating 'think: true' to 'think: \"medium\"' for GPT-OSS model '%s'", model_name)
                 body["think"] = "medium"
                 body_bytes = json.dumps(body).encode("utf-8")
         else:
             # If the model is not supported, remove the 'think' parameter to avoid errors.
-            logger.warning(f"Model '{model_name}' is not in the known list for 'think' support. Removing 'think' parameter from request to avoid errors.")
+            logger.warning("Model '%s' is not in the known list for 'think' support. Removing 'think' parameter from request to avoid errors.", model_name)
             del body["think"]
             body_bytes = json.dumps(body).encode("utf-8")
 
@@ -447,14 +444,16 @@ async def proxy_ollama(
 
         if servers_with_model:
             candidate_servers = servers_with_model
-            logger.info(f"Smart routing: Found {len(servers_with_model)} server(s) with model '{model_name}'")
+            logger.info("Smart routing: Found %d server(s) with model '%s'", len(servers_with_model), model_name)
         else:
             # Model not found in any server's catalog, or catalogs not fetched yet
             # Fall back to all active servers
             logger.warning(
-                f"Model '{model_name}' not found in any server's catalog. "
-                f"Falling back to round-robin across all {len(servers)} active server(s). "
-                f"Make sure to refresh model lists for accurate routing."
+                "Model '%s' not found in any server's catalog. "
+                "Falling back to round-robin across all %d active server(s). "
+                "Make sure to refresh model lists for accurate routing.",
+                model_name,
+                len(servers),
             )
 
     # Proxy to one of the candidate servers
