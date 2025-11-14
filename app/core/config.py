@@ -1,10 +1,18 @@
 """Configuration settings for Ollama Proxy Server."""
 
+from pydantic import ConfigDict
 from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
     """Bootstrap settings for the application."""
+
+    model_config = ConfigDict(
+        env_file=".env",
+        case_sensitive=True,
+        # extra="ignore",
+        extra="forbid",
+    )
 
     # --- Bootstrap Settings ---
     # These are the only settings read from the .env file.
@@ -18,14 +26,6 @@ class Settings(BaseSettings):
     APP_NAME: str = "Ollama Proxy Server"
     APP_VERSION: str = "9.0.0"
     LOG_LEVEL: str = "info"
-
-
-class Config:  # pylint: disable=too-few-public-methods
-    """Pydantic configuration."""
-
-    env_file = ".env"
-    case_sensitive = True
-    extra = "ignore"  # <-- THIS IS THE FIX
 
 
 # This `settings` object is now only used for bootstrapping.

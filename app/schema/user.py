@@ -1,6 +1,6 @@
 """User schemas for Ollama Proxy Server."""
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class UserBase(BaseModel):
@@ -22,7 +22,4 @@ class User(UserBase):
     is_active: bool
     is_admin: bool
 
-    class Config:  # pylint: disable=too-few-public-methods
-        """Pydantic configuration."""
-
-        from_attributes = True
+    model_config = ConfigDict(extra="forbid")

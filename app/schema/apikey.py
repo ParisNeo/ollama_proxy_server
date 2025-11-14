@@ -2,7 +2,7 @@
 
 import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class APIKeyBase(BaseModel):
@@ -25,7 +25,4 @@ class APIKey(APIKeyBase):
     is_revoked: bool
     created_at: datetime.datetime
 
-    class Config:  # pylint: disable=too-few-public-methods
-        """Pydantic configuration."""
-
-        from_attributes = True
+    model_config = ConfigDict(extra="forbid")

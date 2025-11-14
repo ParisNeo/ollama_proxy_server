@@ -70,7 +70,7 @@ async def init_db():
 
     # Then create any missing tables
     async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+        await conn.run_sync(Base.metadata.create_all, checkfirst=True)
 
     _db_initialized = True
     logger.info("Database schema is ready.")
