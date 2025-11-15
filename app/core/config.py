@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     ADMIN_USER: str = "admin"
     ADMIN_PASSWORD: str = "changeme"
     PROXY_PORT: int = 8080
+    PROXY_ADDRESS: str = "127.0.0.1"
     SECRET_KEY: str = "dd2a57833f4a2115b02644c3c332822d5b6e405d542a2258c422fb39a8e97b10"
 
     # --- App Info (Hardcoded) ---

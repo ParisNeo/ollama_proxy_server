@@ -296,8 +296,9 @@ def read_root():
 if __name__ == "__main__":
     import uvicorn
 
-    async def run_server():
+    async def run_server():  # pylint: disable=too-many-locals
         """Connect to the DB to get settings and start Uvicorn programmatically."""
+        host = settings.PROXY_ADDRESS
         port = settings.PROXY_PORT
         ssl_keyfile = None
         ssl_certfile = None
@@ -349,7 +350,7 @@ if __name__ == "__main__":
         # Correct way to run uvicorn programmatically
         config = uvicorn.Config(
             "app.main:app",
-            host="0.0.0.0",  # nosec B104 - make this default localhost ?
+            host=host,
             port=port,
             ssl_keyfile=ssl_keyfile,
             ssl_certfile=ssl_certfile,

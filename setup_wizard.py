@@ -29,6 +29,7 @@ def create_env_file():
 
     config = {
         "PROXY_PORT": get_user_input("Port for the proxy server", "8080"),
+        "PROXY_ADDRESS": get_user_input("Address for the proxy server", "120.0.0.1"),
         "OLLAMA_SERVERS": get_user_input("Backend Ollama server(s)", "http://127.0.0.1:11434"),
         "REDIS_HOST": get_user_input("Redis Host", "localhost"),
         "REDIS_PORT": get_user_input("Redis Port", "6379"),
@@ -40,7 +41,7 @@ def create_env_file():
 
     # --- Secure Password Inputs ---
     config["REDIS_PASSWORD"] = get_secure_input("Redis Password (optional, will be hidden)")
-    
+
     admin_password = ""
     while not admin_password:
         admin_password = get_secure_input("Password for the admin user (cannot be empty, will be hidden)")
@@ -59,12 +60,13 @@ def create_env_file():
             f.write('APP_VERSION="9.0.0"\n')
             f.write('LOG_LEVEL="info"\n')
             f.write(f'PROXY_PORT="{config["PROXY_PORT"]}"\n')
+            f.write(f'PROXY_ADDRESS="{config["PROXY_ADDRESS"]}"\n')
             f.write(f'OLLAMA_SERVERS="{config["OLLAMA_SERVERS"]}"\n')
             f.write('DATABASE_URL="sqlite+aiosqlite:///./ollama_proxy.db"\n')
             f.write(f'ADMIN_USER="{config["ADMIN_USER"]}"\n')
             f.write(f'ADMIN_PASSWORD="{config["ADMIN_PASSWORD"]}"\n')
             f.write(f'SECRET_KEY="{config["SECRET_KEY"]}"\n')
-            
+
             # Write new Redis variables
             f.write(f'REDIS_HOST="{config["REDIS_HOST"]}"\n')
             f.write(f'REDIS_PORT="{config["REDIS_PORT"]}"\n')
@@ -75,7 +77,7 @@ def create_env_file():
 
             f.write('RATE_LIMIT_REQUESTS="100"\n')
             f.write('RATE_LIMIT_WINDOW_MINUTES="1"\n')
-            
+
             if config["ALLOWED_IPS"]:
                 f.write(f'ALLOWED_IPS="{config["ALLOWED_IPS"]}"\n')
             if config["DENIED_IPS"]:
