@@ -1,12 +1,18 @@
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+"""Database session management for Ollama Proxy Server."""
+
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
 from app.core.config import settings
 
 engine = create_async_engine(settings.DATABASE_URL, pool_pre_ping=True)
-AsyncSessionLocal = async_sessionmaker(
-    autocommit=False, autoflush=False, bind=engine, class_=AsyncSession
-)
+ASYNC_SESSION_LOCAL = async_sessionmaker(autocommit=False, autoflush=False, bind=engine, class_=AsyncSession)
 
 
 async def get_db():
-    async with AsyncSessionLocal() as session:
+    """Get database session for dependency injection."""
+    async with ASYNC_SESSION_LOCAL() as session:
         yield session
+
+
+# Export with the old name for backward compatibility
+ASYNC_SESSION_LOCAL_OLD = ASYNC_SESSION_LOCAL

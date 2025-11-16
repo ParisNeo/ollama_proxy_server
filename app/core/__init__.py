@@ -1,1 +1,1 @@
-# Core module initialization
+"""Core module initialization."""

@@ -1,16 +1,23 @@
+"""API key Pydantic schemas for Ollama Proxy Server."""
+
 import datetime
-from pydantic import BaseModel
+
+from pydantic import BaseModel, ConfigDict
 
 
 class APIKeyBase(BaseModel):
+    """Base API key schema."""
+
     key_name: str
 
 
 class APIKeyCreate(APIKeyBase):
-    pass
+    """API key creation schema."""
 
 
 class APIKey(APIKeyBase):
+    """API key schema."""
+
     id: int
     key_prefix: str
     user_id: int
@@ -18,5 +25,4 @@ class APIKey(APIKeyBase):
     is_revoked: bool
     created_at: datetime.datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(extra="forbid")
