@@ -159,6 +159,8 @@ The User Management page gives you a sortable, high-level overview. From here, c
 
 Use the built-in playgrounds to evaluate your models. The **Chat Playground** provides a familiar UI to test conversational models with streaming and image support. Toggle web search on/off with a single click to enable real-time internet data for your queries. The **Embedding Playground** lets you visualize and benchmark how different models understand semantic relationships using powerful 2D plots.
 
+![Chat Playground with Web Search Toggle](assets/chat_playground.png)
+
 ### Step 7: Master Your Analytics
 
 The main "Usage Stats" page and the per-user pages give you a beautiful, exportable overview of exactly how your models are being used.
@@ -230,8 +232,6 @@ If you prefer not to run SearXNG, you can use Ollama cloud search exclusively:
 - Toggle the "Web Search" button in the header
 - When enabled, the system automatically determines if a query needs live internet data
 - The decision matrix analyzes your question and only searches when necessary
-
-![Chat Playground with Web Search Toggle](assets/chat_playground.png)
 
 **In API Requests:**
 - Web search is automatically enabled for proxy requests when `enable_proxy_web_search` is enabled in settings
@@ -340,7 +340,7 @@ The proxy includes a sophisticated auto-routing system that intelligently select
 
 *Hover over the 💰 icon next to any model name to see detailed pricing information:*
 
-![Pricing Tooltip on Hover](assets/models_manager_pricing_tooltip.png)
+![Models Manager with Pricing Tooltip](assets/models_manager_with_tooltip.png)
 
 ### How It Works
 
