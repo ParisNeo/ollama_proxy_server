@@ -26,103 +26,204 @@
 </style>
 
 <div class="flex flex-col h-full card-style p-0 rounded-none">
-    <!-- Header -->
-    <div class="card-header p-2 md:p-4 flex items-center justify-between flex-shrink-0">
-        <div class="flex items-center gap-2 md:gap-4">
-            <h2 class="text-xl font-bold">Chat</h2>
-            <div id="system-prompt-indicator" class="hidden items-center gap-1 text-xs px-2 py-1 bg-sky-500/20 text-sky-300 rounded-full cursor-pointer" title="A system prompt is active. Click to edit.">
-                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0 3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
-                <span>System Prompt</span>
-            </div>
-        </div>
-        <div class="flex items-center gap-2">
-            <div id="thinking-toggle-container" class="hidden md:flex items-center gap-2 text-sm pr-2 border-r border-gray-600" title="Enable model thinking. This will show the reasoning trace before the final answer.">
-                <span class="text-gray-400">Thinking</span>
-                <button type="button" id="thinking-toggle" class="relative inline-flex flex-shrink-0 h-6 w-11 border-2 border-transparent rounded-full cursor-pointer transition-colors ease-in-out duration-200 focus:outline-none bg-gray-600">
-                    <span id="thinking-toggle-knob" class="pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow-lg transform ring-0 transition ease-in-out duration-200 translate-x-0"></span>
+    <!-- Main container with sidebar and chat -->
+    <div class="flex flex-row flex-1 overflow-hidden">
+        <!-- Conversations Sidebar - expands into page -->
+        <div id="conversations-sidebar" class="hidden w-80 flex-shrink-0 card-style border-r border-white/10 flex flex-col">
+            <div class="card-header px-3 py-2 flex items-center justify-between border-b border-white/10">
+                <h3 class="text-sm font-semibold">Threaded Discussions</h3>
+                <button id="conversations-sidebar-close" class="p-1 rounded hover:bg-white/10 transition-colors">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                    </svg>
                 </button>
             </div>
-            <div id="thinking-level-container" class="hidden md:flex items-center gap-2 text-sm pr-2 border-r border-gray-600" title="Set the thinking trace length for GPT-OSS models.">
-                <span class="text-gray-400">Think Level</span>
-                <select id="thinking-level-select" class="px-2 py-1 rounded-md text-sm">
-                    <option value="low">Low</option>
-                    <option value="medium" selected>Medium</option>
-                    <option value="high">High</option>
-                </select>
-            </div>
-            <div id="image-annotation-toggle-container" class="hidden md:flex items-center gap-2 text-sm pr-2 border-r border-gray-600" title="Toggle image annotation mode. This adds a special system prompt to enable object detection and bounding box drawing on images.">
-                <span class="text-gray-400">Annotate</span>
-                <button type="button" id="image-annotation-toggle" class="relative inline-flex flex-shrink-0 h-6 w-11 border-2 border-transparent rounded-full cursor-pointer transition-colors ease-in-out duration-200 focus:outline-none bg-gray-600">
-                    <span id="image-annotation-toggle-knob" class="pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow-lg transform ring-0 transition ease-in-out duration-200 translate-x-0"></span>
-                </button>
-            </div>
-            <div class="relative" id="add-message-menu-container">
-                <button id="add-message-btn" title="Add Message" class="p-2 rounded hover:bg-white/10">
-                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v3m0 0v3m0-3h3m-3 0H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                </button>
-                <div id="add-message-dropdown" class="absolute bottom-full right-0 mb-2 w-48 rounded-md shadow-lg bg-gray-800 ring-1 ring-black ring-opacity-5 hidden z-10">
-                    <a href="#" id="add-user-msg-btn" class="block px-4 py-2 text-sm text-gray-300 hover:bg-gray-700">Add User Message</a>
-                    <a href="#" id="add-ai-msg-btn" class="block px-4 py-2 text-sm text-gray-300 hover:bg-gray-700">Add AI Message</a>
+            <div class="flex-1 overflow-y-auto px-2 py-1.5 flex flex-col">
+                <!-- Semantic Search -->
+                <div class="mb-2">
+                    <input 
+                        type="text" 
+                        id="conversation-search-input" 
+                        placeholder="Search conversations..." 
+                        class="w-full px-2 py-1.5 text-xs rounded-md bg-gray-800 border border-gray-700 text-white placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-[var(--color-primary-500)] focus:border-[var(--color-primary-500)]"
+                    />
+                    <div id="conversation-search-results" class="mt-1.5 space-y-0.5 hidden"></div>
+                </div>
+                <div id="conversations-list" class="space-y-0.5 flex-1">
+                    <!-- Conversations will be loaded here -->
                 </div>
             </div>
-            <button id="system-prompt-btn" title="Set System Prompt" class="p-2 rounded hover:bg-white/10">
-                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0 3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
-            </button>
-            <select id="model-selector" class="px-3 py-2 rounded-md shadow-sm focus:outline-none focus:ring-[var(--color-primary-500)] focus:border-[var(--color-primary-500)] sm:text-sm">
-                {% if model_groups %}
-                    {% for server_name, models in model_groups.items() %}
-                        <optgroup label="{{ server_name }}">
-                        {% for model in models %}
-                            <option value="{{ model }}" {% if model == selected_model %}selected{% endif %}>{{ model }}</option>
-                        {% endfor %}
-                        </optgroup>
-                    {% endfor %}
-                {% else %}
-                    <option value="" disabled>No chat models found</option>
-                {% endif %}
-            </select>
-            <button id="test-prompts-btn" title="Test Prompts" class="p-2 rounded hover:bg-white/10">
-                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"></path></svg>
-            </button>
-            <input type="file" id="import-chat-input" class="hidden" accept=".json">
-            <button id="import-chat-btn" title="Import Chat" class="p-2 rounded hover:bg-white/10">
-                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path></svg>
-            </button>
-            <button id="export-chat-btn" title="Export Chat" class="p-2 rounded hover:bg-white/10">
-                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
-            </button>
-            <button id="clear-chat-btn" class="px-3 py-2 bg-red-600 text-white rounded hover:bg-red-700 focus:outline-none">Clear</button>
+            <div class="px-2 py-1.5 border-t border-white/10">
+                <button id="new-conversation-btn" class="w-full px-3 py-1.5 text-xs bg-[var(--color-primary-600)] hover:bg-[var(--color-primary-700)] rounded text-white transition-colors">
+                    New Thread
+                </button>
+            </div>
         </div>
-    </div>
+        
+        <!-- Chat Content Area -->
+        <div class="flex flex-col flex-1 min-w-0">
+            <!-- Header -->
+            <div class="card-header px-3 py-1.5 flex items-center justify-between flex-shrink-0">
+                <div class="flex items-center gap-1.5">
+                    <!-- Hamburger menu for conversations -->
+                    <button id="conversations-menu-toggle" class="p-1.5 rounded hover:bg-white/10" title="Threaded Discussions">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path>
+                        </svg>
+                    </button>
+                    <h2 class="text-base font-semibold">Chat</h2>
+                    <div id="system-prompt-indicator" class="hidden items-center gap-1 text-xs px-2 py-1 bg-sky-500/20 text-sky-300 rounded-full cursor-pointer" title="A system prompt is active. Click to edit.">
+                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0 3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+                        <span>System Prompt</span>
+                    </div>
+                </div>
+                <div class="flex items-center gap-1">
+                    <div id="thinking-toggle-container" class="hidden md:flex items-center gap-1 text-xs pr-1.5 border-r border-gray-600" title="Enable model thinking. This will show the reasoning trace before the final answer.">
+                        <span class="text-gray-400">Thinking</span>
+                        <button type="button" id="thinking-toggle" class="relative inline-flex flex-shrink-0 h-5 w-9 border-2 border-transparent rounded-full cursor-pointer transition-colors ease-in-out duration-200 focus:outline-none bg-gray-600">
+                            <span id="thinking-toggle-knob" class="pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow transform ring-0 transition ease-in-out duration-200 translate-x-0"></span>
+                        </button>
+                    </div>
+                    <div id="thinking-level-container" class="hidden md:flex items-center gap-1 text-xs pr-1.5 border-r border-gray-600" title="Set the thinking trace length for GPT-OSS models.">
+                        <span class="text-gray-400">Think</span>
+                        <select id="thinking-level-select" class="px-1.5 py-0.5 rounded text-xs">
+                            <option value="low">Low</option>
+                            <option value="medium" selected>Medium</option>
+                            <option value="high">High</option>
+                        </select>
+                    </div>
+                    <div id="image-annotation-toggle-container" class="hidden md:flex items-center gap-1 text-xs pr-1.5 border-r border-gray-600" title="Toggle image annotation mode. This adds a special system prompt to enable object detection and bounding box drawing on images.">
+                        <span class="text-gray-400">Annotate</span>
+                        <button type="button" id="image-annotation-toggle" class="relative inline-flex flex-shrink-0 h-5 w-9 border-2 border-transparent rounded-full cursor-pointer transition-colors ease-in-out duration-200 focus:outline-none bg-gray-600">
+                            <span id="image-annotation-toggle-knob" class="pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow transform ring-0 transition ease-in-out duration-200 translate-x-0"></span>
+                        </button>
+                    </div>
+                    <div id="verbosity-level-container" class="hidden md:flex items-center gap-1 text-xs pr-1.5 border-r border-gray-600" title="Set response verbosity level. Controls how detailed and comprehensive the responses are.">
+                        <span class="text-gray-400">Verbosity</span>
+                        <select id="verbosity-level-select" class="px-1.5 py-0.5 rounded text-xs">
+                            <option value="short">Short</option>
+                            <option value="medium">Medium</option>
+                            <option value="maximum" selected>Maximum</option>
+                        </select>
+                    </div>
+                    <div id="web-search-toggle-container" class="hidden md:flex items-center gap-1 text-xs pr-1.5 border-r border-gray-600" title="Enable web search. When ON, uses decision matrix to determine if query needs current/live data. When OFF, model responds with its knowledge only.">
+                        <span class="text-gray-400">Web Search</span>
+                        <button type="button" id="web-search-toggle" class="relative inline-flex flex-shrink-0 h-5 w-9 border-2 border-transparent rounded-full cursor-pointer transition-colors ease-in-out duration-200 focus:outline-none bg-gray-600">
+                            <span id="web-search-toggle-knob" class="pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow transform ring-0 transition ease-in-out duration-200 translate-x-0"></span>
+                        </button>
+                    </div>
+                    <div class="relative" id="add-message-menu-container">
+                        <button id="add-message-btn" title="Add Message" class="p-1.5 rounded hover:bg-white/10">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v3m0 0v3m0-3h3m-3 0H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                        </button>
+                        <div id="add-message-dropdown" class="absolute bottom-full right-0 mb-1.5 w-40 rounded shadow-lg bg-gray-800 ring-1 ring-black ring-opacity-5 hidden z-10">
+                            <a href="#" id="add-user-msg-btn" class="block px-3 py-1.5 text-xs text-gray-300 hover:bg-gray-700">Add User Message</a>
+                            <a href="#" id="add-ai-msg-btn" class="block px-3 py-1.5 text-xs text-gray-300 hover:bg-gray-700">Add AI Message</a>
+                        </div>
+                    </div>
+                    <button id="system-prompt-btn" title="Set System Prompt" class="p-1.5 rounded hover:bg-white/10">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0 3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+                    </button>
+                    <div class="relative flex items-center gap-1" id="model-selector-container">
+                        <select id="model-selector" class="px-2 py-1 text-xs rounded shadow-sm focus:outline-none focus:ring-[var(--color-primary-500)] focus:border-[var(--color-primary-500)] w-48">
+                            {% if model_groups %}
+                                {% for server_name, models in model_groups.items() %}
+                                    <optgroup label="{{ server_name }}">
+                                    {% for model in models %}
+                                        <option value="{{ model }}" {% if model == selected_model %}selected{% endif %}>
+                                            {{ model }}
+                                        </option>
+                                    {% endfor %}
+                                    </optgroup>
+                                {% endfor %}
+                            {% else %}
+                                <option value="" disabled>No chat models found</option>
+                            {% endif %}
+                        </select>
+                        <!-- Pricing display (shown on hover or next to selector) -->
+                        <div id="model-pricing-display" class="text-xs text-gray-400 cursor-help" 
+                             title="Click to see full pricing details"
+                             style="display: none;">
+                            <span id="pricing-text"></span>
+                        </div>
+                        <!-- Pricing tooltip modal -->
+                        <div id="model-pricing-tooltip" class="hidden fixed z-50 p-3 bg-gray-900 border border-gray-700 rounded shadow-xl min-w-[250px] max-w-[400px]">
+                            <div class="font-semibold mb-1.5 text-white text-sm" id="tooltip-model-name"></div>
+                            <div id="tooltip-pricing-content" class="text-xs text-gray-300 space-y-0.5"></div>
+                            <button id="close-pricing-tooltip" class="mt-2 text-xs text-gray-400 hover:text-white">Close</button>
+                        </div>
+                    </div>
+                    <!-- OpenRouter Credits Display -->
+                    <div id="openrouter-credits-display" class="hidden relative flex items-center gap-1.5 px-2 py-1 rounded bg-gray-800/50 border border-gray-700/50">
+                        <button id="refresh-credits-btn" class="p-0.5 rounded hover:bg-white/10 transition-colors" title="Refresh credits" onclick="updateOpenRouterCredits()">
+                            <svg class="w-3 h-3 text-gray-400 hover:text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                            </svg>
+                        </button>
+                        <svg class="w-3.5 h-3.5 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                        </svg>
+                        <div class="flex flex-col cursor-help">
+                            <div class="text-xs font-medium text-green-400" id="credits-remaining">--</div>
+                            <div class="text-[10px] text-gray-400" id="credits-usage">-- used</div>
+                        </div>
+                        <div id="credits-tooltip" class="hidden absolute bottom-full right-0 mb-1.5 w-48 p-2 bg-gray-900 border border-gray-700 rounded shadow-lg text-xs z-50">
+                            <div class="font-semibold mb-1 text-white">OpenRouter Credits</div>
+                            <div class="space-y-0.5 text-gray-300">
+                                <div>Remaining: <span id="tooltip-remaining" class="text-green-400 font-medium">--</span></div>
+                                <div>Used: <span id="tooltip-used" class="text-yellow-400">--</span></div>
+                                <div>Total: <span id="tooltip-total" class="text-gray-400">--</span></div>
+                            </div>
+                            <div class="mt-1.5 pt-1.5 border-t border-gray-700 text-[10px] text-gray-400">
+                                Click refresh icon to update
+                            </div>
+                        </div>
+                    </div>
+                    <button id="test-prompts-btn" title="Test Prompts" class="p-1.5 rounded hover:bg-white/10">
+                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"></path></svg>
+                    </button>
+                    <input type="file" id="import-chat-input" class="hidden" accept=".json">
+                    <button id="import-chat-btn" title="Import Chat" class="p-1.5 rounded hover:bg-white/10">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path></svg>
+                    </button>
+                    <button id="export-chat-btn" title="Export Chat" class="p-1.5 rounded hover:bg-white/10">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                    </button>
+                    <button id="clear-chat-btn" class="px-2 py-1 text-xs bg-red-600 text-white rounded hover:bg-red-700 focus:outline-none">Clear</button>
+                </div>
+            </div>
 
-    <!-- Chat Messages -->
-    <div id="chat-container" class="flex-grow p-2 md:p-4 overflow-y-auto space-y-4">
-        <!-- Messages will be injected here -->
-        <div class="text-center text-gray-400">Select a model and start chatting.</div>
-    </div>
-    
-    <!-- Global Stats Bar -->
-    <div id="stats-bar" class="p-2 flex-shrink-0 border-t border-b border-white/10 text-xs text-gray-400 flex items-center justify-center gap-6">
-        <div>Mean TTFT: <span id="mean-ttft" class="font-semibold text-gray-300">N/A</span></div>
-        <div>Mean TPS: <span id="mean-tps" class="font-semibold text-gray-300">N/A</span></div>
-    </div>
+            <!-- Chat Messages -->
+            <div id="chat-container" class="flex-grow px-3 py-2 overflow-y-auto space-y-3">
+                <!-- Messages will be injected here -->
+                <div class="text-center text-gray-400 text-sm">Select a model and start chatting.</div>
+            </div>
+            
+            <!-- Global Stats Bar -->
+            <div id="stats-bar" class="px-3 py-1 flex-shrink-0 border-t border-b border-white/10 text-xs text-gray-400 flex items-center justify-center gap-4">
+                <div>Mean TTFT: <span id="mean-ttft" class="font-semibold text-gray-300">N/A</span></div>
+                <div>Mean TPS: <span id="mean-tps" class="font-semibold text-gray-300">N/A</span></div>
+                <div id="model-name-display" class="text-gray-500"></div>
+            </div>
 
-    <!-- Message Input -->
-    <div class="p-2 md:p-4 flex-shrink-0">
-        <div id="doc-previews" class="doc-previews"></div>
-        <div id="image-previews" class="image-previews"></div>
-        <form id="chat-form" class="flex items-end gap-2 md:gap-4">
-            <button type="button" id="attach-img-btn" class="p-2 rounded-md hover:bg-white/10 flex-shrink-0" title="Attach Image">
-                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
-            </button>
-            <input type="file" id="image-input" class="hidden" multiple accept="image/*">
-            <button type="button" id="attach-doc-btn" class="p-2 rounded-md hover:bg-white/10 flex-shrink-0" title="Attach Document">
-                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
-            </button>
-            <input type="file" id="doc-input" class="hidden" multiple accept=".txt,.md,.json,.csv,.py,.js,.html,.css,.xml,.yaml,.yml,.log,.ini,.toml,.sh,.bat">
-            <textarea id="message-input" placeholder="Type your message here, or paste an image..." rows="1" class="flex-grow block w-full px-3 py-2 rounded-md shadow-sm focus:outline-none focus:ring-[var(--color-primary-500)] focus:border-[var(--color-primary-500)] sm:text-sm resize-none"></textarea>
-            <button type="submit" id="send-btn" class="justify-center py-2 px-6 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-[var(--color-primary-600)] hover:bg-[var(--color-primary-700)] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[var(--color-primary-500)] self-end">Send</button>
-        </form>
+            <!-- Message Input -->
+            <div class="px-3 py-2 flex-shrink-0">
+                <div id="doc-previews" class="doc-previews"></div>
+                <div id="image-previews" class="image-previews"></div>
+                <form id="chat-form" class="flex items-end gap-1.5">
+                    <button type="button" id="attach-img-btn" class="p-1.5 rounded hover:bg-white/10 flex-shrink-0" title="Attach Image">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
+                    </button>
+                    <input type="file" id="image-input" class="hidden" multiple accept="image/*">
+                    <button type="button" id="attach-doc-btn" class="p-1.5 rounded hover:bg-white/10 flex-shrink-0" title="Attach Document">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                    </button>
+                    <input type="file" id="doc-input" class="hidden" multiple accept=".txt,.md,.json,.csv,.py,.js,.html,.css,.xml,.yaml,.yml,.log,.ini,.toml,.sh,.bat">
+                    <textarea id="message-input" placeholder="Type your message here, or paste an image..." rows="1" class="flex-grow block w-full px-2.5 py-1.5 rounded shadow-sm focus:outline-none focus:ring-[var(--color-primary-500)] focus:border-[var(--color-primary-500)] text-sm resize-none"></textarea>
+                    <button type="submit" id="send-btn" class="justify-center py-1.5 px-4 border border-transparent rounded shadow-sm text-xs font-medium text-white bg-[var(--color-primary-600)] hover:bg-[var(--color-primary-700)] focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-[var(--color-primary-500)] self-end">Send</button>
+                </form>
+            </div>
+        </div>
     </div>
 </div>
 
@@ -186,6 +287,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const thinkingToggleKnob = document.getElementById('thinking-toggle-knob');
     const thinkingLevelContainer = document.getElementById('thinking-level-container');
     const thinkingLevelSelect = document.getElementById('thinking-level-select');
+    const webSearchToggleContainer = document.getElementById('web-search-toggle-container');
+    const webSearchToggle = document.getElementById('web-search-toggle');
+    const webSearchToggleKnob = document.getElementById('web-search-toggle-knob');
     const addMessageMenuContainer = document.getElementById('add-message-menu-container');
     const addMessageBtn = document.getElementById('add-message-btn');
     const addMessageDropdown = document.getElementById('add-message-dropdown');
@@ -307,6 +411,7 @@ SUPPORTED ANNOTATION SCHEMAS:
     
     let messages = [];
     let isLoading = false;
+    let isWebSearchEnabled = true; // Default to ON - uses decision matrix when enabled
     let abortController = null;
     let attachedImages = [];
     let attachedDocs = [];
@@ -320,6 +425,7 @@ SUPPORTED ANNOTATION SCHEMAS:
     const CUSTOM_SYSTEM_PROMPTS_KEY = 'ollama_proxy_custom_system_prompts';
     const ANNOTATION_MODE_KEY = 'ollama_proxy_annotation_mode';
     const THINKING_MODE_KEY = 'ollama_proxy_thinking_mode';
+    const WEB_SEARCH_ENABLED_KEY = 'ollama_proxy_web_search_enabled';
     const langExtMap = {
         python: 'py', py: 'py', javascript: 'js', js: 'js', typescript: 'ts',
         ts: 'ts', html: 'html', css: 'css', json: 'json', markdown: 'md', md: 'md',
@@ -578,6 +684,7 @@ SUPPORTED ANNOTATION SCHEMAS:
         let streamError = null;
         let currentTTFT = null;
         let currentTPS = null;
+        let currentModel = null; // Track which model actually responded
         let buffer = '';
 
         const messagesForApi = messages.map(msg => Array.isArray(msg.content) && !msg.content.some(item => item.type === 'image_url') ? { ...msg, content: msg.content.find(item => item.type === 'text')?.text || '' } : msg);
@@ -589,7 +696,8 @@ SUPPORTED ANNOTATION SCHEMAS:
 
         const body = { 
             model: modelSelector.value, 
-            messages: messagesForApi
+            messages: messagesForApi,
+            conversation_id: currentConversationId
         };
 
         let thinkOption = null;
@@ -603,6 +711,17 @@ SUPPORTED ANNOTATION SCHEMAS:
         if (thinkOption !== null) {
             body.think_option = thinkOption;
         }
+        
+        // Add verbosity level (default to maximum)
+        const verbositySelect = document.getElementById('verbosity-level-select');
+        if (verbositySelect && !verbositySelect.closest('.hidden')) {
+            body.verbosity = verbositySelect.value || 'maximum';
+        } else {
+            body.verbosity = 'maximum'; // Default to maximum if control is hidden
+        }
+        
+        // Add web search toggle state
+        body.enable_web_search = isWebSearchEnabled;
 
         try {
             const response = await fetch("{{ url_for('admin_playground_stream') }}", {
@@ -630,16 +749,22 @@ SUPPORTED ANNOTATION SCHEMAS:
                     try {
                         const data = JSON.parse(line);
 
+                        // Capture model name from stream (important for "auto" mode) - capture from any chunk
+                        if (data.model) {
+                            currentModel = data.model;
+                        }
+
                         if (firstChunk && data.message && typeof data.message.content === 'string') {
                             firstChunk = false;
                             botContentElement.innerHTML = ''; // Clear placeholder on first message with a content key
                         }
-
+                        
                         if (data.message?.content) { // Process only non-empty content for stats and rendering
                             if (currentTTFT === null) { // If TTFT not set, this is the first real token
                                 const ttft = Math.round(performance.now() - startTime);
                                 currentTTFT = ttft;
-                                botStatsElement.innerHTML = `<span>TTFT: ${ttft}ms</span>`;
+                                const modelDisplay = currentModel ? ` | <span class="text-blue-300">Model: ${currentModel}</span>` : '';
+                                botStatsElement.innerHTML = `<span>TTFT: ${ttft}ms</span>${modelDisplay}`;
                                 botStatsElement.classList.remove('hidden');
                             }
                             fullResponse += data.message.content;
@@ -650,10 +775,11 @@ SUPPORTED ANNOTATION SCHEMAS:
                         if (data.done && data.hasOwnProperty('eval_count') && data.hasOwnProperty('eval_duration')) {
                             const tokensPerSecond = data.eval_duration > 0 ? (data.eval_count / (data.eval_duration / 1e9)) : 0;
                             currentTPS = tokensPerSecond;
+                            const modelDisplay = currentModel ? ` | <span class="text-blue-300">Model: ${currentModel}</span>` : '';
                             if (botStatsElement.innerHTML.includes('TTFT')) {
-                                botStatsElement.innerHTML += ` | <span>Speed: ${tokensPerSecond.toFixed(2)} t/s</span>`;
+                                botStatsElement.innerHTML += ` | <span>Speed: ${tokensPerSecond.toFixed(2)} t/s</span>${modelDisplay}`;
                             } else {
-                                botStatsElement.innerHTML = `<span>Speed: ${tokensPerSecond.toFixed(2)} t/s</span>`;
+                                botStatsElement.innerHTML = `<span>Speed: ${tokensPerSecond.toFixed(2)} t/s</span>${modelDisplay}`;
                                 botStatsElement.classList.remove('hidden');
                             }
                         }
@@ -682,13 +808,22 @@ SUPPORTED ANNOTATION SCHEMAS:
                 const newMessage = {
                     role: 'assistant',
                     content: fullResponse,
-                    stats: (currentTTFT !== null && currentTPS !== null) ? { ttft: currentTTFT, tps: currentTPS } : null
+                    model_name: currentModel, // Store model name for display
+                    stats: (currentTTFT !== null && currentTPS !== null) ? { ttft: currentTTFT, tps: currentTPS, model: currentModel } : null
                 };
                 if (fullResponse.includes('<annotate>')) {
                     newMessage.annotated_image_url = lastSentImageURL;
                 }
                 messages.push(newMessage);
                 updateGlobalStats();
+                
+                // Update OpenRouter credits after message completes (if using OpenRouter)
+                if (modelSelector.value && modelSelector.value.includes('/')) {
+                    setTimeout(() => {
+                        const updateCredits = window.updateOpenRouterCredits;
+                        if (updateCredits) updateCredits();
+                    }, 2000);
+                }
             }
             renderChat(); 
             chatContainer.scrollTop = chatContainer.scrollHeight;
@@ -818,7 +953,8 @@ SUPPORTED ANNOTATION SCHEMAS:
             if (role === 'assistant') {
                 renderBotMessage(contentDiv, content, msg.annotated_image_url);
                 if (stats && stats.ttft !== null && stats.tps !== null) {
-                    statsDiv.innerHTML = `<span>TTFT: ${stats.ttft}ms</span> | <span>Speed: ${stats.tps.toFixed(2)} t/s</span>`;
+                    const modelDisplay = stats.model ? ` | <span class="text-blue-300">Model: ${stats.model}</span>` : '';
+                    statsDiv.innerHTML = `<span>TTFT: ${stats.ttft}ms</span> | <span>Speed: ${stats.tps.toFixed(2)} t/s</span>${modelDisplay}`;
                     statsDiv.classList.remove('hidden');
                 }
             } else {
@@ -1073,10 +1209,12 @@ SUPPORTED ANNOTATION SCHEMAS:
         const stats = messages.filter(m => m.role === 'assistant' && m.stats).map(m => m.stats);
         const meanTTFTEl = document.getElementById('mean-ttft');
         const meanTPSEl = document.getElementById('mean-tps');
+        const modelNameDisplay = document.getElementById('model-name-display');
 
         if (stats.length === 0) {
             meanTTFTEl.textContent = 'N/A';
             meanTPSEl.textContent = 'N/A';
+            modelNameDisplay.textContent = '';
             return;
         }
 
@@ -1088,6 +1226,14 @@ SUPPORTED ANNOTATION SCHEMAS:
 
         meanTTFTEl.textContent = `${Math.round(meanTTFT)} ms`;
         meanTPSEl.textContent = `${meanTPS.toFixed(2)} t/s`;
+        
+        // Display the model name from the last assistant message
+        const lastAssistantMsg = messages.filter(m => m.role === 'assistant').pop();
+        if (lastAssistantMsg && lastAssistantMsg.model_name) {
+            modelNameDisplay.textContent = `Model: ${lastAssistantMsg.model_name}`;
+        } else {
+            modelNameDisplay.textContent = '';
+        }
     }
 
     function exportChat() {
@@ -1256,10 +1402,84 @@ SUPPORTED ANNOTATION SCHEMAS:
         }
     });
 
+    // Pricing data from server
+    const modelPricing = {{ (model_pricing or {}) | tojson }};
+    
+    function updatePricingDisplay() {
+        const selectedModel = modelSelector.value;
+        const pricing = modelPricing[selectedModel];
+        const pricingDisplay = document.getElementById('model-pricing-display');
+        const pricingText = document.getElementById('pricing-text');
+        
+        if (pricing && (pricing.input || pricing.output)) {
+            let text = '';
+            if (pricing.input && pricing.input !== 'N/A') {
+                text += `💰 ${pricing.input} / ${pricing.output || 'N/A'}`;
+                if (pricing.web_search && pricing.web_search !== 'N/A') {
+                    text += ` | 🔍 ${pricing.web_search}`;
+                }
+            }
+            pricingText.textContent = text;
+            pricingDisplay.style.display = 'block';
+        } else {
+            pricingDisplay.style.display = 'none';
+        }
+    }
+    
+    function showPricingTooltip(event) {
+        const selectedModel = modelSelector.value;
+        const pricing = modelPricing[selectedModel];
+        const tooltip = document.getElementById('model-pricing-tooltip');
+        const tooltipName = document.getElementById('tooltip-model-name');
+        const tooltipContent = document.getElementById('tooltip-pricing-content');
+        
+        if (!pricing) {
+            return;
+        }
+        
+        tooltipName.textContent = selectedModel;
+        let content = '';
+        if (pricing.input && pricing.input !== 'N/A') {
+            content += `<div>📥 Input: <strong>${pricing.input}</strong></div>`;
+        }
+        if (pricing.output && pricing.output !== 'N/A') {
+            content += `<div>📤 Output: <strong>${pricing.output}</strong></div>`;
+        }
+        if (pricing.web_search && pricing.web_search !== 'N/A') {
+            content += `<div>🔍 Web Search: <strong>${pricing.web_search}</strong></div>`;
+        }
+        if (pricing.request && pricing.request !== 'N/A') {
+            content += `<div>📋 Per Request: <strong>${pricing.request}</strong></div>`;
+        }
+        if (pricing.image && pricing.image !== 'N/A') {
+            content += `<div>🖼️ Image: <strong>${pricing.image}</strong></div>`;
+        }
+        if (!content) {
+            content = '<div class="text-gray-500">No pricing information available</div>';
+        }
+        tooltipContent.innerHTML = content;
+        
+        // Position tooltip
+        const rect = event.target.getBoundingClientRect();
+        tooltip.style.left = `${rect.left}px`;
+        tooltip.style.top = `${rect.bottom + 5}px`;
+        tooltip.classList.remove('hidden');
+    }
+    
+    document.getElementById('model-pricing-display').addEventListener('click', showPricingTooltip);
+    document.getElementById('close-pricing-tooltip').addEventListener('click', () => {
+        document.getElementById('model-pricing-tooltip').classList.add('hidden');
+    });
+    
     modelSelector.addEventListener('change', () => {
         localStorage.setItem(LAST_MODEL_KEY, modelSelector.value);
+        localStorage.setItem('playground_selected_model', modelSelector.value);  // Store for description generation
         updateThinkingControls();
+        updatePricingDisplay();
     });
+    
+    // Initial pricing display
+    updatePricingDisplay();
     
     annotationToggle.addEventListener('click', () => {
         isAnnotationMode = !isAnnotationMode;
@@ -1274,6 +1494,26 @@ SUPPORTED ANNOTATION SCHEMAS:
         updateThinkingToggleUI();
         updateThinkingControls();
     });
+    
+    webSearchToggle.addEventListener('click', () => {
+        isWebSearchEnabled = !isWebSearchEnabled;
+        localStorage.setItem('webSearchEnabled', isWebSearchEnabled);
+        updateWebSearchToggleUI();
+    });
+    
+    function updateWebSearchToggleUI() {
+        if (isWebSearchEnabled) {
+            webSearchToggle.classList.remove('bg-gray-600');
+            webSearchToggle.classList.add('bg-[var(--color-primary-600)]');
+            webSearchToggleKnob.classList.remove('translate-x-0');
+            webSearchToggleKnob.classList.add('translate-x-5');
+        } else {
+            webSearchToggle.classList.add('bg-gray-600');
+            webSearchToggle.classList.remove('bg-[var(--color-primary-600)]');
+            webSearchToggleKnob.classList.add('translate-x-0');
+            webSearchToggleKnob.classList.remove('translate-x-5');
+        }
+    }
 
     document.addEventListener('click', async e => {
         const copyBtn = e.target.closest('.copy-btn');
@@ -1415,15 +1655,273 @@ SUPPORTED ANNOTATION SCHEMAS:
     const lastModel = localStorage.getItem(LAST_MODEL_KEY);
     if (lastModel && modelSelector.querySelector(`option[value="${lastModel}"]`)) {
         modelSelector.value = lastModel;
+        localStorage.setItem('playground_selected_model', lastModel);  // Store for description generation
     }
     userSystemPrompt = localStorage.getItem(LAST_SYSTEM_PROMPT_KEY) || '';
     isAnnotationMode = localStorage.getItem(ANNOTATION_MODE_KEY) === 'true';
     isThinkingMode = localStorage.getItem(THINKING_MODE_KEY) === 'true';
+    isWebSearchEnabled = localStorage.getItem(WEB_SEARCH_ENABLED_KEY) !== 'false'; // Default to true if not set
     updateAnnotationToggleUI();
     updateThinkingToggleUI();
+    updateWebSearchToggleUI();
     updateSystemPromptIndicator();
     updateGlobalStats();
     updateThinkingControls(); // Initial check for think controls
+    
+    // --- Conversations/Threads Management ---
+    let currentConversationId = null;
+    const conversationsSidebar = document.getElementById('conversations-sidebar');
+    const conversationsMenuToggle = document.getElementById('conversations-menu-toggle');
+    const conversationsSidebarClose = document.getElementById('conversations-sidebar-close');
+    const conversationsList = document.getElementById('conversations-list');
+    const newConversationBtn = document.getElementById('new-conversation-btn');
+    
+    // Toggle sidebar - expands into page, not over it
+    conversationsMenuToggle?.addEventListener('click', () => {
+        const isHidden = conversationsSidebar?.classList.contains('hidden');
+        if (isHidden) {
+            conversationsSidebar?.classList.remove('hidden');
+            loadConversations();
+        } else {
+            conversationsSidebar?.classList.add('hidden');
+        }
+    });
+    
+    conversationsSidebarClose?.addEventListener('click', () => {
+        conversationsSidebar?.classList.add('hidden');
+    });
+    
+    // Load conversations
+    async function loadConversations() {
+        try {
+            const response = await fetch('/admin/api/conversations');
+            if (!response.ok) throw new Error('Failed to load conversations');
+            const conversations = await response.json();
+            
+            conversationsList.innerHTML = '';
+            
+            if (conversations.length === 0) {
+                conversationsList.innerHTML = '<div class="text-gray-400 text-xs px-2 py-3 text-center">No conversations yet</div>';
+                return;
+            }
+            
+            conversations.forEach(conv => {
+                const convEl = document.createElement('div');
+                const isActive = currentConversationId === conv.id;
+                convEl.className = `px-2 py-1.5 rounded cursor-pointer transition-colors hover:bg-white/5 ${isActive ? 'bg-[var(--color-primary-600)]/20 border-l-2 border-[var(--color-primary-500)]' : ''}`;
+                convEl.dataset.conversationId = conv.id;
+                convEl.innerHTML = `
+                    <div class="font-medium text-xs truncate ${isActive ? 'text-[var(--color-primary-300)]' : 'text-gray-300'}">${conv.title || 'Untitled'}</div>
+                    <div class="text-xs text-gray-400 mt-0.5">${new Date(conv.updated_at).toLocaleDateString()} • ${conv.message_count || 0} msgs</div>
+                `;
+                convEl.addEventListener('click', () => loadConversation(conv.id));
+                conversationsList.appendChild(convEl);
+            });
+        } catch (error) {
+            console.error('Error loading conversations:', error);
+            conversationsList.innerHTML = '<div class="text-red-400 text-xs px-2 py-3">Error loading conversations</div>';
+        }
+    }
+    
+    // Load a specific conversation
+    async function loadConversation(conversationId) {
+        try {
+            const response = await fetch(`/admin/api/conversations/${conversationId}`, {
+                headers: {
+                    'X-CSRF-Token': '{{ csrf_token }}'
+                }
+            });
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`Failed to load conversation: ${response.status} ${errorText}`);
+            }
+            const conversation = await response.json();
+            
+            currentConversationId = conversationId;
+            messages = conversation.messages.map(msg => ({
+                role: msg.role,
+                content: msg.content
+            }));
+            
+            renderChat();
+            updateGlobalStats();
+            loadConversations(); // Refresh list to highlight current
+        } catch (error) {
+            console.error('Error loading conversation:', error);
+            alert('Failed to load conversation');
+        }
+    }
+    
+    // Create new conversation
+    newConversationBtn?.addEventListener('click', async () => {
+        try {
+            const response = await fetch('/admin/api/conversations', { 
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-Token': '{{ csrf_token }}'
+                }
+            });
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`Failed to create conversation: ${response.status} ${errorText}`);
+            }
+            const conversation = await response.json();
+            
+            currentConversationId = conversation.id;
+            messages = [];
+            renderChat();
+            loadConversations();
+        } catch (error) {
+            console.error('Error creating conversation:', error);
+            alert(`Failed to create conversation: ${error.message}`);
+        }
+    });
+    
+    // Update fetchStreamedResponse to capture conversation_id from response
+    const originalFetchStreamedResponse = window.fetchStreamedResponse;
+    if (originalFetchStreamedResponse) {
+        window.fetchStreamedResponse = async function() {
+            // Create new conversation if none exists
+            if (!currentConversationId) {
+                try {
+                    const response = await fetch('/admin/api/conversations', { method: 'POST' });
+                    if (response.ok) {
+                        const conversation = await response.json();
+                        currentConversationId = conversation.id;
+                    }
+                } catch (error) {
+                    console.error('Error creating conversation:', error);
+                }
+            }
+            
+            // Call original function
+            return originalFetchStreamedResponse.apply(this, arguments);
+        };
+    }
+    
+    // Hook into the fetch call to capture conversation_id from response header
+    const originalFetch = window.fetch;
+    window.fetch = async function(...args) {
+        const response = await originalFetch.apply(this, args);
+        
+        // If this is a playground-stream request, capture conversation_id
+        if (args[0] && args[0].includes && args[0].includes('/playground-stream')) {
+            const convId = response.headers.get('X-Conversation-Id');
+            if (convId) {
+                currentConversationId = parseInt(convId);
+                // Refresh conversations list to show new conversation
+                if (!conversationsSidebar?.classList.contains('hidden')) {
+                    loadConversations();
+                }
+            }
+        }
+        
+        return response;
+    };
+    
+    // OpenRouter Credits Display
+    const creditsDisplay = document.getElementById('openrouter-credits-display');
+    const creditsRemaining = document.getElementById('credits-remaining');
+    const creditsUsage = document.getElementById('credits-usage');
+    const creditsTooltip = document.getElementById('credits-tooltip');
+    const tooltipRemaining = document.getElementById('tooltip-remaining');
+    const tooltipUsed = document.getElementById('tooltip-used');
+    const tooltipTotal = document.getElementById('tooltip-total');
+    
+    async function updateOpenRouterCredits() {
+        try {
+            const response = await fetch('/admin/api/openrouter-credits');
+            if (!response.ok) {
+                console.warn('OpenRouter credits API returned:', response.status, response.statusText);
+                creditsDisplay?.classList.add('hidden');
+                return;
+            }
+            const data = await response.json();
+            console.log('OpenRouter credits API response:', JSON.stringify(data, null, 2));
+            
+            // Format credits with appropriate precision
+            const formatCredits = (value) => {
+                if (value >= 1000) {
+                    return (value / 1000).toFixed(1) + 'k';
+                } else if (value >= 1) {
+                    return value.toFixed(2);
+                } else {
+                    return value.toFixed(4);
+                }
+            };
+            
+            // Always try to use totals if available (even if 0 or empty credits_data array)
+            const remaining = data.total_remaining_credits ?? 0;
+            const used = data.total_usage ?? 0;
+            const total = data.total_credits_purchased ?? 0;
+            
+            console.log('Credits parsed - Remaining:', remaining, 'Used:', used, 'Total:', total);
+            console.log('credits_data exists?', !!data.credits_data, 'length:', data.credits_data?.length);
+            
+            // Show display if we have any response data (even if values are 0)
+            if (data.hasOwnProperty('total_remaining_credits') || data.hasOwnProperty('total_usage') || (data.credits_data && data.credits_data.length > 0)) {
+                creditsDisplay?.classList.remove('hidden');
+                
+                // Update compact display
+                creditsRemaining.textContent = `$${formatCredits(remaining)}`;
+                creditsUsage.textContent = `${formatCredits(used)} used`;
+                
+                // Update tooltip
+                tooltipRemaining.textContent = `$${remaining.toFixed(4)}`;
+                tooltipUsed.textContent = `$${used.toFixed(4)}`;
+                tooltipTotal.textContent = `$${total.toFixed(4)}`;
+                
+                // Color coding: green if > 50%, yellow if 10-50%, red if < 10%
+                const percentage = total > 0 ? (remaining / total) * 100 : 0;
+                creditsRemaining.className = 'text-xs font-medium';
+                if (percentage > 50) {
+                    creditsRemaining.classList.add('text-green-400');
+                } else if (percentage > 10) {
+                    creditsRemaining.classList.add('text-yellow-400');
+                } else if (remaining > 0) {
+                    creditsRemaining.classList.add('text-red-400');
+                } else {
+                    creditsRemaining.classList.add('text-gray-400');
+                }
+            } else {
+                console.warn('No credits data available. Response structure:', data);
+                creditsDisplay?.classList.add('hidden');
+            }
+        } catch (error) {
+            console.error('Failed to fetch OpenRouter credits:', error);
+            creditsDisplay?.classList.add('hidden');
+        }
+    }
+    
+    // Show tooltip on hover (but not on refresh button)
+    if (creditsDisplay) {
+        const creditsContent = creditsDisplay.querySelector('.flex.flex-col');
+        if (creditsContent) {
+            creditsContent.addEventListener('mouseenter', () => {
+                creditsTooltip?.classList.remove('hidden');
+            });
+            creditsContent.addEventListener('mouseleave', () => {
+                creditsTooltip?.classList.add('hidden');
+            });
+        }
+    }
+    
+    // Make refresh button work
+    const refreshCreditsBtn = document.getElementById('refresh-credits-btn');
+    if (refreshCreditsBtn) {
+        refreshCreditsBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            updateOpenRouterCredits();
+        });
+    }
+    
+    // Initial load and periodic updates (every 30 seconds)
+    updateOpenRouterCredits();
+    setInterval(updateOpenRouterCredits, 30000);
+    
+    // Make updateOpenRouterCredits available globally for stream completion hook and refresh button
+    window.updateOpenRouterCredits = updateOpenRouterCredits;
 });
 </script>
 {% endblock %}

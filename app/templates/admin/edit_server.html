@@ -26,9 +26,10 @@
 
             <div>
                 <label for="server_type" class="block text-sm font-medium">Server Type</label>
-                <select name="server_type" id="server_type" class="mt-1 block w-full px-3 py-2 rounded-md shadow-sm">
+                <select name="server_type" id="server_type" class="mt-1 block w-full px-3 py-2 rounded-md shadow-sm" onchange="handleServerTypeChange()">
                     <option value="ollama" {% if server.server_type == 'ollama' %}selected{% endif %}>Ollama</option>
                     <option value="vllm" {% if server.server_type == 'vllm' %}selected{% endif %}>vLLM (OpenAI-Compatible)</option>
+                    <option value="openrouter" {% if server.server_type == 'openrouter' %}selected{% endif %}>OpenRouter</option>
                 </select>
             </div>
             
@@ -51,4 +52,30 @@
         </form>
     </div>
 </div>
+
+<script>
+function handleServerTypeChange() {
+    const serverType = document.getElementById('server_type').value;
+    const serverUrl = document.getElementById('url');
+    const apiKey = document.getElementById('api_key');
+    
+    if (serverType === 'openrouter') {
+        // Auto-set OpenRouter URL
+        serverUrl.value = 'https://openrouter.ai/api/v1';
+        serverUrl.readOnly = true;
+        serverUrl.style.backgroundColor = '#f3f4f6';
+        
+        // Make API key required
+        apiKey.placeholder = 'Required for OpenRouter';
+    } else {
+        // Reset for other server types
+        serverUrl.readOnly = false;
+        serverUrl.style.backgroundColor = '';
+        apiKey.placeholder = 'Leave blank to keep current key';
+    }
+}
+
+// Run on page load
+document.addEventListener('DOMContentLoaded', handleServerTypeChange);
+</script>
 {% endblock %}

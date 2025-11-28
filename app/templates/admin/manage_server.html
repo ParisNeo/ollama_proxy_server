@@ -30,12 +30,152 @@
             </p>
         </form>
     </div>
-    {% else %}
+    {% elif server.server_type == 'vllm' %}
     <div class="card-style">
         <h2 class="card-header text-2xl font-bold mb-4 pb-2">Model Management</h2>
         <div class="info-box p-4">
             Model management (pulling, deleting, etc.) is not supported for vLLM servers through this UI. Models for vLLM servers are configured when the vLLM server is launched. You can refresh the model list from the main server management page.
         </div>
+    </div>
+    {% elif server.server_type == 'openrouter' %}
+    <div class="card-style">
+        <h2 class="card-header text-2xl font-bold mb-4 pb-2">Enable/Disable OpenRouter Models</h2>
+        <p class="text-current mb-4">
+            Select which OpenRouter models should be available in the Models Manager. Only enabled models will appear in the auto-router and model selection.
+        </p>
+        <p class="text-sm text-gray-400 mb-4">
+            <strong>Note:</strong> This is a one-time setup. Once configured, you typically won't need to change this unless you want to add or remove specific models.
+        </p>
+        
+        {% if server.available_models %}
+        <form action="{{ url_for('admin_update_enabled_models', server_id=server.id) }}" method="post" id="enabled-models-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            
+            <div class="mb-4 flex gap-2">
+                <button type="button" onclick="selectAllModels()" class="px-4 py-2 text-sm font-medium text-white bg-green-600 hover:bg-green-700 rounded-md">
+                    Select All
+                </button>
+                <button type="button" onclick="deselectAllModels()" class="px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-md">
+                    Deselect All
+                </button>
+                <button type="button" onclick="selectFreeModels()" class="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md">
+                    Select Free Only
+                </button>
+            </div>
+            
+            <div class="border border-white/20 rounded-lg p-4 max-h-[600px] overflow-y-auto">
+                <div class="space-y-2">
+                    {% for model in server.available_models %}
+                    {% set model_name = model.name if model.name else (model.get('name') if model is mapping else (model.id if model.id else (model.get('id') if model is mapping else ''))) %}
+                    {% set is_enabled = model_name in enabled_models %}
+                    {% set model_details = model.details if model.details else (model.get('details') if model is mapping else {}) %}
+                    {% set pricing = model_details.pricing if (model_details and model_details.pricing) else {} %}
+                    {% set prompt_price = (pricing.prompt | float) if (pricing and pricing.prompt is defined) else 0.0 %}
+                    {% set completion_price = (pricing.completion | float) if (pricing and pricing.completion is defined) else 0.0 %}
+                    {% set is_free = (prompt_price == 0 and completion_price == 0) or (':free' in model_name.lower()) %}
+                    {% set ctx_len = model_details.context_length if (model_details and model_details.context_length) else None %}
+                    <div class="flex items-center p-2 hover:bg-white/5 rounded {% if is_free %}bg-green-900/20{% endif %}" data-is-free="{{ 'true' if is_free else 'false' }}">
+                        <input 
+                            type="checkbox" 
+                            name="enabled_models" 
+                            id="model_{{ loop.index }}" 
+                            value="{{ model_name }}"
+                            {% if is_enabled %}checked{% endif %}
+                            class="model-checkbox h-4 w-4 rounded text-[var(--color-primary-600)] focus:ring-[var(--color-primary-500)]"
+                            data-is-free="{{ 'true' if is_free else 'false' }}"
+                        >
+                        <label for="model_{{ loop.index }}" class="ml-3 flex-1 cursor-pointer">
+                            <span class="text-sm font-medium text-current font-mono">{{ model_name }}</span>
+                            {% if is_free %}
+                            <span class="ml-2 px-2 py-0.5 text-xs font-semibold rounded bg-green-600 text-white">FREE</span>
+                            {% endif %}
+                            {% if ctx_len %}
+                            <span class="ml-2 text-xs text-gray-400">({{ (ctx_len / 1000) | round(0) | int }}k ctx)</span>
+                            {% endif %}
+                            {% if pricing and (prompt_price > 0 or completion_price > 0) %}
+                            {% set web_search_price = (pricing.web_search | float) if (pricing and pricing.web_search is defined) else 0.0 %}
+                            <span class="ml-2 text-yellow-500 cursor-help" title="💰 Pricing: Input: ${{ (prompt_price * 1000000) | round(2) }} / 1M tokens, Output: ${{ (completion_price * 1000000) | round(2) }} / 1M tokens{% if web_search_price > 0 %}, Web Search: ${{ web_search_price | round(2) }} / 1K calls{% endif %}">💰</span>
+                            {% endif %}
+                        </label>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            
+            <div class="mt-4 flex justify-end">
+                <button type="submit" class="px-6 py-2 text-sm font-medium text-white bg-[var(--color-primary-600)] hover:bg-[var(--color-primary-700)] rounded-md">
+                    Save Enabled Models
+                </button>
+            </div>
+        </form>
+        
+        <script>
+        function selectAllModels() {
+            document.querySelectorAll('.model-checkbox').forEach(cb => cb.checked = true);
+            updateSelectAllCheckbox();
+        }
+        function deselectAllModels() {
+            document.querySelectorAll('.model-checkbox').forEach(cb => cb.checked = false);
+            updateSelectAllCheckbox();
+        }
+        function selectFreeModels() {
+            // First, uncheck all
+            document.querySelectorAll('.model-checkbox').forEach(cb => cb.checked = false);
+            
+            // Check all models with data-is-free="true"
+            document.querySelectorAll('.model-checkbox').forEach(cb => {
+                const isFreeAttr = cb.getAttribute('data-is-free');
+                if (isFreeAttr === 'true') {
+                    cb.checked = true;
+                } else {
+                    // Fallback: check for FREE badge in parent div
+                    const parentDiv = cb.closest('div');
+                    if (parentDiv) {
+                        const label = parentDiv.querySelector('label');
+                        if (label) {
+                            // Check for FREE badge span or FREE text
+                            const freeBadge = label.querySelector('span.bg-green-600');
+                            const hasFreeText = label.textContent.includes('FREE');
+                            if (freeBadge || hasFreeText) {
+                                cb.checked = true;
+                            }
+                        }
+                    }
+                }
+            });
+            
+            updateSelectAllCheckbox();
+        }
+        function updateSelectAllCheckbox() {
+            const checkboxes = document.querySelectorAll('.model-checkbox');
+            const allChecked = Array.from(checkboxes).every(cb => cb.checked);
+            const noneChecked = Array.from(checkboxes).every(cb => !cb.checked);
+            // If there's a select-all checkbox, update it
+            const selectAll = document.getElementById('select-all-checkbox');
+            if (selectAll) {
+                if (allChecked) {
+                    selectAll.checked = true;
+                    selectAll.indeterminate = false;
+                } else if (noneChecked) {
+                    selectAll.checked = false;
+                    selectAll.indeterminate = false;
+                } else {
+                    selectAll.indeterminate = true;
+                }
+            }
+        }
+        // Update select-all checkbox when individual checkboxes change
+        document.addEventListener('DOMContentLoaded', function() {
+            document.querySelectorAll('.model-checkbox').forEach(cb => {
+                cb.addEventListener('change', updateSelectAllCheckbox);
+            });
+        });
+        </script>
+        {% else %}
+        <div class="info-box p-4">
+            No models found. Please refresh the model list from the main <a href="{{ url_for('admin_servers') }}" class="font-semibold text-[var(--color-primary-500)] hover:underline">Server Management</a> page.
+        </div>
+        {% endif %}
     </div>
     {% endif %}
 

@@ -15,51 +15,212 @@
         <p class="mt-2 text-sm text-gray-400">
             For example, if a prompt contains an image, it will only be routed to models you've marked as "Supports Images". Among the eligible models, the one with the lowest priority number will be chosen first.
         </p>
+        <p class="mt-2 text-sm text-gray-400">
+            <strong>Note:</strong> OpenRouter models (shown with green badges) are automatically included when you refresh your OpenRouter server. They work the same way as other models in the auto-router.
+        </p>
     </div>
 
+    <div class="mb-4 flex justify-between items-center">
+        <h2 class="card-header text-2xl font-bold">Configure Model Capabilities</h2>
+        <div class="flex items-center gap-3">
+            <select id="priority_mode" class="px-3 py-2 text-sm font-medium bg-gray-700 text-white rounded-md border border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                <option value="free">🆓 Free Mode</option>
+                <option value="daily_drive">🚗 Daily Drive Mode</option>
+                <option value="advanced">⚡ Advanced Mode</option>
+                <option value="luxury">💎 Luxury Mode</option>
+            </select>
+            <button 
+                type="button" 
+                onclick="runAutoPriorityInventory()"
+                class="px-4 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-md"
+                title="Automatically calculate priorities based on selected mode"
+            >
+                🤖 Auto-Priority Inventory
+            </button>
+        </div>
+    </div>
+    
     <form action="{{ url_for('admin_update_model_metadata') }}" method="post" class="card-style">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <h2 class="card-header text-2xl font-bold mb-4 pb-2">Configure Model Capabilities</h2>
         
-        <div class="overflow-x-auto">
-            <table class="min-w-full">
+        <div class="overflow-x-auto" style="max-width: 100%;">
+            <table class="min-w-full resizable-table" style="table-layout: fixed; width: 100%;">
                 <thead>
                     <tr>
-                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Model Name</th>
-                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Description</th>
-                        <th class="px-4 py-3 text-center text-xs font-medium text-gray-400 uppercase tracking-wider">Supports Images</th>
-                        <th class="px-4 py-3 text-center text-xs font-medium text-gray-400 uppercase tracking-wider">Code Model</th>
-                        <th class="px-4 py-3 text-center text-xs font-medium text-gray-400 uppercase tracking-wider">Fast Model</th>
-                        <th class="px-4 py-3 text-center text-xs font-medium text-gray-400 uppercase tracking-wider">Priority</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider resizable-header" style="width: 200px; position: relative;">
+                            Model Name
+                            <div class="resize-handle" data-column="0"></div>
+                        </th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider resizable-header" style="width: 120px; position: relative;">
+                            Server Type
+                            <div class="resize-handle" data-column="1"></div>
+                        </th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider resizable-header" style="width: 350px; position: relative;">
+                            Description
+                            <div class="resize-handle" data-column="2"></div>
+                        </th>
+                        <th class="p-0 text-center text-xs font-medium text-gray-400 uppercase tracking-wider resizable-header" style="width: 45px; position: relative; height: 80px; vertical-align: bottom;">
+                            <div style="transform: rotate(-45deg); transform-origin: center; white-space: nowrap; position: absolute; left: 50%; bottom: 10px; margin-left: -30px; width: 60px; text-align: left;">
+                                Supports Images
+                            </div>
+                            <div class="resize-handle" data-column="3"></div>
+                        </th>
+                        <th class="p-0 text-center text-xs font-medium text-gray-400 uppercase tracking-wider resizable-header" style="width: 40px; position: relative; height: 80px; vertical-align: bottom;">
+                            <div style="transform: rotate(-45deg); transform-origin: center; white-space: nowrap; position: absolute; left: 50%; bottom: 10px; margin-left: -25px; width: 50px; text-align: left;">
+                                Code Model
+                            </div>
+                            <div class="resize-handle" data-column="4"></div>
+                        </th>
+                        <th class="p-0 text-center text-xs font-medium text-gray-400 uppercase tracking-wider resizable-header" style="width: 40px; position: relative; height: 80px; vertical-align: bottom;">
+                            <div style="transform: rotate(-45deg); transform-origin: center; white-space: nowrap; position: absolute; left: 50%; bottom: 10px; margin-left: -20px; width: 40px; text-align: left;">
+                                Fast Model
+                            </div>
+                            <div class="resize-handle" data-column="5"></div>
+                        </th>
+                        <th class="p-0 text-center text-xs font-medium text-gray-400 uppercase tracking-wider resizable-header" style="width: 45px; position: relative; height: 80px; vertical-align: bottom;">
+                            <div style="transform: rotate(-45deg); transform-origin: center; white-space: nowrap; position: absolute; left: 50%; bottom: 10px; margin-left: -30px; width: 60px; text-align: left;">
+                                Tool Calling
+                            </div>
+                            <div class="resize-handle" data-column="6"></div>
+                        </th>
+                        <th class="p-0 text-center text-xs font-medium text-gray-400 uppercase tracking-wider resizable-header" style="width: 40px; position: relative; height: 80px; vertical-align: bottom;">
+                            <div style="transform: rotate(-45deg); transform-origin: center; white-space: nowrap; position: absolute; left: 50%; bottom: 10px; margin-left: -20px; width: 40px; text-align: left;">
+                                Internet
+                            </div>
+                            <div class="resize-handle" data-column="7"></div>
+                        </th>
+                        <th class="p-0 text-center text-xs font-medium text-gray-400 uppercase tracking-wider resizable-header" style="width: 40px; position: relative; height: 80px; vertical-align: bottom;">
+                            <div style="transform: rotate(-45deg); transform-origin: center; white-space: nowrap; position: absolute; left: 50%; bottom: 10px; margin-left: -25px; width: 50px; text-align: left;">
+                                Thinking
+                            </div>
+                            <div class="resize-handle" data-column="8"></div>
+                        </th>
+                        <th class="px-4 py-3 text-center text-xs font-medium text-gray-400 uppercase tracking-wider resizable-header sticky-priority-header" style="width: 160px; position: sticky; right: 0; background-color: var(--bg-deepest); z-index: 10;">
+                            <div class="flex flex-col items-center justify-center gap-1">
+                                <div class="flex items-center justify-center gap-2">
+                                    <span>Priority</span>
+                                    <span class="text-xs text-gray-500" title="Select models to include in auto-priority analysis">⚙️</span>
+                                </div>
+                                <label class="flex items-center gap-1 cursor-pointer text-xs text-gray-400 hover:text-gray-300" title="Select/Deselect all models for priority analysis">
+                                    <input type="checkbox" id="select_all_priority" class="h-3 w-3 rounded text-[var(--color-primary-600)]" onchange="toggleAllPriorityCheckboxes(this.checked)">
+                                    <span>Select All</span>
+                                </label>
+                            </div>
+                            <div class="resize-handle" data-column="6"></div>
+                        </th>
                     </tr>
                 </thead>
                 <tbody class="divide-y divide-white/10">
-                    {% for meta in metadata_list %}
-                    <tr class="align-top">
-                        <td class="px-4 py-4 whitespace-nowrap text-sm font-medium text-current font-mono">{{ meta.model_name }}</td>
-                        <td class="px-4 py-4 whitespace-nowrap">
-                            <input type="text" name="description_{{ meta.id }}" value="{{ meta.description or '' }}" placeholder="A short description..." class="w-full min-w-48 px-2 py-1 rounded-md shadow-sm sm:text-sm">
-                        </td>
-                        <td class="px-4 py-4 whitespace-nowrap text-center">
-                            <input type="checkbox" name="supports_images_{{ meta.id }}" value="true" class="h-5 w-5 rounded text-[var(--color-primary-600)]" {% if meta.supports_images %}checked{% endif %}>
-                        </td>
-                        <td class="px-4 py-4 whitespace-nowrap text-center">
-                            <input type="checkbox" name="is_code_model_{{ meta.id }}" value="true" class="h-5 w-5 rounded text-[var(--color-primary-600)]" {% if meta.is_code_model %}checked{% endif %}>
-                        </td>
-                        <td class="px-4 py-4 whitespace-nowrap text-center">
-                            <input type="checkbox" name="is_fast_model_{{ meta.id }}" value="true" class="h-5 w-5 rounded text-[var(--color-primary-600)]" {% if meta.is_fast_model %}checked{% endif %}>
-                        </td>
-                        <td class="px-4 py-4 whitespace-nowrap text-center">
-                             <input type="number" name="priority_{{ meta.id }}" value="{{ meta.priority }}" class="w-20 px-2 py-1 rounded-md shadow-sm sm:text-sm text-center">
-                        </td>
-                    </tr>
-                    {% else %}
+                    {% if categorized_by_server %}
+                    <!-- OLLAMA MODELS SECTION (First) -->
+                    {% if categorized_by_server.ollama and categorized_by_server.ollama.all %}
                     <tr>
-                        <td colspan="6" class="px-6 py-10 text-center text-gray-400">
-                           No models found across any active servers. Go to the <a href="{{ url_for('admin_servers') }}" class="font-semibold text-[var(--color-primary-500)] hover:underline">Server Management</a> page and refresh your servers to discover models.
+                        <td colspan="10" class="px-4 py-3 bg-blue-900/40 border-b-2 border-blue-400">
+                            <h3 class="text-lg font-bold text-blue-200">🦙 Ollama Models</h3>
+                            <p class="text-xs text-blue-300 mt-1">Local and cloud Ollama models</p>
                         </td>
                     </tr>
+                    {% for meta in categorized_by_server.ollama.all %}
+                    {% include "admin/models_manager_row.html" %}
                     {% endfor %}
+                    {% endif %}
+                    
+                    <!-- OPENROUTER MODELS SECTION (Second) -->
+                    {% if categorized_by_server.openrouter %}
+                    {% set or_models = categorized_by_server.openrouter %}
+                    
+                    <!-- Other OpenRouter Models - SHOWN FIRST (at the very top) -->
+                    {% if or_models.other %}
+                    <tr>
+                        <td colspan="10" class="px-4 py-3 bg-gray-800/40 border-b-2 border-gray-600">
+                            <h3 class="text-lg font-bold text-gray-300">📦 OpenRouter: Other Models</h3>
+                            <p class="text-xs text-gray-400 mt-1">Remaining OpenRouter models</p>
+                        </td>
+                    </tr>
+                    {% for meta in or_models.other %}
+                    {% include "admin/models_manager_row.html" %}
+                    {% endfor %}
+                    {% endif %}
+                    
+                    <!-- Free Models (All) -->
+                    {% if or_models.free %}
+                    <tr>
+                        <td colspan="10" class="px-4 py-3 bg-green-900/40 border-b-2 border-green-400">
+                            <h3 class="text-lg font-bold text-green-200">🆓 OpenRouter: Free Models</h3>
+                            <p class="text-xs text-green-300 mt-1">All free OpenRouter models (sorted by parameter size)</p>
+                        </td>
+                    </tr>
+                    {% for meta in or_models.free %}
+                    {% include "admin/models_manager_row.html" %}
+                    {% endfor %}
+                    {% endif %}
+                    
+                    <!-- Major Providers -->
+                    {% if or_models.major_providers %}
+                    <tr>
+                        <td colspan="10" class="px-4 py-3 bg-blue-900/40 border-b-2 border-blue-400">
+                            <h3 class="text-lg font-bold text-blue-200">🏢 OpenRouter: Major LLM Providers (Latest Versions)</h3>
+                            <p class="text-xs text-blue-300 mt-1">Latest models from major providers, sorted alphabetically</p>
+                        </td>
+                    </tr>
+                    {% for meta in or_models.major_providers %}
+                    {% include "admin/models_manager_row.html" %}
+                    {% endfor %}
+                    {% endif %}
+                    
+                    <!-- Uncensored Models (Only Dolphin-based) -->
+                    {% if or_models.uncensored %}
+                    <tr>
+                        <td colspan="10" class="px-4 py-3 bg-purple-900/40 border-b-2 border-purple-400">
+                            <h3 class="text-lg font-bold text-purple-200">🔓 OpenRouter: Uncensored Models (Dolphin-based)</h3>
+                            <p class="text-xs text-purple-300 mt-1">Dolphin-based models without guardrails</p>
+                        </td>
+                    </tr>
+                    {% for meta in or_models.uncensored %}
+                    {% include "admin/models_manager_row.html" %}
+                    {% endfor %}
+                    {% endif %}
+                    {% endif %}
+                    
+                    <!-- VLLM MODELS SECTION -->
+                    {% if categorized_by_server.vllm and categorized_by_server.vllm.all %}
+                    <tr>
+                        <td colspan="10" class="px-4 py-3 bg-purple-900/40 border-b-2 border-purple-400">
+                            <h3 class="text-lg font-bold text-purple-200">⚡ vLLM Models</h3>
+                            <p class="text-xs text-purple-300 mt-1">vLLM server models</p>
+                        </td>
+                    </tr>
+                    {% for meta in categorized_by_server.vllm.all %}
+                    {% include "admin/models_manager_row.html" %}
+                    {% endfor %}
+                    {% endif %}
+                    
+                    <!-- OTHER MODELS SECTION -->
+                    {% if categorized_by_server.other and categorized_by_server.other.all %}
+                    <tr>
+                        <td colspan="10" class="px-4 py-3 bg-gray-800/40 border-b-2 border-gray-600">
+                            <h3 class="text-lg font-bold text-gray-300">📦 Other Models</h3>
+                            <p class="text-xs text-gray-400 mt-1">Models from other server types</p>
+                        </td>
+                    </tr>
+                    {% for meta in categorized_by_server.other.all %}
+                    {% include "admin/models_manager_row.html" %}
+                    {% endfor %}
+                    {% endif %}
+                    {% else %}
+                    <!-- Fallback: Show all models in single list if categorization not available -->
+                    {% for meta in metadata_list %}
+                    {% include "admin/models_manager_row.html" %}
+                    {% endfor %}
+                    {% endif %}
+                    
+                    {% if not categorized_by_server and not metadata_list %}
+                    <tr>
+                        <td colspan="10" class="px-6 py-10 text-center text-gray-400">
+                           No models found across any active servers. Go to the <a href="{{ url_for('admin_servers') }}" class="font-semibold text-[var(--color-primary-500)] hover:underline">Server Management</a> page and refresh your servers to discover models (including OpenRouter models).
+                        </td>
+                    </tr>
+                    {% endif %}
                 </tbody>
             </table>
         </div>
@@ -71,4 +232,361 @@
         </div>
     </form>
 </div>
+
+<style>
+/* Column resizing styles */
+.resizable-table {
+    user-select: none;
+}
+
+.resizable-header {
+    position: relative;
+}
+
+.sticky-priority-header {
+    position: sticky !important;
+    right: 0 !important;
+    z-index: 10 !important;
+}
+
+.resize-handle {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 5px;
+    height: 100%;
+    cursor: col-resize;
+    background-color: transparent;
+    z-index: 25;
+    transition: background-color 0.2s;
+}
+
+.resize-handle:hover {
+    background-color: var(--color-primary-500);
+}
+
+.resize-handle.active {
+    background-color: var(--color-primary-600);
+}
+
+.resizing {
+    cursor: col-resize !important;
+    user-select: none;
+}
+
+.resizing * {
+    cursor: col-resize !important;
+    user-select: none;
+}
+
+/* Ensure sticky column cells also have proper styling */
+td[style*="position: sticky"] {
+    position: sticky !important;
+    right: 0 !important;
+    z-index: 10 !important;
+}
+</style>
+
+<script>
+// Column resizing functionality
+(function() {
+    let isResizing = false;
+    let currentColumn = null;
+    let startX = 0;
+    let startWidth = 0;
+    
+    const table = document.querySelector('.resizable-table');
+    if (!table) return;
+    
+    const headers = table.querySelectorAll('.resizable-header');
+    const resizeHandles = table.querySelectorAll('.resize-handle');
+    
+    resizeHandles.forEach((handle, index) => {
+        handle.addEventListener('mousedown', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            
+            isResizing = true;
+            currentColumn = index;
+            startX = e.pageX;
+            startWidth = headers[index].offsetWidth;
+            
+            document.body.classList.add('resizing');
+            handle.classList.add('active');
+            
+            const allCells = table.querySelectorAll(`td:nth-child(${index + 1}), th:nth-child(${index + 1})`);
+            allCells.forEach(cell => cell.style.pointerEvents = 'none');
+        });
+    });
+    
+    document.addEventListener('mousemove', (e) => {
+        if (!isResizing || currentColumn === null) return;
+        
+        const diff = e.pageX - startX;
+        const newWidth = Math.max(80, startWidth + diff); // Minimum width of 80px
+        
+        headers[currentColumn].style.width = newWidth + 'px';
+        
+        // Update all cells in this column
+        const allCells = table.querySelectorAll(`td:nth-child(${currentColumn + 1}), th:nth-child(${currentColumn + 1})`);
+        allCells.forEach(cell => {
+            cell.style.width = newWidth + 'px';
+            // Preserve sticky positioning for priority column
+            if (currentColumn === 6) {
+                cell.style.position = 'sticky';
+                cell.style.right = '0';
+                cell.style.zIndex = '10';
+            }
+        });
+    });
+    
+    document.addEventListener('mouseup', () => {
+        if (isResizing) {
+            isResizing = false;
+            currentColumn = null;
+            document.body.classList.remove('resizing');
+            
+            resizeHandles.forEach(handle => handle.classList.remove('active'));
+            
+            const allCells = table.querySelectorAll('td, th');
+            allCells.forEach(cell => cell.style.pointerEvents = '');
+        }
+    });
+})();
+
+// Auto-priority inventory
+async function runAutoPriorityInventory() {
+    const button = event?.target || document.querySelector('button[onclick*="runAutoPriorityInventory"]');
+    if (!button) return;
+    
+    // Get selected mode
+    const modeSelect = document.getElementById('priority_mode');
+    const selectedMode = modeSelect ? modeSelect.value : 'free';
+    
+    // Get mode descriptions
+    const modeDescriptions = {
+        'free': 'Free Mode: Free models (P1) → Ollama cloud (P2) → Paid (P3)',
+        'daily_drive': 'Daily Drive Mode: Ollama cloud (P1) → Free (P2) → Paid (P3)',
+        'advanced': 'Advanced Mode: Top-tier paid (P1) → Mid-tier paid (P2), skips free models',
+        'luxury': 'Luxury Mode: Premium models for high-budget scenarios. Top-tier premium $5+/1M (P1) → Mid-tier premium $1-5/1M (P2) → Other paid (P3), skips free models'
+    };
+    
+    // Get selected models from checkboxes
+    const selectedCheckboxes = document.querySelectorAll('input[name="priority_selection"]:checked');
+    const selectedModels = Array.from(selectedCheckboxes).map(checkbox => checkbox.value);
+    
+    if (selectedModels.length === 0) {
+        const confirmAll = confirm(`No models selected. Analyze ALL models using ${modeDescriptions[selectedMode]}?\n\nClick OK to proceed, or Cancel to select models first.`);
+        if (!confirmAll) {
+            return;
+        }
+    }
+    
+    const originalText = button.textContent;
+    button.disabled = true;
+    const modeName = modeSelect ? modeSelect.options[modeSelect.selectedIndex].text : 'Auto-Priority';
+    button.textContent = selectedModels.length > 0 
+        ? `⏳ Analyzing ${selectedModels.length} selected models (${modeName})...` 
+        : `⏳ Calculating priorities for all models (${modeName})...`;
+    
+    try {
+        const response = await fetch('/admin/api/auto-priority-inventory', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                csrf_token: document.querySelector('input[name="csrf_token"]')?.value || '',
+                selected_models: selectedModels,
+                mode: selectedMode
+            })
+        });
+        
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({ error: 'Failed to calculate priorities' }));
+            throw new Error(errorData.error || 'Failed to calculate priorities');
+        }
+        
+        const data = await response.json();
+        if (data.success) {
+            const modeDesc = modeDescriptions[data.mode || selectedMode] || modeDescriptions[selectedMode];
+            const message = `Successfully updated priorities for ${data.updated_count} out of ${data.total_models} models.\n` +
+                          `Ollama: ${data.ollama_count}, OpenRouter (active endpoints): ${data.openrouter_count}.\n\n` +
+                          `Mode: ${modeDesc}`;
+            alert(message);
+            // Reload page to show updated priorities
+            window.location.reload();
+        } else {
+            alert('Failed to calculate priorities. Please try again.');
+        }
+    } catch (error) {
+        console.error('Error calculating priorities:', error);
+        alert('Error calculating priorities: ' + error.message);
+    } finally {
+        button.disabled = false;
+        button.textContent = originalText;
+    }
+}
+
+// Toggle all priority checkboxes
+function toggleAllPriorityCheckboxes(checked) {
+    const allCheckboxes = document.querySelectorAll('input[name="priority_selection"]');
+    allCheckboxes.forEach(checkbox => {
+        checkbox.checked = checked;
+    });
+    
+    // Update the label text
+    const label = document.querySelector('label[for="select_all_priority"]');
+    if (label) {
+        const span = label.querySelector('span');
+        if (span) {
+            span.textContent = checked ? 'Deselect All' : 'Select All';
+        }
+    }
+}
+
+// Update select all checkbox state when individual checkboxes change
+function updateSelectAllState() {
+    const allCheckboxes = document.querySelectorAll('input[name="priority_selection"]');
+    const checkedCount = Array.from(allCheckboxes).filter(cb => cb.checked).length;
+    const selectAllCheckbox = document.getElementById('select_all_priority');
+    const label = document.querySelector('label[for="select_all_priority"]');
+    
+    if (selectAllCheckbox && label) {
+        const span = label.querySelector('span');
+        if (allCheckboxes.length === 0) {
+            selectAllCheckbox.checked = false;
+            if (span) span.textContent = 'Select All';
+        } else if (checkedCount === allCheckboxes.length) {
+            selectAllCheckbox.checked = true;
+            if (span) span.textContent = 'Deselect All';
+        } else {
+            selectAllCheckbox.checked = false;
+            if (span) span.textContent = 'Select All';
+        }
+    }
+}
+
+// Initialize select all state on page load
+document.addEventListener('DOMContentLoaded', function() {
+    updateSelectAllState();
+    
+    // Add change listeners to all priority checkboxes
+    const allCheckboxes = document.querySelectorAll('input[name="priority_selection"]');
+    allCheckboxes.forEach(checkbox => {
+        checkbox.addEventListener('change', updateSelectAllState);
+    });
+});
+
+// Smart AI description generator
+async function generateSmartDescription(modelName, metaId) {
+    // Try both possible ID formats
+    let textarea = document.getElementById('description_' + metaId);
+    if (!textarea) {
+        // Try alternative format (name attribute)
+        textarea = document.querySelector(`textarea[name="description_${metaId}"]`);
+    }
+    if (!textarea) {
+        console.error('Textarea not found for metaId:', metaId, 'Tried: description_' + metaId);
+        alert('Error: Could not find description field. Please refresh the page and try again.');
+        return;
+    }
+    
+    // Find the button that was clicked
+    const buttons = document.querySelectorAll(`button[onclick*="generateSmartDescription('${modelName}', '${metaId}')"]`);
+    const button = buttons.length > 0 ? buttons[0] : event?.target;
+    
+    if (!button) {
+        console.error('Button not found');
+        return;
+    }
+    
+    const originalText = button.textContent;
+    
+    // Disable button and show loading
+    button.disabled = true;
+    button.textContent = '⏳ Analyzing...';
+    
+    try {
+        // Get selected AI model from playground (stored in localStorage) or use default
+        const selectedAIModel = localStorage.getItem('playground_selected_model') || null;
+        
+        // Call API to generate description (uses selected AI model from playground or default)
+        const response = await fetch('/admin/api/generate-model-description', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                model_name: modelName,
+                ai_model: selectedAIModel,  // Use model selected in playground
+                csrf_token: document.querySelector('input[name="csrf_token"]')?.value || ''
+            })
+        });
+        
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({ error: 'Failed to generate description' }));
+            throw new Error(errorData.error || 'Failed to generate description');
+        }
+        
+        const data = await response.json();
+        
+        if (data.description && data.description.trim()) {
+            // Set the description value
+            textarea.value = data.description.trim();
+            
+            // Auto-resize textarea
+            textarea.style.height = 'auto';
+            textarea.style.height = (textarea.scrollHeight) + 'px';
+            
+            // Trigger multiple events to ensure form knows value changed
+            textarea.dispatchEvent(new Event('input', { bubbles: true }));
+            textarea.dispatchEvent(new Event('change', { bubbles: true }));
+            
+            // Update capability checkboxes if provided
+            if (data.capabilities) {
+                const caps = data.capabilities;
+                
+                // Update each checkbox based on capabilities
+                const checkboxMap = {
+                    'supports_images': `supports_images_${metaId}`,
+                    'is_code_model': `is_code_model_${metaId}`,
+                    'is_fast_model': `is_fast_model_${metaId}`,
+                    'supports_tool_calling': `supports_tool_calling_${metaId}`,
+                    'supports_internet': `supports_internet_${metaId}`,
+                    'is_thinking_model': `is_thinking_model_${metaId}`
+                };
+                
+                for (const [capKey, checkboxName] of Object.entries(checkboxMap)) {
+                    const checkbox = document.querySelector(`input[name="${checkboxName}"]`);
+                    if (checkbox) {
+                        checkbox.checked = caps[capKey] === true;
+                        // Trigger change event so form knows it changed
+                        checkbox.dispatchEvent(new Event('change', { bubbles: true }));
+                    }
+                }
+            }
+            
+            // Force a re-render by blurring and focusing
+            textarea.blur();
+            textarea.focus();
+            
+            // Verify the value was set
+            if (textarea.value !== data.description.trim()) {
+                console.error('Failed to set textarea value. Expected:', data.description.substring(0, 50), 'Got:', textarea.value.substring(0, 50));
+                alert('Warning: Description generated but may not have been saved. Please check the field.');
+            }
+        } else {
+            const errorMsg = data.error || 'Failed to generate description. The model returned an empty response.';
+            alert(errorMsg);
+        }
+    } catch (error) {
+        console.error('Error generating description:', error);
+        alert('Error generating description: ' + error.message);
+    } finally {
+        button.disabled = false;
+        button.textContent = originalText;
+    }
+}
+</script>
 {% endblock %}

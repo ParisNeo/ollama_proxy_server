@@ -1,0 +1,49 @@
+services:
+  searxng:
+    image: searxng/searxng:latest
+    container_name: searxng
+    ports:
+      - "8081:8080"  # External 8081, internal 8080 (8080 is used by EnterpriseDB)
+    volumes:
+      - searxng-data:/etc/searxng
+      - searxng-config:/var/log/searxng
+    environment:
+      - SEARXNG_HOSTNAME=localhost:7019
+    networks:
+      - searxng-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080/healthz"]  # Internal port
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  caddy-searxng:
+    image: caddy:latest
+    container_name: caddy-searxng
+    ports:
+      - "7019:7019"
+      - "7019:7019/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks:
+      - searxng-network
+    restart: unless-stopped
+    depends_on:
+      searxng:
+        condition: service_healthy
+    command: caddy run --config /etc/caddy/Caddyfile
+
+volumes:
+  searxng-data:
+  searxng-config:
+  caddy-data:
+  caddy-config:
+
+networks:
+  searxng-network:
+    driver: bridge
+
