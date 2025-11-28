@@ -22,9 +22,10 @@
                 </div>
                 <div>
                     <label for="server_type" class="block text-sm font-medium text-current">Server Type</label>
-                    <select name="server_type" id="server_type" class="mt-1 block w-full px-3 py-2 rounded-md shadow-sm">
+                    <select name="server_type" id="server_type" class="mt-1 block w-full px-3 py-2 rounded-md shadow-sm" onchange="handleServerTypeChange()">
                         <option value="ollama" selected>Ollama</option>
                         <option value="vllm">vLLM (OpenAI-Compatible)</option>
+                        <option value="openrouter">OpenRouter</option>
                     </select>
                 </div>
                  <div class="md:col-span-1">
@@ -61,7 +62,7 @@
                         <td class="px-6 py-4 whitespace-nowrap text-sm font-mono">{{ server.url }}</td>
                         <td class="px-6 py-4 whitespace-nowrap text-sm">
                             <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full 
-                                {% if server.server_type == 'vllm' %}bg-purple-200 text-purple-800{% else %}bg-blue-200 text-blue-800{% endif %}">
+                                {% if server.server_type == 'vllm' %}bg-purple-200 text-purple-800{% elif server.server_type == 'openrouter' %}bg-green-200 text-green-800{% else %}bg-blue-200 text-blue-800{% endif %}">
                                 {{ server.server_type | upper }}
                             </span>
                         </td>
@@ -116,4 +117,32 @@
         </div>
     </div>
 </div>
+
+<script>
+function handleServerTypeChange() {
+    const serverType = document.getElementById('server_type').value;
+    const serverUrl = document.getElementById('server_url');
+    const apiKey = document.getElementById('api_key');
+    
+    if (serverType === 'openrouter') {
+        // Auto-set OpenRouter URL
+        serverUrl.value = 'https://openrouter.ai/api/v1';
+        serverUrl.readOnly = true;
+        serverUrl.style.backgroundColor = '#f3f4f6';
+        
+        // Make API key required
+        apiKey.required = true;
+        apiKey.placeholder = 'Required for OpenRouter';
+    } else {
+        // Reset for other server types
+        if (serverUrl.value === 'https://openrouter.ai/api/v1') {
+            serverUrl.value = 'http://127.0.0.1:11434';
+        }
+        serverUrl.readOnly = false;
+        serverUrl.style.backgroundColor = '';
+        apiKey.required = false;
+        apiKey.placeholder = 'Leave blank if not needed';
+    }
+}
+</script>
 {% endblock %}

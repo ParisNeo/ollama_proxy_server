@@ -1,0 +1,76 @@
+<tr class="align-top">
+    <td class="px-4 py-4 text-sm font-medium text-current font-mono" style="word-break: break-word; overflow-wrap: break-word;">
+        <div class="flex items-center gap-2">
+            <span>{{ meta.model_name }}</span>
+            {% if meta.pricing_summary %}
+            <span class="text-xs text-gray-400 cursor-help" 
+                  title="💰 Pricing: Input: {{ meta.pricing_summary.get('input', 'N/A') }}, Output: {{ meta.pricing_summary.get('output', 'N/A') }}{% if meta.pricing_summary.get('web_search') %}, Web Search: {{ meta.pricing_summary.get('web_search') }}{% endif %}"
+                  style="font-weight: normal;">
+                💰
+            </span>
+            {% endif %}
+        </div>
+    </td>
+    <td class="px-4 py-4 whitespace-nowrap text-sm">
+        <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full 
+            {% if meta.server_type == 'vllm' %}bg-purple-200 text-purple-800{% elif meta.server_type == 'openrouter' %}bg-green-200 text-green-800{% else %}bg-blue-200 text-blue-800{% endif %}">
+            {{ (meta.server_type or 'ollama') | upper }}
+        </span>
+    </td>
+    <td class="px-4 py-4">
+        <div class="flex items-start gap-2">
+            <textarea 
+                name="description_{{ meta.id }}" 
+                id="description_{{ meta.id }}"
+                placeholder="A short description..." 
+                class="flex-1 min-w-48 px-2 py-1 rounded-md shadow-sm sm:text-sm resize-y min-h-[2rem] max-h-[10rem]"
+                rows="1"
+                style="width: 100%;"
+                oninput="this.style.height = 'auto'; this.style.height = (this.scrollHeight) + 'px';"
+            >{{ meta.description or '' }}</textarea>
+            <button 
+                type="button" 
+                onclick="generateSmartDescription('{{ meta.model_name }}', '{{ meta.id }}')"
+                class="px-3 py-1 text-xs font-medium text-white bg-purple-600 hover:bg-purple-700 rounded-md whitespace-nowrap flex-shrink-0"
+                title="Use AI to analyze and generate description"
+            >
+                🤖 Smart AI
+            </button>
+        </div>
+    </td>
+    <td class="p-0 whitespace-nowrap text-center">
+        <input type="checkbox" name="supports_images_{{ meta.id }}" value="true" class="h-3 w-3 rounded text-[var(--color-primary-600)]" {% if meta.supports_images %}checked{% endif %}>
+    </td>
+    <td class="p-0 whitespace-nowrap text-center">
+        <input type="checkbox" name="is_code_model_{{ meta.id }}" value="true" class="h-3 w-3 rounded text-[var(--color-primary-600)]" {% if meta.is_code_model %}checked{% endif %}>
+    </td>
+    <td class="p-0 whitespace-nowrap text-center">
+        <input type="checkbox" name="is_fast_model_{{ meta.id }}" value="true" class="h-3 w-3 rounded text-[var(--color-primary-600)]" {% if meta.is_fast_model %}checked{% endif %}>
+    </td>
+    <td class="p-0 whitespace-nowrap text-center">
+        <input type="checkbox" name="supports_tool_calling_{{ meta.id }}" id="supports_tool_calling_{{ meta.id }}" value="true" class="h-3 w-3 rounded text-[var(--color-primary-600)]" {% if meta.supports_tool_calling %}checked{% endif %}>
+    </td>
+    <td class="p-0 whitespace-nowrap text-center">
+        <input type="checkbox" name="supports_internet_{{ meta.id }}" id="supports_internet_{{ meta.id }}" value="true" class="h-3 w-3 rounded text-[var(--color-primary-600)]" {% if meta.supports_internet %}checked{% endif %}>
+    </td>
+    <td class="p-0 whitespace-nowrap text-center">
+        <input type="checkbox" name="is_thinking_model_{{ meta.id }}" id="is_thinking_model_{{ meta.id }}" value="true" class="h-3 w-3 rounded text-[var(--color-primary-600)]" {% if meta.is_thinking_model %}checked{% endif %}>
+    </td>
+    <td class="px-4 py-4 whitespace-nowrap text-center" style="position: sticky; right: 0; background-color: var(--bg-deepest); z-index: 10;">
+        <div class="flex items-center justify-center gap-2">
+            <input type="number" name="priority_{{ meta.id }}" value="{{ meta.priority }}" class="w-20 px-2 py-1 rounded-md shadow-sm sm:text-sm text-center">
+            <label class="flex items-center cursor-pointer" title="Include this model in auto-priority analysis">
+                <input 
+                    type="checkbox" 
+                    name="priority_selection" 
+                    value="{{ meta.model_name }}"
+                    class="h-4 w-4 rounded text-[var(--color-primary-600)] focus:ring-[var(--color-primary-500)]"
+                    data-model-name="{{ meta.model_name }}"
+                    data-server-type="{{ meta.server_type or 'ollama' }}"
+                    onchange="if(typeof updateSelectAllState === 'function') updateSelectAllState()"
+                >
+            </label>
+        </div>
+    </td>
+</tr>
+

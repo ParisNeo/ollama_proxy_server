@@ -2,9 +2,11 @@ import asyncio
 import json
 import logging
 import datetime
+import time
 from typing import List, Tuple, Optional, Dict, Any
 from fastapi import APIRouter, Depends, Request, Response, HTTPException, status
 from fastapi.responses import StreamingResponse, JSONResponse
+import httpx
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,6 +22,14 @@ from app.core.vllm_translator import (
     translate_ollama_to_vllm_embeddings,
     translate_vllm_to_ollama_embeddings,
     vllm_stream_to_ollama_stream
+)
+from app.core.openrouter_translator import (
+    translate_ollama_to_openrouter_chat,
+    translate_ollama_to_openrouter_embeddings,
+    translate_openrouter_to_ollama_embeddings,
+    openrouter_stream_to_ollama_stream,
+    get_openrouter_headers,
+    OPENROUTER_BASE_URL
 )
 
 logger = logging.getLogger(__name__)
@@ -78,6 +88,7 @@ async def _send_backend_request(
     This function is wrapped by retry logic.
     """
     normalized_url = server.url.rstrip('/')
+    # Ollama uses /api/{path}, not /api/v1/{path}
     backend_url = f"{normalized_url}/api/{path}"
 
     request_headers = headers.copy()
@@ -131,18 +142,28 @@ async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer
     if not hasattr(request.app.state, 'backend_server_index'):
         request.app.state.backend_server_index = 0
 
-    # Prepare request headers (exclude 'host' header)
-    headers = {k: v for k, v in request.headers.items() if k.lower() != 'host'}
+    # Prepare request headers (exclude 'host' and 'content-length' headers)
+    # Let httpx calculate content-length automatically based on body_bytes
+    headers = {k: v for k, v in request.headers.items() 
+               if k.lower() not in ('host', 'content-length')}
 
     # Try each server in round-robin fashion
     num_servers = len(servers)
+    if num_servers == 0:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="No servers available for routing"
+        )
+    
     servers_tried = []
 
     for server_attempt in range(num_servers):
         # Select next server using round-robin
-        index = request.app.state.backend_server_index
+        if not hasattr(request.app.state, 'backend_server_index'):
+            request.app.state.backend_server_index = 0
+        index = request.app.state.backend_server_index % num_servers
         chosen_server = servers[index]
-        request.app.state.backend_server_index = (index + 1) % len(servers)
+        request.app.state.backend_server_index = (index + 1) % num_servers
 
         servers_tried.append(chosen_server.name)
 
@@ -161,6 +182,52 @@ async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer
                 raise # Re-raise HTTP exceptions from the vLLM proxy
             except Exception as e:
                 logger.warning(f"vLLM server '{chosen_server.name}' failed: {e}. Trying next server.")
+                continue # Try next server
+
+        # --- BRANCH: Handle OpenRouter servers differently ---
+        if chosen_server.server_type == 'openrouter':
+            try:
+                response = await _proxy_to_openrouter(request, chosen_server, path, body_bytes)
+                return response, chosen_server
+            except HTTPException as e:
+                # Check if this is an auto model and it failed with a model-specific error
+                body_dict = json.loads(body_bytes) if body_bytes else {}
+                is_auto = body_dict.get("_is_auto_model", False)
+                
+                if is_auto:
+                    error_detail = str(e.detail).lower()
+                    is_model_error = (
+                        e.status_code in (404, 400) and 
+                        ("model" in error_detail or "not found" in error_detail or "no such" in error_detail or "endpoint" in error_detail)
+                    )
+                    
+                    if is_model_error:
+                        # Model failed, try next best model
+                        failed_model = body_dict.get("model")
+                        logger.warning(f"Auto-routing: Model '{failed_model}' failed ({e.status_code}): {e.detail}. Trying next best model...")
+                        
+                        # Get next best model (skip the failed one)
+                        settings = await get_settings()
+                        skip_models = body_dict.get("_failed_models", [])
+                        skip_models.append(failed_model)
+                        body_dict["_failed_models"] = skip_models
+                        
+                        next_model = await _select_auto_model(db, body_dict, settings, skip_models=skip_models)
+                        if next_model:
+                            logger.info(f"Auto-routing fallback: Selected '{next_model}'")
+                            body_dict["model"] = next_model
+                            body_bytes = json.dumps(body_dict).encode('utf-8')
+                            # Retry with next model
+                            try:
+                                response = await _proxy_to_openrouter(request, chosen_server, path, body_bytes)
+                                return response, chosen_server
+                            except HTTPException:
+                                # Still failed, re-raise original error
+                                raise e
+                
+                raise # Re-raise HTTP exceptions from the OpenRouter proxy
+            except Exception as e:
+                logger.warning(f"OpenRouter server '{chosen_server.name}' failed: {e}. Trying next server.")
                 continue # Try next server
 
         # --- Ollama server logic (with retries) ---
@@ -285,6 +352,134 @@ async def _proxy_to_vllm(
         raise HTTPException(status_code=500, detail=f"Failed to communicate with vLLM server: {e}")
 
 
+async def _proxy_to_openrouter(
+    request: Request,
+    server: OllamaServer,
+    path: str,
+    body_bytes: bytes
+) -> Response:
+    """
+    Handles proxying a request to OpenRouter, including payload and response translation.
+    Supports all OpenRouter features: auto-routing, model routing, provider routing, etc.
+    """
+    http_client: AsyncClient = request.app.state.http_client
+    
+    try:
+        ollama_payload = json.loads(body_bytes) if body_bytes else {}
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+
+    model_name = ollama_payload.get("model")  # Can be None for auto-routing
+    
+    # Get API key from server
+    server_api_key = None
+    if server.encrypted_api_key:
+        server_api_key = decrypt_data(server.encrypted_api_key)
+    
+    if not server_api_key:
+        raise HTTPException(
+            status_code=400, 
+            detail="OpenRouter requires an API key. Please configure one in server settings."
+        )
+    
+    # Build headers with OpenRouter-specific options
+    # TODO: Could add HTTP-Referer and X-Title from server config or app settings
+    headers = get_openrouter_headers(server_api_key)
+
+    # Translate path and payload based on the endpoint
+    if path == "chat":
+        openrouter_path = "chat/completions"
+        openrouter_payload = translate_ollama_to_openrouter_chat(ollama_payload)
+    elif path == "embeddings":
+        openrouter_path = "embeddings"
+        openrouter_payload = translate_ollama_to_openrouter_embeddings(ollama_payload)
+    else:
+        raise HTTPException(
+            status_code=404, 
+            detail=f"Endpoint '/api/{path}' not supported for OpenRouter servers. Supported: /api/chat, /api/embeddings"
+        )
+    
+    # OpenRouter always uses the same base URL
+    backend_url = f"{OPENROUTER_BASE_URL}/{openrouter_path}"
+    is_streaming = openrouter_payload.get("stream", False)
+
+    try:
+        if is_streaming:
+            async def stream_generator():
+                async with http_client.stream(
+                    "POST", 
+                    backend_url, 
+                    json=openrouter_payload, 
+                    timeout=600.0, 
+                    headers=headers
+                ) as openrouter_response:
+                    if openrouter_response.status_code != 200:
+                        error_body = await openrouter_response.aread()
+                        logger.error(f"OpenRouter server error ({openrouter_response.status_code}): {error_body.decode()}")
+                        # Yield a single error chunk in Ollama format
+                        error_chunk = {"error": f"OpenRouter server error: {error_body.decode()}"}
+                        yield (json.dumps(error_chunk) + '\n').encode('utf-8')
+                        return
+                    
+                    async for chunk in openrouter_stream_to_ollama_stream(
+                        openrouter_response.aiter_text(), 
+                        model_name
+                    ):
+                        yield chunk
+            
+            return StreamingResponse(stream_generator(), media_type="application/x-ndjson")
+        else:  # Non-streaming
+            response = await http_client.post(
+                backend_url, 
+                json=openrouter_payload, 
+                timeout=600.0, 
+                headers=headers
+            )
+            response.raise_for_status()
+            openrouter_data = response.json()
+            
+            if path == "embeddings":
+                ollama_data = translate_openrouter_to_ollama_embeddings(openrouter_data)
+                return JSONResponse(content=ollama_data)
+            elif path == "chat":
+                # Translate non-streaming chat response
+                choices = openrouter_data.get("choices", [])
+                if choices:
+                    message = choices[0].get("message", {})
+                    actual_model = openrouter_data.get("model", model_name)
+                    ollama_data = {
+                        "model": actual_model or "openrouter",
+                        "created_at": datetime.datetime.fromtimestamp(
+                            openrouter_data.get("created", time.time()),
+                            tz=datetime.timezone.utc
+                        ).isoformat().replace('+00:00', 'Z'),
+                        "message": message,
+                        "done": True,
+                    }
+                    return JSONResponse(content=ollama_data)
+                else:
+                    raise HTTPException(status_code=500, detail="OpenRouter returned empty response")
+            else:
+                raise HTTPException(status_code=404, detail=f"Unsupported endpoint: {path}")
+
+    except httpx.HTTPStatusError as e:
+        try:
+            error_detail = e.response.json()
+        except:
+            error_detail = e.response.text
+        logger.error(f"OpenRouter request failed with status {e.response.status_code}: {error_detail}")
+        raise HTTPException(
+            status_code=e.response.status_code, 
+            detail=f"OpenRouter server error: {error_detail}"
+        )
+    except Exception as e:
+        logger.error(f"Error proxying to OpenRouter server {server.name}: {e}")
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Failed to communicate with OpenRouter server: {e}"
+        )
+
+
 @router.get("/tags")
 async def federate_models(
     request: Request,
@@ -365,27 +560,76 @@ async def federate_models(
     return {"models": final_model_list}
 
 
-async def _select_auto_model(db: AsyncSession, body: Dict[str, Any]) -> Optional[str]:
-    """Selects the best model based on metadata and request content."""
+async def _get_all_models_ollama_format(db: AsyncSession) -> Dict[str, Dict[str, Any]]:
+    """
+    Helper function to get all models in Ollama format.
+    Returns a dict mapping model_name -> model_dict.
+    """
+    all_servers = await server_crud.get_servers(db)
+    servers = [s for s in all_servers if s.is_active]
     
-    # 1. Determine request characteristics
-    has_images = "images" in body and body["images"]
+    all_models = {}
+    for server in servers:
+        models_list = server.available_models or []
+        
+        if isinstance(models_list, str):
+            try:
+                models_list = json.loads(models_list)
+            except json.JSONDecodeError:
+                continue
+
+        if not isinstance(models_list, list):
+            continue
+
+        for model in models_list:
+            if isinstance(model, dict) and "name" in model:
+                if "model" not in model:
+                    model["model"] = model["name"]
+                all_models[model['name']] = model
     
-    prompt_content = ""
-    if "prompt" in body: # generate endpoint
-        prompt_content = body["prompt"]
-    elif "messages" in body: # chat endpoint
-        last_message = body["messages"][-1] if body["messages"] else {}
-        if isinstance(last_message.get("content"), str):
-            prompt_content = last_message["content"]
-        elif isinstance(last_message.get("content"), list): # multimodal chat
-             text_part = next((p.get("text", "") for p in last_message["content"] if p.get("type") == "text"), "")
-             prompt_content = text_part
+    # Add the 'auto' model
+    all_models["auto"] = {
+        "name": "auto",
+        "model": "auto",
+        "modified_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "size": 0,
+        "digest": "auto-digest-placeholder",
+        "details": {
+            "parent_model": "",
+            "format": "proxy",
+            "family": "auto",
+            "families": ["auto"],
+            "parameter_size": "N/A",
+            "quantization_level": "N/A"
+        }
+    }
+    
+    return all_models
 
-    code_keywords = ["def ", "class ", "import ", "const ", "let ", "var ", "function ", "public static void", "int main("]
-    contains_code = any(kw.lower() in prompt_content.lower() for kw in code_keywords)
 
-    # 2. Get all model metadata and available models
+async def _select_auto_model(db: AsyncSession, body: Dict[str, Any], settings: AppSettingsModel = None, skip_models: List[str] = None) -> Optional[str]:
+    """
+    Professional auto-routing system that intelligently selects models based on:
+    - Request characteristics (images, code, tool calling, internet, thinking, fast)
+    - Model capabilities (from metadata)
+    - Model descriptions (semantic matching)
+    - Priority modes (Free, Daily Drive, Advanced, Luxury)
+    - Budget considerations
+    """
+    from app.core.auto_router import AutoRouter
+    
+    # Get priority mode from settings (default to "free")
+    priority_mode = "free"
+    if settings:
+        priority_mode = getattr(settings, "auto_routing_priority_mode", "free") or "free"
+    
+    # Initialize the professional auto-router
+    router = AutoRouter(priority_mode=priority_mode)
+    
+    # Analyze the request to determine what capabilities are needed
+    request_analysis = router.analyze_request(body)
+    
+    # Get all model metadata and available models
     all_metadata = await model_metadata_crud.get_all_metadata(db)
     all_available_models = await server_crud.get_all_available_model_names(db)
     available_metadata = [m for m in all_metadata if m.model_name in all_available_models]
@@ -394,37 +638,86 @@ async def _select_auto_model(db: AsyncSession, body: Dict[str, Any]) -> Optional
         logger.warning("Auto-routing failed: No models with metadata are available on active servers.")
         return None
 
-    # 3. Filter models based on characteristics
-    candidate_models = available_metadata
-
-    if has_images:
-        logger.info("Auto-routing: Filtering for models that support images.")
-        candidate_models = [m for m in candidate_models if m.supports_images]
+    # Build model_details_map from server.available_models (for pricing information)
+    model_details_map = {}
+    servers = await server_crud.get_servers(db)
+    active_servers = [s for s in servers if s.is_active]
     
-    if contains_code:
-        logger.info("Auto-routing: Filtering for code models.")
-        code_models = [m for m in candidate_models if m.is_code_model]
-        if code_models:
-            candidate_models = code_models
-
-    if body.get("options", {}).get("fast_model"):
-        logger.info("Auto-routing: Filtering for fast models.")
-        fast_models = [m for m in candidate_models if m.is_fast_model]
-        if fast_models:
-            candidate_models = fast_models
-
-    if not candidate_models:
-        logger.warning("Auto-routing: No models matched the request criteria. Falling back to the highest priority model available.")
-        candidate_models = available_metadata
-
-    if not candidate_models:
+    for server in active_servers:
+        if server.available_models:
+            models_list = server.available_models
+            if isinstance(models_list, str):
+                try:
+                    models_list = json.loads(models_list)
+                except:
+                    continue
+            
+            for model_data in models_list:
+                if isinstance(model_data, dict) and "name" in model_data:
+                    model_name = model_data["name"]
+                    if model_name not in model_details_map:
+                        model_details_map[model_name] = model_data.get("details", {})
+    
+    # Use priority-based routing: try each priority level in order
+    priorities = sorted(set(m.priority for m in available_metadata if m.priority is not None))
+    
+    # Filter out skipped models (for fallback retry)
+    if skip_models:
+        available_metadata = [m for m in available_metadata if m.model_name not in skip_models]
+        if not available_metadata:
+            logger.warning(f"Auto-routing: All models skipped. Tried: {skip_models}")
+            return None
+    
+    if not priorities:
+        # No priorities set - use all available models
+        logger.warning("Auto-routing: No models have priority set. Using all available models.")
+        result = router.select_best_model(available_metadata, request_analysis, model_details_map)
+        if result:
+            model, score = result
+            return model.model_name
         return None
-
-    # 4. The list is already sorted by priority from the CRUD function.
-    best_model = candidate_models[0]
-    logger.info(f"Auto-routing selected model '{best_model.model_name}' with priority {best_model.priority}.")
     
-    return best_model.model_name
+    # Try each priority level in order (1 = highest priority)
+    for priority_level in priorities:
+        priority_models = [m for m in available_metadata if m.priority == priority_level]
+        
+        if not priority_models:
+            continue
+        
+        logger.info(f"Auto-routing ({priority_mode}): Checking {len(priority_models)} models with priority {priority_level}")
+        
+        # Score and select best model from this priority level
+        result = router.select_best_model(priority_models, request_analysis, model_details_map)
+        
+        if result:
+            model, score = result
+            # Only return if score is positive (model has required capabilities)
+            if score > 0:
+                return model.model_name
+            else:
+                logger.debug(f"Model '{model.model_name}' scored {score:.2f} (missing required capabilities), trying next priority level")
+        
+        # No suitable model at this priority level, continue to next priority
+    
+    # If we get here, no models matched at any priority level
+    # Fall back to highest priority model available (regardless of characteristics)
+    logger.warning("Auto-routing: No models matched the request criteria at any priority level. Falling back to highest priority model.")
+    if priorities:
+        fallback_priority = priorities[0]
+        fallback_models = [m for m in available_metadata if m.priority == fallback_priority]
+        if fallback_models:
+            result = router.select_best_model(fallback_models, request_analysis, model_details_map)
+            if result:
+                model, score = result
+                logger.info(f"Auto-routing fallback: Selected '{model.model_name}' with priority {model.priority} (score: {score:.2f}).")
+                return model.model_name
+    
+    # Last resort: return first available model
+    if available_metadata:
+        logger.warning("Auto-routing: Using first available model as last resort.")
+        return available_metadata[0].model_name
+    
+    return None
 
 
 @router.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"])
@@ -487,7 +780,9 @@ async def proxy_ollama(
             
     # --- NEW: Handle 'auto' model routing ---
     if model_name == "auto":
-        chosen_model_name = await _select_auto_model(db, body)
+        # Get settings for auto-routing priority mode
+        settings = await get_settings()
+        chosen_model_name = await _select_auto_model(db, body, settings)
         if not chosen_model_name:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -497,8 +792,115 @@ async def proxy_ollama(
         # Override the model in the request and continue
         model_name = chosen_model_name
         body["model"] = model_name
+        body["_is_auto_model"] = True  # Flag for fallback retry
         body_bytes = json.dumps(body).encode('utf-8')
+    
+    # --- WEB SEARCH INTEGRATION: Automatically enhance chat requests with web search when needed ---
+    if path == "chat" and isinstance(body, dict) and "messages" in body:
+        app_settings: AppSettingsModel = request.app.state.settings
+        
+        # Check if proxy web search is enabled
+        if not app_settings.enable_proxy_web_search:
+            logger.debug("Proxy web search is disabled in settings, skipping web search integration")
+        else:
+            has_api_key = bool(app_settings.ollama_api_key or app_settings.ollama_api_key_2)
+            
+            if has_api_key:
+                from app.core.unified_search import UnifiedSearchService
+                from app.core.chat_web_search import needs_web_search, extract_search_query, format_search_results_naturally
+                
+                # Get the last user message
+                messages = body.get("messages", [])
+                last_user_message = None
+                for msg in reversed(messages):
+                    if isinstance(msg, dict) and msg.get("role") == "user":
+                        last_user_message = msg
+                        break
+                
+                if last_user_message:
+                    user_content = last_user_message.get("content", "")
+                    if isinstance(user_content, str) and needs_web_search(user_content):
+                        logger.info(f"Web search triggered for proxy chat request: {user_content[:100]}")
+                        try:
+                            search_service = UnifiedSearchService(
+                                searxng_url=app_settings.searxng_url if app_settings.searxng_url else "http://localhost:7019",
+                                ollama_api_key=app_settings.ollama_api_key,
+                                ollama_api_key_2=app_settings.ollama_api_key_2,
+                                timeout=20.0
+                            )
+                            
+                            search_query = extract_search_query(user_content)
+                            logger.info(f"Performing web search for query: {search_query}")
+                            
+                            search_results = await search_service.web_search(
+                                query=search_query,
+                                max_results=5,
+                                engine=None  # Auto: try SearXNG first, fallback to Ollama
+                            )
+                            
+                            if search_results.get("results"):
+                                logger.info(f"Web search returned {len(search_results['results'])} results")
+                                # Format results as natural, flowing prose
+                                web_context = format_search_results_naturally(search_results["results"], search_query)
+                                
+                                if web_context:
+                                    # Add web search context to the user's message directly
+                                    # This ensures it works with all server types (OpenRouter, vLLM, Ollama)
+                                    original_content = user_content
+                                    enhanced_content = f"Current information from the web:\n\n{web_context}\n\nBased on this information, please answer: {original_content}"
+                                    last_user_message["content"] = enhanced_content
+                                    
+                                    # Update the body and re-encode body_bytes
+                                    body["messages"] = messages
+                                    body_bytes = json.dumps(body).encode('utf-8')
+                                    
+                                    logger.info(f"✓ Enhanced proxy chat message with web search context (original: {len(original_content)}, enhanced: {len(enhanced_content)})")
+                                else:
+                                    logger.warning("Web search returned results but formatting produced empty context")
+                            else:
+                                logger.warning(f"Web search returned no results for query: {search_query}")
+                        except Exception as e:
+                            logger.error(f"Error adding web search context to proxy request: {e}", exc_info=True)
+                            # Continue without web search if it fails
+                    else:
+                        logger.debug(f"Web search not needed for proxy chat message: {user_content[:100] if isinstance(user_content, str) else 'non-string content'}")
+            else:
+                logger.debug("Ollama API keys not configured, skipping web search for proxy requests")
+    # --- END WEB SEARCH INTEGRATION ---
 
+    # Handle /api/show endpoint - Ollama-specific, return 404 for OpenRouter models
+    # This endpoint is used by clients to get model details, but OpenRouter doesn't support it
+    if path == "show":
+        # Try to get model name from body if not already extracted
+        if not model_name and body_bytes:
+            try:
+                body_data = json.loads(body_bytes)
+                model_name = body_data.get("model")
+            except:
+                pass
+        
+        # If we have a model name, check if it's an OpenRouter model
+        if model_name:
+            # OpenRouter models have "provider/model" format
+            if "/" in model_name and not model_name.startswith("/"):
+                # Definitely an OpenRouter model
+                logger.debug(f"/api/show requested for OpenRouter model '{model_name}' - returning 404")
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Endpoint '/api/show' is not supported for OpenRouter models. Use OpenRouter's /models endpoint instead."
+                )
+            # Check servers to see if this model is only on OpenRouter servers
+            servers_with_model = await server_crud.get_servers_with_model(db, model_name)
+            if servers_with_model:
+                # Check if all servers are OpenRouter (which doesn't support /api/show)
+                if all(s.server_type == "openrouter" for s in servers_with_model):
+                    logger.debug(f"/api/show requested for model '{model_name}' which is only on OpenRouter servers - returning 404")
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail=f"Endpoint '/api/show' is not supported for OpenRouter models. Use OpenRouter's /models endpoint instead."
+                    )
+        # For Ollama servers or unknown models, continue with normal proxying
+    
     # Smart routing: filter servers by model availability
     candidate_servers = servers
     if model_name:
@@ -509,12 +911,36 @@ async def proxy_ollama(
             logger.info(f"Smart routing: Found {len(servers_with_model)} server(s) with model '{model_name}'")
         else:
             # Model not found in any server's catalog, or catalogs not fetched yet
-            # Fall back to all active servers
-            logger.warning(
-                f"Model '{model_name}' not found in any server's catalog. "
-                f"Falling back to round-robin across all {len(servers)} active server(s). "
-                f"Make sure to refresh model lists for accurate routing."
-            )
+            # Use intelligent fallback based on model name patterns
+            model_name_lower = model_name.lower()
+            
+            # Ollama cloud models (with :cloud suffix) should only go to Ollama servers
+            if ":cloud" in model_name_lower:
+                ollama_servers = [s for s in servers if s.server_type == "ollama"]
+                if ollama_servers:
+                    candidate_servers = ollama_servers
+                    logger.info(
+                        f"Model '{model_name}' not found in catalog, but detected as Ollama cloud model. "
+                        f"Routing to {len(ollama_servers)} Ollama server(s) only."
+                    )
+                else:
+                    logger.error(f"Ollama cloud model '{model_name}' requested but no Ollama servers are active.")
+            # OpenRouter models typically have "provider/model" format
+            elif "/" in model_name and not model_name.startswith("/"):
+                openrouter_servers = [s for s in servers if s.server_type == "openrouter"]
+                if openrouter_servers:
+                    candidate_servers = openrouter_servers
+                    logger.info(
+                        f"Model '{model_name}' not found in catalog, but detected as OpenRouter model. "
+                        f"Routing to {len(openrouter_servers)} OpenRouter server(s) only."
+                    )
+            else:
+                # Fall back to all active servers for unknown patterns
+                logger.warning(
+                    f"Model '{model_name}' not found in any server's catalog. "
+                    f"Falling back to round-robin across all {len(servers)} active server(s). "
+                    f"Make sure to refresh model lists for accurate routing."
+                )
 
     # Proxy to one of the candidate servers
     response, chosen_server = await _reverse_proxy(request, path, candidate_servers, body_bytes)

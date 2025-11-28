@@ -26,8 +26,6 @@ wheels/
 MANIFEST
 
 # PyInstaller
-#  Usually these files are written by a python script from a template
-#  before PyInstaller builds the exe, so as to inject date/other infos into it.
 *.manifest
 *.spec
 
@@ -52,16 +50,16 @@ coverage.xml
 *.mo
 *.pot
 
-# Django stuff:
+# Django stuff
 *.log
 local_settings.py
 db.sqlite3
 
-# Flask stuff:
+# Flask stuff
 instance/
 .webassets-cache
 
-# Scrapy stuff:
+# Scrapy stuff
 .scrapy
 
 # Sphinx documentation
@@ -73,41 +71,136 @@ target/
 # Jupyter Notebook
 .ipynb_checkpoints
 
-# Environments
-.env
-.venv
-env/
+# Virtual environments and dependencies (MUST BE IGNORED)
 venv/
+env/
 ENV/
-env.bak
-venv.bak
+env.bak/
+venv.bak/
+searxng_venv/
+.Python
 
-# IDE specific files
-.idea/
+# Downloaded dependencies and packages
+*.egg-info/
+.eggs/
+dist/
+build/
+*.egg
+*.whl
+
+# ChromaDB vector database
+chroma_db/
+*.chroma
+
+# Logs
+*.log
+logs/
+searxng_standalone.log
+
+# Environment files with secrets (NEVER COMMIT THESE!)
+.env
+.env.local
+.env.*.local
+
+# Database files
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+ollama_proxy.db
+
+# SSL certificates and keys
+*.pem
+*.key
+*.crt
+*.cert
+.ssl/
+
+# IDE and editor files
 .vscode/
+.idea/
 *.swp
 *.swo
 *~
+.DS_Store
+Thumbs.db
 
-# Docker
-.dockerignore
-docker-compose.yml
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.backup
 
-# Database
-ollama_proxy.db
-*.db-journal
+# OS files
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Desktop.ini
 
-# setup state
+# SearXNG data and config (may contain sensitive settings)
+searxng_data/
+searxng_src/
+searxng_src/__pycache__/
+searxng_src/*.pyc
+
+# Playwright browsers and cache (large downloads)
+.playwright/
+.playwright-mcp/
+
+# Model downloads and cache
+models/
+.cache/
+.huggingface/
+transformers_cache/
+
+# Setup state
 .setup_state
-
-# lollms vs coder discussions
-.lollms
 
 # User Uploads
 app/static/uploads/
 
-# SSL Uploads
-.ssl/
-
 # Lollms vscoder files
 .lollms
+
+# Test scripts and files (development only)
+test_*.py
+*_test.py
+app/core/test_prompts.py
+searxng_src/searxng_src/tests/
+
+# Build guides and temporary documentation (development notes)
+*FIX*.md
+*PLAN*.md
+*STATUS*.md
+*SUMMARY*.md
+OPENROUTER_IMPLEMENTATION_*.md
+MANUAL_*.md
+QUICK_*.md
+PODMAN_*.md
+
+# Fix/utility scripts (development tools, not for end users)
+fix_*.py
+fix_*.ps1
+fix_*.bat
+fix_*.sh
+diagnose_*.ps1
+*_searxng*.py
+*_searxng*.bat
+start_searxng*.bat
+run_searxng_venv.py
+setup_searxng_venv.py
+searxng_standalone.py
+
+# Benchmarks (development/testing data)
+benchmarks/
+
+# Useful scripts (optional - uncomment if you want to exclude)
+# useful_scripts/
+
+# Docker (optional - uncomment if you don't want to commit docker-compose files)
+# docker-compose.yml
+
+# Other projects (not part of this repository)
+Living_AI/

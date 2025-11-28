@@ -96,7 +96,12 @@ def _build_logging_config(log_level: str = "INFO") -> dict:
         # SPECIFIC LIBRARY LOGGERS (prevent duplicate handlers)
         # ------------------------------------------------------------------
         "loggers": {
-            "uvicorn.error": {"handlers": ["default"], "level": level, "propagate": False},
+            # Suppress WebSocket warnings - they're not critical if WebSocket isn't used
+            "uvicorn.error": {
+                "handlers": ["default"], 
+                "level": "ERROR",  # Only show errors, not warnings about WebSocket
+                "propagate": False
+            },
             "uvicorn.access": {"handlers": ["default"], "level": level, "propagate": False},
             "gunicorn.error": {"handlers": ["default"], "level": level, "propagate": False},
             "gunicorn.access": {"handlers": ["default"], "level": level, "propagate": False},
