@@ -49,6 +49,14 @@
         </div>
     </div>
     
+    <!-- OpenRouter Credits -->
+    <div id="openrouter-credits-widget" class="card-style" style="display: none;">
+        <h2 class="card-header text-2xl font-bold mb-4 pb-2">OpenRouter Credits</h2>
+        <div id="credits-container" class="space-y-4">
+            <div class="text-center text-gray-400">Loading credits...</div>
+        </div>
+    </div>
+    
     <!-- Active Models -->
     <div class="card-style">
         <h2 class="card-header text-2xl font-bold mb-4 pb-2">Active Models</h2>
@@ -138,6 +146,56 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('disk-progress').style.strokeDasharray = `${sys.disk.percent.toFixed(1)}, 100`;
         document.getElementById('disk-details').textContent = `${sys.disk.used_gb} / ${sys.disk.total_gb} GB`;
     }
+    
+    async function updateOpenRouterCredits() {
+        try {
+            const response = await fetch("{{ url_for('admin_openrouter_credits') }}");
+            const data = await response.json();
+            
+            const widget = document.getElementById('openrouter-credits-widget');
+            const container = document.getElementById('credits-container');
+            
+            if (data.servers && data.servers.length > 0) {
+                widget.style.display = 'block';
+                container.innerHTML = '';
+                
+                data.servers.forEach(server => {
+                    const credits = server.credits || 0;
+                    const creditsDisplay = credits.toFixed(2);
+                    const colorClass = credits > 10 ? 'text-green-400' : credits > 1 ? 'text-yellow-400' : 'text-red-400';
+                    
+                    container.innerHTML += `
+                        <div class="flex items-center justify-between p-4 bg-gray-800/50 rounded-lg">
+                            <div>
+                                <div class="font-semibold text-current">${server.server_name}</div>
+                                <div class="text-xs text-gray-400 mt-1">OpenRouter Account</div>
+                            </div>
+                            <div class="text-right">
+                                <div class="text-2xl font-bold ${colorClass}">$${creditsDisplay}</div>
+                                <div class="text-xs text-gray-400 mt-1">Credits Remaining</div>
+                            </div>
+                        </div>
+                    `;
+                });
+                
+                if (data.total_credits !== undefined) {
+                    container.innerHTML += `
+                        <div class="mt-4 pt-4 border-t border-white/10">
+                            <div class="flex items-center justify-between">
+                                <div class="font-semibold text-current">Total Credits</div>
+                                <div class="text-xl font-bold text-current">$${data.total_credits.toFixed(2)}</div>
+                            </div>
+                        </div>
+                    `;
+                }
+            } else {
+                widget.style.display = 'none';
+            }
+        } catch (error) {
+            console.error('Failed to fetch OpenRouter credits:', error);
+            document.getElementById('openrouter-credits-widget').style.display = 'none';
+        }
+    }
 
     function updateRunningModels(data) {
         const models = data.running_models;
@@ -177,9 +235,29 @@ document.addEventListener('DOMContentLoaded', () => {
                     <button type="submit" class="text-red-400 hover:text-red-600">Unload</button>
                 </form>
             `;
+            // Build pricing tooltip if available
+            let pricingTooltip = '';
+            let pricingIcon = '';
+            if (model.pricing) {
+                const pricing = model.pricing;
+                const parts = [];
+                if (pricing.input && pricing.input !== 'N/A') parts.push(`Input: ${pricing.input}`);
+                if (pricing.output && pricing.output !== 'N/A') parts.push(`Output: ${pricing.output}`);
+                if (pricing.web_search && pricing.web_search !== 'N/A') parts.push(`Web Search: ${pricing.web_search}`);
+                if (parts.length > 0) {
+                    pricingTooltip = `💰 Pricing: ${parts.join(', ')}`;
+                    pricingIcon = '<span class="text-yellow-500 cursor-help" title="' + pricingTooltip.replace(/"/g, '&quot;') + '">💰</span>';
+                }
+            }
+            
             const row = `
                 <tr>
-                    <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-current">${model.name}</td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-current">
+                        <div class="flex items-center gap-2">
+                            <span>${model.name}</span>
+                            ${pricingIcon}
+                        </div>
+                    </td>
                     <td class="px-6 py-4 whitespace-nowrap text-sm">${model.server_name}</td>
                     <td class="px-6 py-4 whitespace-nowrap text-sm">${placement}</td>
                     <td class="px-6 py-4 whitespace-nowrap text-sm">${sizeGb > 0 ? (sizeGb + ' GB') : 'N/A'}</td>
@@ -244,8 +322,14 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    // Initial load
+    updateOpenRouterCredits();
+    
     fetchData();
     setInterval(fetchData, 5000);
+    
+    // Update credits every 30 seconds
+    setInterval(updateOpenRouterCredits, 30000);
 });
 </script>
 {% endblock %}

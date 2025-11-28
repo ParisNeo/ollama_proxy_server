@@ -100,6 +100,14 @@ async def migrate_ollama_servers_table(engine: AsyncEngine) -> None:
         "DATETIME"
     )
 
+    # Add enabled_models column if missing (for OpenRouter model filtering)
+    await add_column_if_missing(
+        engine,
+        "ollama_servers",
+        "enabled_models",
+        "JSON"
+    )
+
     logger.info("ollama_servers table migration complete")
 
 
@@ -377,6 +385,7 @@ async def run_all_migrations(engine: AsyncEngine) -> None:
         table_schemas = {
             "ollama_servers": {
                 "available_models": "JSON",
+                "enabled_models": "JSON",
                 "models_last_updated": "DATETIME",
                 "last_error": "VARCHAR",
                 "server_type": "VARCHAR DEFAULT 'ollama' NOT NULL",
@@ -400,6 +409,9 @@ async def run_all_migrations(engine: AsyncEngine) -> None:
                 "is_code_model": "BOOLEAN NOT NULL DEFAULT 0",
                 "is_chat_model": "BOOLEAN NOT NULL DEFAULT 1",
                 "is_fast_model": "BOOLEAN NOT NULL DEFAULT 0",
+                "supports_tool_calling": "BOOLEAN NOT NULL DEFAULT 0",
+                "supports_internet": "BOOLEAN NOT NULL DEFAULT 0",
+                "is_thinking_model": "BOOLEAN NOT NULL DEFAULT 0",
                 "priority": "INTEGER NOT NULL DEFAULT 10",
             },
         }

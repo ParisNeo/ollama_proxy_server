@@ -142,12 +142,29 @@ async def rate_limiter(
     if not redis_client:
         return True
 
-    if api_key.rate_limit_requests is not None and api_key.rate_limit_window_minutes is not None:
+    # Determine rate limit: 0 or None/blank means unlimited (no rate limiting)
+    # Default mode in API key creation IS unlimited
+    # ONLY if something other than 0 or blank does it get any limitations
+    
+    # Check API key first - None, 0, or blank means unlimited for this key
+    # Don't fall back to settings - API keys are unlimited by default
+    if api_key.rate_limit_requests is None:
+        # None/blank = unlimited (default mode)
+        logger.debug(f"API key {api_key.key_prefix}: rate_limit_requests is None, skipping rate limiting")
+        return True
+    elif api_key.rate_limit_requests == 0:
+        # Explicitly set to 0 = unlimited
+        logger.debug(f"API key {api_key.key_prefix}: rate_limit_requests is 0, skipping rate limiting")
+        return True
+    elif api_key.rate_limit_requests > 0:
+        # Explicitly set to > 0 = apply this limit
         limit = api_key.rate_limit_requests
-        window_minutes = api_key.rate_limit_window_minutes
+        window_minutes = api_key.rate_limit_window_minutes if api_key.rate_limit_window_minutes is not None and api_key.rate_limit_window_minutes > 0 else 1
+        logger.debug(f"API key {api_key.key_prefix}: Applying rate limit {limit} requests per {window_minutes} minutes")
     else:
-        limit = settings.rate_limit_requests
-        window_minutes = settings.rate_limit_window_minutes
+        # Negative value - treat as unlimited
+        logger.debug(f"API key {api_key.key_prefix}: rate_limit_requests is negative ({api_key.rate_limit_requests}), skipping rate limiting")
+        return True
     
     window = window_minutes * 60
     key = f"rate_limit:{api_key.key_prefix}"
@@ -165,6 +182,9 @@ async def rate_limiter(
                 detail=f"Rate limit exceeded. Try again in {ttl} seconds.",
                 headers={"Retry-After": str(ttl)}
             )
+    except HTTPException:
+        # Re-raise HTTP exceptions (rate limit exceeded)
+        raise
     except Exception as e:
         logger.error(f"Could not connect to Redis for rate limiting: {e}")
     return True

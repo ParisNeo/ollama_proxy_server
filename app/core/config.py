@@ -4,11 +4,12 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     # --- Bootstrap Settings ---
     # These are the only settings read from the .env file.
+    # IMPORTANT: Never commit .env files with real credentials!
     DATABASE_URL: str = "sqlite+aiosqlite:///./ollama_proxy.db"
     ADMIN_USER: str = "admin"
-    ADMIN_PASSWORD: str = "changeme"
+    ADMIN_PASSWORD: str = "changeme"  # MUST be changed in production .env file
     PROXY_PORT: int = 8080
-    SECRET_KEY: str = "dd2a57833f4a2115b02644c3c332822d5b6e405d542a2258c422fb39a8e97b10"
+    SECRET_KEY: str = "CHANGE_THIS_IN_PRODUCTION"  # MUST be changed in production .env file
 
     # --- App Info (Hardcoded) ---
     APP_NAME: str = "Ollama Proxy Server"

@@ -34,6 +34,58 @@ class AppSettingsModel(BaseModel):
     redis_port: int = 6379
     redis_username: Optional[str] = None
     redis_password: Optional[str] = None
+    
+    @field_validator('redis_port', mode='before')
+    @classmethod
+    def validate_redis_port(cls, v):
+        """Ensure redis_port is always an integer, even if stored as string"""
+        # Handle None
+        if v is None:
+            return 6379
+        
+        # Handle string - try to convert, but catch any errors
+        if isinstance(v, str):
+            # Strip whitespace
+            v = v.strip()
+            # If it looks like a password (contains special chars, not just digits), return default
+            if not v.replace('-', '').replace('+', '').isdigit():
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.warning(f"Invalid redis_port value '{v}' appears to be a password, using default 6379")
+                return 6379
+            # Try to convert string to int
+            try:
+                port = int(v)
+                # Validate range
+                if 1 <= port <= 65535:
+                    return port
+                else:
+                    import logging
+                    logger = logging.getLogger(__name__)
+                    logger.warning(f"Redis port {port} out of range (1-65535), using default 6379")
+                    return 6379
+            except (ValueError, TypeError):
+                # If conversion fails, return default
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.warning(f"Cannot convert redis_port '{v}' to integer, using default 6379")
+                return 6379
+        
+        # Handle int
+        if isinstance(v, int):
+            if 1 <= v <= 65535:
+                return v
+            else:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.warning(f"Redis port {v} out of range (1-65535), using default 6379")
+                return 6379
+        
+        # For any other type, return default
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.warning(f"Invalid redis_port type '{type(v)}', using default 6379")
+        return 6379
 
     rate_limit_requests: int = 100
     rate_limit_window_minutes: int = 1
@@ -73,6 +125,32 @@ class AppSettingsModel(BaseModel):
     blocked_ollama_endpoints: str = Field(
         default="pull,delete,create,copy,push",
         description="Comma-separated list of Ollama API paths to block for API key holders."
+    )
+    
+    # --- OLLAMA WEB SEARCH ---
+    ollama_api_key: Optional[str] = Field(
+        default=None,
+        description="Ollama API key for web search and fetch (Account 1). Get one at https://ollama.com/settings/keys"
+    )
+    ollama_api_key_2: Optional[str] = Field(
+        default=None,
+        description="Ollama API key for web search and fetch (Account 2 - backup/load balancing). Get one at https://ollama.com/settings/keys"
+    )
+    enable_proxy_web_search: bool = Field(
+        default=True,
+        description="Enable automatic web search for all tools using the proxy. When enabled, chat requests through the proxy will automatically include web search results when needed. Disable if external tools have their own web search logic."
+    )
+    
+    # --- SEARXNG SETTINGS ---
+    searxng_url: Optional[str] = Field(
+        default=None,
+        description="URL for local SearXNG instance (e.g., http://localhost:7019). If not set, will use Ollama cloud search as primary. Get SearXNG at https://github.com/searxng/searxng"
+    )
+    
+    # --- AUTO-ROUTING SETTINGS ---
+    auto_routing_priority_mode: str = Field(
+        default="free",
+        description="Priority mode for auto-routing: 'free' (free models first), 'daily_drive' (Ollama cloud first), 'advanced' (top-tier paid first), or 'luxury' (premium models for high-budget scenarios)"
     )
 
     @field_validator('retry_total_timeout_seconds')

@@ -1,0 +1,50 @@
+# Caddy reverse proxy for SearXNG
+# External port: 7019 (HTTPS)
+# Internal SearXNG: 8080 (HTTP)
+
+localhost:7019 {
+    # Reverse proxy to SearXNG
+    # Note: SearXNG should be on port 8080 in the searxng-network
+    reverse_proxy searxng:8080 {
+        # Health check endpoint
+        health_uri /healthz
+        health_interval 10s
+        health_timeout 5s
+        
+        # Preserve headers
+        header_up Host {host}
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Proto {scheme}
+        
+        # Connection settings
+        transport http {
+            dial_timeout 10s
+            response_header_timeout 30s
+            idle_conn_timeout 90s
+        }
+        
+        # Retry on failure
+        fail_timeout 5s
+        max_fails 3
+    }
+    
+    # Enable automatic HTTPS with self-signed cert for localhost
+    tls internal
+    
+    # Logging
+    log {
+        output stdout
+        format console
+        level INFO
+    }
+    
+    # Handle errors gracefully
+    handle_errors {
+        @5xx expression `{http.error.status_code} >= 500`
+        handle @5xx {
+            respond "{http.error.status_code} {http.error.status_text}"
+        }
+    }
+}
+

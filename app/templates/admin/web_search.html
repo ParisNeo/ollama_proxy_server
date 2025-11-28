@@ -1,0 +1,256 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Web Search{% endblock %}
+
+{% block content %}
+<div class="container mx-auto px-4 py-8">
+    <div class="mb-6">
+        <h1 class="text-3xl font-bold mb-2">Web Search</h1>
+        <p class="text-gray-600 dark:text-gray-400">Search the web using SearXNG (primary) or Ollama Cloud (fallback)</p>
+    </div>
+
+    <!-- API Key Status -->
+    <div id="api-key-status" class="mb-6 p-4 rounded-lg border" style="display: none;">
+        <div class="flex items-center gap-2">
+            <span id="api-key-icon" class="text-2xl">⚠️</span>
+            <div>
+                <p class="font-semibold" id="api-key-message">OLLAMA_API_KEY not configured</p>
+                <p class="text-sm text-gray-600 dark:text-gray-400">Configure it in <a href="/admin/settings" class="text-blue-600 dark:text-blue-400 underline">Settings</a></p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Search Form -->
+    <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 mb-6">
+        <form id="search-form" class="space-y-4">
+            <div>
+                <label for="search-query" class="block text-sm font-medium mb-2">Search Query</label>
+                <input 
+                    type="text" 
+                    id="search-query" 
+                    name="query" 
+                    class="w-full px-4 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600"
+                    placeholder="Enter your search query..."
+                    required
+                >
+            </div>
+            <div class="flex items-center gap-4">
+                <div>
+                    <label for="search-engine" class="block text-sm font-medium mb-2">Search Engine</label>
+                    <select 
+                        id="search-engine" 
+                        name="engine"
+                        class="px-4 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600"
+                    >
+                        <option value="auto">Auto (SearXNG → Ollama)</option>
+                        <option value="searxng">SearXNG Only</option>
+                        <option value="ollama">Ollama Cloud Only</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="max-results" class="block text-sm font-medium mb-2">Max Results</label>
+                    <input 
+                        type="number" 
+                        id="max-results" 
+                        name="max_results" 
+                        min="1" 
+                        max="10" 
+                        value="5"
+                        class="w-24 px-4 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600"
+                    >
+                </div>
+                <div class="flex-1"></div>
+                <button 
+                    type="submit" 
+                    class="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+                    id="search-btn"
+                >
+                    Search
+                </button>
+            </div>
+        </form>
+    </div>
+
+    <!-- Results -->
+    <div id="search-results" class="space-y-4" style="display: none;">
+        <h2 class="text-2xl font-bold mb-4">Search Results</h2>
+        <div id="results-container"></div>
+    </div>
+
+    <!-- Fetch Form -->
+    <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 mb-6 mt-8">
+        <h2 class="text-2xl font-bold mb-4">Fetch Web Page</h2>
+        <form id="fetch-form" class="space-y-4">
+            <div>
+                <label for="fetch-url" class="block text-sm font-medium mb-2">URL</label>
+                <input 
+                    type="url" 
+                    id="fetch-url" 
+                    name="url" 
+                    class="w-full px-4 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600"
+                    placeholder="https://example.com"
+                    required
+                >
+            </div>
+            <button 
+                type="submit" 
+                class="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50"
+                id="fetch-btn"
+            >
+                Fetch
+            </button>
+        </form>
+    </div>
+
+    <!-- Fetch Results -->
+    <div id="fetch-results" class="space-y-4" style="display: none;">
+        <h2 class="text-2xl font-bold mb-4">Fetched Content</h2>
+        <div id="fetch-container" class="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6"></div>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Check API key status
+    checkApiKeyStatus();
+    
+    // Search form
+    document.getElementById('search-form').addEventListener('submit', async function(e) {
+        e.preventDefault();
+        const query = document.getElementById('search-query').value;
+        const maxResults = document.getElementById('max-results').value;
+        
+        if (!query.trim()) return;
+        
+        const btn = document.getElementById('search-btn');
+        btn.disabled = true;
+        btn.textContent = 'Searching...';
+        
+        try {
+            const engine = document.getElementById('search-engine').value;
+            const url = `/search.json?q=${encodeURIComponent(query)}&max_results=${maxResults}${engine !== 'auto' ? '&engine=' + encodeURIComponent(engine) : ''}`;
+            const response = await fetch(url);
+            const data = await response.json();
+            
+            if (response.ok && data.results) {
+                displaySearchResults(data.results, query, data.engine_used || 'auto');
+            } else {
+                alert('Search failed: ' + (data.error || 'Unknown error'));
+            }
+        } catch (error) {
+            alert('Search error: ' + error.message);
+        } finally {
+            btn.disabled = false;
+            btn.textContent = 'Search';
+        }
+    });
+    
+    // Fetch form
+    document.getElementById('fetch-form').addEventListener('submit', async function(e) {
+        e.preventDefault();
+        const url = document.getElementById('fetch-url').value;
+        
+        if (!url.trim()) return;
+        
+        const btn = document.getElementById('fetch-btn');
+        btn.disabled = true;
+        btn.textContent = 'Fetching...';
+        
+        try {
+            const response = await fetch(`/web_fetch?url=${encodeURIComponent(url)}`, {
+                method: 'POST'
+            });
+            const data = await response.json();
+            
+            if (response.ok) {
+                displayFetchResults(data);
+            } else {
+                alert('Fetch failed: ' + (data.error || 'Unknown error'));
+            }
+        } catch (error) {
+            alert('Fetch error: ' + error.message);
+        } finally {
+            btn.disabled = false;
+            btn.textContent = 'Fetch';
+        }
+    });
+    
+    function displaySearchResults(results, query, engineUsed) {
+        const container = document.getElementById('results-container');
+        container.innerHTML = '';
+        
+        if (results.length === 0) {
+            container.innerHTML = '<p class="text-gray-600 dark:text-gray-400">No results found.</p>';
+            return;
+        }
+        
+        // Show which engine was used
+        const engineBadge = `<div class="mb-4 p-2 bg-blue-100 dark:bg-blue-900 rounded text-sm">
+            <strong>Engine used:</strong> ${engineUsed === 'searxng' ? 'SearXNG (Local)' : engineUsed === 'ollama' ? 'Ollama Cloud' : 'Auto (SearXNG → Ollama)'}
+        </div>`;
+        container.innerHTML = engineBadge;
+        
+        results.forEach((result, index) => {
+            const div = document.createElement('div');
+            div.className = 'bg-white dark:bg-gray-800 rounded-lg shadow p-4 mb-4';
+            div.innerHTML = `
+                <h3 class="text-xl font-semibold mb-2">
+                    <a href="${result.url}" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline">
+                        ${result.title || 'No title'}
+                    </a>
+                </h3>
+                <p class="text-sm text-green-600 dark:text-green-400 mb-2">${result.url}</p>
+                <p class="text-gray-700 dark:text-gray-300">${result.content || ''}</p>
+                ${result.engine ? `<p class="text-xs text-gray-500 mt-2">Source: ${result.engine}</p>` : ''}
+            `;
+            container.appendChild(div);
+        });
+        
+        document.getElementById('search-results').style.display = 'block';
+    }
+    
+    function displayFetchResults(data) {
+        const container = document.getElementById('fetch-container');
+        container.innerHTML = `
+            <h3 class="text-2xl font-bold mb-4">${data.title || 'No title'}</h3>
+            <div class="prose dark:prose-invert max-w-none">
+                <pre class="whitespace-pre-wrap text-sm">${escapeHtml(data.content || 'No content')}</pre>
+            </div>
+            ${data.links && data.links.length > 0 ? `
+                <div class="mt-4">
+                    <h4 class="font-semibold mb-2">Links found:</h4>
+                    <ul class="list-disc list-inside">
+                        ${data.links.map(link => `<li><a href="${link}" target="_blank" class="text-blue-600 dark:text-blue-400">${link}</a></li>`).join('')}
+                    </ul>
+                </div>
+            ` : ''}
+        `;
+        document.getElementById('fetch-results').style.display = 'block';
+    }
+    
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+    
+    async function checkApiKeyStatus() {
+        try {
+            const response = await fetch('/admin/api/settings');
+            const data = await response.json();
+            
+            if (!data.ollama_api_key) {
+                document.getElementById('api-key-status').style.display = 'block';
+                document.getElementById('api-key-icon').textContent = '⚠️';
+                document.getElementById('api-key-message').textContent = 'OLLAMA_API_KEY not configured';
+            } else {
+                document.getElementById('api-key-status').style.display = 'none';
+            }
+        } catch (error) {
+            console.error('Failed to check API key status:', error);
+        }
+    }
+});
+</script>
+{% endblock %}
+
