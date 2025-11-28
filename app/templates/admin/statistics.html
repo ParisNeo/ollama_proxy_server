@@ -1,89 +1,103 @@
 {% extends "admin/base.html" %}
 
 {% block title %}API Usage Statistics{% endblock %}
+
 {% block header_title %}API Usage Statistics{% endblock %}
+
+{% macro sortable_header(column_key, column_name, text_align_class='text-left') %}
+    {% set next_order = 'asc' if sort_by == column_key and sort_order == 'desc' else 'desc' %}
+    <th class="px-6 py-3 {{ text_align_class }} text-xs font-medium text-gray-400 uppercase tracking-wider">
+        <a href="{{ url_for('admin_stats') }}?sort_by={{ column_key }}&sort_order={{ next_order }}" class="flex items-center gap-1 hover:text-[var(--color-primary-500)]">
+            {{ column_name }}
+            {% if sort_by == column_key %}
+                {% if sort_order == 'asc' %}<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7"></path></svg>
+                {% else %}<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>{% endif %}
+            {% else %}<svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l4-4 4 4m0 6l-4 4-4-4"></path></svg>{% endif %}
+        </a>
+    </th>
+{% endmacro %}
 
 {% block content %}
 <div class="space-y-8">
-
-    <!-- Charts Row -->
+    <!-- Top Row: Line and Bar Charts -->
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        
-        <!-- Daily Usage Card -->
-        <div class="bg-white p-6 rounded-lg shadow-md">
-            <div class="flex justify-between items-center mb-4">
-                <h2 class="text-xl font-bold">Requests per Day (Last 30 Days)</h2>
+        <div class="card-style">
+            <h2 class="card-header flex justify-between items-center text-xl font-bold mb-4 pb-2">
+                <span>Requests per Day (Last 30 Days)</span>
                 <div class="space-x-2">
-                    <button onclick="exportChartToPNG('dailyUsageChart', 'daily-usage.png')" class="text-sm text-indigo-600 hover:underline">Export PNG</button>
-                    <button onclick="exportDataToCSV(['Date', 'Request Count'], {{ daily_labels | tojson }}, {{ daily_data | tojson }}, 'daily-usage.csv')" class="text-sm text-indigo-600 hover:underline">Export CSV</button>
+                    <button onclick="exportChartToPNG('dailyUsageChart', 'daily-usage.png')" class="text-sm text-[var(--color-primary-500)] hover:underline">PNG</button>
+                    <button onclick="exportDataToCSV(['Date', 'Request Count'], {{ daily_labels | tojson }}, {{ daily_data | tojson }}, 'daily-usage.csv')" class="text-sm text-[var(--color-primary-500)] hover:underline">CSV</button>
                 </div>
-            </div>
-            <canvas id="dailyUsageChart"></canvas>
+            </h2>
+            {% if daily_data %}<canvas id="dailyUsageChart"></canvas>{% else %}<div class="flex items-center justify-center h-64"><p>No request data available.</p></div>{% endif %}
         </div>
-
-        <!-- Hourly Usage Card -->
-        <div class="bg-white p-6 rounded-lg shadow-md">
-            <div class="flex justify-between items-center mb-4">
-                <h2 class="text-xl font-bold">Peak Hours (UTC)</h2>
+        <div class="card-style">
+            <h2 class="card-header flex justify-between items-center text-xl font-bold mb-4 pb-2">
+                <span>Peak Hours (UTC)</span>
                  <div class="space-x-2">
-                    <button onclick="exportChartToPNG('hourlyUsageChart', 'hourly-usage.png')" class="text-sm text-indigo-600 hover:underline">Export PNG</button>
-                    <button onclick="exportDataToCSV(['Hour (UTC)', 'Request Count'], {{ hourly_labels | tojson }}, {{ hourly_data | tojson }}, 'hourly-usage.csv')" class="text-sm text-indigo-600 hover:underline">Export CSV</button>
+                    <button onclick="exportChartToPNG('hourlyUsageChart', 'hourly-usage.png')" class="text-sm text-[var(--color-primary-500)] hover:underline">PNG</button>
+                    <button onclick="exportDataToCSV(['Hour (UTC)', 'Request Count'], {{ hourly_labels | tojson }}, {{ hourly_data | tojson }}, 'hourly-usage.csv')" class="text-sm text-[var(--color-primary-500)] hover:underline">CSV</button>
                 </div>
-            </div>
-            <canvas id="hourlyUsageChart"></canvas>
-        </div>
-
-    </div>
-
-    <!-- Server Load and Key Usage Row -->
-    <div class="grid grid-cols-1 lg:grid-cols-5 gap-8">
-        <!-- Server Load Card -->
-        <div class="bg-white p-6 rounded-lg shadow-md lg:col-span-2">
-            <div class="flex justify-between items-center mb-4">
-                <h2 class="text-xl font-bold">Server Load Distribution</h2>
-                 <div class="space-x-2">
-                    <button onclick="exportChartToPNG('serverLoadChart', 'server-load.png')" class="text-sm text-indigo-600 hover:underline">Export PNG</button>
-                    <button onclick="exportDataToCSV(['Server Name', 'Request Count'], {{ server_labels | tojson }}, {{ server_data | tojson }}, 'server-load.csv')" class="text-sm text-indigo-600 hover:underline">Export CSV</button>
-                </div>
-            </div>
-            <canvas id="serverLoadChart"></canvas>
-        </div>
-
-        <!-- Key Usage Table Card -->
-        <div class="bg-white p-6 rounded-lg shadow-md lg:col-span-3">
-             <div class="flex justify-between items-center mb-4">
-                <h2 class="text-xl font-bold">Total Requests per API Key</h2>
-                <button onclick="exportTableToCSV('keyUsageTable', 'key-usage.csv')" class="text-sm text-indigo-600 hover:underline">Export CSV</button>
-            </div>
-            <div class="overflow-x-auto max-h-96">
-                <table class="min-w-full divide-y divide-gray-200" id="keyUsageTable">
-                    <thead class="bg-gray-50 sticky top-0">
-                        <tr>
-                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Username</th>
-                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Key Name</th>
-                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Key Prefix</th>
-                            <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Requests</th>
-                        </tr>
-                    </thead>
-                    <tbody class="bg-white divide-y divide-gray-200">
-                        {% for stat in key_usage_stats %}
-                        <tr>
-                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{{ stat.username }}</td>
-                            <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{{ stat.key_name }}</td>
-                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 font-mono">{{ stat.key_prefix }}</td>
-                            <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium text-gray-900">{{ stat.request_count }}</td>
-                        </tr>
-                        {% else %}
-                        <tr>
-                            <td colspan="4" class="px-6 py-4 text-center text-gray-500">No usage data available.</td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
+            </h2>
+            {% if hourly_data and hourly_data | sum > 0 %}<canvas id="hourlyUsageChart"></canvas>{% else %}<div class="flex items-center justify-center h-64"><p>No hourly usage data.</p></div>{% endif %}
         </div>
     </div>
 
+    <!-- Middle Row: Doughnut and Pie Charts -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        <div class="card-style">
+            <h2 class="card-header flex justify-between items-center text-xl font-bold mb-4 pb-2">
+                <span>Server Load</span>
+                 <div class="space-x-2">
+                    <button onclick="exportChartToPNG('serverLoadChart', 'server-load.png')" class="text-sm text-[var(--color-primary-500)] hover:underline">PNG</button>
+                    <button onclick="exportDataToCSV(['Server Name', 'Request Count'], {{ server_labels | tojson }}, {{ server_data | tojson }}, 'server-load.csv')" class="text-sm text-[var(--color-primary-500)] hover:underline">CSV</button>
+                </div>
+            </h2>
+            {% if server_data and server_data | sum > 0 %}<canvas id="serverLoadChart"></canvas>{% else %}<div class="flex items-center justify-center h-64"><p>No server load data.</p></div>{% endif %}
+        </div>
+        <div class="card-style">
+            <h2 class="card-header flex justify-between items-center text-xl font-bold mb-4 pb-2">
+                <span>Model Usage</span>
+                 <div class="space-x-2">
+                    <button onclick="exportChartToPNG('modelUsageChart', 'model-usage.png')" class="text-sm text-[var(--color-primary-500)] hover:underline">PNG</button>
+                    <button onclick="exportDataToCSV(['Model Name', 'Request Count'], {{ model_labels | tojson }}, {{ model_data | tojson }}, 'model-usage.csv')" class="text-sm text-[var(--color-primary-500)] hover:underline">CSV</button>
+                </div>
+            </h2>
+            {% if model_data %}<canvas id="modelUsageChart"></canvas>{% else %}<div class="flex items-center justify-center h-64"><p>No model-specific usage data.</p></div>{% endif %}
+        </div>
+    </div>
+
+    <!-- Bottom Row: Key Usage Table -->
+    <div class="card-style">
+         <h2 class="card-header flex justify-between items-center text-xl font-bold mb-4 pb-2">
+            <span>Key Usage by Request Count</span>
+            <button onclick="exportTableToCSV('keyUsageTable', 'key-usage.csv')" class="text-sm text-[var(--color-primary-500)] hover:underline">CSV</button>
+        </h2>
+        <div class="overflow-x-auto">
+            <table class="min-w-full" id="keyUsageTable">
+                <thead>
+                    <tr>
+                        {{ sortable_header('username', 'Username') }}
+                        {{ sortable_header('key_name', 'Key Name') }}
+                        {{ sortable_header('key_prefix', 'Key Prefix') }}
+                        {{ sortable_header('request_count', 'Requests', 'text-right') }}
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-white/10">
+                    {% for stat in key_usage_stats %}
+                    <tr>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm">{{ stat.username }}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-current">{{ stat.key_name }}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm font-mono">{{ stat.key_prefix }}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium text-current">{{ stat.request_count }}</td>
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="4" class="px-6 py-4 text-center">No usage data available.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
 </div>
 
 <!-- CHART & EXPORT JAVASCRIPT -->
@@ -122,7 +136,7 @@
         
         rows.forEach(row => {
             const cols = row.querySelectorAll("th, td");
-            const rowData = Array.from(cols).map(col => `"${col.innerText}"`);
+            const rowData = Array.from(cols).map(col => `"${col.innerText.trim().replace(/"/g, '""')}"`);
             csvContent += rowData.join(",") + "\n";
         });
 
@@ -133,77 +147,90 @@
 
     // --- Chart Initializations ---
     document.addEventListener('DOMContentLoaded', function () {
-        const primaryColor = 'rgba(79, 70, 229, 1)';
-        const primaryColorTransparent = 'rgba(79, 70, 229, 0.2)';
+        const cs = getComputedStyle(document.documentElement);
+        const primaryColor = cs.getPropertyValue('--color-primary-600').trim() || 'rgba(79, 70, 229, 1)';
+        const primaryColorTransparent = primaryColor.replace(/[\d\.]+\)$/g, '0.2)');
+
+        // Chart color palettes
+        const palette = [
+            cs.getPropertyValue('--color-primary-600').trim(),
+            '#059669', '#d946ef', '#f97316', '#dc2626', '#6b7280', '#3b82f6',
+            cs.getPropertyValue('--color-primary-800').trim(),
+            '#047857', '#a21caf', '#ea580c', '#b91c1c', '#4b5563', '#2563eb'
+        ];
 
         // 1. Daily Usage Chart (Line)
-        const dailyCtx = document.getElementById('dailyUsageChart').getContext('2d');
-        new Chart(dailyCtx, {
-            type: 'line',
-            data: {
-                labels: {{ daily_labels | tojson }},
-                datasets: [{
-                    label: 'Requests',
-                    data: {{ daily_data | tojson }},
-                    borderColor: primaryColor,
-                    backgroundColor: primaryColorTransparent,
-                    fill: true,
-                    tension: 0.1
-                }]
-            },
-            options: {
-                responsive: true,
-                scales: {
-                    y: { beginAtZero: true }
-                }
-            }
-        });
+        const dailyCtx = document.getElementById('dailyUsageChart')?.getContext('2d');
+        if (dailyCtx) {
+            new Chart(dailyCtx, {
+                type: 'line',
+                data: {
+                    labels: {{ daily_labels | tojson }},
+                    datasets: [{
+                        label: 'Requests',
+                        data: {{ daily_data | tojson }},
+                        borderColor: primaryColor,
+                        backgroundColor: primaryColorTransparent,
+                        fill: true,
+                        tension: 0.1
+                    }]
+                },
+                options: { responsive: true, scales: { y: { beginAtZero: true } } }
+            });
+        }
 
         // 2. Hourly Usage Chart (Bar)
-        const hourlyCtx = document.getElementById('hourlyUsageChart').getContext('2d');
-        new Chart(hourlyCtx, {
-            type: 'bar',
-            data: {
-                labels: {{ hourly_labels | tojson }},
-                datasets: [{
-                    label: 'Requests',
-                    data: {{ hourly_data | tojson }},
-                    backgroundColor: primaryColorTransparent,
-                    borderColor: primaryColor,
-                    borderWidth: 1
-                }]
-            },
-            options: {
-                responsive: true,
-                scales: {
-                    y: { beginAtZero: true }
-                }
-            }
-        });
+        const hourlyCtx = document.getElementById('hourlyUsageChart')?.getContext('2d');
+        if (hourlyCtx) {
+            new Chart(hourlyCtx, {
+                type: 'bar',
+                data: {
+                    labels: {{ hourly_labels | tojson }},
+                    datasets: [{
+                        label: 'Requests',
+                        data: {{ hourly_data | tojson }},
+                        backgroundColor: primaryColorTransparent,
+                        borderColor: primaryColor,
+                        borderWidth: 1
+                    }]
+                },
+                options: { responsive: true, scales: { y: { beginAtZero: true } } }
+            });
+        }
 
         // 3. Server Load Chart (Doughnut)
-        const serverCtx = document.getElementById('serverLoadChart').getContext('2d');
-        new Chart(serverCtx, {
-            type: 'doughnut',
-            data: {
-                labels: {{ server_labels | tojson }},
-                datasets: [{
-                    label: 'Requests',
-                    data: {{ server_data | tojson }},
-                    backgroundColor: [
-                        'rgba(79, 70, 229, 0.8)',
-                        'rgba(5, 150, 105, 0.8)',
-                        'rgba(217, 70, 239, 0.8)',
-                        'rgba(245, 158, 11, 0.8)',
-                        'rgba(220, 38, 38, 0.8)',
-                        'rgba(107, 114, 128, 0.8)'
-                    ],
-                }]
-            },
-            options: {
-                responsive: true,
-            }
-        });
+        const serverCtx = document.getElementById('serverLoadChart')?.getContext('2d');
+        if (serverCtx) {
+            new Chart(serverCtx, {
+                type: 'doughnut',
+                data: {
+                    labels: {{ server_labels | tojson }},
+                    datasets: [{
+                        label: 'Requests',
+                        data: {{ server_data | tojson }},
+                        backgroundColor: palette,
+                    }]
+                },
+                options: { responsive: true }
+            });
+        }
+
+        // 4. Model Usage Chart (Pie)
+        const modelCtx = document.getElementById('modelUsageChart')?.getContext('2d');
+        if (modelCtx) {
+            new Chart(modelCtx, {
+                type: 'pie',
+                data: {
+                    labels: {{ model_labels | tojson }},
+                    datasets: [{
+                        label: 'Requests',
+                        data: {{ model_data | tojson }},
+                        backgroundColor: palette,
+                    }]
+                },
+                options: { responsive: true }
+            });
+        }
     });
 </script>
 {% endblock %}

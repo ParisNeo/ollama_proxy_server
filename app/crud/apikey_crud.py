@@ -1,3 +1,4 @@
+# app/crud/apikey_crud.py
 import secrets
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -20,6 +21,11 @@ async def get_api_key_by_id(db: AsyncSession, key_id: int) -> APIKey | None:
 
 async def get_api_keys_for_user(db: AsyncSession, user_id: int) -> list[APIKey]:
     result = await db.execute(select(APIKey).filter(APIKey.user_id == user_id).order_by(APIKey.created_at.desc()))
+    return result.scalars().all()
+
+async def get_all_api_keys(db: AsyncSession) -> list[APIKey]:
+    """Get all API keys from the database."""
+    result = await db.execute(select(APIKey).order_by(APIKey.created_at.desc()))
     return result.scalars().all()
 
 
@@ -80,3 +86,9 @@ async def toggle_api_key_active(db: AsyncSession, key_id: int) -> APIKey | None:
     await db.commit()
     await db.refresh(key)
     return key
+
+async def get_api_key_by_name_and_user_id(db: AsyncSession, *, key_name: str, user_id: int) -> APIKey | None:
+    """Gets an API key by its name for a specific user."""
+    stmt = select(APIKey).filter(APIKey.user_id == user_id, APIKey.key_name == key_name)
+    result = await db.execute(stmt)
+    return result.scalars().first()

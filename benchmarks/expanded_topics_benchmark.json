@@ -1,0 +1,71 @@
+{
+  "name": "Expanded Topic Classification Benchmark",
+  "groups": [
+    {
+      "id": "g1",
+      "name": "Science (Physics)",
+      "color": "#3b82f6",
+      "texts": [
+        "Einstein's theory of general relativity describes gravity as a curvature of spacetime.",
+        "Quantum mechanics deals with the behavior of matter and energy at the atomic and subatomic levels.",
+        "Newton's third law states that for every action, there is an equal and opposite reaction.",
+        "The Schrödinger equation is a mathematical equation that describes the changes over time of a physical system in which quantum effects are significant."
+      ]
+    },
+    {
+      "id": "g2",
+      "name": "Technology (Software)",
+      "color": "#10b981",
+      "texts": [
+        "An API (Application Programming Interface) allows different software applications to communicate with each other.",
+        "Version control systems like Git are essential for collaborative software development.",
+        "An algorithm is a finite sequence of well-defined instructions, typically used to solve a class of specific problems or to perform a computation.",
+        "Object-oriented programming is a programming paradigm based on the concept of 'objects', which can contain data and code."
+      ]
+    },
+    {
+      "id": "g3",
+      "name": "Finance (Investing)",
+      "color": "#f59e0b",
+      "texts": [
+        "Diversification is a strategy of investing in a variety of assets to reduce risk.",
+        "The stock market is where investors buy and sell shares of publicly traded companies.",
+        "Inflation erodes the purchasing power of money over time.",
+        "A bond is a fixed-income instrument that represents a loan made by an investor to a borrower."
+      ]
+    },
+    {
+      "id": "g4",
+      "name": "History (Ancient Rome)",
+      "color": "#ef4444",
+      "texts": [
+        "The Roman Empire was one of the most powerful empires in world history, lasting for over a thousand years.",
+        "Julius Caesar was a Roman general and statesman who played a critical role in the events that led to the demise of the Roman Republic.",
+        "The Colosseum is an oval amphitheater in the center of the city of Rome, Italy, built of travertine limestone, tuff, and brick-faced concrete.",
+        "Latin was the language of the Roman Empire and the ancestor of the Romance languages."
+      ]
+    },
+    {
+      "id": "g5",
+      "name": "Literature (Classics)",
+      "color": "#8b5cf6",
+      "texts": [
+        "William Shakespeare is widely regarded as the greatest writer in the English language.",
+        "George Orwell's novel 'Nineteen Eighty-Four' is a dystopian social science fiction novel and cautionary tale.",
+        "To Kill a Mockingbird by Harper Lee is a novel about the seriousness of racial inequality.",
+        "Moby Dick, by Herman Melville, is the story of a vengeful sea captain's hunt for a giant whale."
+      ]
+    },
+    {
+      "id": "g6",
+      "name": "Health & Medicine",
+      "color": "#14b8a6",
+      "texts": [
+        "Vaccines work by stimulating the immune system to produce antibodies without causing the illness.",
+        "DNA, or deoxyribonucleic acid, is the hereditary material in humans and almost all other organisms.",
+        "A balanced diet and regular exercise are crucial for maintaining good physical health.",
+        "Antibiotics are medications that destroy or slow down the growth of bacteria."
+      ]
+    }
+  ]
+}

@@ -1,63 +1,26 @@
-import os
-from typing import List, Union
-from pydantic import AnyHttpUrl, field_validator, RedisDsn
+from typing import Optional
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-
 class Settings(BaseSettings):
-    # --- App Settings ---
-    APP_NAME: str = "Ollama Proxy Server"
-    APP_VERSION: str = "8.0.0"
-    LOG_LEVEL: str = "info"
-    SECRET_KEY: str
-    PROXY_PORT: int = 8080
-
-    # --- Ollama Backend Servers ---
-    OLLAMA_SERVERS: Union[List[AnyHttpUrl], str]
-
-    @field_validator("OLLAMA_SERVERS", mode="before")
-    @classmethod
-    def assemble_ollama_servers(cls, v: Union[str, List[AnyHttpUrl]]) -> List[AnyHttpUrl]:
-        if isinstance(v, str):
-            return [url.strip() for url in v.split(",") if url.strip()]
-        return v
-
-    # --- Database Settings ---
+    # --- Bootstrap Settings ---
+    # These are the only settings read from the .env file.
+    # IMPORTANT: Never commit .env files with real credentials!
     DATABASE_URL: str = "sqlite+aiosqlite:///./ollama_proxy.db"
-
-    # --- Admin User ---
     ADMIN_USER: str = "admin"
-    ADMIN_PASSWORD: str = "changeme"
+    ADMIN_PASSWORD: str = "changeme"  # MUST be changed in production .env file
+    PROXY_PORT: int = 8080
+    SECRET_KEY: str = "CHANGE_THIS_IN_PRODUCTION"  # MUST be changed in production .env file
 
-    # --- Redis & Rate Limiting ---
-    REDIS_URL: RedisDsn = "redis://localhost:6379/0"
-    RATE_LIMIT_REQUESTS: int = 100
-    RATE_LIMIT_WINDOW_MINUTES: int = 1
-
-    # --- HTTP Client (Backend) Timeouts & Limits ---
-    HTTPX_CONNECT_TIMEOUT: float = 10.0
-    HTTPX_READ_TIMEOUT: float = 600.0
-    HTTPX_WRITE_TIMEOUT: float = 600.0
-    HTTPX_POOL_TIMEOUT: float = 60.0
-    HTTPX_MAX_KEEPALIVE_CONNECTIONS: int = 20
-    HTTPX_MAX_CONNECTIONS: int = 100
-    HTTPX_KEEPALIVE_EXPIRY: float = 60.0
-
-    # --- IP Access Control ---
-    ALLOWED_IPS: List[str] = []
-    DENIED_IPS: List[str] = []
-
-    @field_validator("ALLOWED_IPS", "DENIED_IPS", mode="before")
-    @classmethod
-    def assemble_ip_lists(cls, v: Union[str, List[str]]) -> List[str]:
-        if isinstance(v, str):
-            return [ip.strip() for ip in v.split(",") if ip.strip()]
-        return v
-
+    # --- App Info (Hardcoded) ---
+    APP_NAME: str = "Ollama Proxy Server"
+    APP_VERSION: str = "9.0.0"
+    LOG_LEVEL: str = "info"
 
     class Config:
         env_file = ".env"
         case_sensitive = True
+        extra = 'ignore'  # <-- THIS IS THE FIX
 
-
+# This `settings` object is now only used for bootstrapping.
+# The rest of the app will use settings loaded from the DB.
 settings = Settings()

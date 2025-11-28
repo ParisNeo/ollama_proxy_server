@@ -4,73 +4,211 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}Ollama Proxy Admin{% endblock %}</title>
+    <link rel="icon" href="{{ url_for('static', path='favicon.svg') }}" type="image/svg+xml">
+    <link rel="shortcut icon" href="{{ url_for('static', path='favicon.svg') }}" type="image/svg+xml">
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- === ADD CHART.JS LIBRARY === -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="{{ url_for('static', path='css/styles.css') }}">
+    
+    <!-- KaTeX for Math Rendering -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js" onload="renderMathInElement(document.body, { delimiters: [{left: '$$', right: '$$', display: true}, {left: '$', right: '$', display: false}, {left: '\\[', right: '\\]', display: true}, {left: '\\(', right: '\\)', display: false}] });"></script>
+
+    <!-- Highlight.js for Code Syntax Highlighting -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+
     <style>
-        .active {
-            background-color: #4f46e5;
-            color: white;
+        {% set theme_colors = request.app.state.settings.available_themes[request.app.state.settings.selected_theme] %}
+        :root {
+            --color-primary-500: {{ theme_colors['500'] }};
+            --color-primary-600: {{ theme_colors['600'] }};
+            --color-primary-700: {{ theme_colors['700'] }};
+            --color-primary-800: {{ theme_colors['800'] }};
         }
     </style>
 </head>
-<body class="bg-gray-100 font-sans leading-normal tracking-normal">
+<body class="font-sans leading-normal tracking-normal ui-{{ request.app.state.settings.ui_style }}">
 
-    <div class="flex md:flex-row flex-col">
-        <!-- Sidebar -->
-        <div class="bg-gray-800 text-white w-full md:w-64 min-h-screen flex flex-col justify-between relative">
+    <button id="sidebar-open-btn" class="fixed top-4 left-4 z-50 p-2 text-white rounded-md hover:opacity-80 shadow-lg">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path></svg>
+    </button>
+
+    <div class="flex h-screen">
+        <div id="sidebar" class="w-64 min-w-[16rem] flex-shrink-0 flex flex-col justify-between transition-all duration-300 ease-in-out">
             <div>
-                <div class="flex items-center justify-between p-4 border-b border-gray-700">
-                    <a href="{{ url_for('admin_dashboard') }}" class="text-2xl font-bold">Ollama Proxy</a>
+                <div class="flex items-center justify-between p-4 border-b border-white/10 h-16">
+                    <a href="{{ url_for('admin_dashboard') }}" class="flex items-center text-2xl font-bold whitespace-nowrap overflow-hidden">
+                        {% if request.app.state.settings.branding_logo_url %}
+                        <img src="{{ request.app.state.settings.branding_logo_url }}" alt="Logo" class="h-8 w-8 mr-2 object-contain flex-shrink-0">
+                        {% endif %}
+                        <span class="truncate">{{ request.app.state.settings.branding_title }}</span>
+                    </a>
+                    <button id="sidebar-close-btn" class="ml-2 flex-shrink-0">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path>
+                        </svg>
+                    </button>
                 </div>
                 
                 {% if request.state.user %}
                 <nav class="mt-4">
-                    <a href="{{ url_for('admin_dashboard') }}" class="flex items-center px-4 py-3 hover:bg-gray-700 {% if request.url.path == url_for('admin_dashboard') %}active{% endif %}">
-                        <svg class="w-6 h-6 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 8v8m-4-5v5m-4-2v2m-2 4h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
+                    <a href="{{ url_for('admin_dashboard') }}" class="flex items-center px-4 py-3 whitespace-nowrap {% if 'dashboard' in request.url.path %}active{% endif %}">
+                        <svg class="w-6 h-6 mr-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 8v8m-4-5v5m-4-2v2m-2 4h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
                         Dashboard
                     </a>
-                    <a href="{{ url_for('admin_servers') }}" class="flex items-center px-4 py-3 hover:bg-gray-700 {% if request.url.path == url_for('admin_servers') %}active{% endif %}">
-                        <svg class="w-6 h-6 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01"></path></svg>
+                    <a href="{{ url_for('admin_users') }}" class="flex items-center px-4 py-3 whitespace-nowrap {% if 'users' in request.url.path %}active{% endif %}">
+                        <svg class="w-6 h-6 mr-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M15 21a6 6 0 00-9-5.197M15 21a6 6 0 00-9-5.197"></path></svg>
+                        User Management
+                    </a>
+                    <a href="{{ url_for('admin_servers') }}" class="flex items-center px-4 py-3 whitespace-nowrap {% if 'servers' in request.url.path %}active{% endif %}">
+                        <svg class="w-6 h-6 mr-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2-2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01"></path></svg>
                         Server Management
                     </a>
-                    <a href="{{ url_for('admin_stats') }}" class="flex items-center px-4 py-3 hover:bg-gray-700 {% if request.url.path == url_for('admin_stats') %}active{% endif %}">
-                         <svg class="w-6 h-6 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path></svg>
+                    <a href="{{ url_for('admin_models_manager') }}" class="flex items-center px-4 py-3 whitespace-nowrap {% if 'models-manager' in request.url.path %}active{% endif %}">
+                        <svg class="w-6 h-6 mr-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 18.657A8 8 0 016.343 7.343S7 9 9 10c0-2 .5-5 2.986-7.014A8.003 8.003 0 0122 12c0 3.771-2.5 7-6.343 6.657zM2 6a8 8 0 1111.314 11.314L2 6z"></path></svg>
+                        Models Manager
+                    </a>
+                    <a href="{{ url_for('admin_playground') }}" class="flex items-center px-4 py-3 whitespace-nowrap {% if 'playground' in request.url.path and 'embedding' not in request.url.path %}active{% endif %}">
+                        <svg class="w-6 h-6 mr-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path></svg>
+                        Chat Playground
+                    </a>
+                    <a href="{{ url_for('admin_embedding_playground') }}" class="flex items-center px-4 py-3 whitespace-nowrap {% if 'embedding-playground' in request.url.path %}active{% endif %}">
+                        <svg class="w-6 h-6 mr-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 14v6m-3-3h6M3 10h2a2 2 0 012 2v2a2 2 0 01-2 2H3v-6zm0 6h2a2 2 0 002-2v-2a2 2 0 00-2-2H3v6zm6 0h2a2 2 0 002-2v-2a2 2 0 00-2-2H9v6z"></path></svg>
+                        Embedding Playground
+                    </a>
+                    <a href="{{ url_for('admin_web_search') }}" class="flex items-center px-4 py-3 whitespace-nowrap {% if 'web-search' in request.url.path %}active{% endif %}">
+                        <svg class="w-6 h-6 mr-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+                        Web Search
+                    </a>
+                    <a href="{{ url_for('admin_stats') }}" class="flex items-center px-4 py-3 whitespace-nowrap {% if 'stats' in request.url.path %}active{% endif %}">
+                         <svg class="w-6 h-6 mr-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path></svg>
                         Usage Stats
                     </a>
-                    <a href="{{ url_for('admin_help') }}" class="flex items-center px-4 py-3 hover:bg-gray-700 {% if request.url.path == url_for('admin_help') %}active{% endif %}">
-                        <svg class="w-6 h-6 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.79 4 4 0 2.21-1.79 4-4 4-1.742 0-3.223-.835-3.772-2M12 18.5v.01M12 5.5v.01"></path></svg>
+                     <a href="{{ url_for('admin_settings') }}" class="flex items-center px-4 py-3 whitespace-nowrap {% if 'settings' in request.url.path %}active{% endif %}">
+                        <svg class="w-6 h-6 mr-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+                        Settings
+                    </a>
+                    <a href="{{ url_for('admin_help') }}" class="flex items-center px-4 py-3 whitespace-nowrap {% if 'help' in request.url.path %}active{% endif %}">
+                        <svg class="w-6 h-6 mr-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.79 4 4 0 2.21-1.79 4-4 4-1.742 0-3.223-.835-3.772-2M12 18.5v.01M12 5.5v.01"></path></svg>
                         Help & Credits
                     </a>
                 </nav>
                 {% endif %}
             </div>
-
-            <div class="w-full">
+            <div class="w-full flex-shrink-0">
                 {% if request.state.user %}
-                <div class="p-4 border-t border-gray-700">
-                    <p class="text-sm">Welcome, <span class="font-semibold">{{ request.state.user.username }}</span></p>
+                <div class="p-4 border-t border-white/10">
+                    <div class="pb-3 mb-3 border-b border-white/10 text-xs text-gray-400">
+                        <p>{{ request.app.state.settings.branding_title }} v{{ request.app.version }}</p>
+                        <p class="truncate">Powered by ParisNeo's Ollama Proxy Fortress</p>
+                    </div>
+                    <p class="text-sm whitespace-nowrap">Welcome, <span class="font-semibold">{{ request.state.user.username }}</span></p>
+                    {% if is_redis_connected %}
+                    <div class="flex items-center mt-2 text-xs text-green-400">
+                        <span class="h-2 w-2 mr-2 bg-green-500 rounded-full"></span>
+                        Redis: Connected
+                    </div>
+                    {% else %}
+                    <a href="{{ url_for('admin_help') }}#redis-setup" class="flex items-center mt-2 text-xs text-red-400 hover:text-red-300 hover:underline">
+                        <span class="h-2 w-2 mr-2 bg-red-500 rounded-full"></span>
+                        Redis: Disconnected (Help)
+                    </a>
+                    {% endif %}
                 </div>
-                <a href="{{ url_for('admin_logout') }}" class="flex items-center w-full px-4 py-3 bg-red-600 hover:bg-red-700">
-                     <svg class="w-6 h-6 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path></svg>
+                <a href="{{ url_for('admin_logout') }}" class="flex items-center w-full px-4 py-3 bg-red-600/50 hover:bg-red-600 whitespace-nowrap">
+                     <svg class="w-6 h-6 mr-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path></svg>
                     Logout
                 </a>
                 {% endif %}
             </div>
         </div>
-
-        <div class="flex-1 flex flex-col">
-            <header class="bg-white shadow p-4 md:hidden">
-                 <h1 class="text-xl font-semibold text-gray-700">{% block header_title %}{% endblock %}</h1>
-            </header>
-            <main class="flex-1 p-6 md:p-10">
+        <div class="flex-1 flex flex-col bg-transparent">
+            <main class="flex-1 p-6 md:p-10 overflow-y-auto">
                 {% include 'partials/_flash_messages.html' %}
-                {% block content %}{% endblock %}
+                <div class="max-w-7xl mx-auto">
+                    <h1 class="text-2xl font-bold text-current mb-8">{% block header_title %}{% endblock %}</h1>
+                    {% block content %}{% endblock %}
+                </div>
             </main>
-            <footer class="bg-white p-4 text-center text-sm text-gray-500">
-                Ollama Proxy Server v{{ request.app.version }}
-            </footer>
         </div>
     </div>
+
+    <!-- Modal Structure -->
+    <div id="modal-backdrop" class="fixed inset-0 bg-black bg-opacity-70 z-50 hidden"></div>
+    <div id="modal" class="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50 card-style w-11/12 max-w-2xl hidden">
+        <div class="p-6">
+            <h3 id="modal-title" class="text-xl font-bold mb-4">Modal Title</h3>
+            <div id="modal-body">
+                <p>Modal content goes here.</p>
+            </div>
+        </div>
+        <div class="flex justify-end p-4 border-t border-white/10">
+            <button id="modal-close-btn" class="py-2 px-4 rounded-md shadow-sm text-sm font-medium text-white bg-[var(--color-primary-600)] hover:bg-[var(--color-primary-700)]">Close</button>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const body = document.body;
+            const sidebar = document.getElementById('sidebar');
+            const openBtn = document.getElementById('sidebar-open-btn');
+            const closeBtn = document.getElementById('sidebar-close-btn');
+
+            const openSidebar = () => {
+                sidebar.classList.remove('collapsed');
+                body.classList.remove('sidebar-collapsed');
+                localStorage.setItem('sidebarState', 'open');
+            };
+
+            const closeSidebar = () => {
+                sidebar.classList.add('collapsed');
+                body.classList.add('sidebar-collapsed');
+                localStorage.setItem('sidebarState', 'closed');
+            };
+
+            openBtn.addEventListener('click', openSidebar);
+            closeBtn.addEventListener('click', closeSidebar);
+
+            if (localStorage.getItem('sidebarState') === 'closed') {
+                closeSidebar();
+            }
+
+            // --- Modal Logic ---
+            const modal = document.getElementById('modal');
+            const modalBackdrop = document.getElementById('modal-backdrop');
+            const modalCloseBtn = document.getElementById('modal-close-btn');
+
+            const openModal = () => {
+                modal.classList.remove('hidden');
+                modalBackdrop.classList.remove('hidden');
+            };
+
+            const closeModal = () => {
+                modal.classList.add('hidden');
+                modalBackdrop.classList.add('hidden');
+            };
+
+            modalCloseBtn.addEventListener('click', closeModal);
+            modalBackdrop.addEventListener('click', closeModal);
+
+            window.showModal = (title, body) => {
+                document.getElementById('modal-title').textContent = title;
+                document.getElementById('modal-body').innerHTML = body;
+                openModal();
+            };
+            
+            // Event listener for data-modal triggers
+            document.addEventListener('click', (e) => {
+                const target = e.target.closest('[data-modal-title]');
+                if (target) {
+                    const title = target.dataset.modalTitle;
+                    const body = target.dataset.modalBody;
+                    showModal(title, body);
+                }
+            });
+        });
+    </script>
 </body>
 </html>

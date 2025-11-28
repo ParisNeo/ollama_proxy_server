@@ -1,0 +1,41 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Edit User: {{ user.username }}{% endblock %}
+
+{% block header_title %}Edit User{% endblock %}
+
+{% block content %}
+<div class="max-w-2xl mx-auto space-y-8">
+    <div class="flex justify-between items-center">
+        <a href="{{ url_for('admin_users') }}" class="text-[var(--color-primary-500)] hover:text-[var(--color-primary-700)]">&larr; Back to User Management</a>
+        <a href="{{ url_for('admin_user_stats', user_id=user.id) }}" class="justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500">
+            View Usage Graphs
+        </a>
+    </div>
+
+    <div class="card-style">
+        <h2 class="card-header text-2xl font-bold mb-6 pb-2">Editing: <span class="text-[var(--color-primary-500)]">{{ user.username }}</span></h2>
+        
+        <form action="{{ url_for('admin_edit_user_post', user_id=user.id) }}" method="post" class="space-y-6">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            
+            <div>
+                <label for="username" class="block text-sm font-medium text-current">Username</label>
+                <input type="text" name="username" id="username" required value="{{ user.username }}" class="mt-1 block w-full px-3 py-2 rounded-md shadow-sm focus:outline-none focus:ring-[var(--color-primary-500)] focus:border-[var(--color-primary-500)] sm:text-sm">
+            </div>
+            
+            <div>
+                <label for="password" class="block text-sm font-medium text-current">New Password</label>
+                <input type="password" name="password" id="password" autocomplete="new-password" class="mt-1 block w-full px-3 py-2 rounded-md shadow-sm focus:outline-none focus:ring-[var(--color-primary-500)] focus:border-[var(--color-primary-500)] sm:text-sm">
+                <p class="mt-2 text-xs text-gray-400">Leave blank to keep the current password.</p>
+            </div>
+            
+            <div class="flex justify-end pt-4">
+                <button type="submit" class="w-full md:w-auto justify-center py-2 px-6 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-[var(--color-primary-600)] hover:bg-[var(--color-primary-700)] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[var(--color-primary-500)]">
+                    Save Changes
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

@@ -2,13 +2,21 @@ import secrets
 from passlib.context import CryptContext
 
 # Hashing context for user passwords
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# --- FIX: Add "sha256_crypt" as a legacy scheme.
+# This allows the system to verify passwords that were hashed with this older method.
+# The 'deprecated="auto"' setting ensures that bcrypt is used for all new hashes.
+pwd_context = CryptContext(
+    schemes=["bcrypt", "sha256_crypt"], 
+    deprecated="auto"
+)
 
 # Hashing context for API keys. Using a different scheme for domain separation.
 api_key_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
+    # No changes needed here. Passlib automatically handles the verification
+    # against all schemes listed in the context.
     return pwd_context.verify(plain_password, hashed_password)
 
 

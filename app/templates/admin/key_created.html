@@ -15,7 +15,7 @@
     <div class="flex items-center bg-gray-100 rounded-md p-3 mb-4">
         <code id="plain-key" class="flex-1 break-all text-sm text-gray-900">{{ plain_key }}</code>
         <button id="copy-btn"
-                class="ml-3 px-3 py-1 bg-indigo-600 text-white rounded hover:bg-indigo-700 focus:outline-none">
+                class="ml-3 px-3 py-1 bg-[var(--color-primary-600)] text-white rounded hover:bg-[var(--color-primary-700)] focus:outline-none">
             Copy
         </button>
     </div>
@@ -32,25 +32,35 @@
 </div>
 
 <script>
-    // Simple clipboard copy logic – works in all modern browsers
     document.getElementById('copy-btn').addEventListener('click', function () {
-        const keyEl = document.getElementById('plain-key');
-        const range = document.createRange();
-        range.selectNodeContents(keyEl);
-        const sel = window.getSelection();
-        sel.removeAllRanges();
-        sel.addRange(range);
-        try {
-            document.execCommand('copy');
-            // Show a quick visual feedback
-            const original = this.textContent;
-            this.textContent = 'Copied!';
-            setTimeout(() => { this.textContent = original; }, 1500);
-        } catch (err) {
-            console.error('Copy failed', err);
+        const keyText = document.getElementById('plain-key').innerText;
+        const copyButton = this;
+
+        if (navigator.clipboard && window.isSecureContext) {
+            navigator.clipboard.writeText(keyText).then(function() {
+                const originalText = copyButton.textContent;
+                copyButton.textContent = 'Copied!';
+                setTimeout(() => { copyButton.textContent = originalText; }, 1500);
+            }).catch(function(err) {
+                console.error('Async copy failed: ', err);
+            });
+        } else {
+            const textArea = document.createElement('textarea');
+            textArea.value = keyText;
+            textArea.style.position = 'fixed';
+            document.body.appendChild(textArea);
+            textArea.focus();
+            textArea.select();
+            try {
+                document.execCommand('copy');
+                const originalText = copyButton.textContent;
+                copyButton.textContent = 'Copied!';
+                setTimeout(() => { copyButton.textContent = originalText; }, 1500);
+            } catch (err) {
+                console.error('Fallback copy failed', err);
+            }
+            document.body.removeChild(textArea);
         }
-        // Cleanup selection
-        sel.removeAllRanges();
     });
 </script>
 {% endblock %}

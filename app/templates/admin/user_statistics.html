@@ -1,0 +1,174 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Usage for {{ user.username }}{% endblock %}
+
+{% block header_title %}Usage Statistics for <span class="text-[var(--color-primary-500)]">{{ user.username }}</span>{% endblock %}
+
+{% block content %}
+<div class="space-y-8">
+    <div class="flex justify-start">
+        <a href="{{ url_for('get_user_details', user_id=user.id) }}" class="text-[var(--color-primary-500)] hover:text-[var(--color-primary-700)]">&larr; Back to User Details</a>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        <div class="card-style">
+            <h2 class="card-header flex justify-between items-center text-xl font-bold mb-4 pb-2">
+                <span>Requests per Day (Last 30 Days)</span>
+                <div class="space-x-2">
+                    <button onclick="exportChartToPNG('dailyUsageChart', 'daily-usage-{{ user.username }}.png')" class="text-sm text-[var(--color-primary-500)] hover:underline">PNG</button>
+                    <button onclick="exportDataToCSV(['Date', 'Request Count'], {{ daily_labels | tojson }}, {{ daily_data | tojson }}, 'daily-usage-{{ user.username }}.csv')" class="text-sm text-[var(--color-primary-500)] hover:underline">CSV</button>
+                </div>
+            </h2>
+            {% if daily_data %}<canvas id="dailyUsageChart"></canvas>{% else %}<div class="flex items-center justify-center h-64"><p>No request data available.</p></div>{% endif %}
+        </div>
+        <div class="card-style">
+            <h2 class="card-header flex justify-between items-center text-xl font-bold mb-4 pb-2">
+                <span>Peak Hours (UTC)</span>
+                 <div class="space-x-2">
+                    <button onclick="exportChartToPNG('hourlyUsageChart', 'hourly-usage-{{ user.username }}.png')" class="text-sm text-[var(--color-primary-500)] hover:underline">PNG</button>
+                    <button onclick="exportDataToCSV(['Hour (UTC)', 'Request Count'], {{ hourly_labels | tojson }}, {{ hourly_data | tojson }}, 'hourly-usage-{{ user.username }}.csv')" class="text-sm text-[var(--color-primary-500)] hover:underline">CSV</button>
+                </div>
+            </h2>
+            {% if hourly_data and hourly_data | sum > 0 %}<canvas id="hourlyUsageChart"></canvas>{% else %}<div class="flex items-center justify-center h-64"><p>No hourly usage data.</p></div>{% endif %}
+        </div>
+    </div>
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        <div class="card-style">
+            <h2 class="card-header flex justify-between items-center text-xl font-bold mb-4 pb-2">
+                <span>Server Load</span>
+                 <div class="space-x-2">
+                    <button onclick="exportChartToPNG('serverLoadChart', 'server-load-{{ user.username }}.png')" class="text-sm text-[var(--color-primary-500)] hover:underline">PNG</button>
+                    <button onclick="exportDataToCSV(['Server Name', 'Request Count'], {{ server_labels | tojson }}, {{ server_data | tojson }}, 'server-load-{{ user.username }}.csv')" class="text-sm text-[var(--color-primary-500)] hover:underline">CSV</button>
+                </div>
+            </h2>
+            {% if server_data and server_data | sum > 0 %}<canvas id="serverLoadChart"></canvas>{% else %}<div class="flex items-center justify-center h-64"><p>No server load data.</p></div>{% endif %}
+        </div>
+        <div class="card-style">
+            <h2 class="card-header flex justify-between items-center text-xl font-bold mb-4 pb-2">
+                <span>Model Usage</span>
+                 <div class="space-x-2">
+                    <button onclick="exportChartToPNG('modelUsageChart', 'model-usage-{{ user.username }}.png')" class="text-sm text-[var(--color-primary-500)] hover:underline">PNG</button>
+                    <button onclick="exportDataToCSV(['Model Name', 'Request Count'], {{ model_labels | tojson }}, {{ model_data | tojson }}, 'model-usage-{{ user.username }}.csv')" class="text-sm text-[var(--color-primary-500)] hover:underline">CSV</button>
+                </div>
+            </h2>
+            {% if model_data %}<canvas id="modelUsageChart"></canvas>{% else %}<div class="flex items-center justify-center h-64"><p>No model-specific usage data.</p></div>{% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- CHART & EXPORT JAVASCRIPT -->
+<script>
+    // --- Helper Functions for Exporting ---
+    function downloadURI(uri, name) {
+        const link = document.createElement("a");
+        link.download = name;
+        link.href = uri;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    }
+
+    function exportChartToPNG(chartId, filename) {
+        const chart = Chart.getChart(chartId);
+        if (chart) {
+            const uri = chart.toBase64Image();
+            downloadURI(uri, filename);
+        }
+    }
+
+    function exportDataToCSV(headers, labels, data, filename) {
+        let csvContent = "data:text/csv;charset=utf-8," + headers.join(",") + "\n";
+        labels.forEach((label, index) => {
+            csvContent += `"${label}",${data[index]}\n`;
+        });
+        const encodedUri = encodeURI(csvContent);
+        downloadURI(encodedUri, filename);
+    }
+
+    // --- Chart Initializations ---
+    document.addEventListener('DOMContentLoaded', function () {
+        const cs = getComputedStyle(document.documentElement);
+        const primaryColor = cs.getPropertyValue('--color-primary-600').trim() || 'rgba(79, 70, 229, 1)';
+        const primaryColorTransparent = primaryColor.replace(/[\d\.]+\)$/g, '0.2)');
+
+        // 1. Daily Usage Chart (Line)
+        const dailyCtx = document.getElementById('dailyUsageChart')?.getContext('2d');
+        if (dailyCtx) {
+            new Chart(dailyCtx, {
+                type: 'line',
+                data: {
+                    labels: {{ daily_labels | tojson }},
+                    datasets: [{
+                        label: 'Requests',
+                        data: {{ daily_data | tojson }},
+                        borderColor: primaryColor,
+                        backgroundColor: primaryColorTransparent,
+                        fill: true,
+                        tension: 0.1
+                    }]
+                },
+                options: { responsive: true, scales: { y: { beginAtZero: true } } }
+            });
+        }
+
+        // 2. Hourly Usage Chart (Bar)
+        const hourlyCtx = document.getElementById('hourlyUsageChart')?.getContext('2d');
+        if (hourlyCtx) {
+            new Chart(hourlyCtx, {
+                type: 'bar',
+                data: {
+                    labels: {{ hourly_labels | tojson }},
+                    datasets: [{
+                        label: 'Requests',
+                        data: {{ hourly_data | tojson }},
+                        backgroundColor: primaryColorTransparent,
+                        borderColor: primaryColor,
+                        borderWidth: 1
+                    }]
+                },
+                options: { responsive: true, scales: { y: { beginAtZero: true } } }
+            });
+        }
+
+        // Chart color palettes
+        const palette = [
+            cs.getPropertyValue('--color-primary-600').trim(),
+            '#059669', '#d946ef', '#f97316', '#dc2626', '#6b7280', '#3b82f6',
+        ];
+
+        // 3. Server Load Chart (Doughnut)
+        const serverCtx = document.getElementById('serverLoadChart')?.getContext('2d');
+        if (serverCtx) {
+            new Chart(serverCtx, {
+                type: 'doughnut',
+                data: {
+                    labels: {{ server_labels | tojson }},
+                    datasets: [{
+                        label: 'Requests',
+                        data: {{ server_data | tojson }},
+                        backgroundColor: palette,
+                    }]
+                },
+                options: { responsive: true }
+            });
+        }
+
+        // 4. Model Usage Chart (Pie)
+        const modelCtx = document.getElementById('modelUsageChart')?.getContext('2d');
+        if (modelCtx) {
+            new Chart(modelCtx, {
+                type: 'pie',
+                data: {
+                    labels: {{ model_labels | tojson }},
+                    datasets: [{
+                        label: 'Requests',
+                        data: {{ model_data | tojson }},
+                        backgroundColor: palette,
+                    }]
+                },
+                options: { responsive: true }
+            });
+        }
+    });
+</script>
+{% endblock %}

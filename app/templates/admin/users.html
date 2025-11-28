@@ -1,0 +1,102 @@
+{% extends "admin/base.html" %}
+
+{% block title %}User Management{% endblock %}
+
+{% block header_title %}User Management{% endblock %}
+
+{% macro sortable_header(column_key, column_name, text_align_class='text-left') %}
+    {% set next_order = 'asc' if sort_by == column_key and sort_order == 'desc' else 'desc' %}
+    <th class="px-6 py-3 {{ text_align_class }} text-xs font-medium text-gray-400 uppercase tracking-wider">
+        <a href="{{ url_for('admin_users') }}?sort_by={{ column_key }}&sort_order={{ next_order }}" class="flex items-center gap-1 hover:text-[var(--color-primary-500)]">
+            {{ column_name }}
+            {% if sort_by == column_key %}
+                {% if sort_order == 'asc' %}<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7"></path></svg>
+                {% else %}<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>{% endif %}
+            {% else %}<svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l4-4 4 4m0 6l-4 4-4-4"></path></svg>{% endif %}
+        </a>
+    </th>
+{% endmacro %}
+
+{% block content %}
+<div class="space-y-8">
+    <!-- Create New User Form -->
+    <div class="card-style">
+        <h2 class="card-header text-2xl font-bold mb-4 pb-2">Create New User</h2>
+        <form action="{{ url_for('create_new_user') }}" method="post">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                    <label for="username" class="block text-sm font-medium text-current">Username</label>
+                    <input type="text" name="username" id="username" required autocomplete="username" class="mt-1 block w-full px-3 py-2 rounded-md shadow-sm focus:outline-none focus:ring-[var(--color-primary-500)] focus:border-[var(--color-primary-500)] sm:text-sm">
+                </div>
+                <div>
+                    <label for="password" class="block text-sm font-medium text-current">Password</label>
+                    <input type="password" name="password" id="password" required autocomplete="new-password" class="mt-1 block w-full px-3 py-2 rounded-md shadow-sm focus:outline-none focus:ring-[var(--color-primary-500)] focus:border-[var(--color-primary-500)] sm:text-sm">
+                </div>
+                <div class="flex items-end">
+                    <button type="submit" class="w-full justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-[var(--color-primary-600)] hover:bg-[var(--color-primary-700)] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[var(--color-primary-500)]">Create User</button>
+                </div>
+            </div>
+        </form>
+    </div>
+
+    <!-- Users List -->
+    <div class="card-style">
+        <h2 class="card-header text-2xl font-bold mb-4 pb-2">Existing Users</h2>
+        <div class="overflow-x-auto">
+            <table class="min-w-full">
+                <thead>
+                    <tr>
+                        {{ sortable_header('username', 'Username') }}
+                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Role</th>
+                        {{ sortable_header('key_count', 'API Keys', 'text-center') }}
+                        {{ sortable_header('request_count', 'Total Requests', 'text-center') }}
+                        {{ sortable_header('last_used', 'Last Used') }}
+                        <th scope="col" class="px-6 py-3 text-right text-xs font-medium text-gray-400 uppercase tracking-wider">Actions</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-white/10">
+                    {% for user in users %}
+                    <tr>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-current">{{ user.username }}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm">
+                            {% if user.is_admin %}
+                                <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-indigo-200 text-indigo-800">Admin</span>
+                            {% else %}
+                                <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-gray-200 text-gray-800">User</span>
+                            {% endif %}
+                        </td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-center">{{ user.key_count }}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-center">{{ user.request_count }}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm">
+                            {% if user.last_used %}
+                                {{ user.last_used.strftime('%Y-%m-%d %H:%M') }}
+                            {% else %}
+                                <span class="italic text-gray-400">Never</span>
+                            {% endif %}
+                        </td>
+                        <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                            <div class="flex items-center justify-end gap-4">
+                                <a href="{{ url_for('admin_user_stats', user_id=user.id) }}" class="text-green-400 hover:text-green-600">View Usage</a>
+                                <a href="{{ url_for('get_user_details', user_id=user.id) }}" class="text-[var(--color-primary-500)] hover:text-[var(--color-primary-700)]">Manage Keys</a>
+                                <a href="{{ url_for('admin_edit_user_form', user_id=user.id) }}" class="text-yellow-400 hover:text-yellow-600">Edit</a>
+                                {% if not user.is_admin %}
+                                <form action="{{ url_for('delete_user_account', user_id=user.id) }}" method="post" onsubmit="return confirm('Are you sure? This will delete the user and all their API keys.');" class="inline">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                    <button type="submit" class="text-red-500 hover:text-red-700">Delete</button>
+                                </form>
+                                {% endif %}
+                            </div>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="6" class="px-6 py-4 text-center">No users found.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}

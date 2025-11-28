@@ -1,10 +1,12 @@
 import logging
-from fastapi import Depends, HTTPException, status, Request
+from fastapi import Depends, HTTPException, status, Request, Form, Header
 from fastapi.security import APIKeyHeader
 from sqlalchemy.ext.asyncio import AsyncSession
 import redis.asyncio as redis
+import time
+import secrets
 
-from app.core.config import settings
+from app.schema.settings import AppSettingsModel # <-- NEW
 from app.database.session import get_db
 from app.crud import apikey_crud
 from app.core.security import verify_api_key
@@ -13,14 +15,62 @@ from app.database.models import APIKey
 logger = logging.getLogger(__name__)
 api_key_header = APIKeyHeader(name="Authorization", auto_error=False)
 
+# --- NEW: Dependency to get DB-loaded settings ---
+def get_settings(request: Request) -> AppSettingsModel:
+    return request.app.state.settings
+
+# --- CSRF Token Generation and Validation ---
+async def get_csrf_token(request: Request) -> str:
+    """Get CSRF token from session or create a new one."""
+    if "csrf_token" not in request.session:
+        request.session["csrf_token"] = secrets.token_hex(32)
+    return request.session["csrf_token"]
+
+async def validate_csrf_token(request: Request, csrf_token: str = Form(...)):
+    """Dependency to validate CSRF token from a form submission."""
+    stored_token = await get_csrf_token(request)
+    if not stored_token or not secrets.compare_digest(csrf_token, stored_token):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="CSRF token mismatch")
+    return True
+
+async def validate_csrf_token_header(request: Request, x_csrf_token: str = Header(..., alias="X-CSRF-Token")):
+    """Dependency to validate CSRF token from an X-CSRF-Token header for AJAX/fetch requests."""
+    stored_token = await get_csrf_token(request)
+    if not stored_token or not secrets.compare_digest(x_csrf_token, stored_token):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="CSRF token mismatch")
+    return True
+
+# --- Login Rate Limiting Dependency ---
+async def login_rate_limiter(request: Request):
+    redis_client: redis.Redis = request.app.state.redis
+    if not redis_client:
+        return True 
+
+    client_ip = request.client.host
+    key = f"login_fail:{client_ip}"
+    
+    try:
+        current_fails = await redis_client.get(key)
+        if current_fails and int(current_fails) >= 5:
+            ttl = await redis_client.ttl(key)
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=f"Too many failed login attempts. Try again in {ttl} seconds."
+            )
+    except Exception as e:
+        logger.error(f"Could not connect to Redis for login rate limiting: {e}")
+    return True
 
 # --- IP Filtering Dependency ---
-async def ip_filter(request: Request):
+async def ip_filter(request: Request, settings: AppSettingsModel = Depends(get_settings)):
     client_ip = request.client.host
-    if not "*" in settings.ALLOWED_IPS and settings.ALLOWED_IPS and client_ip not in settings.ALLOWED_IPS:
+    allowed_ips = [ip.strip() for ip in settings.allowed_ips.split(',') if ip.strip()]
+    denied_ips = [ip.strip() for ip in settings.denied_ips.split(',') if ip.strip()]
+
+    if "*" not in allowed_ips and allowed_ips and client_ip not in allowed_ips:
         logger.warning(f"IP address {client_ip} denied by allow-list.")
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="IP address not allowed")
-    if settings.DENIED_IPS and client_ip in settings.DENIED_IPS:
+    if denied_ips and client_ip in denied_ips:
         logger.warning(f"IP address {client_ip} denied by deny-list.")
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="IP address has been blocked")
     return True
@@ -61,7 +111,6 @@ async def get_valid_api_key(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API Key"
         )
 
-    # --- UPDATED VALIDATION LOGIC ---
     if db_api_key.is_revoked:
         logger.warning(f"Attempt to use revoked API key with prefix '{prefix}'.")
         raise HTTPException(
@@ -73,7 +122,6 @@ async def get_valid_api_key(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="API Key is disabled"
         )
-    # --- END UPDATED LOGIC ---
 
     if not verify_api_key(secret, db_api_key.hashed_key):
         logger.warning(f"Invalid secret for API key with prefix '{prefix}'.")
@@ -88,22 +136,37 @@ async def get_valid_api_key(
 async def rate_limiter(
     request: Request,
     api_key: APIKey = Depends(get_valid_api_key),
+    settings: AppSettingsModel = Depends(get_settings),
 ):
     redis_client: redis.Redis = request.app.state.redis
     if not redis_client:
         return True
 
-    # --- UPDATED RATE LIMIT LOGIC ---
-    # Use per-key limit if available, otherwise fall back to global settings.
-    if api_key.rate_limit_requests is not None and api_key.rate_limit_window_minutes is not None:
-        limit = api_key.rate_limit_requests
-        window_minutes = api_key.rate_limit_window_minutes
-    else:
-        limit = settings.RATE_LIMIT_REQUESTS
-        window_minutes = settings.RATE_LIMIT_WINDOW_MINUTES
-    # --- END UPDATED LOGIC ---
+    # Determine rate limit: 0 or None/blank means unlimited (no rate limiting)
+    # Default mode in API key creation IS unlimited
+    # ONLY if something other than 0 or blank does it get any limitations
     
-    window = window_minutes * 60  # in seconds
+    # Check API key first - None, 0, or blank means unlimited for this key
+    # Don't fall back to settings - API keys are unlimited by default
+    if api_key.rate_limit_requests is None:
+        # None/blank = unlimited (default mode)
+        logger.debug(f"API key {api_key.key_prefix}: rate_limit_requests is None, skipping rate limiting")
+        return True
+    elif api_key.rate_limit_requests == 0:
+        # Explicitly set to 0 = unlimited
+        logger.debug(f"API key {api_key.key_prefix}: rate_limit_requests is 0, skipping rate limiting")
+        return True
+    elif api_key.rate_limit_requests > 0:
+        # Explicitly set to > 0 = apply this limit
+        limit = api_key.rate_limit_requests
+        window_minutes = api_key.rate_limit_window_minutes if api_key.rate_limit_window_minutes is not None and api_key.rate_limit_window_minutes > 0 else 1
+        logger.debug(f"API key {api_key.key_prefix}: Applying rate limit {limit} requests per {window_minutes} minutes")
+    else:
+        # Negative value - treat as unlimited
+        logger.debug(f"API key {api_key.key_prefix}: rate_limit_requests is negative ({api_key.rate_limit_requests}), skipping rate limiting")
+        return True
+    
+    window = window_minutes * 60
     key = f"rate_limit:{api_key.key_prefix}"
 
     try:
@@ -119,6 +182,9 @@ async def rate_limiter(
                 detail=f"Rate limit exceeded. Try again in {ttl} seconds.",
                 headers={"Retry-After": str(ttl)}
             )
+    except HTTPException:
+        # Re-raise HTTP exceptions (rate limit exceeded)
+        raise
     except Exception as e:
         logger.error(f"Could not connect to Redis for rate limiting: {e}")
     return True

@@ -1,0 +1,1927 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Chat Playground{% endblock %}
+
+{# This block is intentionally empty to remove the default page title and save vertical space. #}
+{% block header_title %}{% endblock %}
+
+{% block content %}
+<style>
+    /* Make the playground's parent containers fill the height and disable their scrolling/padding */
+    main {
+        overflow-y: hidden !important;
+        padding: 0 !important;
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+    }
+    main > .max-w-7xl {
+        max-width: none !important;
+        margin: 0 !important;
+        height: 100%;
+        flex-grow: 1;
+        display: flex;
+        flex-direction: column;
+    }
+</style>
+
+<div class="flex flex-col h-full card-style p-0 rounded-none">
+    <!-- Main container with sidebar and chat -->
+    <div class="flex flex-row flex-1 overflow-hidden">
+        <!-- Conversations Sidebar - expands into page -->
+        <div id="conversations-sidebar" class="hidden w-80 flex-shrink-0 card-style border-r border-white/10 flex flex-col">
+            <div class="card-header px-3 py-2 flex items-center justify-between border-b border-white/10">
+                <h3 class="text-sm font-semibold">Threaded Discussions</h3>
+                <button id="conversations-sidebar-close" class="p-1 rounded hover:bg-white/10 transition-colors">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                    </svg>
+                </button>
+            </div>
+            <div class="flex-1 overflow-y-auto px-2 py-1.5 flex flex-col">
+                <!-- Semantic Search -->
+                <div class="mb-2">
+                    <input 
+                        type="text" 
+                        id="conversation-search-input" 
+                        placeholder="Search conversations..." 
+                        class="w-full px-2 py-1.5 text-xs rounded-md bg-gray-800 border border-gray-700 text-white placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-[var(--color-primary-500)] focus:border-[var(--color-primary-500)]"
+                    />
+                    <div id="conversation-search-results" class="mt-1.5 space-y-0.5 hidden"></div>
+                </div>
+                <div id="conversations-list" class="space-y-0.5 flex-1">
+                    <!-- Conversations will be loaded here -->
+                </div>
+            </div>
+            <div class="px-2 py-1.5 border-t border-white/10">
+                <button id="new-conversation-btn" class="w-full px-3 py-1.5 text-xs bg-[var(--color-primary-600)] hover:bg-[var(--color-primary-700)] rounded text-white transition-colors">
+                    New Thread
+                </button>
+            </div>
+        </div>
+        
+        <!-- Chat Content Area -->
+        <div class="flex flex-col flex-1 min-w-0">
+            <!-- Header -->
+            <div class="card-header px-3 py-1.5 flex items-center justify-between flex-shrink-0">
+                <div class="flex items-center gap-1.5">
+                    <!-- Hamburger menu for conversations -->
+                    <button id="conversations-menu-toggle" class="p-1.5 rounded hover:bg-white/10" title="Threaded Discussions">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path>
+                        </svg>
+                    </button>
+                    <h2 class="text-base font-semibold">Chat</h2>
+                    <div id="system-prompt-indicator" class="hidden items-center gap-1 text-xs px-2 py-1 bg-sky-500/20 text-sky-300 rounded-full cursor-pointer" title="A system prompt is active. Click to edit.">
+                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0 3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+                        <span>System Prompt</span>
+                    </div>
+                </div>
+                <div class="flex items-center gap-1">
+                    <div id="thinking-toggle-container" class="hidden md:flex items-center gap-1 text-xs pr-1.5 border-r border-gray-600" title="Enable model thinking. This will show the reasoning trace before the final answer.">
+                        <span class="text-gray-400">Thinking</span>
+                        <button type="button" id="thinking-toggle" class="relative inline-flex flex-shrink-0 h-5 w-9 border-2 border-transparent rounded-full cursor-pointer transition-colors ease-in-out duration-200 focus:outline-none bg-gray-600">
+                            <span id="thinking-toggle-knob" class="pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow transform ring-0 transition ease-in-out duration-200 translate-x-0"></span>
+                        </button>
+                    </div>
+                    <div id="thinking-level-container" class="hidden md:flex items-center gap-1 text-xs pr-1.5 border-r border-gray-600" title="Set the thinking trace length for GPT-OSS models.">
+                        <span class="text-gray-400">Think</span>
+                        <select id="thinking-level-select" class="px-1.5 py-0.5 rounded text-xs">
+                            <option value="low">Low</option>
+                            <option value="medium" selected>Medium</option>
+                            <option value="high">High</option>
+                        </select>
+                    </div>
+                    <div id="image-annotation-toggle-container" class="hidden md:flex items-center gap-1 text-xs pr-1.5 border-r border-gray-600" title="Toggle image annotation mode. This adds a special system prompt to enable object detection and bounding box drawing on images.">
+                        <span class="text-gray-400">Annotate</span>
+                        <button type="button" id="image-annotation-toggle" class="relative inline-flex flex-shrink-0 h-5 w-9 border-2 border-transparent rounded-full cursor-pointer transition-colors ease-in-out duration-200 focus:outline-none bg-gray-600">
+                            <span id="image-annotation-toggle-knob" class="pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow transform ring-0 transition ease-in-out duration-200 translate-x-0"></span>
+                        </button>
+                    </div>
+                    <div id="verbosity-level-container" class="hidden md:flex items-center gap-1 text-xs pr-1.5 border-r border-gray-600" title="Set response verbosity level. Controls how detailed and comprehensive the responses are.">
+                        <span class="text-gray-400">Verbosity</span>
+                        <select id="verbosity-level-select" class="px-1.5 py-0.5 rounded text-xs">
+                            <option value="short">Short</option>
+                            <option value="medium">Medium</option>
+                            <option value="maximum" selected>Maximum</option>
+                        </select>
+                    </div>
+                    <div id="web-search-toggle-container" class="hidden md:flex items-center gap-1 text-xs pr-1.5 border-r border-gray-600" title="Enable web search. When ON, uses decision matrix to determine if query needs current/live data. When OFF, model responds with its knowledge only.">
+                        <span class="text-gray-400">Web Search</span>
+                        <button type="button" id="web-search-toggle" class="relative inline-flex flex-shrink-0 h-5 w-9 border-2 border-transparent rounded-full cursor-pointer transition-colors ease-in-out duration-200 focus:outline-none bg-gray-600">
+                            <span id="web-search-toggle-knob" class="pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow transform ring-0 transition ease-in-out duration-200 translate-x-0"></span>
+                        </button>
+                    </div>
+                    <div class="relative" id="add-message-menu-container">
+                        <button id="add-message-btn" title="Add Message" class="p-1.5 rounded hover:bg-white/10">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v3m0 0v3m0-3h3m-3 0H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                        </button>
+                        <div id="add-message-dropdown" class="absolute bottom-full right-0 mb-1.5 w-40 rounded shadow-lg bg-gray-800 ring-1 ring-black ring-opacity-5 hidden z-10">
+                            <a href="#" id="add-user-msg-btn" class="block px-3 py-1.5 text-xs text-gray-300 hover:bg-gray-700">Add User Message</a>
+                            <a href="#" id="add-ai-msg-btn" class="block px-3 py-1.5 text-xs text-gray-300 hover:bg-gray-700">Add AI Message</a>
+                        </div>
+                    </div>
+                    <button id="system-prompt-btn" title="Set System Prompt" class="p-1.5 rounded hover:bg-white/10">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0 3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+                    </button>
+                    <div class="relative flex items-center gap-1" id="model-selector-container">
+                        <select id="model-selector" class="px-2 py-1 text-xs rounded shadow-sm focus:outline-none focus:ring-[var(--color-primary-500)] focus:border-[var(--color-primary-500)] w-48">
+                            {% if model_groups %}
+                                {% for server_name, models in model_groups.items() %}
+                                    <optgroup label="{{ server_name }}">
+                                    {% for model in models %}
+                                        <option value="{{ model }}" {% if model == selected_model %}selected{% endif %}>
+                                            {{ model }}
+                                        </option>
+                                    {% endfor %}
+                                    </optgroup>
+                                {% endfor %}
+                            {% else %}
+                                <option value="" disabled>No chat models found</option>
+                            {% endif %}
+                        </select>
+                        <!-- Pricing display (shown on hover or next to selector) -->
+                        <div id="model-pricing-display" class="text-xs text-gray-400 cursor-help" 
+                             title="Click to see full pricing details"
+                             style="display: none;">
+                            <span id="pricing-text"></span>
+                        </div>
+                        <!-- Pricing tooltip modal -->
+                        <div id="model-pricing-tooltip" class="hidden fixed z-50 p-3 bg-gray-900 border border-gray-700 rounded shadow-xl min-w-[250px] max-w-[400px]">
+                            <div class="font-semibold mb-1.5 text-white text-sm" id="tooltip-model-name"></div>
+                            <div id="tooltip-pricing-content" class="text-xs text-gray-300 space-y-0.5"></div>
+                            <button id="close-pricing-tooltip" class="mt-2 text-xs text-gray-400 hover:text-white">Close</button>
+                        </div>
+                    </div>
+                    <!-- OpenRouter Credits Display -->
+                    <div id="openrouter-credits-display" class="hidden relative flex items-center gap-1.5 px-2 py-1 rounded bg-gray-800/50 border border-gray-700/50">
+                        <button id="refresh-credits-btn" class="p-0.5 rounded hover:bg-white/10 transition-colors" title="Refresh credits" onclick="updateOpenRouterCredits()">
+                            <svg class="w-3 h-3 text-gray-400 hover:text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                            </svg>
+                        </button>
+                        <svg class="w-3.5 h-3.5 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                        </svg>
+                        <div class="flex flex-col cursor-help">
+                            <div class="text-xs font-medium text-green-400" id="credits-remaining">--</div>
+                            <div class="text-[10px] text-gray-400" id="credits-usage">-- used</div>
+                        </div>
+                        <div id="credits-tooltip" class="hidden absolute bottom-full right-0 mb-1.5 w-48 p-2 bg-gray-900 border border-gray-700 rounded shadow-lg text-xs z-50">
+                            <div class="font-semibold mb-1 text-white">OpenRouter Credits</div>
+                            <div class="space-y-0.5 text-gray-300">
+                                <div>Remaining: <span id="tooltip-remaining" class="text-green-400 font-medium">--</span></div>
+                                <div>Used: <span id="tooltip-used" class="text-yellow-400">--</span></div>
+                                <div>Total: <span id="tooltip-total" class="text-gray-400">--</span></div>
+                            </div>
+                            <div class="mt-1.5 pt-1.5 border-t border-gray-700 text-[10px] text-gray-400">
+                                Click refresh icon to update
+                            </div>
+                        </div>
+                    </div>
+                    <button id="test-prompts-btn" title="Test Prompts" class="p-1.5 rounded hover:bg-white/10">
+                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"></path></svg>
+                    </button>
+                    <input type="file" id="import-chat-input" class="hidden" accept=".json">
+                    <button id="import-chat-btn" title="Import Chat" class="p-1.5 rounded hover:bg-white/10">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path></svg>
+                    </button>
+                    <button id="export-chat-btn" title="Export Chat" class="p-1.5 rounded hover:bg-white/10">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                    </button>
+                    <button id="clear-chat-btn" class="px-2 py-1 text-xs bg-red-600 text-white rounded hover:bg-red-700 focus:outline-none">Clear</button>
+                </div>
+            </div>
+
+            <!-- Chat Messages -->
+            <div id="chat-container" class="flex-grow px-3 py-2 overflow-y-auto space-y-3">
+                <!-- Messages will be injected here -->
+                <div class="text-center text-gray-400 text-sm">Select a model and start chatting.</div>
+            </div>
+            
+            <!-- Global Stats Bar -->
+            <div id="stats-bar" class="px-3 py-1 flex-shrink-0 border-t border-b border-white/10 text-xs text-gray-400 flex items-center justify-center gap-4">
+                <div>Mean TTFT: <span id="mean-ttft" class="font-semibold text-gray-300">N/A</span></div>
+                <div>Mean TPS: <span id="mean-tps" class="font-semibold text-gray-300">N/A</span></div>
+                <div id="model-name-display" class="text-gray-500"></div>
+            </div>
+
+            <!-- Message Input -->
+            <div class="px-3 py-2 flex-shrink-0">
+                <div id="doc-previews" class="doc-previews"></div>
+                <div id="image-previews" class="image-previews"></div>
+                <form id="chat-form" class="flex items-end gap-1.5">
+                    <button type="button" id="attach-img-btn" class="p-1.5 rounded hover:bg-white/10 flex-shrink-0" title="Attach Image">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
+                    </button>
+                    <input type="file" id="image-input" class="hidden" multiple accept="image/*">
+                    <button type="button" id="attach-doc-btn" class="p-1.5 rounded hover:bg-white/10 flex-shrink-0" title="Attach Document">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                    </button>
+                    <input type="file" id="doc-input" class="hidden" multiple accept=".txt,.md,.json,.csv,.py,.js,.html,.css,.xml,.yaml,.yml,.log,.ini,.toml,.sh,.bat">
+                    <textarea id="message-input" placeholder="Type your message here, or paste an image..." rows="1" class="flex-grow block w-full px-2.5 py-1.5 rounded shadow-sm focus:outline-none focus:ring-[var(--color-primary-500)] focus:border-[var(--color-primary-500)] text-sm resize-none"></textarea>
+                    <button type="submit" id="send-btn" class="justify-center py-1.5 px-4 border border-transparent rounded shadow-sm text-xs font-medium text-white bg-[var(--color-primary-600)] hover:bg-[var(--color-primary-700)] focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-[var(--color-primary-500)] self-end">Send</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    // --- Marked.js & Renderer Setup ---
+    const renderer = new marked.Renderer();
+    const originalCodeRenderer = renderer.code;
+    renderer.code = function(code, lang, escaped) {
+      const originalHtml = originalCodeRenderer.call(this, code, lang, escaped);
+      // We add a wrapper div that our script will later use to inject a copy button.
+      return `<div class="code-block-wrapper">${originalHtml}</div>`;
+    };
+    marked.setOptions({
+        renderer: renderer,
+        gfm: true,
+        breaks: true,
+        smartypants: false
+    });
+
+    // --- Main Rendering Function ---
+    function highlightAndMathify(element) {
+        element.querySelectorAll('pre code').forEach((block) => {
+            hljs.highlightElement(block);
+        });
+        if (window.renderMathInElement) {
+            renderMathInElement(element, {
+                delimiters: [
+                    {left: '$$', right: '$$', display: true}, {left: '$', right: '$', display: false},
+                    {left: '\\[', right: '\\]', display: true}, {left: '\\(', right: '\\)', display: false}
+                ],
+                throwOnError: false
+            });
+        }
+    }
+    
+    // --- DOM Elements ---
+    const chatContainer = document.getElementById('chat-container');
+    const chatForm = document.getElementById('chat-form');
+    const messageInput = document.getElementById('message-input');
+    const modelSelector = document.getElementById('model-selector');
+    const sendBtn = document.getElementById('send-btn');
+    const clearChatBtn = document.getElementById('clear-chat-btn');
+    const importChatBtn = document.getElementById('import-chat-btn');
+    const importChatInput = document.getElementById('import-chat-input');
+    const exportChatBtn = document.getElementById('export-chat-btn');
+    const testPromptsBtn = document.getElementById('test-prompts-btn');
+    const systemPromptBtn = document.getElementById('system-prompt-btn');
+    const systemPromptIndicator = document.getElementById('system-prompt-indicator');
+    const attachImgBtn = document.getElementById('attach-img-btn');
+    const imageInput = document.getElementById('image-input');
+    const imagePreviews = document.getElementById('image-previews');
+    const attachDocBtn = document.getElementById('attach-doc-btn');
+    const docInput = document.getElementById('doc-input');
+    const docPreviews = document.getElementById('doc-previews');
+    const annotationToggle = document.getElementById('image-annotation-toggle');
+    const annotationToggleKnob = document.getElementById('image-annotation-toggle-knob');
+    const thinkingToggleContainer = document.getElementById('thinking-toggle-container');
+    const thinkingToggle = document.getElementById('thinking-toggle');
+    const thinkingToggleKnob = document.getElementById('thinking-toggle-knob');
+    const thinkingLevelContainer = document.getElementById('thinking-level-container');
+    const thinkingLevelSelect = document.getElementById('thinking-level-select');
+    const webSearchToggleContainer = document.getElementById('web-search-toggle-container');
+    const webSearchToggle = document.getElementById('web-search-toggle');
+    const webSearchToggleKnob = document.getElementById('web-search-toggle-knob');
+    const addMessageMenuContainer = document.getElementById('add-message-menu-container');
+    const addMessageBtn = document.getElementById('add-message-btn');
+    const addMessageDropdown = document.getElementById('add-message-dropdown');
+    const addUserMsgBtn = document.getElementById('add-user-msg-btn');
+    const addAiMsgBtn = document.getElementById('add-ai-msg-btn');
+
+
+    // --- Constants & State ---
+    const ANNOTATION_PROMPT = `You are an advanced AI assistant for image analysis and annotation. Your primary function is to process images and return structured data for various tasks like object detection, text translation, and redaction.
+
+CRITICAL INSTRUCTIONS:
+1.  Your response MUST contain a single JSON array of annotation objects wrapped in <annotate> tags.
+2.  You can add conversational text AFTER the closing </annotate> tag to answer questions, but the JSON part is mandatory.
+3.  All coordinates MUST be normalized (values between 0.0 and 1.0). (0,0) is top-left, (1,1) is bottom-right.
+4.  If no objects are found or the task cannot be performed, return an empty array: <annotate>[]</annotate>
+
+SUPPORTED ANNOTATION SCHEMAS:
+
+1.  **Bounding Box (\`bbox\`)**: To draw a box around an object.
+    -   \`type\`: "bbox"
+    -   \`bbox\`: [x_min, y_min, x_max, y_max] (array of 4 numbers)
+    -   \`label\`: (string) The name of the object.
+    -   \`display\`: (optional object)
+        -   \`border_color\`: (string, hex code) e.g., "#ff00ff"
+        -   \`fill_opacity\`: (number, 0.0 to 1.0) Opacity of the box fill.
+
+    *Example*: Find a cat.
+    <annotate>
+    [
+      {"type": "bbox", "bbox": [0.1, 0.2, 0.4, 0.5], "label": "cat", "display": {"border_color": "#00ff00"}}
+    ]
+    </annotate>
+
+2.  **Point (\`point\`)**: To mark a specific point on the image.
+    -   \`type\`: "point"
+    -   \`coords\`: [x, y] (array of 2 numbers)
+    -   \`label\`: (string) The name of the point.
+    -   \`display\`: (optional object) with \`border_color\`.
+
+    *Example*: Mark the cat's eye.
+    <annotate>
+    [
+      {"type": "point", "coords": [0.25, 0.3], "label": "cat's left eye"}
+    ]
+    </annotate>
+
+3.  **Polygon (\`polygon\`)**: To outline a complex shape. (Note: The UI will render this as a dashed bounding box around the points).
+    -   \`type\`: "polygon"
+    -   \`points\`: [[x1, y1], [x2, y2], ...] (array of point arrays)
+    -   \`label\`: (string) The name of the shape.
+
+    *Example*: Outline the shape of the roof.
+    <annotate>
+    [
+      {"type": "polygon", "points": [[0.2, 0.1], [0.8, 0.1], [0.5, 0.4]], "label": "roof"}
+    ]
+    </annotate>
+
+4.  **Redaction (\`redaction\`)**: To blur a sensitive area.
+    -   \`type\`: "redaction"
+    -   \`bbox\`: [x_min, y_min, x_max, y_max]
+    -   \`action\`: "blur"
+    -   \`strength\`: (optional number) Blur intensity, e.g., 10.
+
+    *Example*: Hide the face.
+    <annotate>
+    [
+      {"type": "redaction", "bbox": [0.6, 0.2, 0.8, 0.4], "action": "blur", "strength": 8}
+    ]
+    </annotate>
+
+5.  **Replace (\`replace\`)**: To cover an area with a solid color and optional text.
+    -   \`type\`: "replace"
+    -   \`bbox\`: [x_min, y_min, x_max, y_max]
+    -   \`replacement_text\`: (string) Text to display in the box.
+    -   \`color\`: (optional string, hex code) Background color of the box.
+
+    *Example*: Cover the license plate.
+    <annotate>
+    [
+      {"type": "replace", "bbox": [0.4, 0.7, 0.6, 0.8], "replacement_text": "REDACTED", "color": "#000000"}
+    ]
+    </annotate>
+
+6.  **Translated Text (\`translated_text\`)**: To overlay translated text on the image.
+    -   \`type\`: "translated_text"
+    -   \`bbox\`: [x_min, y_min, x_max, y_max] (The box where the original text was).
+    -   \`translated_text\`: (string) The translated text.
+
+    *Example*: Translate the sign to Spanish.
+    <annotate>
+    [
+      {"type": "translated_text", "bbox": [0.3, 0.5, 0.7, 0.6], "translated_text": "Abierto"}
+    ]
+    </annotate>
+    
+7.  **Text Overlay (\`text\`)**: To place text directly onto the image.
+    -   \`type\`: "text"
+    -   \`text\`: (string) The text to display.
+    -   \`position\`: [x, y] (array of 2 numbers) The top-left corner for the text.
+    -   \`style\`: (optional object) A dictionary of CSS styles.
+        -   Supported keys: \`font_size\`, \`font_weight\`, \`color\`, \`background_color\`, \`padding\`, \`border_radius\`.
+
+    *Example*: Add a title and a caption.
+    <annotate>
+    [
+      {"type": "text", "text": "Sunset Dreams", "position": [0.05, 0.1], "style": {"font_size": "32px", "color": "white", "font_weight": "bold"}},
+      {"type": "text", "text": "A beautiful evening", "position": [0.05, 0.9], "style": {"font_size": "16px", "color": "white", "background_color": "rgba(0,0,0,0.5)", "padding": "5px"}}
+    ]
+    </annotate>`;
+    
+    const PREBUILT_SYSTEM_PROMPTS = [
+        { name: "Standard Assistant", prompt: "You are a helpful, respectful and honest assistant." },
+        { name: "Chain of Thought", prompt: "When you are asked a question, first provide a step-by-step plan of how you will answer the question. Then, produce the answer, explaining your reasoning at each step." },
+        { name: "Image Bounding Box Detection", prompt: ANNOTATION_PROMPT },
+        { name: "Python Expert", prompt: "You are an expert Python programmer. Provide concise, efficient, and well-documented code. Your answers should only contain code, unless asked otherwise." },
+        { name: "Creative Writer", prompt: "You are a creative writer, tasked with writing a compelling and imaginative story based on the user's prompt. Focus on vivid descriptions and engaging narrative." }
+    ];
+    
+    let messages = [];
+    let isLoading = false;
+    let isWebSearchEnabled = true; // Default to ON - uses decision matrix when enabled
+    let abortController = null;
+    let attachedImages = [];
+    let attachedDocs = [];
+    let lastSentImageURL = null;
+    let userSystemPrompt = '';
+    let isAnnotationMode = false;
+    let isThinkingMode = false;
+    const CUSTOM_PROMPTS_KEY = 'ollama_proxy_custom_prompts';
+    const LAST_MODEL_KEY = 'ollama_proxy_last_model';
+    const LAST_SYSTEM_PROMPT_KEY = 'ollama_proxy_last_system_prompt';
+    const CUSTOM_SYSTEM_PROMPTS_KEY = 'ollama_proxy_custom_system_prompts';
+    const ANNOTATION_MODE_KEY = 'ollama_proxy_annotation_mode';
+    const THINKING_MODE_KEY = 'ollama_proxy_thinking_mode';
+    const WEB_SEARCH_ENABLED_KEY = 'ollama_proxy_web_search_enabled';
+    const langExtMap = {
+        python: 'py', py: 'py', javascript: 'js', js: 'js', typescript: 'ts',
+        ts: 'ts', html: 'html', css: 'css', json: 'json', markdown: 'md', md: 'md',
+        bash: 'sh', sh: 'sh', shell: 'sh', sql: 'sql', yaml: 'yaml', yml: 'yml',
+        dockerfile: 'Dockerfile', java: 'java', c: 'c', cpp: 'cpp', csharp: 'cs',
+        go: 'go', rust: 'rs', ruby: 'rb', php: 'php', perl: 'pl', xml: 'xml',
+        ini: 'ini', toml: 'toml', plaintext: 'txt', text: 'txt', txt: 'txt'
+    };
+
+
+    // --- File & Image Handling ---
+    function handleImageFiles(files) {
+        for (const file of files) {
+            if (!file.type.startsWith('image/')){ continue }
+            const reader = new FileReader();
+            reader.onload = e => {
+                if (attachedImages.length < 5) {
+                    attachedImages.push(e.target.result);
+                    renderImagePreviews();
+                } else {
+                    alert("You can attach a maximum of 5 images.");
+                }
+            };
+            reader.readAsDataURL(file);
+        }
+    }
+    
+    function handleDocFiles(files) {
+        for (const file of files) {
+            const reader = new FileReader();
+            reader.onload = e => {
+                if (attachedDocs.length < 5) {
+                    attachedDocs.push({ name: file.name, content: e.target.result });
+                    renderDocPreviews();
+                } else {
+                    alert("You can attach a maximum of 5 documents.");
+                }
+            };
+            reader.onerror = () => alert(`Error reading file ${file.name}`);
+            reader.readAsText(file);
+        }
+    }
+
+    function renderImagePreviews() {
+        imagePreviews.innerHTML = '';
+        attachedImages.forEach((imgData, index) => {
+            const previewContainer = document.createElement('div');
+            previewContainer.className = 'img-preview-container';
+            const img = document.createElement('img');
+            img.src = imgData;
+            img.className = 'img-preview';
+            const removeBtn = document.createElement('button');
+            removeBtn.className = 'remove-img-btn';
+            removeBtn.innerHTML = '&times;';
+            removeBtn.onclick = () => {
+                attachedImages.splice(index, 1);
+                renderImagePreviews();
+            };
+            previewContainer.appendChild(img);
+            previewContainer.appendChild(removeBtn);
+            imagePreviews.appendChild(previewContainer);
+        });
+    }
+    
+    function renderDocPreviews() {
+        docPreviews.innerHTML = '';
+        attachedDocs.forEach((doc, index) => {
+            const el = document.createElement('div');
+            el.className = 'doc-preview-container';
+            el.innerHTML = `
+                <svg class="w-4 h-4 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                <span class="doc-preview-name" title="${doc.name}">${doc.name}</span>
+                <button class="remove-doc-btn" data-index="${index}" title="Remove file">&times;</button>
+            `;
+            docPreviews.appendChild(el);
+        });
+    }
+
+    function handlePaste(event) {
+        const files = event.clipboardData?.files;
+        if (files && files.length > 0) {
+            handleImageFiles(files);
+            event.preventDefault();
+        }
+    }
+    
+    // --- Test Prompts Modal ---
+    async function showTestPrompts() {
+        const response = await fetch("{{ url_for('admin_get_test_prompts') }}");
+        const prebuiltPrompts = await response.json();
+        const customPrompts = JSON.parse(localStorage.getItem(CUSTOM_PROMPTS_KEY) || '[]');
+        
+        let modalBody = `
+        <div class="space-y-4">
+            <details class="border border-gray-700 rounded-md">
+                <summary class="cursor-pointer p-3 font-semibold hover:bg-white/5">Add New Test Prompt</summary>
+                <div id="add-prompt-form" class="p-3 border-t border-gray-700 space-y-3">
+                    <input id="new-prompt-category" type="text" placeholder="Category (e.g., Coding)" class="w-full px-3 py-2 rounded-md">
+                    <input id="new-prompt-title" type="text" placeholder="Title (e.g., Python FizzBuzz)" class="w-full px-3 py-2 rounded-md">
+                    <textarea id="new-prompt-prompt" placeholder="Prompt text..." rows="3" class="w-full px-3 py-2 rounded-md"></textarea>
+                    <textarea id="new-prompt-expected" placeholder="Expected outcome..." rows="2" class="w-full px-3 py-2 rounded-md"></textarea>
+                    <button id="save-new-prompt-btn" class="py-2 px-4 bg-blue-600 text-white rounded hover:bg-blue-700">Save Custom Prompt</button>
+                </div>
+            </details>
+            <div class="prompts-list-container" style="max-height: 60vh; overflow-y: auto; padding-right: 0.5rem;"></div>
+        </div>`;
+        
+        window.showModal('Test Prompts Library', modalBody);
+        renderPromptsList(prebuiltPrompts, customPrompts);
+    }
+
+    function renderPromptsList(prebuilt, custom) {
+        const container = document.querySelector('.prompts-list-container');
+        if (!container) return;
+
+        const allPrompts = [...prebuilt.map(p => ({...p, isCustom: false})), ...custom.map(p => ({...p, isCustom: true}))];
+        const categories = allPrompts.reduce((acc, p) => {
+            if (!acc[p.category]) acc[p.category] = [];
+            acc[p.category].push(p);
+            return acc;
+        }, {});
+
+        let listHtml = '<div class="space-y-4">';
+        for (const category in categories) {
+            listHtml += `<h4 class="text-lg font-semibold mt-4">${category}</h4><div class="space-y-2">`;
+            categories[category].forEach(p => {
+                const deleteBtn = p.isCustom ? `<button class="delete-prompt-btn text-red-500 hover:text-red-700 text-lg" data-prompt-title="${escape(p.title)}" title="Delete">&times;</button>` : '';
+                listHtml += `
+                    <div class="p-3 border border-gray-700 rounded-md">
+                        <div class="flex justify-between items-start">
+                           <p class="font-semibold">${p.title} ${p.isCustom ? '<span class="text-xs font-normal text-blue-400">(Custom)</span>' : ''}</p>
+                           ${deleteBtn}
+                        </div>
+                        <p class="text-sm text-gray-400 italic mt-1"><strong>Expected:</strong> ${p.expected_outcome}</p>
+                        <button class="use-prompt-btn mt-2 text-sm text-[var(--color-primary-500)] hover:underline" data-prompt="${escape(p.prompt)}">Use this prompt</button>
+                    </div>`;
+            });
+            listHtml += '</div>';
+        }
+        listHtml += '</div>';
+        container.innerHTML = listHtml;
+    }
+
+    // --- System Prompt & Annotation Logic ---
+    function getFinalSystemPrompt() {
+        const prompts = [];
+        if (userSystemPrompt) {
+            prompts.push(userSystemPrompt);
+        }
+        if (isAnnotationMode) {
+            prompts.push(ANNOTATION_PROMPT);
+        }
+        return prompts.join('\n\n');
+    }
+    
+    function showSystemPromptModal() {
+        const customSystemPrompts = JSON.parse(localStorage.getItem(CUSTOM_SYSTEM_PROMPTS_KEY) || '[]');
+        
+        let modalBody = `<div class="space-y-4">
+            <div>
+                <label for="system-prompt-textarea" class="block text-sm font-medium mb-1">Current System Prompt</label>
+                <textarea id="system-prompt-textarea" rows="6" class="w-full p-2 rounded-md">${userSystemPrompt}</textarea>
+            </div>
+            <div class="flex flex-wrap gap-2 items-center">
+                <div class="relative">
+                     <button id="load-system-prompt-btn" class="py-2 px-4 text-sm bg-gray-600 rounded-md">Load Preset</button>
+                     <div id="system-prompt-dropdown" class="absolute bottom-full mb-2 w-72 rounded-md shadow-lg bg-gray-800 ring-1 ring-black ring-opacity-5 hidden z-20"></div>
+                </div>
+                <input id="new-system-prompt-name" type="text" placeholder="Save current as preset..." class="flex-grow p-2 rounded-md text-sm">
+                <button id="save-custom-system-prompt-btn" class="py-2 px-4 text-sm bg-blue-600 rounded-md">Save as Preset</button>
+            </div>
+             <div class="flex justify-end gap-4 pt-4 border-t border-gray-700">
+                <button id="clear-system-prompt-btn" class="py-2 px-4 bg-red-600 text-white rounded">Clear & Close</button>
+                <button id="apply-system-prompt-btn" class="py-2 px-4 bg-green-600 text-white rounded">Apply & Close</button>
+            </div>
+        </div>`;
+
+        window.showModal('System Prompt', modalBody);
+
+        const dropdown = document.getElementById('system-prompt-dropdown');
+        let dropdownHTML = '<div class="py-1">';
+        dropdownHTML += '<div class="px-4 py-2 text-xs uppercase text-gray-400">Pre-built</div>';
+        PREBUILT_SYSTEM_PROMPTS.forEach(p => {
+            dropdownHTML += `<a href="#" class="block px-4 py-2 text-sm text-gray-300 hover:bg-gray-700 system-prompt-item" data-prompt="${escape(p.prompt)}">${p.name}</a>`;
+        });
+        if (customSystemPrompts.length > 0) {
+            dropdownHTML += '<div class="px-4 py-2 mt-2 text-xs uppercase text-gray-400 border-t border-gray-600">Custom</div>';
+            customSystemPrompts.forEach(p => {
+                 dropdownHTML += `<div class="flex items-center justify-between px-4 py-2 text-sm text-gray-300 hover:bg-gray-700">
+                                    <a href="#" class="flex-grow system-prompt-item" data-prompt="${escape(p.prompt)}">${p.name}</a>
+                                    <button class="delete-system-prompt-btn text-red-500 hover:text-red-400 ml-2" data-name="${escape(p.name)}">&times;</button>
+                                 </div>`;
+            });
+        }
+        dropdownHTML += '</div>';
+        dropdown.innerHTML = dropdownHTML;
+    }
+
+    function updateSystemPromptIndicator() {
+        const finalPrompt = getFinalSystemPrompt();
+        if (finalPrompt) {
+            systemPromptIndicator.classList.remove('hidden');
+            systemPromptIndicator.classList.add('flex');
+        } else {
+            systemPromptIndicator.classList.add('hidden');
+            systemPromptIndicator.classList.remove('flex');
+        }
+    }
+    
+    function updateAnnotationToggleUI() {
+        if (isAnnotationMode) {
+            annotationToggle.classList.remove('bg-gray-600');
+            annotationToggle.classList.add('bg-[var(--color-primary-600)]');
+            annotationToggleKnob.classList.remove('translate-x-0');
+            annotationToggleKnob.classList.add('translate-x-5');
+        } else {
+            annotationToggle.classList.add('bg-gray-600');
+            annotationToggle.classList.remove('bg-[var(--color-primary-600)]');
+            annotationToggleKnob.classList.add('translate-x-0');
+            annotationToggleKnob.classList.remove('translate-x-5');
+        }
+    }
+    
+    function updateThinkingToggleUI() {
+        if (isThinkingMode) {
+            thinkingToggle.classList.remove('bg-gray-600');
+            thinkingToggle.classList.add('bg-[var(--color-primary-600)]');
+            thinkingToggleKnob.classList.remove('translate-x-0');
+            thinkingToggleKnob.classList.add('translate-x-5');
+        } else {
+            thinkingToggle.classList.add('bg-gray-600');
+            thinkingToggle.classList.remove('bg-[var(--color-primary-600)]');
+            thinkingToggleKnob.classList.add('translate-x-0');
+            thinkingToggleKnob.classList.remove('translate-x-5');
+        }
+    }
+
+    // --- Core Chat Functions ---
+    async function fetchStreamedResponse() {
+        if (isLoading) return;
+        abortController = new AbortController();
+        toggleLoading(true);
+        renderChat();
+
+        const botMessageWrapper = findLastBotMessageWrapper();
+        const botContentElement = botMessageWrapper.querySelector('.message-content');
+        const botStatsElement = botMessageWrapper.querySelector('.message-stats');
+        
+        const isScrolledToBottom = () => {
+            return chatContainer.scrollHeight - chatContainer.clientHeight <= chatContainer.scrollTop + 50;
+        };
+
+        let fullResponse = '';
+        let firstChunk = true;
+        const startTime = performance.now();
+        let streamError = null;
+        let currentTTFT = null;
+        let currentTPS = null;
+        let currentModel = null; // Track which model actually responded
+        let buffer = '';
+
+        const messagesForApi = messages.map(msg => Array.isArray(msg.content) && !msg.content.some(item => item.type === 'image_url') ? { ...msg, content: msg.content.find(item => item.type === 'text')?.text || '' } : msg);
+        
+        const finalSystemPrompt = getFinalSystemPrompt();
+        if (finalSystemPrompt && messages.length === 1 && messages[0].role === 'user') {
+            messagesForApi.unshift({ role: "system", content: finalSystemPrompt });
+        }
+
+        const body = { 
+            model: modelSelector.value, 
+            messages: messagesForApi,
+            conversation_id: currentConversationId
+        };
+
+        let thinkOption = null;
+        if (!thinkingToggleContainer.classList.contains('hidden') && isThinkingMode) {
+            if (!thinkingLevelContainer.classList.contains('hidden')) {
+                thinkOption = thinkingLevelSelect.value;
+            } else {
+                thinkOption = true;
+            }
+        }
+        if (thinkOption !== null) {
+            body.think_option = thinkOption;
+        }
+        
+        // Add verbosity level (default to maximum)
+        const verbositySelect = document.getElementById('verbosity-level-select');
+        if (verbositySelect && !verbositySelect.closest('.hidden')) {
+            body.verbosity = verbositySelect.value || 'maximum';
+        } else {
+            body.verbosity = 'maximum'; // Default to maximum if control is hidden
+        }
+        
+        // Add web search toggle state
+        body.enable_web_search = isWebSearchEnabled;
+
+        try {
+            const response = await fetch("{{ url_for('admin_playground_stream') }}", {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': '{{ csrf_token }}' },
+                body: JSON.stringify(body),
+                signal: abortController.signal
+            });
+            if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+
+            while (true) {
+                const shouldScroll = isScrolledToBottom(); // Check before DOM change
+                const { value, done } = await reader.read();
+                if (done) break;
+                
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop(); // Keep partial line for next chunk
+
+                for (const line of lines) {
+                    if (line.trim() === '') continue;
+                    try {
+                        const data = JSON.parse(line);
+
+                        // Capture model name from stream (important for "auto" mode) - capture from any chunk
+                        if (data.model) {
+                            currentModel = data.model;
+                        }
+
+                        if (firstChunk && data.message && typeof data.message.content === 'string') {
+                            firstChunk = false;
+                            botContentElement.innerHTML = ''; // Clear placeholder on first message with a content key
+                        }
+                        
+                        if (data.message?.content) { // Process only non-empty content for stats and rendering
+                            if (currentTTFT === null) { // If TTFT not set, this is the first real token
+                                const ttft = Math.round(performance.now() - startTime);
+                                currentTTFT = ttft;
+                                const modelDisplay = currentModel ? ` | <span class="text-blue-300">Model: ${currentModel}</span>` : '';
+                                botStatsElement.innerHTML = `<span>TTFT: ${ttft}ms</span>${modelDisplay}`;
+                                botStatsElement.classList.remove('hidden');
+                            }
+                            fullResponse += data.message.content;
+                            renderBotMessage(botContentElement, fullResponse, lastSentImageURL);
+                            highlightAndMathify(botContentElement);
+                        }
+                        
+                        if (data.done && data.hasOwnProperty('eval_count') && data.hasOwnProperty('eval_duration')) {
+                            const tokensPerSecond = data.eval_duration > 0 ? (data.eval_count / (data.eval_duration / 1e9)) : 0;
+                            currentTPS = tokensPerSecond;
+                            const modelDisplay = currentModel ? ` | <span class="text-blue-300">Model: ${currentModel}</span>` : '';
+                            if (botStatsElement.innerHTML.includes('TTFT')) {
+                                botStatsElement.innerHTML += ` | <span>Speed: ${tokensPerSecond.toFixed(2)} t/s</span>${modelDisplay}`;
+                            } else {
+                                botStatsElement.innerHTML = `<span>Speed: ${tokensPerSecond.toFixed(2)} t/s</span>${modelDisplay}`;
+                                botStatsElement.classList.remove('hidden');
+                            }
+                        }
+
+                        if (data.error) throw new Error(data.details || data.error);
+                    } catch (err) { console.warn("JSON parsing error in stream, probably a partial chunk. Buffering.", err) }
+                }
+                if (shouldScroll) {
+                    chatContainer.scrollTop = chatContainer.scrollHeight;
+                }
+            }
+        } catch (error) {
+            if (error.name === 'AbortError') {
+                console.log('Stream cancelled by user.');
+                streamError = null;
+                fullResponse += "\n\n*[Generation stopped by user]*";
+            } else {
+                streamError = error;
+                console.error('Error during chat stream:', error);
+                botContentElement.innerHTML = `<p class="text-red-400"><strong>Error:</strong> ${error.message}</p>`;
+                botStatsElement.classList.add('hidden');
+            }
+        } finally {
+            toggleLoading(false);
+            if (!streamError) {
+                const newMessage = {
+                    role: 'assistant',
+                    content: fullResponse,
+                    model_name: currentModel, // Store model name for display
+                    stats: (currentTTFT !== null && currentTPS !== null) ? { ttft: currentTTFT, tps: currentTPS, model: currentModel } : null
+                };
+                if (fullResponse.includes('<annotate>')) {
+                    newMessage.annotated_image_url = lastSentImageURL;
+                }
+                messages.push(newMessage);
+                updateGlobalStats();
+                
+                // Update OpenRouter credits after message completes (if using OpenRouter)
+                if (modelSelector.value && modelSelector.value.includes('/')) {
+                    setTimeout(() => {
+                        const updateCredits = window.updateOpenRouterCredits;
+                        if (updateCredits) updateCredits();
+                    }, 2000);
+                }
+            }
+            renderChat(); 
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+    }
+    
+    async function handleChatSubmit(e) {
+        if (e) e.preventDefault();
+        const userInput = messageInput.value.trim();
+        if ((!userInput && attachedImages.length === 0 && attachedDocs.length === 0) || isLoading) return;
+
+        let content = [];
+        let textForContent = userInput;
+        
+        if (attachedDocs.length > 0) {
+            const fileContentPrefix = attachedDocs.map(doc => `File content from "${doc.name}":\n\`\`\`\n${doc.content}\n\`\`\``).join('\n\n');
+            textForContent = `${fileContentPrefix}\n\n${textForContent}`;
+        }
+        
+        if (textForContent) content.push({ type: 'text', text: textForContent });
+        
+        if (attachedImages.length > 0) {
+            lastSentImageURL = attachedImages[attachedImages.length - 1]; // Store last image for annotation
+            attachedImages.forEach(img => content.push({ type: 'image_url', image_url: { url: img }}));
+        }
+        
+        messages.push({ role: 'user', content: content });
+        
+        messageInput.value = '';
+        messageInput.style.height = 'auto';
+        attachedImages = [];
+        attachedDocs = [];
+        renderImagePreviews();
+        renderDocPreviews();
+
+        await fetchStreamedResponse();
+    }
+    
+    function renderBotMessage(container, rawContent, imageUrlForAnnotation) {
+        const contentString = String(rawContent || '');
+        container.dataset.rawContent = rawContent;
+
+        // Split content by special tags, keeping the tags as delimiters. This is more robust.
+        const parts = contentString.split(/(<think>[\s\S]*?<\/think>|<think>[\s\S]*|<annotate>[\s\S]*?<\/annotate>)/g);
+        
+        let finalHtml = '';
+        for (const part of parts) {
+            if (!part) continue;
+
+            if (part.startsWith('<think>')) {
+                if (part.endsWith('</think>')) { // Closed block
+                    const thinkContent = part.slice(7, -8);
+                    finalHtml += `<details class="think-block"><summary>Thoughts</summary><div>${marked.parse(thinkContent.trim())}</div></details>`;
+                } else { // Unclosed (streaming) block
+                    const thinkContent = part.slice(7);
+                    finalHtml += `<details class="think-block" open><summary class="flex items-center gap-2">Thinking <svg class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg></summary><div>${marked.parse(thinkContent.trim())}</div></details>`;
+                }
+            } else if (part.startsWith('<annotate>')) {
+                const annotationJson = part.slice(10, -11);
+                const safeJson = annotationJson.replace(/'/g, "&apos;");
+                if (!imageUrlForAnnotation) {
+                    finalHtml += `<div class="text-red-400">Error: Could not find an image to annotate for this message.</div>`;
+                } else {
+                    const uniqueId = `annotation-container-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+                    finalHtml += `<div id="${uniqueId}" class="annotated-image-container relative mt-2 group" data-annotations='${safeJson}' data-image-url="${imageUrlForAnnotation}">
+                        <img src="${imageUrlForAnnotation}" class="block max-w-full h-auto rounded-md">
+                        <div class="annotation-overlay"></div>
+                        <div class="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                           <button class="save-annotation-btn p-2 rounded-md bg-gray-800/80 hover:bg-gray-700 text-white" title="Save Annotated Image">
+                               <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                           </button>
+                        </div>
+                    </div>`;
+                }
+            } else {
+                finalHtml += marked.parse(part);
+            }
+        }
+        container.innerHTML = finalHtml;
+    }
+
+
+    function renderChat() {
+        chatContainer.innerHTML = '';
+        if (messages.length === 0 && !isLoading) {
+            chatContainer.innerHTML = '<div class="text-center text-gray-400">Select a model and start chatting.</div>';
+            return;
+        }
+        messages.forEach((msg, index) => appendMessage(msg, index));
+        if (isLoading) {
+            appendMessage({role: 'assistant', content: ''}, messages.length, true);
+        }
+        highlightAndMathify(chatContainer);
+        processAnnotations();
+    }
+    
+    function appendMessage(msg, messageIndex, isPlaceholder = false) {
+        const { role, content, stats } = msg;
+        const messageWrapper = document.createElement('div');
+        messageWrapper.className = `flex gap-4 message-wrapper group ${role === 'user' ? 'justify-end' : 'justify-start'}`;
+        messageWrapper.dataset.messageIndex = messageIndex;
+
+        const contentWrapper = document.createElement('div');
+        contentWrapper.className = `max-w-3xl w-full p-3 rounded-lg relative ${role === 'user' ? 'bg-[var(--color-primary-700)] text-white' : 'bg-gray-700/50'}`;
+        
+        const actionsDiv = document.createElement('div');
+        actionsDiv.className = 'message-actions absolute -top-3 right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity';
+        
+        const contentDiv = document.createElement('div');
+        contentDiv.className = 'message-content prose prose-invert max-w-none prose-p:my-2 prose-pre:my-2 prose-code:font-sans';
+
+        const statsDiv = document.createElement('div');
+        statsDiv.className = 'message-stats text-xs text-gray-400 mt-2 space-x-2 hidden';
+
+        if (isPlaceholder) {
+            contentDiv.innerHTML = `<div class="flex items-center gap-2 text-gray-400"><svg class="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg><span>Waiting for response...</span></div>`;
+        } else {
+            let actionsHTML = `
+                <button class="copy-btn p-1 rounded-full bg-gray-800 hover:bg-gray-700" title="Copy"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg></button>
+                <button class="edit-btn p-1 rounded-full bg-gray-800 hover:bg-gray-700" title="Edit"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.5L15.232 5.232z"></path></svg></button>
+                <button class="delete-btn p-1 rounded-full bg-gray-800 hover:bg-gray-700" title="Delete"><svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"></path></svg></button>`;
+            if (role === 'assistant') {
+                actionsHTML += `<button class="regenerate-btn p-1 rounded-full bg-gray-800 hover:bg-gray-700" title="Regenerate"><svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"></path></svg></button>`;
+            }
+            actionsDiv.innerHTML = actionsHTML;
+
+            if (role === 'assistant') {
+                renderBotMessage(contentDiv, content, msg.annotated_image_url);
+                if (stats && stats.ttft !== null && stats.tps !== null) {
+                    const modelDisplay = stats.model ? ` | <span class="text-blue-300">Model: ${stats.model}</span>` : '';
+                    statsDiv.innerHTML = `<span>TTFT: ${stats.ttft}ms</span> | <span>Speed: ${stats.tps.toFixed(2)} t/s</span>${modelDisplay}`;
+                    statsDiv.classList.remove('hidden');
+                }
+            } else {
+                let textContent = '';
+                contentDiv.innerHTML = ''; 
+                if (Array.isArray(content)) {
+                    content.forEach(part => {
+                        if (part.type === 'text' && part.text) {
+                            textContent = part.text;
+                            contentDiv.insertAdjacentHTML('beforeend', marked.parse(part.text));
+                        } else if (part.type === 'image_url') {
+                            const imageContainer = document.createElement('div');
+                            imageContainer.className = 'image-message-container';
+                            imageContainer.innerHTML = `<img src="${part.image_url.url}" class="block max-w-full h-auto rounded-md mt-2">`;
+                            contentDiv.appendChild(imageContainer);
+                        }
+                    });
+                } else if (typeof content === 'string') {
+                    textContent = content;
+                    contentDiv.innerHTML = marked.parse(content);
+                }
+                contentDiv.dataset.rawContent = textContent;
+            }
+
+            contentDiv.querySelectorAll('.code-block-wrapper').forEach(wrapper => {
+                const btnContainer = document.createElement('div');
+                btnContainer.className = 'playground-code-actions';
+
+                const copyBtn = document.createElement('button');
+                copyBtn.className = 'playground-code-btn copy-code-btn';
+                copyBtn.title = 'Copy code';
+                copyBtn.innerHTML = `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>`;
+
+                const saveBtn = document.createElement('button');
+                saveBtn.className = 'playground-code-btn save-code-btn';
+                saveBtn.title = 'Save as file';
+                saveBtn.innerHTML = `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>`;
+
+                btnContainer.appendChild(copyBtn);
+                btnContainer.appendChild(saveBtn);
+                wrapper.appendChild(btnContainer);
+            });
+        }
+
+        contentWrapper.appendChild(actionsDiv);
+        contentWrapper.appendChild(contentDiv);
+        if (role === 'assistant') contentWrapper.appendChild(statsDiv);
+        messageWrapper.appendChild(contentWrapper);
+        chatContainer.appendChild(messageWrapper);
+    }
+
+    function processAnnotations() {
+        chatContainer.querySelectorAll('.annotated-image-container').forEach(container => {
+            if (container.dataset.processed) return;
+            
+            const annotationsJson = container.dataset.annotations.replace(/&apos;/g, "'");
+            try {
+                const annotations = JSON.parse(annotationsJson);
+                const overlay = container.querySelector('.annotation-overlay');
+                drawAnnotations(annotations, overlay);
+                container.dataset.processed = "true";
+            } catch (e) {
+                console.error("Failed to parse or draw annotation JSON:", e);
+                const errorP = document.createElement('p');
+                errorP.className = 'text-red-400 text-xs italic mt-1';
+                errorP.textContent = 'Error rendering annotations.';
+                container.appendChild(errorP);
+            }
+        });
+    }
+    
+    function drawAnnotations(annotations, overlay) {
+        if (!overlay) return;
+        overlay.innerHTML = '';
+
+        // --- BACKWARD COMPATIBILITY SHIM ---
+        // Transform old format {"box": [...], "class": "..."} to new format
+        const transformedAnnotations = annotations.map(ann => {
+            if (ann.box && ann.class) {
+                return { type: 'bbox', bbox: ann.box, label: ann.class };
+            }
+            // If it has 'bbox' but no 'type', assume it's a bbox.
+            if (ann.bbox && !ann.type) {
+                ann.type = 'bbox';
+            }
+            return ann;
+        });
+
+        transformedAnnotations.forEach(ann => {
+            const el = document.createElement('div');
+            el.className = 'annotation-element';
+            
+            const display = ann.display || {};
+            const borderColor = display.border_color || '#ff00ff';
+            
+            // Shared label logic
+            let labelEl = '';
+            if (ann.label) {
+                labelEl = `<div class="annotation-label" style="background-color: ${borderColor};">${ann.label}</div>`;
+            }
+
+            switch (ann.type) {
+                case 'bbox':
+                case 'annotation': // Treat as bbox
+                    const [x1, y1, x2, y2] = ann.bbox;
+                    el.style.left = `${x1 * 100}%`;
+                    el.style.top = `${y1 * 100}%`;
+                    el.style.width = `${(x2 - x1) * 100}%`;
+                    el.style.height = `${(y2 - y1) * 100}%`;
+                    if (display.show_border !== false) {
+                        el.style.border = `${display.border_width || 2}px solid ${borderColor}`;
+                    }
+                    el.style.backgroundColor = `rgba(255, 255, 255, ${display.fill_opacity || 0.1})`;
+                    el.innerHTML = labelEl;
+                    break;
+                case 'point':
+                    const [px, py] = ann.coords;
+                    el.classList.add('point');
+                    el.style.left = `${px * 100}%`;
+                    el.style.top = `${py * 100}%`;
+                    el.style.backgroundColor = borderColor;
+                    el.innerHTML = labelEl;
+                    break;
+                case 'polygon':
+                    // For simplicity, we'll draw a bounding box around the polygon points.
+                    // True polygon drawing would require SVG.
+                    const allX = ann.points.map(p => p[0]);
+                    const allY = ann.points.map(p => p[1]);
+                    const minX = Math.min(...allX);
+                    const minY = Math.min(...allY);
+                    const maxX = Math.max(...allX);
+                    const maxY = Math.max(...allY);
+                    el.style.left = `${minX * 100}%`;
+                    el.style.top = `${minY * 100}%`;
+                    el.style.width = `${(maxX - minX) * 100}%`;
+                    el.style.height = `${(maxY - minY) * 100}%`;
+                    el.style.border = `2px dashed ${borderColor}`;
+                    el.innerHTML = labelEl;
+                    break;
+                case 'redaction':
+                case 'replace':
+                    const [rx1, ry1, rx2, ry2] = ann.bbox;
+                    el.style.left = `${rx1 * 100}%`;
+                    el.style.top = `${ry1 * 100}%`;
+                    el.style.width = `${(rx2 - rx1) * 100}%`;
+                    el.style.height = `${(ry2 - ry1) * 100}%`;
+                    if (ann.action === 'blur') {
+                        el.style.backdropFilter = `blur(${ann.strength || 5}px)`;
+                    } else if (ann.type === 'replace') {
+                        el.classList.add('text-overlay');
+                        el.style.backgroundColor = ann.color || '#000000';
+                        el.style.color = 'white';
+                        el.textContent = ann.replacement_text;
+                    }
+                    break;
+                 case 'translated_text':
+                    const [tx1, ty1, tx2, ty2] = ann.bbox;
+                    el.classList.add('text-overlay');
+                    el.style.left = `${tx1 * 100}%`;
+                    el.style.top = `${ty1 * 100}%`;
+                    el.style.width = `${(tx2 - tx1) * 100}%`;
+                    el.style.height = `${(ty2 - ty1) * 100}%`;
+                    el.style.backgroundColor = 'white';
+                    el.style.color = 'black';
+                    el.textContent = ann.translated_text;
+                    break;
+                case 'text':
+                    const [tx, ty] = ann.position;
+                    el.style.left = `${tx * 100}%`;
+                    el.style.top = `${ty * 100}%`;
+                    el.textContent = ann.text;
+
+                    if (ann.style) {
+                        const allowedStyles = ['fontSize', 'fontWeight', 'color', 'backgroundColor', 'padding', 'borderRadius', 'textAlign', 'fontFamily'];
+                        for (const [key, value] of Object.entries(ann.style)) {
+                            const camelKey = key.replace(/_([a-z])/g, g => g[1].toUpperCase());
+                            if (allowedStyles.includes(camelKey)) {
+                                el.style[camelKey] = value;
+                            }
+                        }
+                    }
+                    if (!el.style.color) el.style.color = 'white';
+                    if (!el.style.backgroundColor) el.style.backgroundColor = 'rgba(0,0,0,0.5)';
+                    if (!el.style.padding) el.style.padding = '2px 4px';
+                    if (!el.style.borderRadius) el.style.borderRadius = '3px';
+                    el.style.whiteSpace = 'nowrap';
+                    break;
+            }
+            overlay.appendChild(el);
+        });
+    }
+
+    async function saveAnnotatedImage(imageUrl, container) {
+        const image = container.querySelector('img');
+        const annotationsJson = container.dataset.annotations.replace(/&apos;/g, "'");
+        const annotations = JSON.parse(annotationsJson);
+        
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        canvas.width = image.naturalWidth;
+        canvas.height = image.naturalHeight;
+        ctx.drawImage(image, 0, 0);
+
+        // Draw annotations onto canvas
+        annotations.forEach(ann => {
+            // Simplified drawing logic for saving. Add more detail if needed.
+            const display = ann.display || {};
+            const color = display.border_color || '#ff00ff';
+            ctx.strokeStyle = color;
+            ctx.fillStyle = color;
+            ctx.lineWidth = 2;
+            
+            if (ann.type === 'bbox' || ann.type === 'annotation') {
+                const [x1, y1, x2, y2] = ann.bbox;
+                ctx.strokeRect(x1 * canvas.width, y1 * canvas.height, (x2 - x1) * canvas.width, (y2 - y1) * canvas.height);
+            } else if (ann.type === 'redaction' || ann.type === 'replace') {
+                const [x1, y1, x2, y2] = ann.bbox;
+                ctx.fillStyle = ann.color || '#000000';
+                ctx.fillRect(x1 * canvas.width, y1 * canvas.height, (x2 - x1) * canvas.width, (y2 - y1) * canvas.height);
+            }
+        });
+
+        const link = document.createElement('a');
+        link.download = `annotated-image-${Date.now()}.png`;
+        link.href = canvas.toDataURL('image/png');
+        link.click();
+    }
+    
+    function findLastBotMessageWrapper() {
+        const wrappers = chatContainer.querySelectorAll('.message-wrapper');
+        return wrappers[wrappers.length - 1];
+    }
+
+    function toggleLoading(state) {
+        isLoading = state;
+        messageInput.disabled = state;
+        if (state) {
+            sendBtn.innerHTML = `<svg class="w-5 h-5 mr-1" fill="currentColor" viewBox="0 0 20 20"><path d="M5 3a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2V5a2 2 0 00-2-2H5z"></path></svg> Stop`;
+            sendBtn.classList.remove('bg-[var(--color-primary-600)]', 'hover:bg-[var(--color-primary-700)]');
+            sendBtn.classList.add('bg-red-600', 'hover:bg-red-700');
+            sendBtn.type = 'button';
+        } else {
+            sendBtn.innerHTML = 'Send';
+            sendBtn.classList.add('bg-[var(--color-primary-600)]', 'hover:bg-[var(--color-primary-700)]');
+            sendBtn.classList.remove('bg-red-600', 'hover:bg-red-700');
+            sendBtn.type = 'submit';
+            abortController = null;
+        }
+    }
+    
+    function updateGlobalStats() {
+        const stats = messages.filter(m => m.role === 'assistant' && m.stats).map(m => m.stats);
+        const meanTTFTEl = document.getElementById('mean-ttft');
+        const meanTPSEl = document.getElementById('mean-tps');
+        const modelNameDisplay = document.getElementById('model-name-display');
+
+        if (stats.length === 0) {
+            meanTTFTEl.textContent = 'N/A';
+            meanTPSEl.textContent = 'N/A';
+            modelNameDisplay.textContent = '';
+            return;
+        }
+
+        const totalTTFT = stats.reduce((sum, s) => sum + s.ttft, 0);
+        const totalTPS = stats.reduce((sum, s) => sum + s.tps, 0);
+
+        const meanTTFT = totalTTFT / stats.length;
+        const meanTPS = totalTPS / stats.length;
+
+        meanTTFTEl.textContent = `${Math.round(meanTTFT)} ms`;
+        meanTPSEl.textContent = `${meanTPS.toFixed(2)} t/s`;
+        
+        // Display the model name from the last assistant message
+        const lastAssistantMsg = messages.filter(m => m.role === 'assistant').pop();
+        if (lastAssistantMsg && lastAssistantMsg.model_name) {
+            modelNameDisplay.textContent = `Model: ${lastAssistantMsg.model_name}`;
+        } else {
+            modelNameDisplay.textContent = '';
+        }
+    }
+
+    function exportChat() {
+        if (messages.length === 0) return;
+        const blob = new Blob([JSON.stringify(messages, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `chat-history-${new Date().toISOString()}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+    }
+
+    function importChat(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            try {
+                const imported = JSON.parse(e.target.result);
+                if (Array.isArray(imported) && imported.every(m => m.role && m.content !== undefined)) {
+                    messages = imported;
+                    renderChat();
+                    updateGlobalStats();
+                } else { alert('Invalid chat file format.'); }
+            } catch (error) { alert('Failed to read or parse chat file.'); }
+        };
+        reader.readAsText(file);
+        event.target.value = null;
+    }
+
+    function copyToClipboard(text, button) {
+        const originalContent = button.innerHTML;
+        navigator.clipboard.writeText(text).then(() => {
+            button.innerHTML = 'Copied!';
+            setTimeout(() => { button.innerHTML = originalContent; }, 2000);
+        }).catch(() => { // Fallback for http or other issues
+            const textArea = document.createElement('textarea');
+            textArea.value = text;
+            textArea.style.position = 'fixed'; textArea.style.opacity = '0';
+            document.body.appendChild(textArea);
+            textArea.focus(); textArea.select();
+            try {
+                document.execCommand('copy');
+                button.innerHTML = 'Copied!';
+                setTimeout(() => { button.innerHTML = originalContent; }, 2000);
+            } catch (err) { alert('Failed to copy'); }
+            document.body.removeChild(textArea);
+        });
+    }
+    
+    function enterEditMode(messageWrapper, messageIndex) {
+        const contentWrapper = messageWrapper.querySelector('.rounded-lg');
+        const contentDiv = contentWrapper.querySelector('.message-content');
+        contentDiv.style.display = 'none';
+        contentWrapper.querySelector('.message-actions').style.display = 'none';
+
+        const editContainer = document.createElement('div');
+        editContainer.className = 'edit-container';
+        const textarea = document.createElement('textarea');
+        textarea.className = 'block w-full px-3 py-2 rounded-md shadow-sm sm:text-sm resize-y bg-gray-900 text-white';
+        textarea.value = contentDiv.dataset.rawContent;
+        textarea.rows = Math.max(5, (textarea.value.match(/\n/g) || []).length + 1);
+        const buttonGroup = document.createElement('div');
+        buttonGroup.className = 'flex justify-end gap-2 mt-2';
+        
+        const saveAndSubmitBtn = document.createElement('button');
+        saveAndSubmitBtn.textContent = 'Save & Submit';
+        saveAndSubmitBtn.className = 'py-1 px-3 bg-green-600 text-white rounded hover:bg-green-700 text-sm';
+        saveAndSubmitBtn.onclick = () => saveAndSubmitEdit(messageIndex, textarea.value);
+        
+        const saveBtn = document.createElement('button');
+        saveBtn.textContent = 'Save';
+        saveBtn.className = 'py-1 px-3 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm';
+        saveBtn.onclick = () => saveEdit(messageIndex, textarea.value);
+        
+        const cancelBtn = document.createElement('button');
+        cancelBtn.textContent = 'Cancel';
+        cancelBtn.className = 'py-1 px-3 bg-gray-600 text-white rounded hover:bg-gray-700 text-sm';
+        cancelBtn.onclick = () => {
+            editContainer.remove();
+            contentDiv.style.display = 'block';
+            contentWrapper.querySelector('.message-actions').style.display = 'flex';
+        };
+
+        buttonGroup.appendChild(cancelBtn);
+        buttonGroup.appendChild(saveBtn);
+        buttonGroup.appendChild(saveAndSubmitBtn);
+        editContainer.appendChild(textarea);
+        editContainer.appendChild(buttonGroup);
+        contentWrapper.appendChild(editContainer);
+        textarea.focus();
+    }
+    
+    function saveEdit(messageIndex, newContent) {
+        const oldMessage = messages[messageIndex];
+        if (Array.isArray(oldMessage.content)) {
+            const textPart = oldMessage.content.find(p => p.type === 'text');
+            if (textPart) textPart.text = newContent; else oldMessage.content.unshift({type: 'text', text: newContent});
+        } else {
+            oldMessage.content = newContent;
+        }
+        renderChat();
+    }
+    
+    function saveAndSubmitEdit(messageIndex, newContent) {
+        messages.splice(messageIndex + 1); // Remove all subsequent messages
+        saveEdit(messageIndex, newContent);
+        fetchStreamedResponse();
+    }
+    
+    function insertEditableMessage(role) {
+        messages.push({ role: role, content: 'New message...' });
+        renderChat();
+        const newMessageWrapper = chatContainer.lastElementChild;
+        if (newMessageWrapper) {
+            enterEditMode(newMessageWrapper, messages.length - 1);
+        }
+    }
+    
+    function updateThinkingControls() {
+        const simpleThinkModels = ['qwen', 'deepseek'];
+        const gptOssKeyword = 'gpt-oss';
+        const selectedModel = modelSelector.value.toLowerCase();
+
+        const isGptOss = selectedModel.includes(gptOssKeyword);
+        const isSimpleThink = simpleThinkModels.some(keyword => selectedModel.includes(keyword));
+
+        thinkingToggleContainer.classList.add('hidden');
+        thinkingLevelContainer.classList.add('hidden');
+
+        if (isGptOss || isSimpleThink) {
+            thinkingToggleContainer.classList.remove('hidden');
+        }
+
+        if (isGptOss && isThinkingMode) {
+            thinkingLevelContainer.classList.remove('hidden');
+        }
+    }
+
+
+    // --- Event Listeners & Init ---
+    messageInput.addEventListener('input', () => { messageInput.style.height = 'auto'; messageInput.style.height = `${Math.min(messageInput.scrollHeight, 200)}px`; });
+    messageInput.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); chatForm.dispatchEvent(new Event('submit', { cancelable: true })); } });
+    messageInput.addEventListener('paste', handlePaste);
+    clearChatBtn.addEventListener('click', () => { messages = []; attachedImages = []; attachedDocs = []; renderChat(); renderImagePreviews(); renderDocPreviews(); updateGlobalStats(); chatContainer.innerHTML = '<div class="text-center text-gray-400">Chat cleared.</div>'; });
+    exportChatBtn.addEventListener('click', exportChat);
+    importChatBtn.addEventListener('click', () => importChatInput.click());
+    importChatInput.addEventListener('change', importChat);
+    chatForm.addEventListener('submit', handleChatSubmit);
+    testPromptsBtn.addEventListener('click', showTestPrompts);
+    systemPromptBtn.addEventListener('click', showSystemPromptModal);
+    systemPromptIndicator.addEventListener('click', showSystemPromptModal);
+    attachImgBtn.addEventListener('click', () => imageInput.click());
+    imageInput.addEventListener('change', (e) => handleImageFiles(e.target.files));
+    attachDocBtn.addEventListener('click', () => docInput.click());
+    docInput.addEventListener('change', (e) => handleDocFiles(e.target.files));
+    addMessageBtn.addEventListener('click', (e) => { e.stopPropagation(); addMessageDropdown.classList.toggle('hidden'); });
+    addUserMsgBtn.addEventListener('click', (e) => { e.preventDefault(); insertEditableMessage('user'); addMessageDropdown.classList.add('hidden'); });
+    addAiMsgBtn.addEventListener('click', (e) => { e.preventDefault(); insertEditableMessage('assistant'); addMessageDropdown.classList.add('hidden'); });
+    document.addEventListener('click', (e) => { if (!addMessageMenuContainer.contains(e.target)) addMessageDropdown.classList.add('hidden'); });
+
+    sendBtn.addEventListener('click', () => {
+        if (isLoading && abortController) {
+            abortController.abort();
+        }
+    });
+
+    // Pricing data from server
+    const modelPricing = {{ (model_pricing or {}) | tojson }};
+    
+    function updatePricingDisplay() {
+        const selectedModel = modelSelector.value;
+        const pricing = modelPricing[selectedModel];
+        const pricingDisplay = document.getElementById('model-pricing-display');
+        const pricingText = document.getElementById('pricing-text');
+        
+        if (pricing && (pricing.input || pricing.output)) {
+            let text = '';
+            if (pricing.input && pricing.input !== 'N/A') {
+                text += `💰 ${pricing.input} / ${pricing.output || 'N/A'}`;
+                if (pricing.web_search && pricing.web_search !== 'N/A') {
+                    text += ` | 🔍 ${pricing.web_search}`;
+                }
+            }
+            pricingText.textContent = text;
+            pricingDisplay.style.display = 'block';
+        } else {
+            pricingDisplay.style.display = 'none';
+        }
+    }
+    
+    function showPricingTooltip(event) {
+        const selectedModel = modelSelector.value;
+        const pricing = modelPricing[selectedModel];
+        const tooltip = document.getElementById('model-pricing-tooltip');
+        const tooltipName = document.getElementById('tooltip-model-name');
+        const tooltipContent = document.getElementById('tooltip-pricing-content');
+        
+        if (!pricing) {
+            return;
+        }
+        
+        tooltipName.textContent = selectedModel;
+        let content = '';
+        if (pricing.input && pricing.input !== 'N/A') {
+            content += `<div>📥 Input: <strong>${pricing.input}</strong></div>`;
+        }
+        if (pricing.output && pricing.output !== 'N/A') {
+            content += `<div>📤 Output: <strong>${pricing.output}</strong></div>`;
+        }
+        if (pricing.web_search && pricing.web_search !== 'N/A') {
+            content += `<div>🔍 Web Search: <strong>${pricing.web_search}</strong></div>`;
+        }
+        if (pricing.request && pricing.request !== 'N/A') {
+            content += `<div>📋 Per Request: <strong>${pricing.request}</strong></div>`;
+        }
+        if (pricing.image && pricing.image !== 'N/A') {
+            content += `<div>🖼️ Image: <strong>${pricing.image}</strong></div>`;
+        }
+        if (!content) {
+            content = '<div class="text-gray-500">No pricing information available</div>';
+        }
+        tooltipContent.innerHTML = content;
+        
+        // Position tooltip
+        const rect = event.target.getBoundingClientRect();
+        tooltip.style.left = `${rect.left}px`;
+        tooltip.style.top = `${rect.bottom + 5}px`;
+        tooltip.classList.remove('hidden');
+    }
+    
+    document.getElementById('model-pricing-display').addEventListener('click', showPricingTooltip);
+    document.getElementById('close-pricing-tooltip').addEventListener('click', () => {
+        document.getElementById('model-pricing-tooltip').classList.add('hidden');
+    });
+    
+    modelSelector.addEventListener('change', () => {
+        localStorage.setItem(LAST_MODEL_KEY, modelSelector.value);
+        localStorage.setItem('playground_selected_model', modelSelector.value);  // Store for description generation
+        updateThinkingControls();
+        updatePricingDisplay();
+    });
+    
+    // Initial pricing display
+    updatePricingDisplay();
+    
+    annotationToggle.addEventListener('click', () => {
+        isAnnotationMode = !isAnnotationMode;
+        localStorage.setItem(ANNOTATION_MODE_KEY, isAnnotationMode);
+        updateAnnotationToggleUI();
+        updateSystemPromptIndicator();
+    });
+    
+    thinkingToggle.addEventListener('click', () => {
+        isThinkingMode = !isThinkingMode;
+        localStorage.setItem(THINKING_MODE_KEY, isThinkingMode);
+        updateThinkingToggleUI();
+        updateThinkingControls();
+    });
+    
+    webSearchToggle.addEventListener('click', () => {
+        isWebSearchEnabled = !isWebSearchEnabled;
+        localStorage.setItem('webSearchEnabled', isWebSearchEnabled);
+        updateWebSearchToggleUI();
+    });
+    
+    function updateWebSearchToggleUI() {
+        if (isWebSearchEnabled) {
+            webSearchToggle.classList.remove('bg-gray-600');
+            webSearchToggle.classList.add('bg-[var(--color-primary-600)]');
+            webSearchToggleKnob.classList.remove('translate-x-0');
+            webSearchToggleKnob.classList.add('translate-x-5');
+        } else {
+            webSearchToggle.classList.add('bg-gray-600');
+            webSearchToggle.classList.remove('bg-[var(--color-primary-600)]');
+            webSearchToggleKnob.classList.add('translate-x-0');
+            webSearchToggleKnob.classList.remove('translate-x-5');
+        }
+    }
+
+    document.addEventListener('click', async e => {
+        const copyBtn = e.target.closest('.copy-btn');
+        if (copyBtn) {
+            const contentDiv = copyBtn.closest('.rounded-lg').querySelector('.message-content');
+            copyToClipboard(contentDiv.dataset.rawContent || '', copyBtn); return;
+        }
+        
+        const codeCopyBtn = e.target.closest('.copy-code-btn');
+        if (codeCopyBtn) {
+            const codeEl = codeCopyBtn.closest('.code-block-wrapper').querySelector('code');
+            copyToClipboard(codeEl.innerText, codeCopyBtn); return;
+        }
+        
+        const saveBtn = e.target.closest('.save-code-btn');
+        if (saveBtn) {
+            const codeEl = saveBtn.closest('.code-block-wrapper').querySelector('code');
+            const codeContent = codeEl.innerText;
+            const lang = [...codeEl.classList].find(c => c.startsWith('language-'))?.replace('language-', '') || 'txt';
+            const extension = langExtMap[lang.toLowerCase()] || lang || 'txt';
+            
+            const blob = new Blob([codeContent], { type: 'text/plain;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `snippet.${extension}`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            return;
+        }
+
+        const editBtn = e.target.closest('.edit-btn');
+        if (editBtn) {
+            const messageWrapper = editBtn.closest('.message-wrapper');
+            enterEditMode(messageWrapper, parseInt(messageWrapper.dataset.messageIndex, 10)); return;
+        }
+        const deleteBtn = e.target.closest('.delete-btn');
+        if (deleteBtn) {
+            if (isLoading) return;
+            const messageWrapper = deleteBtn.closest('.message-wrapper');
+            const messageIndex = parseInt(messageWrapper.dataset.messageIndex, 10);
+            if (!isNaN(messageIndex) && confirm('Are you sure you want to delete this message and all subsequent messages?')) {
+                messages.splice(messageIndex); renderChat(); updateGlobalStats();
+            } return;
+        }
+        const regenerateBtn = e.target.closest('.regenerate-btn');
+        if (regenerateBtn) {
+            if (isLoading) return;
+            const messageWrapper = regenerateBtn.closest('.message-wrapper');
+            const messageIndex = parseInt(messageWrapper.dataset.messageIndex, 10);
+            if (!isNaN(messageIndex)) {
+                messages.splice(messageIndex); fetchStreamedResponse();
+            } return;
+        }
+        const saveAnnotationBtn = e.target.closest('.save-annotation-btn');
+        if (saveAnnotationBtn) {
+            const container = saveAnnotationBtn.closest('.annotated-image-container');
+            const imageUrl = container.dataset.imageUrl;
+            await saveAnnotatedImage(imageUrl, container);
+            return;
+        }
+        
+        const removeDocBtn = e.target.closest('.remove-doc-btn');
+        if (removeDocBtn) {
+            const index = parseInt(removeDocBtn.dataset.index, 10);
+            attachedDocs.splice(index, 1);
+            renderDocPreviews();
+            return;
+        }
+
+        if (e.target.classList.contains('use-prompt-btn')) {
+            messageInput.value = unescape(e.target.dataset.prompt);
+            document.getElementById('modal-close-btn').click();
+            messageInput.focus(); messageInput.dispatchEvent(new Event('input'));
+        }
+        if (e.target.id === 'save-new-prompt-btn') {
+            const [category, title, prompt, expected] = ['#new-prompt-category', '#new-prompt-title', '#new-prompt-prompt', '#new-prompt-expected'].map(id => document.getElementById(id.substring(1)).value.trim());
+            if (category && title && prompt && expected) {
+                const customPrompts = JSON.parse(localStorage.getItem(CUSTOM_PROMPTS_KEY) || '[]');
+                customPrompts.push({ category, title, prompt, expected_outcome: expected });
+                localStorage.setItem(CUSTOM_PROMPTS_KEY, JSON.stringify(customPrompts));
+                showTestPrompts();
+            } else { alert('All fields are required.'); }
+        }
+        if (e.target.classList.contains('delete-prompt-btn')) {
+            const titleToDelete = unescape(e.target.dataset.promptTitle);
+            if (confirm(`Delete custom prompt "${titleToDelete}"?`)) {
+                let customPrompts = JSON.parse(localStorage.getItem(CUSTOM_PROMPTS_KEY) || '[]');
+                customPrompts = customPrompts.filter(p => p.title !== titleToDelete);
+                localStorage.setItem(CUSTOM_PROMPTS_KEY, JSON.stringify(customPrompts));
+                showTestPrompts();
+            }
+        }
+        if (e.target.id === 'load-system-prompt-btn') {
+            document.getElementById('system-prompt-dropdown').classList.toggle('hidden');
+        }
+        if (e.target.classList.contains('system-prompt-item')) {
+            e.preventDefault();
+            document.getElementById('system-prompt-textarea').value = unescape(e.target.dataset.prompt);
+            document.getElementById('system-prompt-dropdown').classList.add('hidden');
+        }
+        if (e.target.id === 'apply-system-prompt-btn') {
+            userSystemPrompt = document.getElementById('system-prompt-textarea').value.trim();
+            localStorage.setItem(LAST_SYSTEM_PROMPT_KEY, userSystemPrompt);
+            updateSystemPromptIndicator();
+            document.getElementById('modal-close-btn').click();
+        }
+        if (e.target.id === 'clear-system-prompt-btn') {
+            userSystemPrompt = '';
+            localStorage.removeItem(LAST_SYSTEM_PROMPT_KEY);
+            updateSystemPromptIndicator();
+            document.getElementById('modal-close-btn').click();
+        }
+        if (e.target.id === 'save-custom-system-prompt-btn') {
+            const name = document.getElementById('new-system-prompt-name').value.trim();
+            const prompt = document.getElementById('system-prompt-textarea').value.trim();
+            if (name && prompt) {
+                const custom = JSON.parse(localStorage.getItem(CUSTOM_SYSTEM_PROMPTS_KEY) || '[]');
+                if (custom.some(p => p.name === name)) { alert('A preset with this name already exists.'); return; }
+                custom.push({ name, prompt });
+                localStorage.setItem(CUSTOM_SYSTEM_PROMPTS_KEY, JSON.stringify(custom));
+                showSystemPromptModal();
+            } else { alert('Please provide a name and a prompt to save.'); }
+        }
+        if (e.target.classList.contains('delete-system-prompt-btn')) {
+            const nameToDelete = unescape(e.target.dataset.name);
+            if (confirm(`Delete system prompt preset "${nameToDelete}"?`)) {
+                let custom = JSON.parse(localStorage.getItem(CUSTOM_SYSTEM_PROMPTS_KEY) || '[]');
+                custom = custom.filter(p => p.name !== nameToDelete);
+                localStorage.setItem(CUSTOM_SYSTEM_PROMPTS_KEY, JSON.stringify(custom));
+                showSystemPromptModal();
+            }
+        }
+    });
+
+    // --- Init ---
+    const lastModel = localStorage.getItem(LAST_MODEL_KEY);
+    if (lastModel && modelSelector.querySelector(`option[value="${lastModel}"]`)) {
+        modelSelector.value = lastModel;
+        localStorage.setItem('playground_selected_model', lastModel);  // Store for description generation
+    }
+    userSystemPrompt = localStorage.getItem(LAST_SYSTEM_PROMPT_KEY) || '';
+    isAnnotationMode = localStorage.getItem(ANNOTATION_MODE_KEY) === 'true';
+    isThinkingMode = localStorage.getItem(THINKING_MODE_KEY) === 'true';
+    isWebSearchEnabled = localStorage.getItem(WEB_SEARCH_ENABLED_KEY) !== 'false'; // Default to true if not set
+    updateAnnotationToggleUI();
+    updateThinkingToggleUI();
+    updateWebSearchToggleUI();
+    updateSystemPromptIndicator();
+    updateGlobalStats();
+    updateThinkingControls(); // Initial check for think controls
+    
+    // --- Conversations/Threads Management ---
+    let currentConversationId = null;
+    const conversationsSidebar = document.getElementById('conversations-sidebar');
+    const conversationsMenuToggle = document.getElementById('conversations-menu-toggle');
+    const conversationsSidebarClose = document.getElementById('conversations-sidebar-close');
+    const conversationsList = document.getElementById('conversations-list');
+    const newConversationBtn = document.getElementById('new-conversation-btn');
+    
+    // Toggle sidebar - expands into page, not over it
+    conversationsMenuToggle?.addEventListener('click', () => {
+        const isHidden = conversationsSidebar?.classList.contains('hidden');
+        if (isHidden) {
+            conversationsSidebar?.classList.remove('hidden');
+            loadConversations();
+        } else {
+            conversationsSidebar?.classList.add('hidden');
+        }
+    });
+    
+    conversationsSidebarClose?.addEventListener('click', () => {
+        conversationsSidebar?.classList.add('hidden');
+    });
+    
+    // Load conversations
+    async function loadConversations() {
+        try {
+            const response = await fetch('/admin/api/conversations');
+            if (!response.ok) throw new Error('Failed to load conversations');
+            const conversations = await response.json();
+            
+            conversationsList.innerHTML = '';
+            
+            if (conversations.length === 0) {
+                conversationsList.innerHTML = '<div class="text-gray-400 text-xs px-2 py-3 text-center">No conversations yet</div>';
+                return;
+            }
+            
+            conversations.forEach(conv => {
+                const convEl = document.createElement('div');
+                const isActive = currentConversationId === conv.id;
+                convEl.className = `px-2 py-1.5 rounded cursor-pointer transition-colors hover:bg-white/5 ${isActive ? 'bg-[var(--color-primary-600)]/20 border-l-2 border-[var(--color-primary-500)]' : ''}`;
+                convEl.dataset.conversationId = conv.id;
+                convEl.innerHTML = `
+                    <div class="font-medium text-xs truncate ${isActive ? 'text-[var(--color-primary-300)]' : 'text-gray-300'}">${conv.title || 'Untitled'}</div>
+                    <div class="text-xs text-gray-400 mt-0.5">${new Date(conv.updated_at).toLocaleDateString()} • ${conv.message_count || 0} msgs</div>
+                `;
+                convEl.addEventListener('click', () => loadConversation(conv.id));
+                conversationsList.appendChild(convEl);
+            });
+        } catch (error) {
+            console.error('Error loading conversations:', error);
+            conversationsList.innerHTML = '<div class="text-red-400 text-xs px-2 py-3">Error loading conversations</div>';
+        }
+    }
+    
+    // Load a specific conversation
+    async function loadConversation(conversationId) {
+        try {
+            const response = await fetch(`/admin/api/conversations/${conversationId}`, {
+                headers: {
+                    'X-CSRF-Token': '{{ csrf_token }}'
+                }
+            });
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`Failed to load conversation: ${response.status} ${errorText}`);
+            }
+            const conversation = await response.json();
+            
+            currentConversationId = conversationId;
+            messages = conversation.messages.map(msg => ({
+                role: msg.role,
+                content: msg.content
+            }));
+            
+            renderChat();
+            updateGlobalStats();
+            loadConversations(); // Refresh list to highlight current
+        } catch (error) {
+            console.error('Error loading conversation:', error);
+            alert('Failed to load conversation');
+        }
+    }
+    
+    // Create new conversation
+    newConversationBtn?.addEventListener('click', async () => {
+        try {
+            const response = await fetch('/admin/api/conversations', { 
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-Token': '{{ csrf_token }}'
+                }
+            });
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`Failed to create conversation: ${response.status} ${errorText}`);
+            }
+            const conversation = await response.json();
+            
+            currentConversationId = conversation.id;
+            messages = [];
+            renderChat();
+            loadConversations();
+        } catch (error) {
+            console.error('Error creating conversation:', error);
+            alert(`Failed to create conversation: ${error.message}`);
+        }
+    });
+    
+    // Update fetchStreamedResponse to capture conversation_id from response
+    const originalFetchStreamedResponse = window.fetchStreamedResponse;
+    if (originalFetchStreamedResponse) {
+        window.fetchStreamedResponse = async function() {
+            // Create new conversation if none exists
+            if (!currentConversationId) {
+                try {
+                    const response = await fetch('/admin/api/conversations', { method: 'POST' });
+                    if (response.ok) {
+                        const conversation = await response.json();
+                        currentConversationId = conversation.id;
+                    }
+                } catch (error) {
+                    console.error('Error creating conversation:', error);
+                }
+            }
+            
+            // Call original function
+            return originalFetchStreamedResponse.apply(this, arguments);
+        };
+    }
+    
+    // Hook into the fetch call to capture conversation_id from response header
+    const originalFetch = window.fetch;
+    window.fetch = async function(...args) {
+        const response = await originalFetch.apply(this, args);
+        
+        // If this is a playground-stream request, capture conversation_id
+        if (args[0] && args[0].includes && args[0].includes('/playground-stream')) {
+            const convId = response.headers.get('X-Conversation-Id');
+            if (convId) {
+                currentConversationId = parseInt(convId);
+                // Refresh conversations list to show new conversation
+                if (!conversationsSidebar?.classList.contains('hidden')) {
+                    loadConversations();
+                }
+            }
+        }
+        
+        return response;
+    };
+    
+    // OpenRouter Credits Display
+    const creditsDisplay = document.getElementById('openrouter-credits-display');
+    const creditsRemaining = document.getElementById('credits-remaining');
+    const creditsUsage = document.getElementById('credits-usage');
+    const creditsTooltip = document.getElementById('credits-tooltip');
+    const tooltipRemaining = document.getElementById('tooltip-remaining');
+    const tooltipUsed = document.getElementById('tooltip-used');
+    const tooltipTotal = document.getElementById('tooltip-total');
+    
+    async function updateOpenRouterCredits() {
+        try {
+            const response = await fetch('/admin/api/openrouter-credits');
+            if (!response.ok) {
+                console.warn('OpenRouter credits API returned:', response.status, response.statusText);
+                creditsDisplay?.classList.add('hidden');
+                return;
+            }
+            const data = await response.json();
+            console.log('OpenRouter credits API response:', JSON.stringify(data, null, 2));
+            
+            // Format credits with appropriate precision
+            const formatCredits = (value) => {
+                if (value >= 1000) {
+                    return (value / 1000).toFixed(1) + 'k';
+                } else if (value >= 1) {
+                    return value.toFixed(2);
+                } else {
+                    return value.toFixed(4);
+                }
+            };
+            
+            // Always try to use totals if available (even if 0 or empty credits_data array)
+            const remaining = data.total_remaining_credits ?? 0;
+            const used = data.total_usage ?? 0;
+            const total = data.total_credits_purchased ?? 0;
+            
+            console.log('Credits parsed - Remaining:', remaining, 'Used:', used, 'Total:', total);
+            console.log('credits_data exists?', !!data.credits_data, 'length:', data.credits_data?.length);
+            
+            // Show display if we have any response data (even if values are 0)
+            if (data.hasOwnProperty('total_remaining_credits') || data.hasOwnProperty('total_usage') || (data.credits_data && data.credits_data.length > 0)) {
+                creditsDisplay?.classList.remove('hidden');
+                
+                // Update compact display
+                creditsRemaining.textContent = `$${formatCredits(remaining)}`;
+                creditsUsage.textContent = `${formatCredits(used)} used`;
+                
+                // Update tooltip
+                tooltipRemaining.textContent = `$${remaining.toFixed(4)}`;
+                tooltipUsed.textContent = `$${used.toFixed(4)}`;
+                tooltipTotal.textContent = `$${total.toFixed(4)}`;
+                
+                // Color coding: green if > 50%, yellow if 10-50%, red if < 10%
+                const percentage = total > 0 ? (remaining / total) * 100 : 0;
+                creditsRemaining.className = 'text-xs font-medium';
+                if (percentage > 50) {
+                    creditsRemaining.classList.add('text-green-400');
+                } else if (percentage > 10) {
+                    creditsRemaining.classList.add('text-yellow-400');
+                } else if (remaining > 0) {
+                    creditsRemaining.classList.add('text-red-400');
+                } else {
+                    creditsRemaining.classList.add('text-gray-400');
+                }
+            } else {
+                console.warn('No credits data available. Response structure:', data);
+                creditsDisplay?.classList.add('hidden');
+            }
+        } catch (error) {
+            console.error('Failed to fetch OpenRouter credits:', error);
+            creditsDisplay?.classList.add('hidden');
+        }
+    }
+    
+    // Show tooltip on hover (but not on refresh button)
+    if (creditsDisplay) {
+        const creditsContent = creditsDisplay.querySelector('.flex.flex-col');
+        if (creditsContent) {
+            creditsContent.addEventListener('mouseenter', () => {
+                creditsTooltip?.classList.remove('hidden');
+            });
+            creditsContent.addEventListener('mouseleave', () => {
+                creditsTooltip?.classList.add('hidden');
+            });
+        }
+    }
+    
+    // Make refresh button work
+    const refreshCreditsBtn = document.getElementById('refresh-credits-btn');
+    if (refreshCreditsBtn) {
+        refreshCreditsBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            updateOpenRouterCredits();
+        });
+    }
+    
+    // Initial load and periodic updates (every 30 seconds)
+    updateOpenRouterCredits();
+    setInterval(updateOpenRouterCredits, 30000);
+    
+    // Make updateOpenRouterCredits available globally for stream completion hook and refresh button
+    window.updateOpenRouterCredits = updateOpenRouterCredits;
+});
+</script>
+{% endblock %}

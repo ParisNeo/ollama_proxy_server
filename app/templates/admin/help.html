@@ -1,161 +1,368 @@
 {% extends "admin/base.html" %}
 
 {% block title %}Help & Credits{% endblock %}
+
 {% block header_title %}Help & Credits{% endblock %}
 
 {% block content %}
-<div class="max-w-4xl mx-auto space-y-8">
+<style>
+    .toc-link {
+        display: block;
+        padding: 0.5rem 1rem;
+        border-radius: 0.375rem;
+        transition: all 0.2s ease-in-out;
+        border-left: 3px solid transparent;
+    }
+    .toc-link:hover {
+        background-color: rgba(128, 128, 128, 0.1);
+        padding-left: 1.25rem;
+    }
+    .toc-link.active-toc {
+        color: var(--color-primary-500);
+        font-weight: 600;
+        border-left-color: var(--color-primary-500);
+    }
+    .ui-brutalism .toc-link.active-toc {
+        background-color: var(--color-primary-500);
+        color: white;
+        border: 3px solid black;
+    }
+</style>
 
-    <!-- How to Use Section -->
-    <div class="bg-white p-6 rounded-lg shadow-md">
-        <h2 class="text-2xl font-bold mb-4 border-b pb-2">How to Use Ollama Proxy Fortress</h2>
-        
-        <div class="space-y-4 text-gray-700">
-            <p>This proxy server acts as a secure gateway to your Ollama instances. The workflow is simple:</p>
-            <ol class="list-decimal list-inside space-y-2 pl-4">
-                <li><strong>Create a User:</strong> From the <a href="{{ url_for('admin_dashboard') }}" class="text-indigo-600 hover:underline">Dashboard</a>, create a virtual user. This helps you organize API keys (e.g., one user for each application).</li>
-                <li><strong>Generate an API Key:</strong> Click "Manage" next to a user to access the key management page.</li>
-                <li><strong>Copy the Key:</strong> The full API key is shown only once upon creation. Copy it and store it securely in your application's configuration.</li>
-                <li><strong>Make Secure API Calls:</strong> Use the proxy's URL (e.g., `http://127.0.0.1:8080`) instead of your direct Ollama URL. Provide the API key in the `Authorization` header as a Bearer token.</li>
-            </ol>
+<div class="flex flex-col lg:flex-row gap-12">
+
+    <!-- Main Content -->
+    <div class="w-full lg:w-3/4 space-y-12">
+
+        <!-- Getting Started Workflow -->
+        <div id="getting-started" class="card-style scroll-mt-20">
+            <h2 class="card-header text-2xl font-bold mb-6 pb-2">🚀 Getting Started: Your Workflow</h2>
+            <div class="space-y-4 text-current">
+                <ol class="list-decimal list-inside space-y-4">
+                    <li>
+                        <strong>Configure Servers:</strong> Go to the <a href="{{ url_for('admin_servers') }}" class="font-semibold text-[var(--color-primary-600)] hover:underline">Server Management</a> page. Add the URLs for all your backend instances (both Ollama and vLLM are supported).
+                    </li>
+                    <li>
+                        <strong>Create a User:</strong> Navigate to the <a href="{{ url_for('admin_users') }}" class="font-semibold text-[var(--color-primary-600)] hover:underline">User Management</a> page. This is where you'll create accounts for your users or applications.
+                    </li>
+                    <li>
+                        <strong>Generate an API Key:</strong> From the user list, click "Manage Keys" for a specific user. On their details page, you can generate new keys and set optional, per-key rate limits (requires Redis).
+                    </li>
+                    <li>
+                        <strong>Copy the Key:</strong> The full API key is shown **only once** upon creation. Copy it immediately and store it in a secure location like a password manager.
+                    </li>
+                    <li>
+                        <strong>Use the Key:</strong> In your applications, replace your Ollama URL with the proxy's URL (e.g., <code class="inline-code">http://127.0.0.1:8080</code>) and provide the API key in the <code class="inline-code">Authorization</code> header as a Bearer token.
+                    </li>
+                </ol>
+            </div>
         </div>
 
-        <h3 class="text-xl font-semibold mt-6 mb-4 border-b pb-2">Advanced Key Management</h3>
-        <div class="space-y-4 text-gray-700">
-            <div>
-                <h4 class="font-semibold">Per-Key Rate Limiting</h4>
-                <p>When creating a new API key, you can set a custom rate limit that applies only to that key. You do this by filling in the two rate limit fields:</p>
-                <ul class="list-disc list-inside space-y-2 pl-4 mt-2">
-                    <li><code class="bg-gray-200 px-1 rounded">Rate Limit Requests</code>: The maximum number of requests this key can make within the time window.</li>
-                    <li><code class="bg-gray-200 px-1 rounded">Window (Minutes)</code>: The duration of the time window in minutes.</li>
+        <!-- Dashboard Section -->
+        <div id="dashboard" class="card-style scroll-mt-20">
+            <h2 class="card-header text-2xl font-bold mb-6 pb-2">🖥️ The Dashboard: Your Monitoring Hub</h2>
+            <div class="space-y-4 text-current">
+                <p>The main dashboard provides a real-time, auto-updating overview of your entire AI infrastructure.</p>
+                <ul class="list-disc list-inside space-y-3 pl-4">
+                    <li><strong>System Status:</strong> These gauges show the live CPU, Memory, and Disk usage of the machine running the proxy server itself.</li>
+                    <li><strong>Active Models:</strong> This table shows a unified list of all models currently active across your backend servers.
+                        <ul class="list-['-_'] list-inside pl-4 mt-2">
+                            <li>For **Ollama** servers, this means models currently loaded into VRAM/RAM. They have an "Expires In" timer and can be unloaded.</li>
+                            <li>For **vLLM** servers, all available models are considered "Always Active" as they are managed by the vLLM instance itself.</li>
+                        </ul>
+                    </li>
+                    <li><strong>Load Balancer Status:</strong> This panel shows the health of all configured backend servers. "Online" means the proxy can reach the server, while "Offline" indicates a connection issue. It also shows a lifetime request count for each server.</li>
+                    <li><strong>Rate Limit Queue Status:</strong> If you're using Redis, this shows a live view of API keys that are actively being rate-limited, how close they are to their limit, and when their usage window will reset.</li>
                 </ul>
-                <p class="mt-2"><strong>Example:</strong> Setting `Requests` to `100` and `Window` to `5` means this specific key can be used a maximum of 100 times every 5 minutes.</p>
-                <p class="mt-2">If you leave these fields blank, the key will automatically use the global rate limit settings defined in your server's `.env` file.</p>
             </div>
-            <div>
-                <h4 class="font-semibold">Key Status: Active, Disabled, and Revoked</h4>
-                <ul class="list-disc list-inside space-y-1 pl-4">
-                    <li><strong class="text-green-600">Active:</strong> The key is fully functional.</li>
-                    <li><strong class="text-yellow-600">Disabled:</strong> The key is temporarily blocked and cannot be used for API calls. It can be re-enabled at any time. This is useful for temporarily pausing access for an application without deleting the key.</li>
-                    <li><strong class="text-black">Revoked:</strong> The key is permanently and irreversibly destroyed. It can never be used again. Use this action if a key has been compromised or is no longer needed.</li>
+        </div>
+        
+        <!-- Server Management Section -->
+        <div id="server-management" class="card-style scroll-mt-20">
+            <h2 class="card-header text-2xl font-bold mb-6 pb-2">🔧 Server Management</h2>
+            <div class="space-y-4 text-current">
+                <p>This is where you configure the backend AI servers that the proxy will manage and distribute requests to.</p>
+                <ul class="list-disc list-inside space-y-3 pl-4">
+                    <li><strong>Adding Servers:</strong> You can add both standard <code class="inline-code">Ollama</code> servers and <code class="inline-code">vLLM</code> (or any OpenAI-compatible) servers. The proxy handles the translation automatically. You can also add an optional API key if your backend server requires one.</li>
+                    <li><strong>Refreshing Models:</strong> Clicking "Refresh" fetches the latest list of available models from a server and stores it in the proxy's database. This is crucial for the "Smart Model Routing" feature. Model lists are also refreshed automatically in the background.</li>
+                    <li><strong>Managing Models:</strong> Clicking "Manage Models" takes you to a detailed view for that server. For Ollama servers, you can pull new models, update existing ones, delete models from disk, and trigger a model to be loaded into or unloaded from memory. These actions are not applicable to vLLM servers.</li>
                 </ul>
             </div>
         </div>
-    </div>
         
-    <!-- Usage Examples Section -->
-    <div class="bg-white p-6 rounded-lg shadow-md">
-        <h2 class="text-2xl font-bold mb-4 border-b pb-2">Usage Examples</h2>
-        <p class="text-gray-600 mb-6">
-            In all examples, replace `op_..._...` with your actual generated API key.
-        </p>
-
-        <!-- Example 1: Listing Models with cURL -->
-        <div class="mb-8">
-            <h3 class="text-xl font-semibold mb-2">Example 1: Listing Available Models (cURL)</h3>
-            <p class="text-sm text-gray-600 mb-2">This command fetches the federated list of all models from all active backend servers.</p>
-            <div class="bg-gray-800 text-white rounded-lg p-4 font-mono text-sm overflow-x-auto">
-                <code class="whitespace-pre">
-curl http://127.0.0.1:8080/api/tags \
-  -H "Authorization: Bearer op_prefix_secret"</code>
+        <!-- User Management Section -->
+        <div id="user-management" class="card-style scroll-mt-20">
+            <h2 class="card-header text-2xl font-bold mb-6 pb-2">👤 User & Key Management</h2>
+            <div class="space-y-4 text-current">
+                <p>Control who can access your AI models and how.</p>
+                <ul class="list-disc list-inside space-y-3 pl-4">
+                    <li><strong>User Accounts:</strong> Create separate user accounts to logically group API keys. This is useful for organizing keys by team, project, or application.</li>
+                    <li><strong>API Keys:</strong> From a user's "Manage Keys" page, you can create multiple keys. Each key gets a descriptive name and a unique prefix for easy identification in logs.</li>
+                    <li><strong>Key Lifecycle:</strong>
+                        <ul class="list-['-_'] list-inside pl-4 mt-2">
+                            <li><strong>Disable/Enable:</strong> Temporarily turn a key on or off without deleting it.</li>
+                            <li><strong>Revoke:</strong> Permanently and irreversibly invalidate a key. This is a security measure for lost or compromised keys.</li>
+                        </ul>
+                    </li>
+                    <li><strong>Per-Key Rate Limits:</strong> If Redis is configured, you can override the global rate limit for specific keys, allowing you to give higher or lower priority to certain applications.</li>
+                </ul>
             </div>
         </div>
 
-        <!-- Example 2: Streaming with Python (requests) -->
-        <div class="mb-8">
-            <h3 class="text-xl font-semibold mb-2">Example 2: Streaming Generation with Python (`requests`)</h3>
-            <p class="text-sm text-gray-600 mb-2">A standard way to stream a response using the popular `requests` library.</p>
-            <div class="bg-gray-800 text-white rounded-lg p-4 font-mono text-sm overflow-x-auto">
-                <code class="whitespace-pre">
+        <!-- Playgrounds & Benchmarking Section -->
+        <div id="playgrounds" class="card-style scroll-mt-20">
+            <h2 class="card-header text-2xl font-bold mb-6 pb-2">🧪 Playgrounds & Benchmarking: Test Your Models</h2>
+            <div class="space-y-8 text-current">
+                <p>The playgrounds are powerful tools for interacting with and evaluating your models directly within the UI.</p>
+                
+                <div>
+                    <h3 class="text-xl font-semibold mb-2">Chat Playground</h3>
+                    <p>This is your interactive command center for testing conversational models.</p>
+                    <ul class="list-disc list-inside space-y-2 mt-3 pl-4">
+                        <li><strong>Real-time Interaction:</strong> Chat with any available model and see responses stream in token by token.</li>
+                        <li><strong>Multi-modal Support:</strong>
+                            <ul class="list-['-_'] list-inside pl-4 mt-2">
+                                <li>**Images:** Simply paste an image into the chat box or use the image attach button.</li>
+                                <li>**Documents:** Use the document attach button to upload text-based files (<code class="inline-code">.txt</code>, <code class="inline-code">.py</code>, <code class="inline-code">.md</code>, etc.). Their content will be automatically included in your prompt, perfect for asking questions about code or text.</li>
+                            </ul>
+                        </li>
+                        <li><strong>System Prompts:</strong> Use the settings icon (<svg class="w-4 h-4 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>) to set a system prompt, defining the model's persona or rules. We've included powerful presets like "Chain of Thought" and "Image Bounding Box Detection".</li>
+                        <li><strong>Code Block Actions:</strong> Hover over any code block in a response to reveal "Copy" and "Save" buttons. The save button will automatically suggest a file extension based on the language (e.g., <code class="inline-code">.py</code> for Python).</li>
+                        <li><strong>Message Controls:</strong> Hover over any message to Copy, Edit, Delete, or Regenerate. Editing a message forks the conversation from that point.</li>
+                        <li><strong>Import/Export:</strong> Save your entire chat history to a JSON file or load a previous conversation.</li>
+                    </ul>
+                </div>
+
+                <div>
+                    <h3 class="text-xl font-semibold mb-2">Embedding Playground</h3>
+                    <p>This tool helps you visually understand how different embedding models work. It answers the question: "Does my model group similar concepts together?"</p>
+                    <ul class="list-disc list-inside space-y-2 mt-3 pl-4">
+                        <li><strong>How it Works:</strong> You define groups of related words ("concepts"). The tool gets the vector embeddings for each text and uses PCA to project them into a 2D graph.</li>
+                        <li><strong>Interpreting the Results:</strong> Texts with similar meanings should appear clustered together. Well-defined, tight clusters indicate that the model has a good grasp of semantic similarity.</li>
+                        <li><strong>Benchmarks:</strong> Use pre-built benchmarks, create your own in the UI, or load/save them as JSON files. Any <code class="inline-code">.json</code> file you add to the <code class="inline-code">benchmarks/</code> folder will automatically appear in the "Load Pre-built" list.</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Statistics Section -->
+        <div id="statistics" class="card-style scroll-mt-20">
+            <h2 class="card-header text-2xl font-bold mb-6 pb-2">📈 Usage Statistics</h2>
+            <div class="space-y-4 text-current">
+                <p>Gain insights into how your models are being used. All charts and tables are exportable to PNG or CSV.</p>
+                <ul class="list-disc list-inside space-y-3 pl-4">
+                    <li><strong>Global Analytics:</strong> The main <a href="{{ url_for('admin_stats') }}" class="font-semibold text-[var(--color-primary-600)] hover:underline">Usage Stats</a> page shows aggregate data across all users, including requests per day, peak hours, model popularity, and server load distribution.</li>
+                    <li><strong>Per-User Analytics:</strong> From the <a href="{{ url_for('admin_users') }}" class="font-semibold text-[var(--color-primary-600)] hover:underline">User Management</a> page, click "View Usage" for any user to see the same set of detailed charts filtered specifically for them.</li>
+                    <li><strong>Sortable Tables:</strong> The tables on the statistics and user management pages are sortable. Just click on a column header to reorder the data.</li>
+                </ul>
+            </div>
+        </div>
+
+        <!-- Security Features Section -->
+        <div id="security" class="card-style scroll-mt-20">
+            <h2 class="card-header text-2xl font-bold mb-6 pb-2">🛡️ Security Features</h2>
+            <div class="space-y-8 text-current">
+                <div>
+                    <h3 class="text-xl font-semibold mb-2">Endpoint Blocking</h3>
+                    <p>This is a critical security layer. By default, the proxy **blocks** API key holders from accessing sensitive Ollama endpoints like <code class="inline-code">/api/pull</code>, <code class="inline-code">/api/delete</code>, and <code class="inline-code">/api/create</code>. This prevents users from consuming excessive resources or modifying your backend servers.</p>
+                     <div class="mt-4 p-3 rounded-md text-sm info-box">
+                        <strong>Customizable:</strong> You can change the list of blocked endpoints in the <a href="{{ url_for('admin_settings') }}" class="font-semibold underline">Settings</a> page under "Endpoint Security".
+                    </div>
+                </div>
+                <div>
+                    <h3 class="text-xl font-semibold mb-2">HTTPS/SSL Encryption</h3>
+                    <p>Encrypt all traffic by going to the <a href="{{ url_for('admin_settings') }}" class="font-semibold underline">Settings</a> page. You can either upload your certificate and key files directly or provide the file paths on the server. A server restart is required to apply changes.</p>
+                    <p class="mt-2">For local testing, you can generate a self-signed certificate with OpenSSL:</p>
+                     <div class="code-block-wrapper mt-2">
+                        <pre><code class="language-bash">openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -sha256 -days 365 -nodes -subj "/CN=localhost"</code></pre>
+                        <button class="copy-button">Copy</button>
+                    </div>
+                </div>
+                 <div>
+                    <h3 class="text-xl font-semibold mb-2">IP Filtering</h3>
+                    <p>In the <a href="{{ url_for('admin_settings') }}" class="font-semibold underline">Settings</a> page, you can specify comma-separated lists of IP addresses or ranges (e.g., <code class="inline-code">192.168.1.0/24</code>) for the "Allowed IPs" and "Denied IPs" fields to control access to the proxy.</p>
+                </div>
+                 <div>
+                    <h3 class="text-xl font-semibold mb-2">Rate Limiting & Brute-Force Protection</h3>
+                    <p>When Redis is enabled, you can set global or per-key rate limits. The proxy also automatically blocks IPs that have too many failed admin login attempts.</p>
+                </div>
+            </div>
+        </div>
+            
+        <!-- Usage Examples Section -->
+        <div id="examples" class="card-style scroll-mt-20">
+            <h2 class="card-header text-2xl font-bold mb-6 pb-2">👨‍💻 Usage Examples</h2>
+            <div class="space-y-8">
+                <div>
+                    <h3 class="text-xl font-semibold mb-2">cURL</h3>
+                    <div class="code-block-wrapper">
+                        <pre><code class="language-bash">
+curl http://127.0.0.1:8080/api/generate \
+  -H "Authorization: Bearer op_prefix_secret" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "llama3",
+    "prompt": "Why is the sky blue?",
+    "stream": false
+  }'</code></pre>
+                        <button class="copy-button">Copy</button>
+                    </div>
+                </div>
+                 <div>
+                    <h3 class="text-xl font-semibold mb-2">Python (`requests`)</h3>
+                    <div class="code-block-wrapper">
+                        <pre><code class="language-python">
 import requests
 import json
 
-API_KEY = "op_prefix_secret"  # <-- Replace with your key
-PROXY_URL = "http://127.0.0.1:8080/api/generate"
+proxy_url = "http://127.0.0.1:8080/api/chat"
+api_key = "op_prefix_secret"
 
 headers = {
-    "Authorization": f"Bearer {API_KEY}",
+    "Authorization": f"Bearer {api_key}",
     "Content-Type": "application/json"
 }
 
 data = {
     "model": "llama3",
-    "prompt": "Tell me a short story about a robot who discovers music.",
-    "stream": True
+    "messages": [
+        {"role": "user", "content": "Explain quantum computing simply."}
+    ],
+    "stream": False
 }
 
-try:
-    with requests.post(PROXY_URL, headers=headers, json=data, stream=True) as response:
-        response.raise_for_status()  # Raise an exception for bad status codes
-        print("Story: ", end="", flush=True)
-        for chunk in response.iter_lines():
-            if chunk:
-                decoded_chunk = json.loads(chunk.decode('utf-8'))
-                print(decoded_chunk.get("response", ""), end="", flush=True)
-    print()
-except requests.exceptions.RequestException as e:
-    print(f"\nAn error occurred: {e}")
-</code>
+response = requests.post(proxy_url, headers=headers, data=json.dumps(data))
+print(response.json())
+</code></pre>
+                        <button class="copy-button">Copy</button>
+                    </div>
+                </div>
             </div>
         </div>
 
-        <!-- Example 3: lollms-client -->
-        <div>
-            <h3 class="text-xl font-semibold mb-2">Example 3: Using with `lollms-client`</h3>
-            <p class="text-sm text-gray-600 mb-2">To use the proxy with the `lollms-client` library, configure the host address to point to the proxy and provide your key as the `service_key`.</p>
-            <div class="bg-gray-800 text-white rounded-lg p-4 font-mono text-sm overflow-x-auto">
-                <code class="whitespace-pre">
-from lollms_client import LollmsClient, MSG_TYPE
+        <!-- Redis Setup Guide -->
+        <div id="redis-setup" class="card-style scroll-mt-20">
+            <h2 class="card-header text-2xl font-bold mb-6 pb-2">⚡ Redis Setup Guide</h2>
+            <div class="space-y-6 text-current">
+                <div>
+                    <h3 class="text-xl font-semibold mb-2">Why Do I Need Redis?</h3>
+                    <p>Redis is an in-memory database that provides high-speed data access. This application uses it for two optional but important security features:</p>
+                    <ul class="list-disc list-inside space-y-2 mt-2 pl-4">
+                        <li><strong>API Rate Limiting:</strong> Prevents abuse by limiting how many requests a key can make in a given time.</li>
+                        <li><strong>Brute-Force Protection:</strong> Temporarily locks an IP address after too many failed admin logins.</li>
+                    </ul>
+                    <div class="mt-4 p-3 rounded-md text-sm warning-box">
+                        <strong>Note:</strong> The proxy will work perfectly without Redis, but these security features will be disabled.
+                    </div>
+                </div>
 
-# Configure the client to use the secure proxy
-lc = LollmsClient(
-    llm_binding_name="ollama",
-    llm_binding_config={
-        "host_address": "http://localhost:8080",  # <-- Point to the proxy server
-        "model_name": "llama3",                   # Or any model you have
-        "service_key": "op_prefix_secret",        # <-- Replace with your API key
-    }
-)
-
-def streaming_callback(data, msg_type):
-    if msg_type == MSG_TYPE.MSG_TYPE_CHUNK:
-        print(data, end="", flush=True)
-    return True
-
-print("--- Streaming with lollms-client ---")
-lc.generate_text(
-    prompt="What is the capital of France?",
-    stream=True,
-    streaming_callback=streaming_callback
-)
-print("\n\n--- Listing models ---")
-models = lc.listModels()
-print(models)
-</code>
+                <div>
+                    <h3 class="text-xl font-semibold mb-2">Installation</h3>
+                    <p class="mb-4">The easiest way to run Redis on any platform is with Docker.</p>
+                    <div class="code-block-wrapper mt-2">
+                        <pre><code class="language-bash">docker run -d --name redis-stack -p 6379:6379 --restart always redis/redis-stack:latest</code></pre>
+                         <button class="copy-button">Copy</button>
+                    </div>
+                </div>
+                 <div>
+                    <h3 class="text-xl font-semibold mb-2">Configuration</h3>
+                    <p>Once Redis is running, go to the <a href="{{ url_for('admin_settings') }}" class="font-semibold text-[var(--color-primary-600)] hover:underline">Settings</a> page, enter your Redis connection details, and save. The proxy will connect automatically.</p>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Credits Section -->
+        <div id="credits" class="card-style scroll-mt-20">
+            <h2 class="card-header text-2xl font-bold mb-6 pb-2">💖 Credits & Acknowledgements</h2>
+            <div class="space-y-4 text-current">
+                <p>This application was developed with passion by the open-source community. It stands on the shoulders of giants and wouldn't be possible without the following incredible projects:</p>
+                <ul class="list-disc list-inside space-y-2 pl-4">
+                    <li><strong><a href="https://fastapi.tiangolo.com/" target="_blank" class="font-semibold text-[var(--color-primary-600)] hover:underline">FastAPI</a></strong>, <strong><a href="https://www.sqlalchemy.org/" target="_blank" class="font-semibold text-[var(--color-primary-600)] hover:underline">SQLAlchemy</a></strong>, <strong><a href="https://jinja.palletsprojects.com/" target="_blank" class="font-semibold text-[var(--color-primary-600)] hover:underline">Jinja2</a></strong>, <strong><a href="https://www.chartjs.org/" target="_blank" class="font-semibold text-[var(--color-primary-600)] hover:underline">Chart.js</a></strong>, and <strong><a href="https://tailwindcss.com/" target="_blank" class="font-semibold text-[var(--color-primary-600)] hover:underline">Tailwind CSS</a></strong>.</li>
+                </ul>
+                <p class="pt-4">Project built and maintained by <strong>ParisNeo</strong> with help from AI and cool developers (check the contributors list in the github page).</p>
+                <p>Visit the project on <a href="https://github.com/ParisNeo/ollama_proxy_server" target="_blank" class="font-semibold text-[var(--color-primary-600)] hover:underline">GitHub</a> to contribute, report issues, or star the repository!</p>
             </div>
         </div>
     </div>
 
-    <!-- Credits Section -->
-    <div class="bg-white p-6 rounded-lg shadow-md">
-        <h2 class="text-2xl font-bold mb-4 border-b pb-2">Credits & Acknowledgements</h2>
-        <div class="space-y-4 text-gray-700">
-            <p>This application was developed with passion by the open-source community. It stands on the shoulders of giants and wouldn't be possible without the following incredible projects:</p>
-            <ul class="list-disc list-inside space-y-2 pl-4">
-                <li><strong><a href="https://fastapi.tiangolo.com/" target="_blank" class="text-indigo-600 hover:underline">FastAPI</a>:</strong> For the high-performance, easy-to-use web framework.</li>
-                <li><strong><a href="https://www.sqlalchemy.org/" target="_blank" class="text-indigo-600 hover:underline">SQLAlchemy</a>:</strong> For providing a powerful and Pythonic SQL toolkit and ORM.</li>
-                <li><strong><a href="https://jinja.palletsprojects.com/" target="_blank" class="text-indigo-600 hover:underline">Jinja2</a>:</strong> For fast and expressive server-side templating.</li>
-                <li><strong><a href="https://www.chartjs.org/" target="_blank" class="text-indigo-600 hover:underline">Chart.js</a>:</strong> For the beautiful and interactive data visualizations.</li>
-                <li><strong><a href="https://tailwindcss.com/" target="_blank" class="text-indigo-600 hover:underline">Tailwind CSS</a>:</strong> For the utility-first CSS framework that makes the UI beautiful.</li>
-            </ul>
-            <p class="pt-4">
-                A special thank you to **Saifeddine ALOUI (ParisNeo)** for creating and maintaining this project.
-            </p>
-            <p>
-                Visit the project on <a href="https://github.com/ParisNeo/ollama_proxy_server" target="_blank" class="text-indigo-600 hover:underline">GitHub</a> to contribute, report issues, or star the repository!
-            </p>
+    <!-- Sticky Table of Contents -->
+    <div class="w-full lg:w-1/4">
+        <div class="sticky top-10">
+            <div class="card-style">
+                <h3 class="card-header text-lg font-bold mb-4">On this page</h3>
+                <nav>
+                    <ul class="space-y-2">
+                        <li><a href="#getting-started" class="toc-link">Getting Started</a></li>
+                        <li><a href="#dashboard" class="toc-link">The Dashboard</a></li>
+                        <li><a href="#server-management" class="toc-link">Server Management</a></li>
+                        <li><a href="#user-management" class="toc-link">User Management</a></li>
+                        <li><a href="#playgrounds" class="toc-link">Playgrounds</a></li>
+                        <li><a href="#statistics" class="toc-link">Usage Statistics</a></li>
+                        <li><a href="#security" class="toc-link">Security Features</a></li>
+                        <li><a href="#examples" class="toc-link">Usage Examples</a></li>
+                        <li><a href="#redis-setup" class="toc-link">Redis Setup</a></li>
+                        <li><a href="#credits" class="toc-link">Credits</a></li>
+                    </ul>
+                </nav>
+            </div>
         </div>
     </div>
-
 </div>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    // Copy button logic
+    document.querySelectorAll('.copy-button').forEach(button => {
+        button.addEventListener('click', () => {
+            const codeBlock = button.previousElementSibling.querySelector('code');
+            const text = codeBlock.innerText;
+            
+            navigator.clipboard.writeText(text).then(() => {
+                const originalText = button.textContent;
+                button.textContent = 'Copied!';
+                setTimeout(() => {
+                    button.textContent = originalText;
+                }, 2000);
+            }).catch(err => {
+                console.error('Failed to copy text: ', err);
+            });
+        });
+    });
+
+    // Table of Contents scroll-spy logic
+    const sections = document.querySelectorAll('div[id]');
+    const tocLinks = document.querySelectorAll('.toc-link');
+
+    const observer = new IntersectionObserver((entries) => {
+        let visibleSectionId = null;
+        let maxRatio = 0;
+        entries.forEach(entry => {
+            if (entry.isIntersecting && entry.intersectionRatio > maxRatio) {
+                maxRatio = entry.intersectionRatio;
+                visibleSectionId = entry.target.getAttribute('id');
+            }
+        });
+        
+        if (!visibleSectionId && entries.length > 0 && entries[0].isIntersecting) {
+             visibleSectionId = entries[0].target.getAttribute('id');
+        }
+
+        if (visibleSectionId) {
+             tocLinks.forEach(link => {
+                link.classList.remove('active-toc');
+                if (link.getAttribute('href') === `#${visibleSectionId}`) {
+                    link.classList.add('active-toc');
+                }
+            });
+        }
+    }, {
+        rootMargin: '-20% 0px -70% 0px',
+        threshold: [0.1, 0.5, 0.9]
+    });
+
+    sections.forEach(section => {
+        observer.observe(section);
+    });
+});
+</script>
 {% endblock %}

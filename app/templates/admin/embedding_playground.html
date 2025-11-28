@@ -1,0 +1,376 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Embedding Playground{% endblock %}
+
+{% block header_title %}Embedding Playground & Benchmark{% endblock %}
+
+{% block content %}
+<div class="max-w-6xl mx-auto space-y-8">
+    <div class="card-style">
+        <h2 class="card-header text-2xl font-bold mb-6 pb-2">Benchmark Setup</h2>
+        <form id="embedding-benchmark-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <div class="space-y-8">
+                <!-- Benchmark Management -->
+                <div>
+                    <h3 class="text-lg font-semibold mb-2">Benchmark Data</h3>
+                    <div class="flex flex-wrap gap-4 items-center">
+                        <div class="relative">
+                            <button type="button" id="load-prebuilt-btn" class="justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700">Load Pre-built</button>
+                            <div id="prebuilt-dropdown" class="absolute z-10 mt-2 w-72 rounded-md shadow-lg bg-gray-800 ring-1 ring-black ring-opacity-5 hidden">
+                                <div id="prebuilt-list" class="py-1" role="menu" aria-orientation="vertical">
+                                    <!-- Pre-built benchmarks will be loaded here -->
+                                </div>
+                            </div>
+                        </div>
+                         <button type="button" id="load-file-btn" class="justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-gray-600 hover:bg-gray-700">Load from File</button>
+                        <input type="file" id="load-file-input" class="hidden" accept=".json">
+                        <button type="button" id="save-file-btn" class="justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-gray-600 hover:bg-gray-700">Save to File</button>
+                        <input type="text" id="benchmark-name" placeholder="Benchmark Name" class="px-3 py-2 rounded-md shadow-sm sm:text-sm flex-grow min-w-0">
+                        <button type="button" id="clear-benchmark-btn" class="justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-red-600 hover:bg-red-700">Clear</button>
+                    </div>
+                </div>
+
+                <!-- Model Selection -->
+                <div>
+                    <label for="model-selector" class="block text-sm font-medium text-current mb-2">Select Models to Benchmark</label>
+                    <select id="model-selector" name="models" multiple class="w-full p-2 rounded-md shadow-sm focus:outline-none focus:ring-[var(--color-primary-500)] focus:border-[var(--color-primary-500)] sm:text-sm" size="5">
+                        {% if models %}
+                            {% for model in models %}
+                            <option value="{{ model }}">{{ model }}</option>
+                            {% endfor %}
+                        {% else %}
+                            <option value="" disabled>No embedding models found</option>
+                        {% endif %}
+                    </select>
+                    <p class="mt-1 text-xs text-gray-400">Hold Ctrl/Cmd to select multiple models.</p>
+                </div>
+
+                <!-- Concept Groups -->
+                <div>
+                    <h3 class="text-lg font-semibold mb-2">Concept Groups</h3>
+                    <div id="groups-container" class="space-y-4">
+                        <!-- Concept groups will be added here by JS -->
+                    </div>
+                    <div class="mt-4 flex gap-4">
+                        <button type="button" id="add-group-btn" class="justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-green-600 hover:bg-green-700">Add Concept Group</button>
+                    </div>
+                </div>
+                
+                <div class="flex justify-end pt-4 border-t border-white/10">
+                    <button type="submit" id="run-benchmark-btn" class="w-full md:w-auto justify-center py-2 px-6 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-[var(--color-primary-600)] hover:bg-[var(--color-primary-700)]">
+                        Run Benchmark
+                    </button>
+                </div>
+            </div>
+        </form>
+    </div>
+
+    <!-- Results -->
+    <div id="results-container" class="card-style hidden">
+        <h2 class="card-header text-2xl font-bold mb-4 pb-2">Benchmark Results</h2>
+        <div id="results-tabs" class="flex border-b border-gray-700 mb-4"></div>
+        <div id="results-plots"></div>
+    </div>
+</div>
+
+<!-- TEMPLATES FOR DYNAMIC UI -->
+<template id="group-template">
+    <div class="group border border-gray-700 rounded-md p-4 space-y-3">
+        <div class="flex items-center gap-4">
+            <input type="text" class="group-name px-3 py-2 rounded-md shadow-sm sm:text-sm flex-grow" placeholder="Group Name (e.g., 'Greetings')">
+            <input type="color" class="group-color h-10 w-10 p-1 bg-transparent border-none cursor-pointer" title="Group color">
+            <button type="button" class="remove-group-btn p-1 bg-red-600 rounded-full text-white hover:bg-red-800">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+            </button>
+        </div>
+        <div class="texts-container space-y-2"></div>
+        <button type="button" class="add-text-btn text-sm text-[var(--color-primary-500)] hover:underline">+ Add Text</button>
+    </div>
+</template>
+
+<template id="text-template">
+    <div class="text-item flex items-center gap-2">
+        <textarea rows="1" class="text-input block w-full px-3 py-2 rounded-md shadow-sm sm:text-sm resize-y" placeholder="Enter text..."></textarea>
+        <button type="button" class="remove-text-btn p-1 text-red-500 hover:text-red-700">
+             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+        </button>
+    </div>
+</template>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js/dist/chart.umd.js"></script>
+<script>
+// Main script for embedding playground benchmark tool
+document.addEventListener('DOMContentLoaded', () => {
+    // DOM Elements
+    const form = document.getElementById('embedding-benchmark-form');
+    const addGroupBtn = document.getElementById('add-group-btn');
+    const groupsContainer = document.getElementById('groups-container');
+    const groupTemplate = document.getElementById('group-template');
+    const textTemplate = document.getElementById('text-template');
+    const runBtn = document.getElementById('run-benchmark-btn');
+    const benchmarkNameInput = document.getElementById('benchmark-name');
+    
+    // Benchmark Management Buttons
+    const loadPrebuiltBtn = document.getElementById('load-prebuilt-btn');
+    const prebuiltDropdown = document.getElementById('prebuilt-dropdown');
+    const prebuiltList = document.getElementById('prebuilt-list');
+    const loadFileBtn = document.getElementById('load-file-btn');
+    const loadFileInput = document.getElementById('load-file-input');
+    const saveFileBtn = document.getElementById('save-file-btn');
+    const clearBenchmarkBtn = document.getElementById('clear-benchmark-btn');
+
+    // Results Elements
+    const resultsContainer = document.getElementById('results-container');
+    const resultsTabs = document.getElementById('results-tabs');
+    const resultsPlots = document.getElementById('results-plots');
+
+    let groupIndex = 0;
+    let prebuiltBenchmarks = [];
+    let activeCharts = {};
+
+    // --- State Management and Rendering ---
+    function getBenchmarkState() {
+        const state = { name: benchmarkNameInput.value.trim(), groups: [] };
+        groupsContainer.querySelectorAll('.group').forEach(groupEl => {
+            const group = {
+                id: groupEl.dataset.groupId,
+                name: groupEl.querySelector('.group-name').value.trim(),
+                color: groupEl.querySelector('.group-color').value,
+                texts: Array.from(groupEl.querySelectorAll('.text-input')).map(t => t.value.trim()).filter(t => t)
+            };
+            if (group.name && group.texts.length > 0) {
+                state.groups.push(group);
+            }
+        });
+        return state;
+    }
+
+    function loadBenchmarkState(benchmark) {
+        clearBenchmark();
+        benchmarkNameInput.value = benchmark.name || 'Imported Benchmark';
+        benchmark.groups.forEach(group => addGroup(group));
+    }
+
+    // --- UI Manipulation ---
+    function addGroup(group = null) {
+        const clone = groupTemplate.content.cloneNode(true);
+        const groupEl = clone.querySelector('.group');
+        const groupId = `g${groupIndex++}`;
+        groupEl.dataset.groupId = groupId;
+
+        if (group) {
+            groupEl.querySelector('.group-name').value = group.name;
+            groupEl.querySelector('.group-color').value = group.color;
+            group.texts.forEach(text => addText(groupEl.querySelector('.texts-container'), text));
+        } else {
+            // Assign a random color to new groups
+            groupEl.querySelector('.group-color').value = `#${Math.floor(Math.random()*16777215).toString(16).padStart(6, '0')}`;
+            addText(groupEl.querySelector('.texts-container')); // Add one default text field
+        }
+        groupsContainer.appendChild(clone);
+    }
+    
+    function addText(container, text = '') {
+        const clone = textTemplate.content.cloneNode(true);
+        clone.querySelector('.text-input').value = text;
+        container.appendChild(clone);
+    }
+
+    function clearBenchmark() {
+        groupsContainer.innerHTML = '';
+        benchmarkNameInput.value = '';
+        groupIndex = 0;
+    }
+
+    // --- Event Handlers ---
+    addGroupBtn.addEventListener('click', () => addGroup());
+    groupsContainer.addEventListener('click', (e) => {
+        if (e.target.closest('.remove-group-btn')) {
+            e.target.closest('.group').remove();
+        } else if (e.target.closest('.add-text-btn')) {
+            addText(e.target.closest('.group').querySelector('.texts-container'));
+        } else if (e.target.closest('.remove-text-btn')) {
+            e.target.closest('.text-item').remove();
+        }
+    });
+    
+    clearBenchmarkBtn.addEventListener('click', clearBenchmark);
+
+    // Benchmark File Operations
+    saveFileBtn.addEventListener('click', () => {
+        const state = getBenchmarkState();
+        if (!state.name || state.groups.length === 0) {
+            alert('Please name your benchmark and add at least one group with text.');
+            return;
+        }
+        const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${state.name.replace(/ /g, '_')}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+    });
+
+    loadFileBtn.addEventListener('click', () => loadFileInput.click());
+    loadFileInput.addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (event) => {
+            try {
+                const data = JSON.parse(event.target.result);
+                loadBenchmarkState(data);
+            } catch (err) {
+                alert('Invalid JSON file.');
+            }
+        };
+        reader.readAsText(file);
+        e.target.value = null;
+    });
+
+    // Pre-built Benchmarks Dropdown
+    loadPrebuiltBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        prebuiltDropdown.classList.toggle('hidden');
+    });
+    document.addEventListener('click', () => prebuiltDropdown.classList.add('hidden'));
+
+    async function fetchPrebuilt() {
+        const response = await fetch("{{ url_for('admin_get_prebuilt_benchmarks') }}");
+        prebuiltBenchmarks = await response.json();
+        prebuiltList.innerHTML = '';
+        prebuiltBenchmarks.forEach((bench, index) => {
+            const item = document.createElement('a');
+            item.href = '#';
+            item.className = 'text-gray-300 block px-4 py-2 text-sm hover:bg-gray-700';
+            item.textContent = bench.name;
+            item.dataset.index = index;
+            item.onclick = (e) => {
+                e.preventDefault();
+                loadBenchmarkState(prebuiltBenchmarks[index]);
+                prebuiltDropdown.classList.add('hidden');
+            };
+            prebuiltList.appendChild(item);
+        });
+    }
+
+    // --- Benchmark Execution & Results ---
+    form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        toggleLoading(true);
+        resultsContainer.classList.add('hidden');
+
+        const benchmarkData = getBenchmarkState();
+        const selectedModels = Array.from(document.getElementById('model-selector').selectedOptions).map(opt => opt.value);
+
+        if (selectedModels.length === 0 || benchmarkData.groups.length === 0) {
+            alert('Please select at least one model and define at least one concept group.');
+            toggleLoading(false);
+            return;
+        }
+
+        try {
+            const response = await fetch("{{ url_for('admin_run_embedding_benchmark') }}", {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': '{{ csrf_token }}' },
+                body: JSON.stringify({
+                    models: selectedModels,
+                    benchmark: benchmarkData
+                }),
+            });
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || 'Benchmark failed');
+            
+            displayResults(data);
+        } catch (error) {
+            alert(`Error: ${error.message}`);
+        } finally {
+            toggleLoading(false);
+        }
+    });
+
+    function displayResults(data) {
+        Object.values(activeCharts).forEach(chart => chart.destroy());
+        activeCharts = {};
+        
+        resultsTabs.innerHTML = '';
+        resultsPlots.innerHTML = '';
+
+        Object.keys(data.models).forEach((modelName, index) => {
+            // Create Tab
+            const tab = document.createElement('button');
+            tab.className = `py-2 px-4 text-sm font-medium border-b-2 ${index === 0 ? 'text-[var(--color-primary-500)] border-[var(--color-primary-500)]' : 'text-gray-400 border-transparent hover:text-gray-200 hover:border-gray-500'}`;
+            tab.textContent = modelName;
+            tab.dataset.target = `plot-${modelName}`;
+            resultsTabs.appendChild(tab);
+
+            // Create Plot Container
+            const plotContainer = document.createElement('div');
+            plotContainer.id = `plot-${modelName}`;
+            plotContainer.className = index > 0 ? 'hidden' : '';
+            plotContainer.innerHTML = `<canvas></canvas>`;
+            resultsPlots.appendChild(plotContainer);
+
+            // Render Chart
+            const modelData = data.models[modelName];
+            const datasets = data.groups.map(group => ({
+                label: group.name,
+                data: modelData.points.filter(p => p.group_id === group.id),
+                backgroundColor: group.color
+            }));
+            
+            const ctx = plotContainer.querySelector('canvas').getContext('2d');
+            activeCharts[modelName] = new Chart(ctx, {
+                type: 'scatter',
+                data: { datasets },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    return context.raw.label;
+                                }
+                            }
+                        },
+                        legend: { labels: { color: '#d1d5db' } }
+                    },
+                    scales: {
+                        x: { ticks: { color: '#9ca3af' }, grid: { color: 'rgba(255,255,255,0.1)' } },
+                        y: { ticks: { color: '#9ca3af' }, grid: { color: 'rgba(255,255,255,0.1)' } }
+                    }
+                }
+            });
+        });
+
+        // Tab switching logic
+        resultsTabs.addEventListener('click', e => {
+            if (e.target.tagName === 'BUTTON') {
+                resultsTabs.querySelectorAll('button').forEach(btn => {
+                    btn.className = 'py-2 px-4 text-sm font-medium text-gray-400 border-b-2 border-transparent hover:text-gray-200 hover:border-gray-500';
+                });
+                e.target.className = 'py-2 px-4 text-sm font-medium text-[var(--color-primary-500)] border-b-2 border-[var(--color-primary-500)]';
+                
+                resultsPlots.querySelectorAll('div').forEach(plot => plot.classList.add('hidden'));
+                document.getElementById(e.target.dataset.target).classList.remove('hidden');
+            }
+        });
+
+        resultsContainer.classList.remove('hidden');
+    }
+
+    function toggleLoading(isLoading) {
+        runBtn.disabled = isLoading;
+        runBtn.innerHTML = isLoading 
+            ? '<svg class="animate-spin h-5 w-5 mx-auto" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>'
+            : 'Run Benchmark';
+    }
+
+    // Initial setup
+    addGroup();
+    fetchPrebuilt();
+});
+</script>
+{% endblock %}
