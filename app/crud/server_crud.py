@@ -167,10 +167,16 @@ async def fetch_and_update_models(db: AsyncSession, server_id: int) -> dict:
                     completion_price = pricing.get("completion", 0)  # $ per million output tokens
                     is_free = (prompt_price == 0 and completion_price == 0) or ":free" in model_id.lower()
                     
+                    # Special logging for Grok models
+                    if "grok" in model_id.lower():
+                        logger.info(f"Grok model found: {model_id}, is_free: {is_free}, prompt_price: {prompt_price}, completion_price: {completion_price}")
+                    
                     if is_free:
                         free_models.append((model, model_id))
                     else:
                         paid_models.append((model, model_id))
+                
+                logger.info(f"OpenRouter models categorized: {len(free_models)} free, {len(paid_models)} paid")
                 
                 # Check endpoints for free models only (paid models are assumed to have active endpoints)
                 api_key = decrypt_data(server.encrypted_api_key) if server.encrypted_api_key else None
@@ -187,14 +193,42 @@ async def fetch_and_update_models(db: AsyncSession, server_id: int) -> dict:
                             # Add small delay to respect rate limits (50 req/day for free tier)
                             await asyncio.sleep(0.1)
                             has_endpoint = await check_openrouter_model_endpoints(model_id, api_key, client)
+                            # Special logging for Grok models
+                            if "grok" in model_id.lower():
+                                logger.info(f"Grok model {model_id} endpoint check result: {has_endpoint}")
                             return (model, model_id) if has_endpoint else None
                     
                     results = await asyncio.gather(*[check_free_model(fm) for fm in free_models], return_exceptions=True)
-                    free_models_with_endpoints = [r for r in results if r is not None and not isinstance(r, Exception)]
+                    free_models_with_endpoints = []
+                    failed_models = []
+                    
+                    for i, result in enumerate(results):
+                        model_id = free_models[i][1] if i < len(free_models) else "unknown"
+                        if isinstance(result, Exception):
+                            logger.warning(f"Exception checking endpoints for {model_id}: {result}")
+                            if "grok" in model_id.lower():
+                                logger.error(f"Grok model {model_id} had exception during endpoint check!")
+                            failed_models.append(model_id)
+                        elif result is not None:
+                            free_models_with_endpoints.append(result)
+                            if "grok" in model_id.lower():
+                                logger.info(f"Grok model {model_id} successfully added to free_models_with_endpoints")
+                        else:
+                            # Model returned None (no endpoints)
+                            if "grok" in model_id.lower():
+                                logger.error(f"Grok model {model_id} returned None from endpoint check (no endpoints found)")
+                            failed_models.append(model_id)
                     
                     filtered_count = len(free_models) - len(free_models_with_endpoints)
                     if filtered_count > 0:
                         logger.info(f"Filtered out {filtered_count} free models without active endpoints")
+                        if failed_models:
+                            logger.debug(f"Models filtered out: {failed_models[:10]}...")  # Log first 10
+                    
+                    # Log successful models for debugging
+                    successful_models = [m[1] for m in free_models_with_endpoints]
+                    if successful_models:
+                        logger.debug(f"Free models with endpoints ({len(successful_models)}): {successful_models[:10]}...")
                 elif free_models:
                     # If no API key, include all free models (can't check endpoints)
                     logger.warning("No API key available for endpoint checking - including all free models")
@@ -202,6 +236,15 @@ async def fetch_and_update_models(db: AsyncSession, server_id: int) -> dict:
                 
                 # Combine paid models (all included) + free models with active endpoints
                 all_valid_models = paid_models + free_models_with_endpoints
+                
+                # Log Grok models in final list
+                grok_models = [m_id for _, m_id in all_valid_models if "grok" in m_id.lower()]
+                if grok_models:
+                    logger.info(f"Grok models in final valid list: {grok_models}")
+                else:
+                    logger.warning("No Grok models found in final valid models list!")
+                
+                logger.info(f"Total valid models to process: {len(all_valid_models)} ({len(paid_models)} paid + {len(free_models_with_endpoints)} free with endpoints)")
                 
                 # Process all valid models
                 for model, model_id in all_valid_models:
@@ -289,6 +332,44 @@ async def fetch_and_update_models(db: AsyncSession, server_id: int) -> dict:
         server.available_models = models
         server.models_last_updated = datetime.datetime.utcnow()
         server.last_error = None
+        
+        # For OpenRouter servers: if enabled_models is None (never been set), auto-enable all newly fetched models
+        # This ensures new models appear automatically on first refresh
+        # Also, if enabled_models is an empty list but we have new models, merge them in
+        # (This handles the case where models were previously disabled but new ones are fetched)
+        if server.server_type == "openrouter":
+            model_names = [m.get("name") for m in models if isinstance(m, dict) and "name" in m]
+            
+            # Check if Grok is in the models list
+            grok_in_models = [m for m in model_names if "grok" in m.lower()]
+            if grok_in_models:
+                logger.info(f"Grok models in models list before enabled_models update: {grok_in_models}")
+            
+            if server.enabled_models is None:
+                # First time: enable all models
+                server.enabled_models = model_names
+                logger.info(f"Auto-enabled {len(model_names)} OpenRouter models (first-time setup)")
+                if grok_in_models:
+                    logger.info(f"Grok models auto-enabled: {grok_in_models}")
+            elif isinstance(server.enabled_models, list):
+                # Merge new models into existing enabled list (avoid duplicates)
+                existing_set = set(server.enabled_models)
+                new_models = [m for m in model_names if m not in existing_set]
+                if new_models:
+                    server.enabled_models = list(existing_set) + new_models
+                    logger.info(f"Auto-enabled {len(new_models)} newly fetched OpenRouter models (merged with existing)")
+                    grok_new = [m for m in new_models if "grok" in m.lower()]
+                    if grok_new:
+                        logger.info(f"Grok models in new_models: {grok_new}")
+            
+            # Final check: is Grok in enabled_models?
+            if isinstance(server.enabled_models, list):
+                grok_enabled = [m for m in server.enabled_models if "grok" in m.lower()]
+                if grok_enabled:
+                    logger.info(f"Grok models in enabled_models after update: {grok_enabled}")
+                else:
+                    logger.error(f"Grok models NOT in enabled_models! Available: {grok_in_models}, enabled_models count: {len(server.enabled_models)}")
+        
         await db.commit()
         await db.refresh(server)
 
@@ -498,10 +579,14 @@ async def get_all_available_model_names(db: AsyncSession, filter_type: Optional[
                 
                 # For OpenRouter servers, filter by enabled_models if not including disabled
                 # BUT: Always include models with "free" in the name (they have active endpoints)
+                # NOTE: If enabled_models is None, all models are enabled (show all)
                 if server.server_type == "openrouter" and not include_disabled:
                     is_free_model = "free" in model_name.lower()
-                    if server.enabled_models and model_name not in server.enabled_models and not is_free_model:
-                        continue  # Skip disabled models (unless they're free models)
+                    # Only filter if enabled_models is explicitly set (not None)
+                    # None means "all enabled", empty list means "none enabled", list with items means "only these enabled"
+                    if server.enabled_models is not None:
+                        if model_name not in server.enabled_models and not is_free_model:
+                            continue  # Skip disabled models (unless they're free models)
                 
                 is_embed = is_embedding_model(model_name)
                 

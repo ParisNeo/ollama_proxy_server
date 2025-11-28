@@ -528,16 +528,24 @@ async def admin_manage_server_models(
         raise HTTPException(status_code=404, detail="Server not found")
 
     # Get enabled models (default to all if not set)
+    # IMPORTANT: The "Manage Models" page should show ALL models from available_models,
+    # regardless of enabled_models status. This allows users to enable/disable models.
+    # The enabled_models filtering only applies to the main Models Manager page.
     enabled_models_set = set()
-    if server.enabled_models:
+    # Check if enabled_models is None (never set) vs empty list (explicitly disabled)
+    if server.enabled_models is not None:
+        # enabled_models is explicitly set (could be empty list or list with items)
         enabled_models_set = set(server.enabled_models)
     elif server.server_type == "openrouter" and server.available_models:
-        # If no enabled_models set yet, default to all models being enabled
+        # If enabled_models is None (never been set), default to all models being enabled
         import json
         models_list = server.available_models
         if isinstance(models_list, str):
             models_list = json.loads(models_list)
         enabled_models_set = {m.get("name") for m in models_list if isinstance(m, dict) and "name" in m}
+    
+    # For the "Manage Models" page, we want to show ALL models from available_models
+    # so users can enable/disable them. Don't filter by enabled_models here.
 
     # Parse available_models if it's a JSON string (for template compatibility)
     import json

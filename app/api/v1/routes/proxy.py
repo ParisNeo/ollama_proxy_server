@@ -187,10 +187,44 @@ async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer
         # --- BRANCH: Handle OpenRouter servers differently ---
         if chosen_server.server_type == 'openrouter':
             try:
-                # OpenRouter translation doesn't use the retry logic wrapper in the same way
                 response = await _proxy_to_openrouter(request, chosen_server, path, body_bytes)
                 return response, chosen_server
-            except HTTPException:
+            except HTTPException as e:
+                # Check if this is an auto model and it failed with a model-specific error
+                body_dict = json.loads(body_bytes) if body_bytes else {}
+                is_auto = body_dict.get("_is_auto_model", False)
+                
+                if is_auto:
+                    error_detail = str(e.detail).lower()
+                    is_model_error = (
+                        e.status_code in (404, 400) and 
+                        ("model" in error_detail or "not found" in error_detail or "no such" in error_detail or "endpoint" in error_detail)
+                    )
+                    
+                    if is_model_error:
+                        # Model failed, try next best model
+                        failed_model = body_dict.get("model")
+                        logger.warning(f"Auto-routing: Model '{failed_model}' failed ({e.status_code}): {e.detail}. Trying next best model...")
+                        
+                        # Get next best model (skip the failed one)
+                        settings = await get_settings()
+                        skip_models = body_dict.get("_failed_models", [])
+                        skip_models.append(failed_model)
+                        body_dict["_failed_models"] = skip_models
+                        
+                        next_model = await _select_auto_model(db, body_dict, settings, skip_models=skip_models)
+                        if next_model:
+                            logger.info(f"Auto-routing fallback: Selected '{next_model}'")
+                            body_dict["model"] = next_model
+                            body_bytes = json.dumps(body_dict).encode('utf-8')
+                            # Retry with next model
+                            try:
+                                response = await _proxy_to_openrouter(request, chosen_server, path, body_bytes)
+                                return response, chosen_server
+                            except HTTPException:
+                                # Still failed, re-raise original error
+                                raise e
+                
                 raise # Re-raise HTTP exceptions from the OpenRouter proxy
             except Exception as e:
                 logger.warning(f"OpenRouter server '{chosen_server.name}' failed: {e}. Trying next server.")
@@ -573,7 +607,7 @@ async def _get_all_models_ollama_format(db: AsyncSession) -> Dict[str, Dict[str,
     return all_models
 
 
-async def _select_auto_model(db: AsyncSession, body: Dict[str, Any], settings: AppSettingsModel = None) -> Optional[str]:
+async def _select_auto_model(db: AsyncSession, body: Dict[str, Any], settings: AppSettingsModel = None, skip_models: List[str] = None) -> Optional[str]:
     """
     Professional auto-routing system that intelligently selects models based on:
     - Request characteristics (images, code, tool calling, internet, thinking, fast)
@@ -626,6 +660,13 @@ async def _select_auto_model(db: AsyncSession, body: Dict[str, Any], settings: A
     
     # Use priority-based routing: try each priority level in order
     priorities = sorted(set(m.priority for m in available_metadata if m.priority is not None))
+    
+    # Filter out skipped models (for fallback retry)
+    if skip_models:
+        available_metadata = [m for m in available_metadata if m.model_name not in skip_models]
+        if not available_metadata:
+            logger.warning(f"Auto-routing: All models skipped. Tried: {skip_models}")
+            return None
     
     if not priorities:
         # No priorities set - use all available models
@@ -751,6 +792,7 @@ async def proxy_ollama(
         # Override the model in the request and continue
         model_name = chosen_model_name
         body["model"] = model_name
+        body["_is_auto_model"] = True  # Flag for fallback retry
         body_bytes = json.dumps(body).encode('utf-8')
     
     # --- WEB SEARCH INTEGRATION: Automatically enhance chat requests with web search when needed ---

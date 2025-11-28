@@ -47,6 +47,8 @@ from app.schema.settings import AppSettingsModel
 setup_logging(settings.LOG_LEVEL)
 logger = logging.getLogger(__name__)
 os.environ.setdefault("PASSLIB_DISABLE_WARNINGS", "1")
+# Disable ChromaDB telemetry to prevent errors
+os.environ.setdefault("ANONYMIZED_TELEMETRY", "False")
 
 _db_initialized = False
 async def init_db():

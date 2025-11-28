@@ -192,6 +192,7 @@ async def admin_playground_stream(
             
             logger.info(f"Playground 'auto' model resolved to -> '{resolved_model}'")
             model_name = resolved_model
+            data["_is_auto_model"] = True  # Flag for fallback retry
         # --- END NEW ---
 
         # Apply verbosity control to messages
@@ -333,43 +334,144 @@ async def admin_playground_stream(
                 full_response = ""
                 user_message = ""
                 streamed_model_name = model_name
-                try:
-                    async with http_client.stream("POST", chat_url, json=openrouter_payload, timeout=600.0, headers=headers) as response:
-                        if response.status_code != 200:
-                            error_body = await response.aread()
-                            error_payload = {"error": f"OpenRouter error: {error_body.decode()}"}
+                current_model = model_name
+                failed_models = []
+                is_auto = data.get("_is_auto_model", False)
+                
+                while True:
+                    try:
+                        async with http_client.stream("POST", chat_url, json=openrouter_payload, timeout=600.0, headers=headers) as response:
+                            if response.status_code != 200:
+                                error_body = await response.aread()
+                                error_text = error_body.decode()
+                                error_lower = error_text.lower()
+                                
+                                # Check if it's a model-specific error (for auto-routing fallback)
+                                is_model_error = (
+                                    is_auto and
+                                    response.status_code in (404, 400) and 
+                                    ("model" in error_lower or "not found" in error_lower or "no such" in error_lower or "endpoint" in error_lower)
+                                )
+                                
+                                if is_model_error:
+                                    # Model failed, try next best model
+                                    failed_models.append(current_model)
+                                    logger.warning(f"Auto-routing: Model '{current_model}' failed ({response.status_code}): {error_text}. Trying next best model...")
+                                    
+                                    # Get next best model
+                                    next_model = await _select_auto_model(db, data, skip_models=failed_models)
+                                    if next_model:
+                                        current_model = next_model
+                                        ollama_payload["model"] = next_model
+                                        openrouter_payload = translate_ollama_to_openrouter_chat(ollama_payload)
+                                        logger.info(f"Auto-routing fallback: Selected '{next_model}'")
+                                        continue  # Retry with next model
+                                    else:
+                                        # No more models available
+                                        error_payload = {"error": f"Auto-routing: All models failed. Tried: {', '.join(failed_models)}"}
+                                        yield (json.dumps(error_payload) + '\n').encode('utf-8')
+                                        return
+                                else:
+                                    # Not a model error, yield error and return
+                                    error_payload = {"error": f"OpenRouter error: {error_text}"}
+                                    yield (json.dumps(error_payload) + '\n').encode('utf-8')
+                                    return
+                            
+                            # Get last user message for saving
+                            for msg in reversed(messages):
+                                if msg.get("role") == "user":
+                                    user_message = msg.get("content", "")
+                                    break
+                            
+                            async for chunk in openrouter_stream_to_ollama_stream(response.aiter_text(), current_model):
+                                # Extract content and model name from chunks
+                                try:
+                                    chunk_str = chunk.decode('utf-8') if isinstance(chunk, bytes) else chunk
+                                    for line in chunk_str.strip().split('\n'):
+                                        if line:
+                                            chunk_data = json.loads(line)
+                                            if chunk_data.get("message", {}).get("content"):
+                                                full_response += chunk_data["message"]["content"]
+                                            if chunk_data.get("model"):
+                                                streamed_model_name = chunk_data["model"]
+                                except:
+                                    pass
+                                yield chunk
+                        
+                        # Success! Save messages and return
+                        if len(failed_models) > 0:
+                            logger.info(f"Auto-routing fallback: Successfully used '{current_model}' after {len(failed_models)} failed model(s)")
+                        await _save_messages_to_conversation(
+                            db, conversation_id, user_message, full_response, streamed_model_name, request
+                        )
+                        return  # Success, exit the retry loop
+                    
+                    except httpx.HTTPStatusError as e:
+                        # HTTP error - check if model-specific (for auto-routing fallback)
+                        error_text = ""
+                        try:
+                            error_text = e.response.text.lower()
+                        except:
+                            pass
+                        
+                        is_model_error = (
+                            is_auto and
+                            e.response.status_code in (404, 400) and 
+                            ("model" in error_text or "not found" in error_text or "no such" in error_text or "endpoint" in error_text)
+                        )
+                        
+                        if is_model_error:
+                            # Model failed, try next best model
+                            failed_models.append(current_model)
+                            logger.warning(f"Auto-routing: Model '{current_model}' failed ({e.response.status_code}): {e.response.text}. Trying next best model...")
+                            
+                            # Get next best model
+                            next_model = await _select_auto_model(db, data, skip_models=failed_models)
+                            if next_model:
+                                current_model = next_model
+                                ollama_payload["model"] = next_model
+                                openrouter_payload = translate_ollama_to_openrouter_chat(ollama_payload)
+                                logger.info(f"Auto-routing fallback: Selected '{next_model}'")
+                                continue  # Retry with next model
+                            else:
+                                # No more models available
+                                logger.error(f"Auto-routing: All models failed. Tried: {', '.join(failed_models)}")
+                                error_payload = {"error": f"Auto-routing: All models failed. Tried: {', '.join(failed_models)}"}
+                                yield (json.dumps(error_payload) + '\n').encode('utf-8')
+                                return
+                        else:
+                            # Not a model error
+                            logger.error(f"OpenRouter HTTP error for '{current_model}': {e}")
+                            error_payload = {"error": f"OpenRouter error ({e.response.status_code}): {e.response.text}"}
                             yield (json.dumps(error_payload) + '\n').encode('utf-8')
                             return
-                        
-                        # Get last user message for saving
-                        for msg in reversed(messages):
-                            if msg.get("role") == "user":
-                                user_message = msg.get("content", "")
-                                break
-                        
-                        async for chunk in openrouter_stream_to_ollama_stream(response.aiter_text(), model_name):
-                            # Extract content and model name from chunks
-                            try:
-                                chunk_str = chunk.decode('utf-8') if isinstance(chunk, bytes) else chunk
-                                for line in chunk_str.strip().split('\n'):
-                                    if line:
-                                        chunk_data = json.loads(line)
-                                        if chunk_data.get("message", {}).get("content"):
-                                            full_response += chunk_data["message"]["content"]
-                                        if chunk_data.get("model"):
-                                            streamed_model_name = chunk_data["model"]
-                            except:
-                                pass
-                            yield chunk
                     
-                    # Save messages to conversation after stream completes
-                    await _save_messages_to_conversation(
-                        db, conversation_id, user_message, full_response, streamed_model_name, request
-                    )
-                except Exception as e:
-                    logger.error(f"OpenRouter stream error: {e}")
-                    error_payload = {"error": f"OpenRouter stream error: {str(e)}"}
-                    yield (json.dumps(error_payload) + '\n').encode('utf-8')
+                    except Exception as e:
+                        # Non-HTTP error - if auto-routing, try next model
+                        if is_auto:
+                            failed_models.append(current_model)
+                            logger.warning(f"Auto-routing: Model '{current_model}' failed with error: {e}. Trying next best model...")
+                            
+                            # Get next best model
+                            next_model = await _select_auto_model(db, data, skip_models=failed_models)
+                            if next_model:
+                                current_model = next_model
+                                ollama_payload["model"] = next_model
+                                openrouter_payload = translate_ollama_to_openrouter_chat(ollama_payload)
+                                logger.info(f"Auto-routing fallback: Selected '{next_model}'")
+                                continue  # Retry with next model
+                            else:
+                                # No more models available
+                                logger.error(f"Auto-routing: All models failed. Tried: {', '.join(failed_models)}")
+                                error_payload = {"error": f"Auto-routing: All models failed. Tried: {', '.join(failed_models)}"}
+                                yield (json.dumps(error_payload) + '\n').encode('utf-8')
+                                return
+                        else:
+                            # Not auto-routing, just fail
+                            logger.error(f"OpenRouter stream error for '{current_model}': {e}")
+                            error_payload = {"error": f"OpenRouter stream error: {str(e)}"}
+                            yield (json.dumps(error_payload) + '\n').encode('utf-8')
+                            return
             
             response = StreamingResponse(openrouter_stream(), media_type="application/x-ndjson")
             response.headers["X-Conversation-Id"] = str(conversation_id)

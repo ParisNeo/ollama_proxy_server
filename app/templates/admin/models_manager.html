@@ -116,8 +116,46 @@
                     {% if categorized_by_server.ollama and categorized_by_server.ollama.all %}
                     <tr>
                         <td colspan="10" class="px-4 py-3 bg-blue-900/40 border-b-2 border-blue-400">
-                            <h3 class="text-lg font-bold text-blue-200">🦙 Ollama Models</h3>
-                            <p class="text-xs text-blue-300 mt-1">Local and cloud Ollama models</p>
+                            <div class="flex items-center justify-between mb-2">
+                                <div>
+                                    <h3 class="text-lg font-bold text-blue-200">🦙 Ollama Models</h3>
+                                    <p class="text-xs text-blue-300 mt-1">Local and cloud Ollama models</p>
+                                </div>
+                            </div>
+                            <!-- Column headers row inside the banner -->
+                            <div class="grid grid-cols-10 gap-0 mt-3 pt-3 border-t border-blue-400/30">
+                                <div class="col-span-3"></div>
+                                <div class="p-0 text-center text-xs font-medium text-blue-200 uppercase tracking-wider relative" style="height: 60px;">
+                                    <div style="transform: rotate(-45deg); transform-origin: center; white-space: nowrap; position: absolute; left: 50%; bottom: 5px; margin-left: -30px; width: 60px; text-align: left;">Supports Images</div>
+                                </div>
+                                <div class="p-0 text-center text-xs font-medium text-blue-200 uppercase tracking-wider relative" style="height: 60px;">
+                                    <div style="transform: rotate(-45deg); transform-origin: center; white-space: nowrap; position: absolute; left: 50%; bottom: 5px; margin-left: -25px; width: 50px; text-align: left;">Code Model</div>
+                                </div>
+                                <div class="p-0 text-center text-xs font-medium text-blue-200 uppercase tracking-wider relative" style="height: 60px;">
+                                    <div style="transform: rotate(-45deg); transform-origin: center; white-space: nowrap; position: absolute; left: 50%; bottom: 5px; margin-left: -20px; width: 40px; text-align: left;">Fast Model</div>
+                                </div>
+                                <div class="p-0 text-center text-xs font-medium text-blue-200 uppercase tracking-wider relative" style="height: 60px;">
+                                    <div style="transform: rotate(-45deg); transform-origin: center; white-space: nowrap; position: absolute; left: 50%; bottom: 5px; margin-left: -30px; width: 60px; text-align: left;">Tool Calling</div>
+                                </div>
+                                <div class="p-0 text-center text-xs font-medium text-blue-200 uppercase tracking-wider relative" style="height: 60px;">
+                                    <div style="transform: rotate(-45deg); transform-origin: center; white-space: nowrap; position: absolute; left: 50%; bottom: 5px; margin-left: -20px; width: 40px; text-align: left;">Internet</div>
+                                </div>
+                                <div class="p-0 text-center text-xs font-medium text-blue-200 uppercase tracking-wider relative" style="height: 60px;">
+                                    <div style="transform: rotate(-45deg); transform-origin: center; white-space: nowrap; position: absolute; left: 50%; bottom: 5px; margin-left: -25px; width: 50px; text-align: left;">Thinking</div>
+                                </div>
+                                <div class="px-4 text-center text-xs font-medium text-blue-200 uppercase tracking-wider">
+                                    <div class="flex flex-col items-center justify-center gap-1">
+                                        <div class="flex items-center justify-center gap-2">
+                                            <span>Priority</span>
+                                            <span class="text-xs text-blue-300" title="Select models to include in auto-priority analysis">⚙️</span>
+                                        </div>
+                                        <label class="flex items-center gap-1 cursor-pointer text-xs text-blue-300 hover:text-blue-200" title="Select/Deselect all models for priority analysis">
+                                            <input type="checkbox" class="section-select-all-priority h-3 w-3 rounded text-[var(--color-primary-600)]" onchange="toggleAllPriorityCheckboxes(this.checked)">
+                                            <span>Select All</span>
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
                         </td>
                     </tr>
                     {% for meta in categorized_by_server.ollama.all %}
@@ -133,8 +171,46 @@
                     {% if or_models.other %}
                     <tr>
                         <td colspan="10" class="px-4 py-3 bg-gray-800/40 border-b-2 border-gray-600">
-                            <h3 class="text-lg font-bold text-gray-300">📦 OpenRouter: Other Models</h3>
-                            <p class="text-xs text-gray-400 mt-1">Remaining OpenRouter models</p>
+                            <div class="flex items-center justify-between mb-2">
+                                <div>
+                                    <h3 class="text-lg font-bold text-gray-300">📦 OpenRouter: Other Models</h3>
+                                    <p class="text-xs text-gray-400 mt-1">Remaining OpenRouter models</p>
+                                </div>
+                            </div>
+                            <!-- Column headers row inside the banner -->
+                            <div class="grid grid-cols-10 gap-0 mt-3 pt-3 border-t border-gray-600/30">
+                                <div class="col-span-3"></div>
+                                <div class="p-0 text-center text-xs font-medium text-gray-300 uppercase tracking-wider relative" style="height: 60px;">
+                                    <div style="transform: rotate(-45deg); transform-origin: center; white-space: nowrap; position: absolute; left: 50%; bottom: 5px; margin-left: -30px; width: 60px; text-align: left;">Supports Images</div>
+                                </div>
+                                <div class="p-0 text-center text-xs font-medium text-gray-300 uppercase tracking-wider relative" style="height: 60px;">
+                                    <div style="transform: rotate(-45deg); transform-origin: center; white-space: nowrap; position: absolute; left: 50%; bottom: 5px; margin-left: -25px; width: 50px; text-align: left;">Code Model</div>
+                                </div>
+                                <div class="p-0 text-center text-xs font-medium text-gray-300 uppercase tracking-wider relative" style="height: 60px;">
+                                    <div style="transform: rotate(-45deg); transform-origin: center; white-space: nowrap; position: absolute; left: 50%; bottom: 5px; margin-left: -20px; width: 40px; text-align: left;">Fast Model</div>
+                                </div>
+                                <div class="p-0 text-center text-xs font-medium text-gray-300 uppercase tracking-wider relative" style="height: 60px;">
+                                    <div style="transform: rotate(-45deg); transform-origin: center; white-space: nowrap; position: absolute; left: 50%; bottom: 5px; margin-left: -30px; width: 60px; text-align: left;">Tool Calling</div>
+                                </div>
+                                <div class="p-0 text-center text-xs font-medium text-gray-300 uppercase tracking-wider relative" style="height: 60px;">
+                                    <div style="transform: rotate(-45deg); transform-origin: center; white-space: nowrap; position: absolute; left: 50%; bottom: 5px; margin-left: -20px; width: 40px; text-align: left;">Internet</div>
+                                </div>
+                                <div class="p-0 text-center text-xs font-medium text-gray-300 uppercase tracking-wider relative" style="height: 60px;">
+                                    <div style="transform: rotate(-45deg); transform-origin: center; white-space: nowrap; position: absolute; left: 50%; bottom: 5px; margin-left: -25px; width: 50px; text-align: left;">Thinking</div>
+                                </div>
+                                <div class="px-4 text-center text-xs font-medium text-gray-300 uppercase tracking-wider">
+                                    <div class="flex flex-col items-center justify-center gap-1">
+                                        <div class="flex items-center justify-center gap-2">
+                                            <span>Priority</span>
+                                            <span class="text-xs text-gray-400" title="Select models to include in auto-priority analysis">⚙️</span>
+                                        </div>
+                                        <label class="flex items-center gap-1 cursor-pointer text-xs text-gray-400 hover:text-gray-300" title="Select/Deselect all models for priority analysis">
+                                            <input type="checkbox" class="section-select-all-priority h-3 w-3 rounded text-[var(--color-primary-600)]" onchange="toggleAllPriorityCheckboxes(this.checked)">
+                                            <span>Select All</span>
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
                         </td>
                     </tr>
                     {% for meta in or_models.other %}
@@ -146,8 +222,46 @@
                     {% if or_models.free %}
                     <tr>
                         <td colspan="10" class="px-4 py-3 bg-green-900/40 border-b-2 border-green-400">
-                            <h3 class="text-lg font-bold text-green-200">🆓 OpenRouter: Free Models</h3>
-                            <p class="text-xs text-green-300 mt-1">All free OpenRouter models (sorted by parameter size)</p>
+                            <div class="flex items-center justify-between mb-2">
+                                <div>
+                                    <h3 class="text-lg font-bold text-green-200">🆓 OpenRouter: Free Models</h3>
+                                    <p class="text-xs text-green-300 mt-1">All free OpenRouter models (sorted by parameter size)</p>
+                                </div>
+                            </div>
+                            <!-- Column headers row inside the banner -->
+                            <div class="grid grid-cols-10 gap-0 mt-3 pt-3 border-t border-green-400/30">
+                                <div class="col-span-3"></div>
+                                <div class="p-0 text-center text-xs font-medium text-green-200 uppercase tracking-wider relative" style="height: 60px;">
+                                    <div style="transform: rotate(-45deg); transform-origin: center; white-space: nowrap; position: absolute; left: 50%; bottom: 5px; margin-left: -30px; width: 60px; text-align: left;">Supports Images</div>
+                                </div>
+                                <div class="p-0 text-center text-xs font-medium text-green-200 uppercase tracking-wider relative" style="height: 60px;">
+                                    <div style="transform: rotate(-45deg); transform-origin: center; white-space: nowrap; position: absolute; left: 50%; bottom: 5px; margin-left: -25px; width: 50px; text-align: left;">Code Model</div>
+                                </div>
+                                <div class="p-0 text-center text-xs font-medium text-green-200 uppercase tracking-wider relative" style="height: 60px;">
+                                    <div style="transform: rotate(-45deg); transform-origin: center; white-space: nowrap; position: absolute; left: 50%; bottom: 5px; margin-left: -20px; width: 40px; text-align: left;">Fast Model</div>
+                                </div>
+                                <div class="p-0 text-center text-xs font-medium text-green-200 uppercase tracking-wider relative" style="height: 60px;">
+                                    <div style="transform: rotate(-45deg); transform-origin: center; white-space: nowrap; position: absolute; left: 50%; bottom: 5px; margin-left: -30px; width: 60px; text-align: left;">Tool Calling</div>
+                                </div>
+                                <div class="p-0 text-center text-xs font-medium text-green-200 uppercase tracking-wider relative" style="height: 60px;">
+                                    <div style="transform: rotate(-45deg); transform-origin: center; white-space: nowrap; position: absolute; left: 50%; bottom: 5px; margin-left: -20px; width: 40px; text-align: left;">Internet</div>
+                                </div>
+                                <div class="p-0 text-center text-xs font-medium text-green-200 uppercase tracking-wider relative" style="height: 60px;">
+                                    <div style="transform: rotate(-45deg); transform-origin: center; white-space: nowrap; position: absolute; left: 50%; bottom: 5px; margin-left: -25px; width: 50px; text-align: left;">Thinking</div>
+                                </div>
+                                <div class="px-4 text-center text-xs font-medium text-green-200 uppercase tracking-wider">
+                                    <div class="flex flex-col items-center justify-center gap-1">
+                                        <div class="flex items-center justify-center gap-2">
+                                            <span>Priority</span>
+                                            <span class="text-xs text-green-300" title="Select models to include in auto-priority analysis">⚙️</span>
+                                        </div>
+                                        <label class="flex items-center gap-1 cursor-pointer text-xs text-green-300 hover:text-green-200" title="Select/Deselect all models for priority analysis">
+                                            <input type="checkbox" class="section-select-all-priority h-3 w-3 rounded text-[var(--color-primary-600)]" onchange="toggleAllPriorityCheckboxes(this.checked)">
+                                            <span>Select All</span>
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
                         </td>
                     </tr>
                     {% for meta in or_models.free %}
@@ -159,8 +273,46 @@
                     {% if or_models.major_providers %}
                     <tr>
                         <td colspan="10" class="px-4 py-3 bg-blue-900/40 border-b-2 border-blue-400">
-                            <h3 class="text-lg font-bold text-blue-200">🏢 OpenRouter: Major LLM Providers (Latest Versions)</h3>
-                            <p class="text-xs text-blue-300 mt-1">Latest models from major providers, sorted alphabetically</p>
+                            <div class="flex items-center justify-between mb-2">
+                                <div>
+                                    <h3 class="text-lg font-bold text-blue-200">🏢 OpenRouter: Major LLM Providers (Latest Versions)</h3>
+                                    <p class="text-xs text-blue-300 mt-1">Latest models from major providers, sorted alphabetically</p>
+                                </div>
+                            </div>
+                            <!-- Column headers row inside the banner -->
+                            <div class="grid grid-cols-10 gap-0 mt-3 pt-3 border-t border-blue-400/30">
+                                <div class="col-span-3"></div>
+                                <div class="p-0 text-center text-xs font-medium text-blue-200 uppercase tracking-wider relative" style="height: 60px;">
+                                    <div style="transform: rotate(-45deg); transform-origin: center; white-space: nowrap; position: absolute; left: 50%; bottom: 5px; margin-left: -30px; width: 60px; text-align: left;">Supports Images</div>
+                                </div>
+                                <div class="p-0 text-center text-xs font-medium text-blue-200 uppercase tracking-wider relative" style="height: 60px;">
+                                    <div style="transform: rotate(-45deg); transform-origin: center; white-space: nowrap; position: absolute; left: 50%; bottom: 5px; margin-left: -25px; width: 50px; text-align: left;">Code Model</div>
+                                </div>
+                                <div class="p-0 text-center text-xs font-medium text-blue-200 uppercase tracking-wider relative" style="height: 60px;">
+                                    <div style="transform: rotate(-45deg); transform-origin: center; white-space: nowrap; position: absolute; left: 50%; bottom: 5px; margin-left: -20px; width: 40px; text-align: left;">Fast Model</div>
+                                </div>
+                                <div class="p-0 text-center text-xs font-medium text-blue-200 uppercase tracking-wider relative" style="height: 60px;">
+                                    <div style="transform: rotate(-45deg); transform-origin: center; white-space: nowrap; position: absolute; left: 50%; bottom: 5px; margin-left: -30px; width: 60px; text-align: left;">Tool Calling</div>
+                                </div>
+                                <div class="p-0 text-center text-xs font-medium text-blue-200 uppercase tracking-wider relative" style="height: 60px;">
+                                    <div style="transform: rotate(-45deg); transform-origin: center; white-space: nowrap; position: absolute; left: 50%; bottom: 5px; margin-left: -20px; width: 40px; text-align: left;">Internet</div>
+                                </div>
+                                <div class="p-0 text-center text-xs font-medium text-blue-200 uppercase tracking-wider relative" style="height: 60px;">
+                                    <div style="transform: rotate(-45deg); transform-origin: center; white-space: nowrap; position: absolute; left: 50%; bottom: 5px; margin-left: -25px; width: 50px; text-align: left;">Thinking</div>
+                                </div>
+                                <div class="px-4 text-center text-xs font-medium text-blue-200 uppercase tracking-wider">
+                                    <div class="flex flex-col items-center justify-center gap-1">
+                                        <div class="flex items-center justify-center gap-2">
+                                            <span>Priority</span>
+                                            <span class="text-xs text-blue-300" title="Select models to include in auto-priority analysis">⚙️</span>
+                                        </div>
+                                        <label class="flex items-center gap-1 cursor-pointer text-xs text-blue-300 hover:text-blue-200" title="Select/Deselect all models for priority analysis">
+                                            <input type="checkbox" class="section-select-all-priority h-3 w-3 rounded text-[var(--color-primary-600)]" onchange="toggleAllPriorityCheckboxes(this.checked)">
+                                            <span>Select All</span>
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
                         </td>
                     </tr>
                     {% for meta in or_models.major_providers %}
@@ -172,8 +324,46 @@
                     {% if or_models.uncensored %}
                     <tr>
                         <td colspan="10" class="px-4 py-3 bg-purple-900/40 border-b-2 border-purple-400">
-                            <h3 class="text-lg font-bold text-purple-200">🔓 OpenRouter: Uncensored Models (Dolphin-based)</h3>
-                            <p class="text-xs text-purple-300 mt-1">Dolphin-based models without guardrails</p>
+                            <div class="flex items-center justify-between mb-2">
+                                <div>
+                                    <h3 class="text-lg font-bold text-purple-200">🔓 OpenRouter: Uncensored Models (Dolphin-based)</h3>
+                                    <p class="text-xs text-purple-300 mt-1">Dolphin-based models without guardrails</p>
+                                </div>
+                            </div>
+                            <!-- Column headers row inside the banner -->
+                            <div class="grid grid-cols-10 gap-0 mt-3 pt-3 border-t border-purple-400/30">
+                                <div class="col-span-3"></div>
+                                <div class="p-0 text-center text-xs font-medium text-purple-200 uppercase tracking-wider relative" style="height: 60px;">
+                                    <div style="transform: rotate(-45deg); transform-origin: center; white-space: nowrap; position: absolute; left: 50%; bottom: 5px; margin-left: -30px; width: 60px; text-align: left;">Supports Images</div>
+                                </div>
+                                <div class="p-0 text-center text-xs font-medium text-purple-200 uppercase tracking-wider relative" style="height: 60px;">
+                                    <div style="transform: rotate(-45deg); transform-origin: center; white-space: nowrap; position: absolute; left: 50%; bottom: 5px; margin-left: -25px; width: 50px; text-align: left;">Code Model</div>
+                                </div>
+                                <div class="p-0 text-center text-xs font-medium text-purple-200 uppercase tracking-wider relative" style="height: 60px;">
+                                    <div style="transform: rotate(-45deg); transform-origin: center; white-space: nowrap; position: absolute; left: 50%; bottom: 5px; margin-left: -20px; width: 40px; text-align: left;">Fast Model</div>
+                                </div>
+                                <div class="p-0 text-center text-xs font-medium text-purple-200 uppercase tracking-wider relative" style="height: 60px;">
+                                    <div style="transform: rotate(-45deg); transform-origin: center; white-space: nowrap; position: absolute; left: 50%; bottom: 5px; margin-left: -30px; width: 60px; text-align: left;">Tool Calling</div>
+                                </div>
+                                <div class="p-0 text-center text-xs font-medium text-purple-200 uppercase tracking-wider relative" style="height: 60px;">
+                                    <div style="transform: rotate(-45deg); transform-origin: center; white-space: nowrap; position: absolute; left: 50%; bottom: 5px; margin-left: -20px; width: 40px; text-align: left;">Internet</div>
+                                </div>
+                                <div class="p-0 text-center text-xs font-medium text-purple-200 uppercase tracking-wider relative" style="height: 60px;">
+                                    <div style="transform: rotate(-45deg); transform-origin: center; white-space: nowrap; position: absolute; left: 50%; bottom: 5px; margin-left: -25px; width: 50px; text-align: left;">Thinking</div>
+                                </div>
+                                <div class="px-4 text-center text-xs font-medium text-purple-200 uppercase tracking-wider">
+                                    <div class="flex flex-col items-center justify-center gap-1">
+                                        <div class="flex items-center justify-center gap-2">
+                                            <span>Priority</span>
+                                            <span class="text-xs text-purple-300" title="Select models to include in auto-priority analysis">⚙️</span>
+                                        </div>
+                                        <label class="flex items-center gap-1 cursor-pointer text-xs text-purple-300 hover:text-purple-200" title="Select/Deselect all models for priority analysis">
+                                            <input type="checkbox" class="section-select-all-priority h-3 w-3 rounded text-[var(--color-primary-600)]" onchange="toggleAllPriorityCheckboxes(this.checked)">
+                                            <span>Select All</span>
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
                         </td>
                     </tr>
                     {% for meta in or_models.uncensored %}
@@ -186,8 +376,46 @@
                     {% if categorized_by_server.vllm and categorized_by_server.vllm.all %}
                     <tr>
                         <td colspan="10" class="px-4 py-3 bg-purple-900/40 border-b-2 border-purple-400">
-                            <h3 class="text-lg font-bold text-purple-200">⚡ vLLM Models</h3>
-                            <p class="text-xs text-purple-300 mt-1">vLLM server models</p>
+                            <div class="flex items-center justify-between mb-2">
+                                <div>
+                                    <h3 class="text-lg font-bold text-purple-200">⚡ vLLM Models</h3>
+                                    <p class="text-xs text-purple-300 mt-1">vLLM server models</p>
+                                </div>
+                            </div>
+                            <!-- Column headers row inside the banner -->
+                            <div class="grid grid-cols-10 gap-0 mt-3 pt-3 border-t border-purple-400/30">
+                                <div class="col-span-3"></div>
+                                <div class="p-0 text-center text-xs font-medium text-purple-200 uppercase tracking-wider relative" style="height: 60px;">
+                                    <div style="transform: rotate(-45deg); transform-origin: center; white-space: nowrap; position: absolute; left: 50%; bottom: 5px; margin-left: -30px; width: 60px; text-align: left;">Supports Images</div>
+                                </div>
+                                <div class="p-0 text-center text-xs font-medium text-purple-200 uppercase tracking-wider relative" style="height: 60px;">
+                                    <div style="transform: rotate(-45deg); transform-origin: center; white-space: nowrap; position: absolute; left: 50%; bottom: 5px; margin-left: -25px; width: 50px; text-align: left;">Code Model</div>
+                                </div>
+                                <div class="p-0 text-center text-xs font-medium text-purple-200 uppercase tracking-wider relative" style="height: 60px;">
+                                    <div style="transform: rotate(-45deg); transform-origin: center; white-space: nowrap; position: absolute; left: 50%; bottom: 5px; margin-left: -20px; width: 40px; text-align: left;">Fast Model</div>
+                                </div>
+                                <div class="p-0 text-center text-xs font-medium text-purple-200 uppercase tracking-wider relative" style="height: 60px;">
+                                    <div style="transform: rotate(-45deg); transform-origin: center; white-space: nowrap; position: absolute; left: 50%; bottom: 5px; margin-left: -30px; width: 60px; text-align: left;">Tool Calling</div>
+                                </div>
+                                <div class="p-0 text-center text-xs font-medium text-purple-200 uppercase tracking-wider relative" style="height: 60px;">
+                                    <div style="transform: rotate(-45deg); transform-origin: center; white-space: nowrap; position: absolute; left: 50%; bottom: 5px; margin-left: -20px; width: 40px; text-align: left;">Internet</div>
+                                </div>
+                                <div class="p-0 text-center text-xs font-medium text-purple-200 uppercase tracking-wider relative" style="height: 60px;">
+                                    <div style="transform: rotate(-45deg); transform-origin: center; white-space: nowrap; position: absolute; left: 50%; bottom: 5px; margin-left: -25px; width: 50px; text-align: left;">Thinking</div>
+                                </div>
+                                <div class="px-4 text-center text-xs font-medium text-purple-200 uppercase tracking-wider">
+                                    <div class="flex flex-col items-center justify-center gap-1">
+                                        <div class="flex items-center justify-center gap-2">
+                                            <span>Priority</span>
+                                            <span class="text-xs text-purple-300" title="Select models to include in auto-priority analysis">⚙️</span>
+                                        </div>
+                                        <label class="flex items-center gap-1 cursor-pointer text-xs text-purple-300 hover:text-purple-200" title="Select/Deselect all models for priority analysis">
+                                            <input type="checkbox" class="section-select-all-priority h-3 w-3 rounded text-[var(--color-primary-600)]" onchange="toggleAllPriorityCheckboxes(this.checked)">
+                                            <span>Select All</span>
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
                         </td>
                     </tr>
                     {% for meta in categorized_by_server.vllm.all %}
@@ -199,8 +427,46 @@
                     {% if categorized_by_server.other and categorized_by_server.other.all %}
                     <tr>
                         <td colspan="10" class="px-4 py-3 bg-gray-800/40 border-b-2 border-gray-600">
-                            <h3 class="text-lg font-bold text-gray-300">📦 Other Models</h3>
-                            <p class="text-xs text-gray-400 mt-1">Models from other server types</p>
+                            <div class="flex items-center justify-between mb-2">
+                                <div>
+                                    <h3 class="text-lg font-bold text-gray-300">📦 Other Models</h3>
+                                    <p class="text-xs text-gray-400 mt-1">Models from other server types</p>
+                                </div>
+                            </div>
+                            <!-- Column headers row inside the banner -->
+                            <div class="grid grid-cols-10 gap-0 mt-3 pt-3 border-t border-gray-600/30">
+                                <div class="col-span-3"></div>
+                                <div class="p-0 text-center text-xs font-medium text-gray-300 uppercase tracking-wider relative" style="height: 60px;">
+                                    <div style="transform: rotate(-45deg); transform-origin: center; white-space: nowrap; position: absolute; left: 50%; bottom: 5px; margin-left: -30px; width: 60px; text-align: left;">Supports Images</div>
+                                </div>
+                                <div class="p-0 text-center text-xs font-medium text-gray-300 uppercase tracking-wider relative" style="height: 60px;">
+                                    <div style="transform: rotate(-45deg); transform-origin: center; white-space: nowrap; position: absolute; left: 50%; bottom: 5px; margin-left: -25px; width: 50px; text-align: left;">Code Model</div>
+                                </div>
+                                <div class="p-0 text-center text-xs font-medium text-gray-300 uppercase tracking-wider relative" style="height: 60px;">
+                                    <div style="transform: rotate(-45deg); transform-origin: center; white-space: nowrap; position: absolute; left: 50%; bottom: 5px; margin-left: -20px; width: 40px; text-align: left;">Fast Model</div>
+                                </div>
+                                <div class="p-0 text-center text-xs font-medium text-gray-300 uppercase tracking-wider relative" style="height: 60px;">
+                                    <div style="transform: rotate(-45deg); transform-origin: center; white-space: nowrap; position: absolute; left: 50%; bottom: 5px; margin-left: -30px; width: 60px; text-align: left;">Tool Calling</div>
+                                </div>
+                                <div class="p-0 text-center text-xs font-medium text-gray-300 uppercase tracking-wider relative" style="height: 60px;">
+                                    <div style="transform: rotate(-45deg); transform-origin: center; white-space: nowrap; position: absolute; left: 50%; bottom: 5px; margin-left: -20px; width: 40px; text-align: left;">Internet</div>
+                                </div>
+                                <div class="p-0 text-center text-xs font-medium text-gray-300 uppercase tracking-wider relative" style="height: 60px;">
+                                    <div style="transform: rotate(-45deg); transform-origin: center; white-space: nowrap; position: absolute; left: 50%; bottom: 5px; margin-left: -25px; width: 50px; text-align: left;">Thinking</div>
+                                </div>
+                                <div class="px-4 text-center text-xs font-medium text-gray-300 uppercase tracking-wider">
+                                    <div class="flex flex-col items-center justify-center gap-1">
+                                        <div class="flex items-center justify-center gap-2">
+                                            <span>Priority</span>
+                                            <span class="text-xs text-gray-400" title="Select models to include in auto-priority analysis">⚙️</span>
+                                        </div>
+                                        <label class="flex items-center gap-1 cursor-pointer text-xs text-gray-400 hover:text-gray-300" title="Select/Deselect all models for priority analysis">
+                                            <input type="checkbox" class="section-select-all-priority h-3 w-3 rounded text-[var(--color-primary-600)]" onchange="toggleAllPriorityCheckboxes(this.checked)">
+                                            <span>Select All</span>
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
                         </td>
                     </tr>
                     {% for meta in categorized_by_server.other.all %}

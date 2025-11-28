@@ -4,9 +4,13 @@ Handles embeddings and vector search for conversation threads
 """
 import logging
 import json
+import os
 from typing import List, Dict, Any, Optional
 import numpy as np
 from pathlib import Path
+
+# Disable ChromaDB telemetry before importing (must be set early)
+os.environ.setdefault("ANONYMIZED_TELEMETRY", "False")
 
 try:
     import chromadb

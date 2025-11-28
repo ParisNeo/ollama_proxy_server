@@ -125,21 +125,68 @@
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0 3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
                     </button>
                     <div class="relative flex items-center gap-1" id="model-selector-container">
-                        <select id="model-selector" class="px-2 py-1 text-xs rounded shadow-sm focus:outline-none focus:ring-[var(--color-primary-500)] focus:border-[var(--color-primary-500)] w-48">
-                            {% if model_groups %}
-                                {% for server_name, models in model_groups.items() %}
-                                    <optgroup label="{{ server_name }}">
-                                    {% for model in models %}
-                                        <option value="{{ model }}" {% if model == selected_model %}selected{% endif %}>
-                                            {{ model }}
-                                        </option>
+                        <!-- Custom Searchable Dropdown -->
+                        <div class="relative w-48" id="model-selector-wrapper">
+                            <!-- Selected Model Display / Trigger Button -->
+                            <button type="button" id="model-selector-button" class="w-full px-2 py-1 text-xs text-left rounded shadow-sm bg-gray-800 border border-gray-600 hover:border-gray-500 focus:outline-none focus:ring-[var(--color-primary-500)] focus:border-[var(--color-primary-500)] flex items-center justify-between">
+                                <span id="model-selector-display" class="truncate">{% if selected_model %}{{ selected_model }}{% else %}Select model...{% endif %}</span>
+                                <svg class="w-4 h-4 text-gray-400 ml-2 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                                </svg>
+                            </button>
+                            
+                            <!-- Hidden select for compatibility with existing code -->
+                            <select id="model-selector" class="hidden">
+                                {% if model_groups %}
+                                    {% for server_name, models in model_groups.items() %}
+                                        <optgroup label="{{ server_name }}" data-server="{{ server_name }}">
+                                        {% for model in models %}
+                                            <option value="{{ model }}" {% if model == selected_model %}selected{% endif %} data-server="{{ server_name }}">
+                                                {{ model }}
+                                            </option>
+                                        {% endfor %}
+                                        </optgroup>
                                     {% endfor %}
-                                    </optgroup>
-                                {% endfor %}
-                            {% else %}
-                                <option value="" disabled>No chat models found</option>
-                            {% endif %}
-                        </select>
+                                {% else %}
+                                    <option value="" disabled>No chat models found</option>
+                                {% endif %}
+                            </select>
+                            
+                            <!-- Dropdown Panel -->
+                            <div id="model-selector-dropdown" class="hidden absolute z-50 w-full mt-1 bg-gray-800 border border-gray-600 rounded shadow-lg max-h-96 overflow-hidden flex flex-col">
+                                <!-- Search Input -->
+                                <div class="p-2 border-b border-gray-700">
+                                    <input type="text" id="model-search-input" placeholder="Search models..." 
+                                           class="w-full px-2 py-1.5 text-xs bg-gray-900 border border-gray-600 rounded focus:outline-none focus:ring-[var(--color-primary-500)] focus:border-[var(--color-primary-500)] text-white placeholder-gray-500">
+                                </div>
+                                
+                                <!-- Options List -->
+                                <div id="model-selector-options" class="overflow-y-auto max-h-80">
+                                    {% if model_groups %}
+                                        {% for server_name, models in model_groups.items() %}
+                                            <div class="model-optgroup" data-server="{{ server_name }}">
+                                                <div class="px-3 py-1.5 text-xs font-semibold text-gray-400 bg-gray-900 sticky top-0">
+                                                    {{ server_name }}
+                                                </div>
+                                                {% for model in models %}
+                                                    <button type="button" class="model-option w-full px-3 py-1.5 text-xs text-left text-gray-300 hover:bg-gray-700 focus:bg-gray-700 focus:outline-none {% if model == selected_model %}bg-gray-700{% endif %}" 
+                                                            data-value="{{ model }}" data-server="{{ server_name }}" data-text="{{ model|lower }}">
+                                                        {{ model }}
+                                                    </button>
+                                                {% endfor %}
+                                            </div>
+                                        {% endfor %}
+                                    {% else %}
+                                        <div class="px-3 py-2 text-xs text-gray-400">No chat models found</div>
+                                    {% endif %}
+                                </div>
+                                
+                                <!-- No Results Message -->
+                                <div id="model-no-results" class="hidden px-3 py-2 text-xs text-gray-400 text-center">
+                                    No models found matching your search
+                                </div>
+                            </div>
+                        </div>
                         <!-- Pricing display (shown on hover or next to selector) -->
                         <div id="model-pricing-display" class="text-xs text-gray-400 cursor-help" 
                              title="Click to see full pricing details"
@@ -1471,11 +1518,204 @@ SUPPORTED ANNOTATION SCHEMAS:
         document.getElementById('model-pricing-tooltip').classList.add('hidden');
     });
     
+    // Custom searchable dropdown functionality
+    const modelSelectorWrapper = document.getElementById('model-selector-wrapper');
+    const modelSelectorButton = document.getElementById('model-selector-button');
+    const modelSelectorDisplay = document.getElementById('model-selector-display');
+    const modelSelectorDropdown = document.getElementById('model-selector-dropdown');
+    const modelSearchInput = document.getElementById('model-search-input');
+    const modelSelectorOptions = document.getElementById('model-selector-options');
+    const modelNoResults = document.getElementById('model-no-results');
+    const modelOptions = document.querySelectorAll('.model-option');
+    const modelOptgroups = document.querySelectorAll('.model-optgroup');
+    
+    let isDropdownOpen = false;
+    
+    // Toggle dropdown
+    if (modelSelectorButton) {
+        modelSelectorButton.addEventListener('click', (e) => {
+            e.stopPropagation();
+            isDropdownOpen = !isDropdownOpen;
+            if (isDropdownOpen) {
+                modelSelectorDropdown.classList.remove('hidden');
+                modelSearchInput.focus();
+                filterModels('');
+            } else {
+                modelSelectorDropdown.classList.add('hidden');
+            }
+        });
+    }
+    
+    // Close dropdown when clicking outside
+    document.addEventListener('click', (e) => {
+        if (modelSelectorWrapper && !modelSelectorWrapper.contains(e.target)) {
+            isDropdownOpen = false;
+            if (modelSelectorDropdown) {
+                modelSelectorDropdown.classList.add('hidden');
+            }
+        }
+    });
+    
+    // Filter models as user types
+    if (modelSearchInput) {
+        modelSearchInput.addEventListener('input', (e) => {
+            filterModels(e.target.value.toLowerCase());
+        });
+        
+        // Handle keyboard navigation
+        modelSearchInput.addEventListener('keydown', (e) => {
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                const firstVisible = modelSelectorOptions.querySelector('.model-option:not(.hidden)');
+                if (firstVisible) firstVisible.focus();
+            } else if (e.key === 'Escape') {
+                isDropdownOpen = false;
+                modelSelectorDropdown.classList.add('hidden');
+                modelSelectorButton.focus();
+            }
+        });
+    }
+    
+    // Filter function
+    function filterModels(searchTerm) {
+        if (!modelOptgroups || !modelNoResults || !modelSelectorOptions) return;
+        
+        let hasVisibleResults = false;
+        
+        modelOptgroups.forEach(optgroup => {
+            const options = optgroup.querySelectorAll('.model-option');
+            let hasVisibleInGroup = false;
+            
+            options.forEach(option => {
+                const optionText = option.getAttribute('data-text') || '';
+                const matches = !searchTerm || optionText.includes(searchTerm);
+                
+                if (matches) {
+                    option.classList.remove('hidden');
+                    hasVisibleInGroup = true;
+                    hasVisibleResults = true;
+                } else {
+                    option.classList.add('hidden');
+                }
+            });
+            
+            // Show/hide optgroup header based on visible options
+            const header = optgroup.querySelector('div:first-child');
+            if (header) {
+                if (hasVisibleInGroup) {
+                    optgroup.classList.remove('hidden');
+                } else {
+                    optgroup.classList.add('hidden');
+                }
+            }
+        });
+        
+        // Show/hide no results message
+        if (hasVisibleResults) {
+            modelNoResults.classList.add('hidden');
+            modelSelectorOptions.classList.remove('hidden');
+        } else {
+            modelNoResults.classList.remove('hidden');
+            modelSelectorOptions.classList.add('hidden');
+        }
+    }
+    
+    // Handle option selection
+    if (modelOptions) {
+        modelOptions.forEach(option => {
+            option.addEventListener('click', () => {
+                const value = option.getAttribute('data-value');
+                modelSelector.value = value;
+                if (modelSelectorDisplay) {
+                    modelSelectorDisplay.textContent = value;
+                }
+                
+                // Update selected state
+                modelOptions.forEach(opt => opt.classList.remove('bg-gray-700'));
+                option.classList.add('bg-gray-700');
+                
+                // Close dropdown
+                isDropdownOpen = false;
+                if (modelSelectorDropdown) {
+                    modelSelectorDropdown.classList.add('hidden');
+                }
+                
+                // Trigger change event for existing handlers
+                const changeEvent = new Event('change', { bubbles: true });
+                modelSelector.dispatchEvent(changeEvent);
+            });
+            
+            // Keyboard navigation
+            option.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    option.click();
+                } else if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    const next = option.nextElementSibling;
+                    if (next && next.classList.contains('model-option') && !next.classList.contains('hidden')) {
+                        next.focus();
+                    } else {
+                        // Find next visible option
+                        let found = false;
+                        modelOptions.forEach(opt => {
+                            if (!found && opt !== option && !opt.classList.contains('hidden')) {
+                                opt.focus();
+                                found = true;
+                            }
+                        });
+                    }
+                } else if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    const prev = option.previousElementSibling;
+                    if (prev && prev.classList.contains('model-option') && !prev.classList.contains('hidden')) {
+                        prev.focus();
+                    } else {
+                        // Find previous visible option
+                        let found = false;
+                        const optionsArray = Array.from(modelOptions).reverse();
+                        optionsArray.forEach(opt => {
+                            if (!found && opt !== option && !opt.classList.contains('hidden')) {
+                                opt.focus();
+                                found = true;
+                            }
+                        });
+                    }
+                } else if (e.key === 'Escape') {
+                    isDropdownOpen = false;
+                    if (modelSelectorDropdown) {
+                        modelSelectorDropdown.classList.add('hidden');
+                    }
+                    if (modelSelectorButton) {
+                        modelSelectorButton.focus();
+                    }
+                }
+            });
+        });
+    }
+    
+    // Sync with hidden select for compatibility
     modelSelector.addEventListener('change', () => {
         localStorage.setItem(LAST_MODEL_KEY, modelSelector.value);
         localStorage.setItem('playground_selected_model', modelSelector.value);  // Store for description generation
         updateThinkingControls();
         updatePricingDisplay();
+        
+        // Update display
+        if (modelSelectorDisplay) {
+            modelSelectorDisplay.textContent = modelSelector.value || 'Select model...';
+        }
+        
+        // Update selected state in dropdown
+        if (modelOptions) {
+            modelOptions.forEach(opt => {
+                if (opt.getAttribute('data-value') === modelSelector.value) {
+                    opt.classList.add('bg-gray-700');
+                } else {
+                    opt.classList.remove('bg-gray-700');
+                }
+            });
+        }
     });
     
     // Initial pricing display
@@ -1655,7 +1895,17 @@ SUPPORTED ANNOTATION SCHEMAS:
     const lastModel = localStorage.getItem(LAST_MODEL_KEY);
     if (lastModel && modelSelector.querySelector(`option[value="${lastModel}"]`)) {
         modelSelector.value = lastModel;
+        modelSelectorDisplay.textContent = lastModel;
         localStorage.setItem('playground_selected_model', lastModel);  // Store for description generation
+        
+        // Update selected state in dropdown
+        modelOptions.forEach(opt => {
+            if (opt.getAttribute('data-value') === lastModel) {
+                opt.classList.add('bg-gray-700');
+            } else {
+                opt.classList.remove('bg-gray-700');
+            }
+        });
     }
     userSystemPrompt = localStorage.getItem(LAST_SYSTEM_PROMPT_KEY) || '';
     isAnnotationMode = localStorage.getItem(ANNOTATION_MODE_KEY) === 'true';

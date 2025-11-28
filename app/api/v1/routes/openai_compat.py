@@ -197,6 +197,7 @@ async def openai_chat_completions(
             logger.info(f"OpenAI 'auto' model resolved to -> '{chosen_model}'")
             model_name = chosen_model
             openai_payload["model"] = chosen_model
+            openai_payload["_is_auto_model"] = True  # Flag for fallback retry
         except Exception as e:
             logger.error(f"Error in auto model selection: {e}", exc_info=True)
             raise HTTPException(status_code=503, detail=f"Auto-routing failed: {str(e)}")
@@ -501,8 +502,10 @@ async def openai_completions(
             chosen_model = await _select_auto_model(db, ollama_payload)
             if not chosen_model:
                 raise HTTPException(status_code=503, detail="Auto-routing could not find a suitable model")
+            logger.info(f"OpenAI 'auto' model resolved to -> '{chosen_model}'")
             model_name = chosen_model
             chat_payload["model"] = chosen_model
+            chat_payload["_is_auto_model"] = True  # Flag for fallback retry
         except Exception as e:
             logger.error(f"Error in auto model selection: {e}", exc_info=True)
             raise HTTPException(status_code=503, detail=f"Auto-routing failed: {str(e)}")
