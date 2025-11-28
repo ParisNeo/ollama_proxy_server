@@ -1859,34 +1859,55 @@ SUPPORTED ANNOTATION SCHEMAS:
             console.log('Credits parsed - Remaining:', remaining, 'Used:', used, 'Total:', total);
             console.log('credits_data exists?', !!data.credits_data, 'length:', data.credits_data?.length);
             
-            // Show display if we have any response data (even if values are 0)
-            if (data.hasOwnProperty('total_remaining_credits') || data.hasOwnProperty('total_usage') || (data.credits_data && data.credits_data.length > 0)) {
+            // Always show display if we got a successful response (even if values are 0)
+            // This ensures the credits display is visible when OpenRouter is configured
+            if (data && (data.hasOwnProperty('total_remaining_credits') || data.hasOwnProperty('total_usage') || (data.credits_data && Array.isArray(data.credits_data)))) {
                 creditsDisplay?.classList.remove('hidden');
                 
                 // Update compact display
-                creditsRemaining.textContent = `$${formatCredits(remaining)}`;
-                creditsUsage.textContent = `${formatCredits(used)} used`;
+                if (creditsRemaining) {
+                    creditsRemaining.textContent = `$${formatCredits(remaining)}`;
+                }
+                if (creditsUsage) {
+                    creditsUsage.textContent = `${formatCredits(used)} used`;
+                }
                 
                 // Update tooltip
-                tooltipRemaining.textContent = `$${remaining.toFixed(4)}`;
-                tooltipUsed.textContent = `$${used.toFixed(4)}`;
-                tooltipTotal.textContent = `$${total.toFixed(4)}`;
+                if (tooltipRemaining) {
+                    tooltipRemaining.textContent = `$${remaining.toFixed(4)}`;
+                }
+                if (tooltipUsed) {
+                    tooltipUsed.textContent = `$${used.toFixed(4)}`;
+                }
+                if (tooltipTotal) {
+                    tooltipTotal.textContent = `$${total.toFixed(4)}`;
+                }
                 
                 // Color coding: green if > 50%, yellow if 10-50%, red if < 10%
                 const percentage = total > 0 ? (remaining / total) * 100 : 0;
-                creditsRemaining.className = 'text-xs font-medium';
-                if (percentage > 50) {
-                    creditsRemaining.classList.add('text-green-400');
-                } else if (percentage > 10) {
-                    creditsRemaining.classList.add('text-yellow-400');
-                } else if (remaining > 0) {
-                    creditsRemaining.classList.add('text-red-400');
-                } else {
-                    creditsRemaining.classList.add('text-gray-400');
+                if (creditsRemaining) {
+                    creditsRemaining.className = 'text-xs font-medium';
+                    if (percentage > 50) {
+                        creditsRemaining.classList.add('text-green-400');
+                    } else if (percentage > 10) {
+                        creditsRemaining.classList.add('text-yellow-400');
+                    } else if (remaining > 0) {
+                        creditsRemaining.classList.add('text-red-400');
+                    } else {
+                        creditsRemaining.classList.add('text-gray-400');
+                    }
                 }
             } else {
                 console.warn('No credits data available. Response structure:', data);
-                creditsDisplay?.classList.add('hidden');
+                // Don't hide if we have OpenRouter servers - show "N/A" instead
+                const hasOpenRouterServers = data && data.credits_data && Array.isArray(data.credits_data);
+                if (hasOpenRouterServers) {
+                    creditsDisplay?.classList.remove('hidden');
+                    if (creditsRemaining) creditsRemaining.textContent = '$N/A';
+                    if (creditsUsage) creditsUsage.textContent = 'N/A used';
+                } else {
+                    creditsDisplay?.classList.add('hidden');
+                }
             }
         } catch (error) {
             console.error('Failed to fetch OpenRouter credits:', error);

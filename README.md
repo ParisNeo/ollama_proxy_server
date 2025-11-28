@@ -133,6 +133,10 @@ Your new mission control. Instantly see system health, active models, server sta
 
 ![Dashboard](assets/DashBoard.gif)
 
+*Static view of the dashboard showing real-time system metrics:*
+
+![Dashboard Overview](assets/dashboard_updated.png)
+
 ### Step 3: Manage Your Servers & Models
 
 No more SSH or terminal juggling. Add all your Ollama instances, then pull, update, and delete models on any server with a few clicks.
@@ -172,6 +176,8 @@ The built-in Help page is now a rich document with a sticky table of contents th
 ## 🌐 Web Search Integration: SearXNG & Ollama Cloud
 
 The proxy server includes intelligent web search capabilities that enhance AI responses with real-time information from the internet.
+
+![Web Search Interface](assets/web_search.png)
 
 ### How It Works
 
@@ -224,6 +230,8 @@ If you prefer not to run SearXNG, you can use Ollama cloud search exclusively:
 - Toggle the "Web Search" button in the header
 - When enabled, the system automatically determines if a query needs live internet data
 - The decision matrix analyzes your question and only searches when necessary
+
+![Chat Playground with Web Search Toggle](assets/chat_playground.png)
 
 **In API Requests:**
 - Web search is automatically enabled for proxy requests when `enable_proxy_web_search` is enabled in settings
@@ -328,6 +336,12 @@ The proxy includes a sophisticated auto-routing system that intelligently select
 - **Semantic Matching**: Uses AI-generated model descriptions to find the best fit
 - **Smart Scoring**: Multi-factor scoring algorithm ensures optimal model selection
 
+![Models Manager with Capabilities and Priority](assets/models_manager.png)
+
+*Hover over the 💰 icon next to any model name to see detailed pricing information:*
+
+![Pricing Tooltip on Hover](assets/models_manager_pricing_tooltip.png)
+
 ### How It Works
 
 When you send a request with `"model": "auto"`, the system:
@@ -343,6 +357,8 @@ When you send a request with `"model": "auto"`, the system:
 - **Daily Drive Mode**: Prioritizes Ollama cloud models first (great balance)
 - **Advanced Mode**: Prioritizes top-tier paid models (Claude 4.5, GPT-5, Gemini 3)
 - **Luxury Mode**: Prioritizes premium models ($5+/1M tokens) for high-budget scenarios
+
+![Auto-Routing Priority Settings](assets/settings_auto_routing.png)
 
 ### Example Scenarios
 
