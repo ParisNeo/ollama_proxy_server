@@ -201,3 +201,6 @@ benchmarks/
 
 # Docker (optional - uncomment if you don't want to commit docker-compose files)
 # docker-compose.yml
+
+# Other projects (not part of this repository)
+Living_AI/
