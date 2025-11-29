@@ -2,6 +2,7 @@
 CRUD operations for conversations and messages
 """
 import logging
+import secrets
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy import desc, func
@@ -44,6 +45,50 @@ async def get_conversation(
     
     result = await db.execute(query)
     return result.scalars().first()
+
+
+async def get_conversation_by_share_token(
+    db: AsyncSession,
+    share_token: str
+) -> Optional[Conversation]:
+    """Get a conversation by share token (public access)"""
+    result = await db.execute(
+        select(Conversation).filter(Conversation.share_token == share_token)
+    )
+    return result.scalars().first()
+
+
+async def generate_share_token(db: AsyncSession, conversation_id: int) -> Optional[str]:
+    """Generate a unique share token for a conversation"""
+    max_attempts = 10
+    for _ in range(max_attempts):
+        # Generate a URL-safe token (32 bytes = 43 base64 characters)
+        token = secrets.token_urlsafe(32)
+        
+        # Check if token already exists
+        existing = await get_conversation_by_share_token(db, token)
+        if not existing:
+            # Update conversation with share token
+            conversation = await get_conversation(db, conversation_id)
+            if conversation:
+                conversation.share_token = token
+                await db.commit()
+                await db.refresh(conversation)
+                return token
+    
+    logger.error(f"Failed to generate unique share token after {max_attempts} attempts")
+    return None
+
+
+async def revoke_share_token(db: AsyncSession, conversation_id: int) -> bool:
+    """Revoke (remove) share token from a conversation"""
+    conversation = await get_conversation(db, conversation_id)
+    if not conversation:
+        return False
+    
+    conversation.share_token = None
+    await db.commit()
+    return True
 
 
 async def get_user_conversations(

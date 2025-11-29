@@ -118,6 +118,9 @@ class Conversation(Base):
     # For RAG: store embedding of first exchange for similarity search
     first_exchange_embedding = Column(JSON, nullable=True)  # Vector embedding as JSON array
     
+    # Share link: unique token for public access to this conversation
+    share_token = Column(String, nullable=True, unique=True, index=True)
+    
     user = relationship("User")
     messages = relationship("Message", back_populates="conversation", cascade="all, delete-orphan", order_by="Message.created_at")
 

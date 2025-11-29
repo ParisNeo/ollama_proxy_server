@@ -45,6 +45,7 @@ class ConversationResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     message_count: Optional[int] = None
+    share_token: Optional[str] = None
     
     class Config:
         from_attributes = True

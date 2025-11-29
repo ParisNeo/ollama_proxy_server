@@ -656,10 +656,19 @@ async def _select_auto_model(db: AsyncSession, body: Dict[str, Any], settings: A
                 if isinstance(model_data, dict) and "name" in model_data:
                     model_name = model_data["name"]
                     if model_name not in model_details_map:
-                        model_details_map[model_name] = model_data.get("details", {})
-    
-    # Use priority-based routing: try each priority level in order
-    priorities = sorted(set(m.priority for m in available_metadata if m.priority is not None))
+                        # Store full model data, especially pricing
+                        details = model_data.get("details", {})
+                        # Also check if pricing is at top level (OpenRouter format)
+                        if "pricing" in model_data:
+                            details["pricing"] = model_data["pricing"]
+                        model_details_map[model_name] = details
+                        
+                        # Log pricing for expensive models in free mode (for debugging)
+                        if "claude" in model_name.lower() or "gpt-4" in model_name.lower() or "gpt-5" in model_name.lower():
+                            pricing = details.get("pricing", {})
+                            prompt_price = pricing.get("prompt", 0)
+                            completion_price = pricing.get("completion", 0)
+                            logger.debug(f"Model {model_name} pricing: prompt=${prompt_price}, completion=${completion_price}")
     
     # Filter out skipped models (for fallback retry)
     if skip_models:
@@ -667,6 +676,73 @@ async def _select_auto_model(db: AsyncSession, body: Dict[str, Any], settings: A
         if not available_metadata:
             logger.warning(f"Auto-routing: All models skipped. Tried: {skip_models}")
             return None
+    
+    # CRITICAL: Filter by priority mode FIRST (before checking priority levels)
+    # This ensures free mode only considers free models, etc.
+    from app.core.priority_modes import (
+        is_free_model,
+        is_ollama_cloud_model,
+        is_top_tier_model,
+        is_mid_tier_model
+    )
+    
+    if priority_mode == "free":
+        # Free mode: ONLY free models
+        original_count = len(available_metadata)
+        available_metadata = [m for m in available_metadata if is_free_model(m, model_details_map)]
+        filtered_count = original_count - len(available_metadata)
+        logger.info(f"Free mode: Filtered {filtered_count} paid models out, {len(available_metadata)} free models remaining")
+        if len(available_metadata) == 0:
+            logger.error("Free mode: NO FREE MODELS AVAILABLE! Check model pricing data.")
+            # Log sample of what was filtered out for debugging
+            all_metadata_backup = await model_metadata_crud.get_all_metadata(db)
+            sample_filtered = [m.model_name for m in all_metadata_backup[:10] if not is_free_model(m, model_details_map)]
+            logger.error(f"Sample filtered models (first 10): {sample_filtered}")
+            # Log pricing info for a few models
+            for m in all_metadata_backup[:5]:
+                details = model_details_map.get(m.model_name, {})
+                pricing = details.get("pricing", {})
+                logger.error(f"  {m.model_name}: pricing={pricing}, is_free={is_free_model(m, model_details_map)}")
+    elif priority_mode == "daily_drive":
+        # Daily Drive: Ollama cloud models + free models only
+        cloud_models = [m for m in available_metadata if is_ollama_cloud_model(m.model_name)]
+        free_models = [m for m in available_metadata if is_free_model(m, model_details_map) and m not in cloud_models]
+        available_metadata = cloud_models + free_models
+        logger.info(f"Daily Drive mode: Filtered to {len(available_metadata)} models ({len(cloud_models)} cloud + {len(free_models)} free)")
+    elif priority_mode == "advanced":
+        # Advanced: Top-tier and mid-tier paid models only (NO free models)
+        available_metadata = [
+            m for m in available_metadata
+            if (is_top_tier_model(m.model_name, m) or 
+                is_mid_tier_model(m.model_name, m, model_details_map)) and
+               not is_free_model(m, model_details_map)
+        ]
+        logger.info(f"Advanced mode: Filtered to {len(available_metadata)} paid models only")
+    elif priority_mode == "luxury":
+        # Luxury: Premium paid models only (NO free models)
+        available_metadata = [
+            m for m in available_metadata
+            if is_top_tier_model(m.model_name, m) and
+               not is_free_model(m, model_details_map)
+        ]
+        logger.info(f"Luxury mode: Filtered to {len(available_metadata)} premium paid models only")
+    
+    if not available_metadata:
+        logger.warning(f"Auto-routing ({priority_mode}): No models match priority mode filter!")
+        return None
+    
+    # Use priority-based routing: try each priority level in order
+    priorities = sorted(set(m.priority for m in available_metadata if m.priority is not None))
+    
+    # Log available models by priority for debugging
+    if priorities:
+        logger.info(f"Auto-routing ({priority_mode}): Found {len(available_metadata)} available models")
+        for p in priorities:
+            count = len([m for m in available_metadata if m.priority == p])
+            sample = [m.model_name for m in available_metadata if m.priority == p][:3]
+            logger.info(f"  Priority {p}: {count} models (e.g., {', '.join(sample)})")
+    else:
+        logger.warning("Auto-routing: No models have priority set!")
     
     if not priorities:
         # No priorities set - use all available models
@@ -682,20 +758,26 @@ async def _select_auto_model(db: AsyncSession, body: Dict[str, Any], settings: A
         priority_models = [m for m in available_metadata if m.priority == priority_level]
         
         if not priority_models:
+            logger.debug(f"Auto-routing: No models with priority {priority_level}")
             continue
         
         logger.info(f"Auto-routing ({priority_mode}): Checking {len(priority_models)} models with priority {priority_level}")
+        logger.debug(f"Priority {priority_level} models: {[m.model_name for m in priority_models[:5]]}")
         
         # Score and select best model from this priority level
         result = router.select_best_model(priority_models, request_analysis, model_details_map)
         
         if result:
             model, score = result
-            # Only return if score is positive (model has required capabilities)
-            if score > 0:
+            # Return if score is >= -100 (only skip if missing hard requirements like images)
+            # This ensures we use priority 1/2 models even if they're missing optional capabilities
+            if score >= -100:
+                logger.info(f"Auto-routing: Selected '{model.model_name}' from priority {priority_level} with score {score:.2f}")
                 return model.model_name
             else:
-                logger.debug(f"Model '{model.model_name}' scored {score:.2f} (missing required capabilities), trying next priority level")
+                logger.debug(f"Model '{model.model_name}' scored {score:.2f} (missing hard requirements), trying next priority level")
+        else:
+            logger.debug(f"No suitable model found at priority {priority_level}, trying next priority level")
         
         # No suitable model at this priority level, continue to next priority
     

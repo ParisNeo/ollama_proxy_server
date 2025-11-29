@@ -58,8 +58,17 @@
     </td>
     <td class="px-4 py-4 whitespace-nowrap text-center" style="position: sticky; right: 0; background-color: var(--bg-deepest); z-index: 10;">
         <div class="flex items-center justify-center gap-2">
-            <input type="number" name="priority_{{ meta.id }}" value="{{ meta.priority }}" class="w-20 px-2 py-1 rounded-md shadow-sm sm:text-sm text-center">
-            <label class="flex items-center cursor-pointer" title="Include this model in auto-priority analysis">
+            {% if category_name is not defined %}
+                {% set category_name = "Unknown Category" %}
+            {% endif %}
+            <input 
+                type="number" 
+                name="priority_{{ meta.id }}" 
+                value="{{ meta.priority }}" 
+                class="w-20 px-2 py-1 rounded-md shadow-sm sm:text-sm text-center"
+                title="Priority for {{ category_name }} - Lower numbers = higher priority (used first)"
+            >
+            <label class="flex items-center cursor-pointer" title="Include this model in auto-priority analysis ({{ category_name }})">
                 <input 
                     type="checkbox" 
                     name="priority_selection" 
@@ -67,6 +76,8 @@
                     class="h-4 w-4 rounded text-[var(--color-primary-600)] focus:ring-[var(--color-primary-500)]"
                     data-model-name="{{ meta.model_name }}"
                     data-server-type="{{ meta.server_type or 'ollama' }}"
+                    data-category="{{ category_name }}"
+                    title="Include in auto-priority analysis ({{ category_name }})"
                     onchange="if(typeof updateSelectAllState === 'function') updateSelectAllState()"
                 >
             </label>

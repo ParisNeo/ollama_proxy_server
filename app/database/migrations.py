@@ -414,6 +414,9 @@ async def run_all_migrations(engine: AsyncEngine) -> None:
                 "is_thinking_model": "BOOLEAN NOT NULL DEFAULT 0",
                 "priority": "INTEGER NOT NULL DEFAULT 10",
             },
+            "conversations": {
+                "share_token": "VARCHAR",
+            }
         }
 
         # Auto-migrate all tables

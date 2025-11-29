@@ -57,7 +57,8 @@ async def get_conversations(
             "title": conv.title,
             "created_at": conv.created_at,
             "updated_at": conv.updated_at,
-            "message_count": message_counts.get(conv.id, 0)
+            "message_count": message_counts.get(conv.id, 0),
+            "share_token": conv.share_token
         }
         result.append(conv_dict)
     
@@ -85,6 +86,7 @@ async def get_conversation(
         "created_at": conversation.created_at,
         "updated_at": conversation.updated_at,
         "message_count": len(messages),
+        "share_token": conversation.share_token,
         "messages": [
             {
                 "id": msg.id,
@@ -114,7 +116,8 @@ async def create_conversation(
         "title": conversation.title,
         "created_at": conversation.created_at,
         "updated_at": conversation.updated_at,
-        "message_count": 0
+        "message_count": 0,
+        "share_token": conversation.share_token
     }
 
 
@@ -230,4 +233,87 @@ async def search_conversations(
             })
     
     return results
+
+
+@router.post("/conversations/{conversation_id}/share")
+async def generate_share_link(
+    request: Request,
+    conversation_id: int,
+    db: AsyncSession = Depends(get_db),
+    admin_user: User = Depends(require_admin_user)
+):
+    """Generate a share link for a conversation"""
+    # Verify conversation belongs to user
+    conversation = await conversation_crud.get_conversation(db, conversation_id, admin_user.id)
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    
+    # Generate or get existing share token
+    if not conversation.share_token:
+        token = await conversation_crud.generate_share_token(db, conversation_id)
+        if not token:
+            raise HTTPException(status_code=500, detail="Failed to generate share token")
+    else:
+        token = conversation.share_token
+    
+    # Build share URL
+    base_url = str(request.base_url).rstrip('/')
+    share_url = f"{base_url}/share/{token}"
+    
+    return {
+        "share_token": token,
+        "share_url": share_url
+    }
+
+
+@router.delete("/conversations/{conversation_id}/share")
+async def revoke_share_link(
+    request: Request,
+    conversation_id: int,
+    db: AsyncSession = Depends(get_db),
+    admin_user: User = Depends(require_admin_user)
+):
+    """Revoke (delete) a share link for a conversation"""
+    # Verify conversation belongs to user
+    conversation = await conversation_crud.get_conversation(db, conversation_id, admin_user.id)
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    
+    success = await conversation_crud.revoke_share_token(db, conversation_id)
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to revoke share token")
+    
+    return {"success": True}
+
+
+@router.get("/share/{share_token}")
+async def get_shared_conversation(
+    request: Request,
+    share_token: str,
+    db: AsyncSession = Depends(get_db)
+):
+    """Public endpoint to get a conversation by share token (read-only)"""
+    conversation = await conversation_crud.get_conversation_by_share_token(db, share_token)
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Shared conversation not found")
+    
+    messages = await conversation_crud.get_conversation_messages(db, conversation.id)
+    
+    return {
+        "id": conversation.id,
+        "title": conversation.title,
+        "created_at": conversation.created_at,
+        "updated_at": conversation.updated_at,
+        "message_count": len(messages),
+        "messages": [
+            {
+                "id": msg.id,
+                "role": msg.role,
+                "content": msg.content,
+                "model_name": msg.model_name,
+                "created_at": msg.created_at
+            }
+            for msg in messages
+        ]
+    }
 

@@ -163,45 +163,53 @@ class AutoRouter:
         else:
             score += 20  # Low score for unprioritized models
         
-        # Capability matching (required capabilities must be present)
+        # Capability matching (REQUIRED capabilities must be present, OPTIONAL capabilities are bonuses only)
         capability_penalty = 0
         capability_bonus = 0
         
+        # REQUIRED capabilities: If request needs these, model MUST have them (hard requirement)
+        # Images: Hard requirement if request has images
         if request_analysis["has_images"]:
             if metadata.supports_images:
                 capability_bonus += 10
             else:
-                capability_penalty += 50  # Heavy penalty for missing required capability
+                capability_penalty += 1000  # Massive penalty - this is a hard requirement
+                logger.debug(f"Model {metadata.model_name} missing required image support")
         
-        if request_analysis["contains_code"]:
-            if metadata.is_code_model:
-                capability_bonus += 10
-            else:
-                capability_penalty += 30  # Penalty for missing code capability
-        
+        # Tool calling: Hard requirement if request explicitly requires it
         if request_analysis["requires_tool_calling"]:
             if metadata.supports_tool_calling:
                 capability_bonus += 10
             else:
-                capability_penalty += 50  # Heavy penalty for missing required capability
+                capability_penalty += 1000  # Massive penalty - this is a hard requirement
+                logger.debug(f"Model {metadata.model_name} missing required tool calling support")
         
+        # Internet: Hard requirement if request explicitly requires it
         if request_analysis["requires_internet"]:
             if metadata.supports_internet:
                 capability_bonus += 10
             else:
-                capability_penalty += 50  # Heavy penalty for missing required capability
+                capability_penalty += 1000  # Massive penalty - this is a hard requirement
+                logger.debug(f"Model {metadata.model_name} missing required internet support")
         
+        # OPTIONAL capabilities: These are bonuses only, no penalties
+        # Code: Optional - bonus if present, no penalty if missing
+        if request_analysis["contains_code"]:
+            if metadata.is_code_model:
+                capability_bonus += 15  # Higher bonus since it's a good match
+            # No penalty - code capability is optional
+        
+        # Thinking: Optional - bonus if present, no penalty if missing
         if request_analysis["requires_thinking"]:
             if metadata.is_thinking_model:
                 capability_bonus += 10
-            else:
-                capability_penalty += 30  # Penalty for missing thinking capability
+            # No penalty - thinking capability is optional
         
+        # Fast: Optional - bonus if present, no penalty if missing
         if request_analysis["requires_fast"]:
             if metadata.is_fast_model:
                 capability_bonus += 5
-            else:
-                capability_penalty += 20  # Moderate penalty for missing fast capability
+            # No penalty - fast capability is optional
         
         score += capability_bonus
         score -= capability_penalty
@@ -272,16 +280,20 @@ class AutoRouter:
             details = model_details_map.get(model.model_name, {})
             score = self.score_model(model, request_analysis, details)
             
-            # Skip models with negative scores (missing required capabilities)
-            if score >= 0:
+            # Only skip models with massive negative scores (missing hard requirements like images)
+            # Models with score >= -100 are still viable (they just have optional capability mismatches)
+            if score >= -100:
                 scored_models.append((model, score))
+            else:
+                logger.debug(f"Skipping {model.model_name} - score {score:.2f} (missing hard requirements)")
         
         if not scored_models:
-            logger.warning("Auto-routing: No models scored >= 0. All models missing required capabilities.")
+            logger.warning("Auto-routing: No models scored >= -100. All models missing hard required capabilities.")
             return None
         
-        # Sort by score (descending), then by priority (ascending) as tiebreaker
-        scored_models.sort(key=lambda x: (-x[1], x[0].priority or 999))
+        # Sort by priority FIRST (ascending), then by score (descending) as tiebreaker
+        # This ensures priority 1 models are always chosen over priority 2, even if they score slightly lower
+        scored_models.sort(key=lambda x: (x[0].priority or 999, -x[1]))
         
         best_model, best_score = scored_models[0]
         
@@ -291,7 +303,7 @@ class AutoRouter:
         )
         
         if len(scored_models) > 1:
-            logger.debug(f"Top 3 candidates: {[(m.model_name, f'{s:.2f}') for m, s in scored_models[:3]]}")
+            logger.debug(f"Top 5 candidates (priority, score): {[(m.model_name, f'P{m.priority or 999}', f'{s:.2f}') for m, s in scored_models[:5]]}")
         
         return (best_model, best_score)
 

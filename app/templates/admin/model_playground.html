@@ -53,9 +53,15 @@
                     <!-- Conversations will be loaded here -->
                 </div>
             </div>
-            <div class="px-2 py-1.5 border-t border-white/10">
+            <div class="px-2 py-1.5 border-t border-white/10 space-y-1.5">
                 <button id="new-conversation-btn" class="w-full px-3 py-1.5 text-xs bg-[var(--color-primary-600)] hover:bg-[var(--color-primary-700)] rounded text-white transition-colors">
                     New Thread
+                </button>
+                <button id="multi-share-mode-btn" class="w-full px-3 py-1.5 text-xs bg-gray-700 hover:bg-gray-600 rounded text-white transition-colors">
+                    <span id="multi-share-mode-text">Multi-Share Mode</span>
+                </button>
+                <button id="share-selected-btn" class="hidden w-full px-3 py-1.5 text-xs bg-green-600 hover:bg-green-700 rounded text-white transition-colors">
+                    Share Selected (<span id="selected-count">0</span>)
                 </button>
             </div>
         </div>
@@ -76,6 +82,12 @@
                         <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0 3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
                         <span>System Prompt</span>
                     </div>
+                    <!-- Share Link Button -->
+                    <button id="share-link-btn" class="hidden p-1.5 rounded hover:bg-white/10" title="Share this conversation">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z"></path>
+                        </svg>
+                    </button>
                 </div>
                 <div class="flex items-center gap-1">
                     <div id="thinking-toggle-container" class="hidden md:flex items-center gap-1 text-xs pr-1.5 border-r border-gray-600" title="Enable model thinking. This will show the reasoning trace before the final answer.">
@@ -1920,11 +1932,76 @@ SUPPORTED ANNOTATION SCHEMAS:
     
     // --- Conversations/Threads Management ---
     let currentConversationId = null;
+    let multiShareMode = false;
     const conversationsSidebar = document.getElementById('conversations-sidebar');
     const conversationsMenuToggle = document.getElementById('conversations-menu-toggle');
     const conversationsSidebarClose = document.getElementById('conversations-sidebar-close');
     const conversationsList = document.getElementById('conversations-list');
     const newConversationBtn = document.getElementById('new-conversation-btn');
+    const multiShareModeBtn = document.getElementById('multi-share-mode-btn');
+    const shareSelectedBtn = document.getElementById('share-selected-btn');
+    
+    // Multi-share mode toggle
+    multiShareModeBtn?.addEventListener('click', () => {
+        multiShareMode = !multiShareMode;
+        multiShareModeBtn.textContent = multiShareMode ? 'Exit Multi-Share' : 'Multi-Share Mode';
+        multiShareModeBtn.classList.toggle('bg-gray-700', !multiShareMode);
+        multiShareModeBtn.classList.toggle('bg-blue-600', multiShareMode);
+        shareSelectedBtn.classList.toggle('hidden', !multiShareMode);
+        loadConversations(); // Reload to show checkboxes
+    });
+    
+    // Update selected count
+    window.updateSelectedCount = function() {
+        const checked = document.querySelectorAll('.conversation-checkbox:checked');
+        const count = checked.length;
+        document.getElementById('selected-count').textContent = count;
+        shareSelectedBtn.classList.toggle('opacity-50', count === 0);
+    };
+    
+    // Share selected conversations
+    shareSelectedBtn?.addEventListener('click', async () => {
+        const checked = document.querySelectorAll('.conversation-checkbox:checked');
+        if (checked.length === 0) return;
+        
+        const shareLinks = [];
+        for (const checkbox of checked) {
+            const convId = checkbox.dataset.convId;
+            let shareToken = checkbox.dataset.shareToken;
+            
+            if (!shareToken) {
+                // Generate share link
+                try {
+                    const response = await fetch(`/admin/api/conversations/${convId}/share`, {
+                        method: 'POST',
+                        headers: {
+                            'X-CSRF-Token': '{{ csrf_token }}'
+                        }
+                    });
+                    if (response.ok) {
+                        const data = await response.json();
+                        shareToken = data.share_token;
+                        checkbox.dataset.shareToken = shareToken;
+                    }
+                } catch (error) {
+                    console.error(`Failed to generate share link for conversation ${convId}:`, error);
+                    continue;
+                }
+            }
+            
+            if (shareToken) {
+                const baseUrl = window.location.origin;
+                shareLinks.push(`${baseUrl}/share/${shareToken}`);
+            }
+        }
+        
+        if (shareLinks.length > 0) {
+            const linksText = shareLinks.join('\n');
+            await navigator.clipboard.writeText(linksText);
+            alert(`Copied ${shareLinks.length} share link(s) to clipboard!`);
+            loadConversations(); // Refresh to show updated states
+        }
+    });
     
     // Toggle sidebar - expands into page, not over it
     conversationsMenuToggle?.addEventListener('click', () => {
@@ -1958,13 +2035,125 @@ SUPPORTED ANNOTATION SCHEMAS:
             conversations.forEach(conv => {
                 const convEl = document.createElement('div');
                 const isActive = currentConversationId === conv.id;
-                convEl.className = `px-2 py-1.5 rounded cursor-pointer transition-colors hover:bg-white/5 ${isActive ? 'bg-[var(--color-primary-600)]/20 border-l-2 border-[var(--color-primary-500)]' : ''}`;
+                const hasShareToken = !!conv.share_token;
+                convEl.className = `px-2 py-1.5 rounded transition-colors hover:bg-white/5 ${isActive ? 'bg-[var(--color-primary-600)]/20 border-l-2 border-[var(--color-primary-500)]' : ''} ${multiShareMode ? 'cursor-default' : 'cursor-pointer'}`;
                 convEl.dataset.conversationId = conv.id;
-                convEl.innerHTML = `
-                    <div class="font-medium text-xs truncate ${isActive ? 'text-[var(--color-primary-300)]' : 'text-gray-300'}">${conv.title || 'Untitled'}</div>
-                    <div class="text-xs text-gray-400 mt-0.5">${new Date(conv.updated_at).toLocaleDateString()} • ${conv.message_count || 0} msgs</div>
-                `;
-                convEl.addEventListener('click', () => loadConversation(conv.id));
+                convEl.dataset.shareToken = conv.share_token || '';
+                
+                // Create flex container
+                const flexContainer = document.createElement('div');
+                flexContainer.className = 'flex items-start justify-between gap-2';
+                
+                // Create content area
+                const contentArea = document.createElement('div');
+                contentArea.className = `flex-1 min-w-0 ${multiShareMode ? '' : 'cursor-pointer'}`;
+                if (!multiShareMode) {
+                    contentArea.addEventListener('click', () => loadConversation(conv.id));
+                }
+                
+                const titleDiv = document.createElement('div');
+                titleDiv.className = `font-medium text-xs truncate ${isActive ? 'text-[var(--color-primary-300)]' : 'text-gray-300'}`;
+                titleDiv.textContent = conv.title || 'Untitled';
+                
+                const metaDiv = document.createElement('div');
+                metaDiv.className = 'text-xs text-gray-400 mt-0.5';
+                metaDiv.textContent = `${new Date(conv.updated_at).toLocaleDateString()} • ${conv.message_count || 0} msgs`;
+                
+                contentArea.appendChild(titleDiv);
+                contentArea.appendChild(metaDiv);
+                
+                // Create action area
+                const actionArea = document.createElement('div');
+                actionArea.className = 'flex items-center gap-1 flex-shrink-0';
+                
+                // Add checkbox if in multi-share mode
+                if (multiShareMode) {
+                    const checkbox = document.createElement('input');
+                    checkbox.type = 'checkbox';
+                    checkbox.className = 'conversation-checkbox';
+                    checkbox.dataset.convId = conv.id;
+                    checkbox.dataset.shareToken = conv.share_token || '';
+                    checkbox.addEventListener('change', updateSelectedCount);
+                    actionArea.appendChild(checkbox);
+                }
+                
+                // Add share button
+                const shareBtn = document.createElement('button');
+                shareBtn.className = 'share-conv-btn p-1 rounded hover:bg-white/10 transition-colors';
+                shareBtn.dataset.convId = conv.id;
+                shareBtn.dataset.shareToken = conv.share_token || '';
+                shareBtn.title = hasShareToken ? 'Copy share link' : 'Generate share link';
+                
+                const shareIcon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+                shareIcon.setAttribute('class', `w-3.5 h-3.5 ${hasShareToken ? 'text-green-400' : 'text-gray-400'}`);
+                shareIcon.setAttribute('fill', 'none');
+                shareIcon.setAttribute('stroke', 'currentColor');
+                shareIcon.setAttribute('viewBox', '0 0 24 24');
+                const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+                path.setAttribute('stroke-linecap', 'round');
+                path.setAttribute('stroke-linejoin', 'round');
+                path.setAttribute('stroke-width', '2');
+                path.setAttribute('d', 'M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z');
+                shareIcon.appendChild(path);
+                shareBtn.appendChild(shareIcon);
+                
+                // Share button click handler
+                shareBtn.addEventListener('click', async (e) => {
+                    e.stopPropagation();
+                    const convId = shareBtn.dataset.convId;
+                    const existingToken = shareBtn.dataset.shareToken;
+                    
+                    if (existingToken) {
+                        // Copy existing link
+                        const baseUrl = window.location.origin;
+                        const shareUrl = `${baseUrl}/share/${existingToken}`;
+                        await navigator.clipboard.writeText(shareUrl);
+                        shareBtn.title = 'Share link copied!';
+                        setTimeout(() => {
+                            shareBtn.title = existingToken ? 'Copy share link' : 'Generate share link';
+                        }, 2000);
+                    } else {
+                        // Generate new link
+                        try {
+                            const response = await fetch(`/admin/api/conversations/${convId}/share`, {
+                                method: 'POST',
+                                headers: {
+                                    'X-CSRF-Token': '{{ csrf_token }}'
+                                }
+                            });
+                            if (response.ok) {
+                                const data = await response.json();
+                                await navigator.clipboard.writeText(data.share_url);
+                                shareBtn.dataset.shareToken = data.share_token;
+                                shareIcon.classList.remove('text-gray-400');
+                                shareIcon.classList.add('text-green-400');
+                                shareBtn.title = 'Share link copied!';
+                                setTimeout(() => {
+                                    shareBtn.title = 'Copy share link';
+                                }, 2000);
+                                loadConversations(); // Refresh to show updated state
+                            }
+                        } catch (error) {
+                            console.error('Error generating share link:', error);
+                            alert('Failed to generate share link');
+                        }
+                    }
+                });
+                
+                actionArea.appendChild(shareBtn);
+                
+                flexContainer.appendChild(contentArea);
+                flexContainer.appendChild(actionArea);
+                convEl.appendChild(flexContainer);
+                
+                if (!multiShareMode) {
+                    convEl.addEventListener('click', (e) => {
+                        if (!e.target.closest('.share-conv-btn') && !e.target.closest('input')) {
+                            loadConversation(conv.id);
+                        }
+                    });
+                }
+                
                 conversationsList.appendChild(convEl);
             });
         } catch (error) {
@@ -1993,6 +2182,14 @@ SUPPORTED ANNOTATION SCHEMAS:
                 content: msg.content
             }));
             
+            // Show/hide share button based on conversation
+            const shareBtn = document.getElementById('share-link-btn');
+            if (shareBtn) {
+                shareBtn.classList.remove('hidden');
+                shareBtn.dataset.conversationId = conversationId;
+                shareBtn.dataset.shareToken = conversation.share_token || '';
+            }
+            
             renderChat();
             updateGlobalStats();
             loadConversations(); // Refresh list to highlight current
@@ -2001,6 +2198,48 @@ SUPPORTED ANNOTATION SCHEMAS:
             alert('Failed to load conversation');
         }
     }
+    
+    // Share link functionality
+    const shareLinkBtn = document.getElementById('share-link-btn');
+    shareLinkBtn?.addEventListener('click', async () => {
+        const conversationId = shareLinkBtn.dataset.conversationId;
+        if (!conversationId) return;
+        
+        try {
+            // Generate or get share link
+            const response = await fetch(`/admin/api/conversations/${conversationId}/share`, {
+                method: 'POST',
+                headers: {
+                    'X-CSRF-Token': '{{ csrf_token }}'
+                }
+            });
+            
+            if (!response.ok) {
+                throw new Error('Failed to generate share link');
+            }
+            
+            const data = await response.json();
+            const shareUrl = data.share_url;
+            
+            // Copy to clipboard
+            await navigator.clipboard.writeText(shareUrl);
+            
+            // Show success message
+            const originalTitle = shareLinkBtn.title;
+            shareLinkBtn.title = 'Share link copied!';
+            shareLinkBtn.classList.add('text-green-400');
+            setTimeout(() => {
+                shareLinkBtn.title = originalTitle;
+                shareLinkBtn.classList.remove('text-green-400');
+            }, 2000);
+            
+            // Update stored token
+            shareLinkBtn.dataset.shareToken = data.share_token;
+        } catch (error) {
+            console.error('Error generating share link:', error);
+            alert('Failed to generate share link');
+        }
+    });
     
     // Create new conversation
     newConversationBtn?.addEventListener('click', async () => {
@@ -2020,6 +2259,13 @@ SUPPORTED ANNOTATION SCHEMAS:
             
             currentConversationId = conversation.id;
             messages = [];
+            
+            // Hide share button for new conversation (no messages yet)
+            const shareBtn = document.getElementById('share-link-btn');
+            if (shareBtn) {
+                shareBtn.classList.add('hidden');
+            }
+            
             renderChat();
             loadConversations();
         } catch (error) {

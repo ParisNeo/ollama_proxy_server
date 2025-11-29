@@ -182,6 +182,207 @@ async def admin_playground_stream(
             # Create new conversation
             conversation = await conversation_crud.create_conversation(db, admin_user.id)
             conversation_id = conversation.id
+        
+        # --- SHARE LINK DETECTION: Detect and inject shared thread context ---
+        import re
+        share_link_pattern = r'/share/([A-Za-z0-9_-]+)'
+        shared_threads_context = []
+        
+        # Check all user messages for share links
+        for msg in messages:
+            if msg.get("role") == "user":
+                content = msg.get("content", "")
+                if isinstance(content, str):
+                    # Find all share tokens in the message
+                    share_tokens = re.findall(share_link_pattern, content)
+                    for token in share_tokens:
+                        try:
+                            # Load shared conversation
+                            shared_conv = await conversation_crud.get_conversation_by_share_token(db, token)
+                            if shared_conv:
+                                shared_messages = await conversation_crud.get_conversation_messages(db, shared_conv.id)
+                                if shared_messages:
+                                    # Format shared thread for context
+                                    thread_text = f"\n\n[Shared Thread: {shared_conv.title or 'Untitled'}]\n"
+                                    for shared_msg in shared_messages:
+                                        role_label = "User" if shared_msg.role == "user" else "Assistant"
+                                        thread_text += f"{role_label}: {shared_msg.content}\n\n"
+                                    shared_threads_context.append(thread_text)
+                                    logger.info(f"Injected shared thread context from token {token[:8]}... ({len(shared_messages)} messages)")
+                        except Exception as e:
+                            logger.warning(f"Failed to load shared thread {token}: {e}")
+        
+        # --- CODEBASE AWARENESS: Always inject system awareness, search codebase when relevant ---
+        codebase_context = []
+        
+        # Base system awareness prompt (always injected)
+        base_system_prompt = """[SYSTEM SELF-AWARENESS]
+You are an AI assistant running inside the Ollama Proxy Server system. This is a FastAPI-based proxy that routes requests to multiple backend AI model servers (Ollama, OpenRouter, vLLM).
+
+You have access to the ACTUAL codebase and can analyze, explain, and suggest improvements to the system. When users ask about the system, codebase, functionality, or request improvements, you should use the ACTUAL code provided to give accurate, fact-based responses.
+
+CRITICAL: When analyzing the codebase:
+- ONLY reference files and features that are ACTUALLY shown in the code provided
+- DO NOT make up features, files, or modules that don't exist
+- DO NOT claim features are "missing" if you see them implemented in the code
+- VERIFY what exists before claiming it doesn't
+- Be ACCURATE - base your analysis on the actual code, not assumptions
+
+Key capabilities of this system (based on actual implementation):
+- Auto-routing: Intelligently selects models based on request characteristics and priority (implemented in app/core/auto_router.py)
+- Multi-server support: Ollama, OpenRouter, vLLM backends (implemented in app/api/v1/routes/proxy.py)
+- Conversation management with RAG-based search (implemented in app/core/rag_service.py)
+- Share links for conversations (implemented in app/api/v1/routes/conversations.py)
+- Web search integration (implemented via SearXNG)
+- Codebase awareness: You can analyze the system's own code (implemented in app/core/codebase_indexer.py)
+- Rate limiting: Implemented using Redis (app/api/v1/dependencies.py)
+- Model filtering: OpenRouter models can be enabled/disabled (app/crud/server_crud.py)
+
+When suggesting improvements, only recommend free and open-source solutions, and base suggestions on ACTUAL code gaps you can see, not theoretical ones.
+"""
+        codebase_context.append(base_system_prompt)
+        
+        # Expanded keywords for system/codebase questions
+        system_keywords = [
+            'how does', 'how do', 'where is', 'what is', 'explain', 'show me', 'code for', 
+            'function', 'class', 'file', 'improve', 'optimize', 'refactor', 'bug', 'error',
+            'suggest', 'recommend', 'better', 'alternative', 'enhance', 'fix', 'issue',
+            'self-aware', 'codebase', 'system', 'architecture', 'design', 'implementation',
+            'missing', 'needs', 'need', 'upgrade', 'upgrading', 'functionality', 'feature',
+            'capability', 'what if', 'believe', 'think', 'opinion', 'analysis', 'analyze',
+            'looking at', 'examine', 'review', 'evaluate', 'assess'
+        ]
+        improvement_keywords = ['improve', 'optimize', 'refactor', 'better', 'suggest', 'recommend', 'enhance', 'alternative', 'fix', 'upgrade', 'missing', 'needs']
+        
+        last_user_content = ""
+        if messages:
+            last_user_msg = next((msg for msg in reversed(messages) if msg.get("role") == "user"), None)
+            if last_user_msg:
+                last_user_content = last_user_msg.get("content", "")
+                if isinstance(last_user_content, str):
+                    content_lower = last_user_content.lower()
+                    # More aggressive detection: check if query is about the system/codebase
+                    is_system_question = any(keyword in content_lower for keyword in system_keywords)
+                    is_improvement_request = any(keyword in content_lower for keyword in improvement_keywords)
+                    
+                    # Also check for questions about "you", "yourself", "this system", etc.
+                    self_reference_keywords = ['your codebase', 'your functionality', 'your system', 'this system', 'the system', 'you believe', 'you think', 'you suggest']
+                    is_self_reference = any(keyword in content_lower for keyword in self_reference_keywords)
+                    
+                    if is_system_question or is_improvement_request or is_self_reference:
+                        try:
+                            if hasattr(request.app.state, 'rag_service') and request.app.state.rag_service and request.app.state.rag_service.initialized:
+                                # Search codebase with expanded query
+                                search_query = last_user_content
+                                if is_improvement_request:
+                                    # For improvement requests, search more broadly
+                                    search_query = f"{last_user_content} code implementation architecture"
+                                
+                                logger.info(f"Detected system/codebase question. Query: '{last_user_content[:100]}...'")
+                                
+                                # Check if codebase indexer is ready
+                                indexer_ready = (
+                                    hasattr(request.app.state, 'rag_service') and 
+                                    request.app.state.rag_service and 
+                                    request.app.state.rag_service.codebase_indexer and
+                                    len(request.app.state.rag_service.codebase_indexer.indexed_files) > 0
+                                )
+                                
+                                if indexer_ready:
+                                    codebase_results = await request.app.state.rag_service.search_codebase(search_query, limit=10)
+                                    
+                                    if codebase_results:
+                                        codebase_text = "\n\n[RELEVANT CODEBASE CONTEXT FOR YOUR ANALYSIS]\n"
+                                        codebase_text += "Below is relevant code from the system's codebase that relates to the user's question:\n\n"
+                                        
+                                        for i, result in enumerate(codebase_results, 1):
+                                            file_path = result.get('file_path', 'Unknown')
+                                            preview = result.get('preview', result.get('content', ''))
+                                            
+                                            # Get full file content if available
+                                            if hasattr(request.app.state, 'rag_service') and request.app.state.rag_service.codebase_indexer:
+                                                full_content = request.app.state.rag_service.codebase_indexer.get_file_content(file_path)
+                                                if full_content:
+                                                    preview = full_content[:5000]  # Use more context for analysis
+                                                else:
+                                                    preview = preview[:3000] if preview else ""
+                                            
+                                            codebase_text += f"\n--- File {i}: {file_path} ---\n{preview}\n"
+                                    
+                                    # Add system summary to help AI verify what exists
+                                    if hasattr(request.app.state, 'rag_service') and request.app.state.rag_service.codebase_indexer:
+                                        overview = request.app.state.rag_service.codebase_indexer.get_system_overview()
+                                        codebase_text += f"\n\n[SYSTEM OVERVIEW - For Verification]\n"
+                                        codebase_text += f"Total indexed files: {overview.get('total_files', 0)}\n"
+                                        codebase_text += f"Python files: {overview.get('python_files', 0)}\n"
+                                        codebase_text += f"Main modules: {', '.join(overview.get('main_modules', [])[:5])}\n"
+                                        codebase_text += "Use this to verify what files actually exist before claiming they're missing.\n"
+                                        
+                                        if is_improvement_request or is_self_reference:
+                                            codebase_text += "\n\n[CRITICAL INSTRUCTIONS FOR YOUR RESPONSE]\n"
+                                            codebase_text += "Based on the ACTUAL codebase context provided above, provide an accurate analysis:\n\n"
+                                            codebase_text += "ACCURACY REQUIREMENTS:\n"
+                                            codebase_text += "1. ONLY reference files that are ACTUALLY shown in the codebase context above\n"
+                                            codebase_text += "2. DO NOT make up or assume features exist - verify they're in the code first\n"
+                                            codebase_text += "3. DO NOT claim features are 'missing' if you see them implemented in the code\n"
+                                            codebase_text += "4. If you see a feature implemented (e.g., rate limiting, model filtering), acknowledge it exists\n"
+                                            codebase_text += "5. Focus on ACTUAL gaps you can see in the provided code, not theoretical ones\n\n"
+                                            codebase_text += "ANALYSIS STRUCTURE:\n"
+                                            codebase_text += "1. What features ARE actually implemented (based on the code shown)\n"
+                                            codebase_text += "2. What could be improved in existing implementations (with specific code references)\n"
+                                            codebase_text += "3. What is genuinely missing (only if you can verify it's not in the code)\n"
+                                            codebase_text += "4. Specific, actionable suggestions with file paths from the codebase above\n\n"
+                                            codebase_text += "IMPORTANT: You ARE running inside this system. You CAN analyze its codebase. "
+                                            codebase_text += "The code above is REAL - use it to give ACCURATE analysis, not speculation.\n"
+                                            codebase_text += "If you see a feature in the code, say it EXISTS. Don't claim it's missing.\n"
+                                        
+                                        codebase_context.append(codebase_text)
+                                        logger.info(f"Injected codebase context ({len(codebase_results)} files) for {'improvement' if is_improvement_request else 'system'} question")
+                                    else:
+                                        logger.warning(f"Codebase search returned no results for query: {search_query[:100]}")
+                                        # Still provide system awareness even without codebase results
+                                        codebase_text = "\n\n[SYSTEM AWARENESS - Codebase search returned no results, but you still have system knowledge]\n"
+                                        codebase_text += "You are running inside the Ollama Proxy Server. Even without specific code matches, "
+                                        codebase_text += "you should respond based on your understanding of the system's architecture and capabilities.\n"
+                                        codebase_context.append(codebase_text)
+                                else:
+                                    logger.warning("Codebase indexer not ready - providing basic system awareness only")
+                                    # Provide system awareness even if indexing isn't ready
+                                    codebase_text = "\n\n[SYSTEM AWARENESS - Codebase indexing in progress]\n"
+                                    codebase_text += "You are running inside the Ollama Proxy Server system. "
+                                    codebase_text += "Codebase indexing may still be in progress, but you should still respond "
+                                    codebase_text += "based on your knowledge of the system's architecture and capabilities.\n"
+                                    codebase_context.append(codebase_text)
+                        except Exception as e:
+                            logger.error(f"Failed to search codebase: {e}", exc_info=True)
+                    else:
+                        logger.debug(f"Query did not match system/codebase keywords: '{last_user_content[:50]}...'")
+        
+        # Inject all context (shared threads + codebase) into the last user message
+        all_context = []
+        if shared_threads_context:
+            all_context.append("\n\n[Context from shared threads:]\n" + "\n---\n".join(shared_threads_context))
+        if codebase_context:
+            all_context.extend(codebase_context)
+        
+        if all_context and messages:
+            last_user_msg = None
+            for msg in reversed(messages):
+                if msg.get("role") == "user":
+                    last_user_msg = msg
+                    break
+            
+            if last_user_msg:
+                context_text = "\n".join(all_context)
+                if isinstance(last_user_msg.get("content"), str):
+                    last_user_msg["content"] = last_user_msg["content"] + context_text
+                else:
+                    # If content is a list (multimodal), append to text part
+                    if isinstance(last_user_msg.get("content"), list):
+                        text_part = next((item for item in last_user_msg["content"] if item.get("type") == "text"), None)
+                        if text_part:
+                            text_part["text"] = text_part.get("text", "") + context_text
+        # --- END CONTEXT INJECTION ---
 
         # --- NEW: Handle 'auto' model routing ---
         if model_name == "auto":

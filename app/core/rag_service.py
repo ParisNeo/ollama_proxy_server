@@ -37,6 +37,8 @@ class RAGService:
         self.embedding_model: Optional[SentenceTransformer] = None
         self.chroma_client: Optional[Any] = None
         self.collection: Optional[Any] = None
+        self.codebase_collection: Optional[Any] = None
+        self.codebase_indexer: Optional[Any] = None
         self.initialized = False
         
     async def initialize(self):
@@ -67,6 +69,36 @@ class RAGService:
                 name="conversations",
                 metadata={"description": "Conversation thread embeddings for semantic search"}
             )
+            
+            # Get or create collection for codebase
+            try:
+                self.codebase_collection = self.chroma_client.get_or_create_collection(
+                    name="codebase",
+                    metadata={"description": "Codebase embeddings for intelligent code awareness"}
+                )
+            except Exception as e:
+                logger.warning(f"Could not create codebase collection: {e}")
+                self.codebase_collection = None
+            
+            # Initialize codebase indexer
+            try:
+                from app.core.codebase_indexer import CodebaseIndexer
+                self.codebase_indexer = CodebaseIndexer()
+                # Index codebase immediately (synchronous) to ensure it's ready
+                # This is critical for self-awareness to work
+                try:
+                    logger.info("Indexing codebase for self-awareness...")
+                    result = self.codebase_indexer.index_codebase(max_files=200)  # Index up to 200 files
+                    files_indexed = result.get('files_indexed', 0)
+                    logger.info(f"Codebase indexed: {files_indexed} files ready for self-awareness")
+                    if files_indexed == 0:
+                        logger.warning("Codebase indexing returned 0 files - self-awareness may be limited")
+                except Exception as e:
+                    logger.error(f"Codebase indexing failed: {e}", exc_info=True)
+                    # Don't fail initialization, but log the error
+            except Exception as e:
+                logger.error(f"Could not initialize codebase indexer: {e}", exc_info=True)
+                self.codebase_indexer = None
             
             self.initialized = True
             logger.info("RAG service initialized successfully")
@@ -177,4 +209,51 @@ class RAGService:
         if not json_str:
             return []
         return json.loads(json_str)
+    
+    async def search_codebase(self, query: str, limit: int = 5) -> List[Dict[str, Any]]:
+        """Search codebase using semantic search and text matching"""
+        results = []
+        
+        # First, try text-based search (faster, works immediately)
+        if self.codebase_indexer:
+            try:
+                text_results = self.codebase_indexer.search_codebase(query, limit=limit * 2)
+                results.extend(text_results)
+            except Exception as e:
+                logger.warning(f"Text-based codebase search failed: {e}")
+        
+        # Then, try semantic search if codebase collection exists and is populated
+        if self.codebase_collection and self.initialized:
+            try:
+                query_embedding = self.generate_embedding(query)
+                semantic_results = self.codebase_collection.query(
+                    query_embeddings=[query_embedding],
+                    n_results=limit
+                )
+                
+                if semantic_results['ids'] and len(semantic_results['ids'][0]) > 0:
+                    for i, doc_id in enumerate(semantic_results['ids'][0]):
+                        distance = semantic_results['distances'][0][i] if 'distances' in semantic_results and semantic_results['distances'][0] else 1.0
+                        similarity = 1.0 - distance
+                        
+                        results.append({
+                            'file_path': doc_id,
+                            'score': similarity * 100,  # Convert to score
+                            'content': semantic_results['documents'][0][i] if 'documents' in semantic_results and semantic_results['documents'][0] else "",
+                            'type': 'semantic'
+                        })
+            except Exception as e:
+                logger.warning(f"Semantic codebase search failed: {e}")
+        
+        # Deduplicate and sort results
+        seen_files = set()
+        unique_results = []
+        for result in results:
+            file_path = result.get('file_path', '')
+            if file_path and file_path not in seen_files:
+                seen_files.add(file_path)
+                unique_results.append(result)
+        
+        unique_results.sort(key=lambda x: x.get('score', 0), reverse=True)
+        return unique_results[:limit]
 
