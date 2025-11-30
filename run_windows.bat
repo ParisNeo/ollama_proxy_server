@@ -59,7 +59,12 @@ echo [SUCCESS] Virtual environment created.
 call .\%VENV_DIR%\Scripts\activate.bat
 
 if %CURRENT_STATE% GEQ 2 goto setup_step_3
-echo [INFO] [2/3] Installing dependencies...
+echo [INFO] [2/3] Upgrading pip to latest version...
+python -m pip install --upgrade pip
+if %errorlevel% neq 0 ( echo [WARNING] Failed to upgrade pip, continuing anyway... )
+
+echo [INFO] [2/3] Installing dependencies from requirements.txt...
+echo [INFO] This may take several minutes, especially for transformer libraries...
 pip install --no-cache-dir -r %REQUIREMENTS_FILE%
 if %errorlevel% neq 0 ( echo [ERROR] Failed to install packages. & pause & exit /b 1 )
 (echo 2) > %STATE_FILE%
@@ -83,6 +88,17 @@ echo.
 echo [INFO] Activating virtual environment...
 call .\%VENV_DIR%\Scripts\activate.bat
 
+echo [INFO] Verifying critical dependencies...
+python -c "import sentence_transformers; import transformers; import torch; import chromadb; print('[OK] Core RAG dependencies available')" 2>nul
+if %errorlevel% neq 0 (
+    echo [WARNING] Some dependencies may be missing. Installing/upgrading packages...
+    echo [INFO] Upgrading pip...
+    python -m pip install --upgrade pip
+    echo [INFO] Installing/upgrading requirements...
+    pip install --upgrade -r %REQUIREMENTS_FILE%
+    if %errorlevel% neq 0 ( echo [WARNING] Some packages may have failed to install. Continuing anyway... )
+)
+
 echo [INFO] Setting Python Path...
 set PYTHONPATH=.
 
@@ -93,7 +109,7 @@ echo [INFO] This does NOT necessarily indicate an error.
 echo [INFO] To stop the server, simply close this window or press Ctrl+C.
 echo.
 
-python app/main.py
+.\%VENV_DIR%\Scripts\python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8082 --log-level info
 
 echo [INFO] Server has been stopped.
 pause

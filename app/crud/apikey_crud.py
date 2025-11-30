@@ -23,6 +23,11 @@ async def get_api_keys_for_user(db: AsyncSession, user_id: int) -> list[APIKey]:
     result = await db.execute(select(APIKey).filter(APIKey.user_id == user_id).order_by(APIKey.created_at.desc()))
     return result.scalars().all()
 
+async def get_all_api_keys(db: AsyncSession) -> list[APIKey]:
+    """Get all API keys from the database."""
+    result = await db.execute(select(APIKey).order_by(APIKey.created_at.desc()))
+    return result.scalars().all()
+
 
 async def create_api_key(
     db: AsyncSession, 

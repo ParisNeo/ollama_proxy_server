@@ -29,9 +29,12 @@ from app.core.config import settings
 from app.core.logging_config import setup_logging
 from app.api.v1.routes.health import router as health_router
 from app.api.v1.routes.proxy import router as proxy_router
+from app.api.v1.routes.openai_compat import router as openai_compat_router
 from app.api.v1.routes.admin import router as admin_router
 from app.api.v1.routes.playground_chat import router as playground_chat_router
 from app.api.v1.routes.playground_embedding import router as playground_embedding_router
+from app.api.v1.routes.search import router as search_router
+from app.api.v1.routes.conversations import router as conversations_router
 from app.database.session import AsyncSessionLocal, engine
 from app.database.base import Base
 from app.database.migrations import run_all_migrations
@@ -44,6 +47,8 @@ from app.schema.settings import AppSettingsModel
 setup_logging(settings.LOG_LEVEL)
 logger = logging.getLogger(__name__)
 os.environ.setdefault("PASSLIB_DISABLE_WARNINGS", "1")
+# Disable ChromaDB telemetry to prevent errors
+os.environ.setdefault("ANONYMIZED_TELEMETRY", "False")
 
 _db_initialized = False
 async def init_db():
@@ -149,7 +154,60 @@ async def lifespan(app: FastAPI):
     # --- NEW: Load settings from DB ---
     async with AsyncSessionLocal() as db:
         db_settings_obj = await settings_crud.create_initial_settings(db)
-        app.state.settings = AppSettingsModel.model_validate(db_settings_obj.settings_data)
+        
+        # Fix corrupted redis_port BEFORE validation (to prevent validation errors)
+        settings_dict = dict(db_settings_obj.settings_data) if db_settings_obj.settings_data else {}
+        redis_port_value = settings_dict.get('redis_port', 6379)
+        
+        logger.info(f"Loading settings from database. Current redis_port value: {redis_port_value} (type: {type(redis_port_value)})")
+        
+        # ALWAYS check and fix redis_port before validation
+        fixed_port = 6379
+        if isinstance(redis_port_value, str):
+            try:
+                port_int = int(redis_port_value)
+                if 1 <= port_int <= 65535:
+                    fixed_port = port_int
+                    logger.debug(f"Redis port string '{redis_port_value}' converted to int {port_int}")
+                else:
+                    logger.warning(f"Redis port {port_int} out of range, using 6379")
+            except (ValueError, TypeError) as e:
+                logger.warning(f"Found invalid Redis port value '{redis_port_value}' in database (cannot convert to int: {e}), fixing to 6379")
+        elif isinstance(redis_port_value, int) and (1 <= redis_port_value <= 65535):
+            fixed_port = redis_port_value
+            logger.debug(f"Redis port is already valid int: {redis_port_value}")
+        else:
+            logger.warning(f"Found invalid Redis port value '{redis_port_value}' (type: {type(redis_port_value)}) in database, fixing to 6379")
+        
+        # Always update the dict with the fixed port if it changed
+        if redis_port_value != fixed_port:
+            logger.info(f"Fixing redis_port: {redis_port_value} -> {fixed_port}")
+            settings_dict['redis_port'] = fixed_port
+            db_settings_obj.settings_data = settings_dict
+            await db.commit()
+            await db.refresh(db_settings_obj)
+            logger.info(f"Redis port value has been corrected in the database: {redis_port_value} -> {fixed_port}")
+        else:
+            logger.debug(f"Redis port value is already correct: {fixed_port}")
+        
+        # Now validate with the fixed value
+        try:
+            logger.debug("Validating settings with Pydantic...")
+            app.state.settings = AppSettingsModel.model_validate(db_settings_obj.settings_data)
+            logger.debug(f"Settings validated successfully. redis_port = {app.state.settings.redis_port}")
+        except Exception as e:
+            logger.error(f"Error validating settings: {e}. Attempting to fix and retry...")
+            # Force fix redis_port and try again
+            settings_dict['redis_port'] = 6379
+            db_settings_obj.settings_data = settings_dict
+            await db.commit()
+            await db.refresh(db_settings_obj)
+            try:
+                app.state.settings = AppSettingsModel.model_validate(db_settings_obj.settings_data)
+                logger.info("Successfully validated settings after forcing Redis port to 6379")
+            except Exception as e2:
+                logger.error(f"Still failed after fix: {e2}. Using default settings.")
+                app.state.settings = AppSettingsModel()
 
     await create_initial_admin_user()
 
@@ -160,17 +218,55 @@ async def lifespan(app: FastAPI):
 
     try:
         db_settings: AppSettingsModel = app.state.settings
-        if db_settings.redis_username and db_settings.redis_password:
-            credentials = f"{db_settings.redis_username}:{db_settings.redis_password}@"
-        elif db_settings.redis_username:
-            credentials = f"{db_settings.redis_username}@"
+        
+        # Get redis_port - validator should have already converted it, but be extra safe
+        redis_port_value = getattr(db_settings, 'redis_port', 6379)
+        
+        # Ensure redis_port is an integer (validator should handle this, but double-check)
+        if isinstance(redis_port_value, str):
+            try:
+                redis_port = int(redis_port_value)
+            except (ValueError, TypeError):
+                logger.warning(f"Invalid Redis port value '{redis_port_value}' (string), using default 6379")
+                redis_port = 6379
+        elif isinstance(redis_port_value, int):
+            redis_port = redis_port_value
         else:
+            logger.warning(f"Invalid Redis port type '{type(redis_port_value)}', using default 6379")
+            redis_port = 6379
+        
+        # Validate port is in valid range
+        if not (1 <= redis_port <= 65535):
+            logger.warning(f"Redis port {redis_port} out of valid range (1-65535), using default 6379")
+            redis_port = 6379
+        
+        # Build credentials with URL encoding (passwords may contain special chars like #, @, !)
+        # Redis with --requirepass uses password-only auth (no username needed)
+        from urllib.parse import quote_plus
+        encoded_password = None
+        if db_settings.redis_password:
+            encoded_password = quote_plus(db_settings.redis_password)
+            # Use password-only format for --requirepass (most common)
+            # Format: redis://:password@host:port
+            credentials = f":{encoded_password}@"
+        else:
+            # No authentication
             credentials = ""
-        redis_url = f"redis://{credentials}{db_settings.redis_host}:{db_settings.redis_port}/0"
+        
+        redis_url = f"redis://{credentials}{db_settings.redis_host}:{redis_port}/0"
+        # Log with masked password for security
+        if encoded_password and db_settings.redis_password:
+            safe_url = redis_url.replace(encoded_password, '*' * len(db_settings.redis_password))
+        else:
+            safe_url = redis_url
+        logger.debug(f"Attempting Redis connection to: {safe_url}")
 
         app.state.redis = redis.from_url(redis_url, encoding="utf-8", decode_responses=True)
         await app.state.redis.ping()
-        logger.info("Successfully connected to Redis.")
+        logger.info(f"Successfully connected to Redis at {db_settings.redis_host}:{redis_port}")
+    except Exception as exc:
+        logger.warning(f"Redis not available – rate limiting disabled. Reason: {exc}")
+        app.state.redis = None
     except Exception as exc:
         logger.warning(f"Redis not available – rate limiting disabled. Reason: {exc}")
         app.state.redis = None
@@ -178,6 +274,16 @@ async def lifespan(app: FastAPI):
     import asyncio
     refresh_task = asyncio.create_task(periodic_model_refresh(app))
     app.state.refresh_task = refresh_task
+
+    # Initialize RAG/embedding service for conversation search
+    from app.core.rag_service import RAGService
+    try:
+        app.state.rag_service = RAGService()
+        await app.state.rag_service.initialize()
+        logger.info("RAG/embedding service initialized")
+    except Exception as e:
+        logger.warning(f"RAG service not available: {e}. Conversation search will be limited.")
+        app.state.rag_service = None
 
     # Do initial model refresh on startup
     logger.info("Performing initial model refresh on startup...")
@@ -195,6 +301,13 @@ async def lifespan(app: FastAPI):
             await app.state.refresh_task
         except asyncio.CancelledError:
             pass
+    
+    # RAG service cleanup is handled automatically by ChromaDB
+    
+    # Close search proxy
+    from app.core.simple_search import _search_proxy
+    if _search_proxy:
+        await _search_proxy.close()
 
     await app.state.http_client.aclose()
     if app.state.redis:
@@ -233,9 +346,13 @@ async def add_security_headers(request: Request, call_next):
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 app.include_router(health_router, prefix="/api/v1", tags=["Health"])
 app.include_router(proxy_router, prefix="/api", tags=["Ollama Proxy"])
+# OpenAI-compatible endpoints at root level for clients like MSTY
+app.include_router(openai_compat_router, prefix="", tags=["OpenAI Compatible"])
 app.include_router(admin_router, prefix="/admin", tags=["Admin UI"], include_in_schema=False)
 app.include_router(playground_chat_router, prefix="/admin", tags=["Admin UI"], include_in_schema=False)
 app.include_router(playground_embedding_router, prefix="/admin", tags=["Admin UI"], include_in_schema=False)
+app.include_router(search_router, tags=["Search"], include_in_schema=False)
+app.include_router(conversations_router, prefix="/admin/api", tags=["Conversations"], include_in_schema=False)
 
 @app.get("/", include_in_schema=False, summary="Root")
 def read_root():
@@ -284,12 +401,23 @@ if __name__ == "__main__":
         
         # This function will be called after Uvicorn starts up
         def after_start():
-            print("\n" + "="*60)
-            print("🚀 Ollama Proxy Fortress is running! 🚀")
-            print("="*60)
-            print(f"✅ Version: {settings.APP_VERSION}")
-            print(f"✅ Mode: {'Production (HTTPS)' if protocol == 'https' else 'Development (HTTP)'}")
-            print(f"✅ Listening on port: {port}")
+            try:
+                # Try to print with emoji, but fallback if Windows console can't handle it
+                banner = "\n" + "="*60 + "\n"
+                banner += "🚀 Ollama Proxy Fortress is running! 🚀\n"
+                banner += "="*60 + "\n"
+                banner += f"✅ Version: {settings.APP_VERSION}\n"
+                banner += f"✅ Mode: {'Production (HTTPS)' if protocol == 'https' else 'Development (HTTP)'}\n"
+                banner += f"✅ Listening on port: {port}\n"
+                print(banner)
+            except UnicodeEncodeError:
+                # Fallback for Windows console that doesn't support emoji
+                print("\n" + "="*60)
+                print(">>> Ollama Proxy Fortress is running! <<<")
+                print("="*60)
+                print(f"[OK] Version: {settings.APP_VERSION}")
+                print(f"[OK] Mode: {'Production (HTTPS)' if protocol == 'https' else 'Development (HTTP)'}")
+                print(f"[OK] Listening on port: {port}")
             print("\nTo access the admin dashboard, open your web browser to:")
             print(f"    {protocol}://127.0.0.1:{port}/admin/dashboard")
             print(f"    or {protocol}://localhost:{port}/admin/dashboard")
@@ -299,6 +427,15 @@ if __name__ == "__main__":
 
 
         # Correct way to run uvicorn programmatically
+        # Ensure WebSocket support is available
+        try:
+            import websockets
+            import wsproto
+            logger.debug("WebSocket libraries available: websockets, wsproto")
+        except ImportError as e:
+            logger.warning(f"WebSocket libraries not available: {e}. Some features may not work.")
+            logger.warning("Install with: pip install 'uvicorn[standard]' websockets wsproto")
+        
         config = uvicorn.Config(
             "app.main:app",
             host="0.0.0.0",
@@ -306,6 +443,9 @@ if __name__ == "__main__":
             ssl_keyfile=ssl_keyfile,
             ssl_certfile=ssl_certfile,
             log_config=None, # Let our custom logging handle it
+            ws="auto",  # Auto-detect WebSocket library
+            reload=True,  # Enable hot reload for development
+            reload_dirs=["app"],  # Watch app directory for changes
         )
         server = uvicorn.Server(config)
         

@@ -57,6 +57,12 @@ Ollama Proxy Fortress is **more than just a patch**. It's a permanent solution t
 *   🌐 **Multi-Server Management & Federation:**
     *   Centrally manage all your Ollama backend servers. The proxy load-balances requests and provides a unified, federated view of all available models from all your instances combined.
 
+*   🌐 **Intelligent Web Search:**
+    *   **SearXNG Integration:** Self-hosted, privacy-respecting metasearch engine with no rate limits. Aggregates results from multiple search engines for comprehensive answers.
+    *   **Ollama Cloud Fallback:** Automatic fallback to Ollama's cloud search service if SearXNG is unavailable.
+    *   **Smart Decision Matrix:** Automatically determines when queries need live internet data vs. using model knowledge.
+    *   **Manual Toggle:** Control web search on/off in the chat playground with a single click.
+
 *   ✨ **Effortless 1-Click Setup:**
     *   No Docker, no `pip install`, no command-line wizardry required. Just download and run a single script.
 
@@ -127,6 +133,10 @@ Your new mission control. Instantly see system health, active models, server sta
 
 ![Dashboard](assets/DashBoard.gif)
 
+*Static view of the dashboard showing real-time system metrics:*
+
+![Dashboard Overview](assets/dashboard_updated.png)
+
 ### Step 3: Manage Your Servers & Models
 
 No more SSH or terminal juggling. Add all your Ollama instances, then pull, update, and delete models on any server with a few clicks.
@@ -147,7 +157,9 @@ The User Management page gives you a sortable, high-level overview. From here, c
 
 ### Step 6: Test & Benchmark in the Playgrounds
 
-Use the built-in playgrounds to evaluate your models. The **Chat Playground** provides a familiar UI to test conversational models with streaming and image support. The **Embedding Playground** lets you visualize and benchmark how different models understand semantic relationships using powerful 2D plots.
+Use the built-in playgrounds to evaluate your models. The **Chat Playground** provides a familiar UI to test conversational models with streaming and image support. Toggle web search on/off with a single click to enable real-time internet data for your queries. The **Embedding Playground** lets you visualize and benchmark how different models understand semantic relationships using powerful 2D plots.
+
+![Chat Playground with Web Search Toggle](assets/chat_playground.png)
 
 ### Step 7: Master Your Analytics
 
@@ -160,6 +172,84 @@ The main "Usage Stats" page and the per-user pages give you a beautiful, exporta
 The built-in Help page is now a rich document with a sticky table of contents that tracks your scroll position, making it effortless to find the information you need.
 
 ![Help and Credits Page](assets/help.png)
+
+---
+
+## 🌐 Web Search Integration: SearXNG & Ollama Cloud
+
+The proxy server includes intelligent web search capabilities that enhance AI responses with real-time information from the internet.
+
+![Web Search Interface](assets/web_search.png)
+
+### How It Works
+
+The proxy uses a **dual-search architecture**:
+
+1. **Primary: SearXNG** (Privacy-respecting metasearch engine)
+   - Self-hosted, no rate limits
+   - Aggregates results from multiple search engines
+   - Fully private - no tracking or data collection
+   - Default URL: `http://localhost:7019`
+
+2. **Fallback: Ollama Cloud Search**
+   - Used automatically if SearXNG is unavailable
+   - Requires an Ollama API key (free tier available)
+   - Has rate limits based on your tier
+
+### Setting Up SearXNG (Recommended)
+
+**Option 1: Using Docker with Caddy (Recommended)**
+
+If you have SearXNG running via Caddy on port 7019 (as shown in the `Caddyfile`), simply configure it in your `.env`:
+
+```bash
+SEARXNG_URL=http://localhost:7019
+```
+
+**Option 2: Standalone SearXNG Installation**
+
+1. Install SearXNG following the [official guide](https://docs.searxng.org/admin/installation.html)
+2. Configure it to run on port 7019 (or your preferred port)
+3. Update your `.env` file:
+   ```bash
+   SEARXNG_URL=http://localhost:7019
+   ```
+
+**Option 3: Ollama Cloud Only (Simpler Setup)**
+
+If you prefer not to run SearXNG, you can use Ollama cloud search exclusively:
+
+1. Get your Ollama API key from [https://ollama.com/settings/keys](https://ollama.com/settings/keys)
+2. Add to your `.env`:
+   ```bash
+   OLLAMA_API_KEY=your_key_here
+   ```
+3. Leave `SEARXNG_URL` empty or unset
+
+### Using Web Search
+
+**In the Chat Playground:**
+- Toggle the "Web Search" button in the header
+- When enabled, the system automatically determines if a query needs live internet data
+- The decision matrix analyzes your question and only searches when necessary
+
+**In API Requests:**
+- Web search is automatically enabled for proxy requests when `enable_proxy_web_search` is enabled in settings
+- The system intelligently detects queries that need current information
+
+**Manual Search Endpoint:**
+- Visit `/search?q=your+query` in your browser
+- Or use the JSON API: `/api/v1/search?q=your+query&format=json`
+- Toggle between engines: `?engine=searxng` or `?engine=ollama`
+
+### Configuration
+
+All web search settings can be configured in the admin dashboard:
+- **Settings → Web Search**: Enable/disable proxy-wide web search
+- **Settings → Ollama API Keys**: Configure your Ollama cloud search keys
+- **Settings → SearXNG URL**: Set your local SearXNG instance URL
+
+For detailed configuration options, see `.env.example`.
 
 ---
 
@@ -203,6 +293,82 @@ Double-click the `reset.bat` file.
 chmod +x reset.sh
 ./reset.sh
 ```
+
+---
+
+## ⚠️ OpenAI-Compatible Endpoints (Experimental/Incomplete)
+
+**Status**: OpenAI-compatible endpoints have been implemented but are **not fully tested or complete**. Use at your own risk.
+
+The proxy server includes basic OpenAI-compatible endpoints for compatibility with clients like MSTY:
+
+- **`GET /v1/models`** and **`GET /models`** - List available models
+- **`POST /v1/chat/completions`** and **`POST /chat/completions`** - Chat completions (with streaming support)
+- **`POST /v1/embeddings`** and **`POST /embeddings`** - Text embeddings
+- **`POST /v1/completions`** and **`POST /completions`** - Legacy text completions (converted to chat)
+- **`POST /v1/moderations`** and **`POST /moderations`** - Content moderation (returns safe defaults)
+
+### Known Limitations
+
+- Endpoints may not fully match OpenAI's API specification
+- Some advanced features (function calling, tool use, etc.) may not work correctly
+- Response formats may differ from OpenAI's exact format
+- Error handling may not match OpenAI's error responses
+- Token counting and usage statistics are approximations
+
+### Recommendations
+
+- **For production use**: Stick with the native Ollama API endpoints (`/api/*`)
+- **For testing**: OpenAI endpoints can be used but should be thoroughly tested with your specific client
+- **For MSTY**: These endpoints were added to support MSTY, but compatibility is not guaranteed
+
+If you encounter issues with OpenAI-compatible endpoints, please report them, but note that these are lower priority than core Ollama proxy functionality.
+
+---
+
+## 🤖 Intelligent Auto-Routing System
+
+The proxy includes a sophisticated auto-routing system that intelligently selects the best model for each request based on:
+
+- **Request Analysis**: Automatically detects if your request needs images, code, tool calling, internet access, reasoning, or speed
+- **Model Capabilities**: Matches requests to models with the right capabilities
+- **Priority Modes**: Four modes (Free, Daily Drive, Advanced, Luxury) to match your budget and quality needs
+- **Semantic Matching**: Uses AI-generated model descriptions to find the best fit
+- **Smart Scoring**: Multi-factor scoring algorithm ensures optimal model selection
+
+![Models Manager with Capabilities and Priority](assets/models_manager.png)
+
+*Hover over the 💰 icon next to any model name to see detailed pricing information:*
+
+![Models Manager with Pricing Tooltip](assets/models_manager_with_tooltip.png)
+
+### How It Works
+
+When you send a request with `"model": "auto"`, the system:
+
+1. **Analyzes your request** to determine what capabilities are needed
+2. **Filters models** by priority level (based on your selected mode)
+3. **Scores each model** based on capability matches, semantic similarity, and priority
+4. **Selects the best model** and routes your request automatically
+
+### Priority Modes
+
+- **Free Mode**: Prioritizes free models first, then Ollama cloud, then paid
+- **Daily Drive Mode**: Prioritizes Ollama cloud models first (great balance)
+- **Advanced Mode**: Prioritizes top-tier paid models (Claude 4.5, GPT-5, Gemini 3)
+- **Luxury Mode**: Prioritizes premium models ($5+/1M tokens) for high-budget scenarios
+
+![Auto-Routing Priority Settings](assets/settings_auto_routing.png)
+
+### Example Scenarios
+
+**Code Request** → Automatically selects a code-specialized model (e.g., `deepseek-coder:free`)  
+**Image Analysis** → Selects a vision-capable model (e.g., `gemini-2.5-pro:cloud`)  
+**Tool Calling** → Selects a model with function calling support (e.g., `claude-4.5-sonnet`)  
+**Internet Search** → Selects a model with web grounding (e.g., `gemini-3-pro:cloud`)  
+**Reasoning Task** → Selects a thinking model (e.g., `o4-mini`)
+
+For complete documentation, see [AUTO_ROUTING_DOCUMENTATION.md](AUTO_ROUTING_DOCUMENTATION.md).
 
 ---
 
