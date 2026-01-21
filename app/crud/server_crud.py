@@ -52,6 +52,16 @@ async def create_server(db: AsyncSession, server: ServerCreate) -> OllamaServer:
     await db.refresh(db_server)
     return db_server
 
+async def update_server_enabled_models(db: AsyncSession, server_id: int, enabled_models: list[str]) -> OllamaServer | None:
+    """Update the enabled models list for a server (primarily for OpenRouter)."""
+    server = await get_server_by_id(db, server_id)
+    if not server:
+        return None
+    server.enabled_models = enabled_models
+    await db.commit()
+    await db.refresh(server)
+    return server
+
 async def update_server(db: AsyncSession, server_id: int, server_update: ServerUpdate) -> OllamaServer | None:
     db_server = await get_server_by_id(db, server_id)
     if not db_server:
@@ -131,6 +141,187 @@ async def fetch_and_update_models(db: AsyncSession, server_id: int) -> dict:
                             "quantization_level": "N/A"
                         }
                     })
+            elif server.server_type == "openrouter":
+                # OpenRouter uses https://openrouter.ai/api/v1/models
+                from app.core.openrouter_translator import OPENROUTER_BASE_URL
+                from app.core.openrouter_endpoint_checker import check_openrouter_model_endpoints
+                from app.core.encryption import decrypt_data
+                
+                endpoint_url = f"{OPENROUTER_BASE_URL}/models"
+                response = await client.get(endpoint_url)
+                response.raise_for_status()
+                data = response.json()
+                models_data = data.get("data", [])
+                
+                # Separate free and paid models
+                free_models = []
+                paid_models = []
+                
+                for model in models_data:
+                    model_id = model.get("id")
+                    if not model_id: continue
+                    
+                    # Extract pricing information (OpenRouter uses "prompt" and "completion", not "input"/"output")
+                    pricing = model.get("pricing", {})
+                    prompt_price = pricing.get("prompt", 0)  # $ per million input tokens
+                    completion_price = pricing.get("completion", 0)  # $ per million output tokens
+                    is_free = (prompt_price == 0 and completion_price == 0) or ":free" in model_id.lower()
+                    
+                    # Special logging for Grok models
+                    if "grok" in model_id.lower():
+                        logger.info(f"Grok model found: {model_id}, is_free: {is_free}, prompt_price: {prompt_price}, completion_price: {completion_price}")
+                    
+                    if is_free:
+                        free_models.append((model, model_id))
+                    else:
+                        paid_models.append((model, model_id))
+                
+                logger.info(f"OpenRouter models categorized: {len(free_models)} free, {len(paid_models)} paid")
+                
+                # Check endpoints for free models only (paid models are assumed to have active endpoints)
+                api_key = decrypt_data(server.encrypted_api_key) if server.encrypted_api_key else None
+                free_models_with_endpoints = []
+                
+                if api_key and free_models:
+                    logger.info(f"Checking endpoints for {len(free_models)} free OpenRouter models...")
+                    import asyncio
+                    semaphore = asyncio.Semaphore(10)  # Limit concurrent requests
+                    
+                    async def check_free_model(model_data_tuple):
+                        model, model_id = model_data_tuple
+                        async with semaphore:
+                            # Add small delay to respect rate limits (50 req/day for free tier)
+                            await asyncio.sleep(0.1)
+                            has_endpoint = await check_openrouter_model_endpoints(model_id, api_key, client)
+                            # Special logging for Grok models
+                            if "grok" in model_id.lower():
+                                logger.info(f"Grok model {model_id} endpoint check result: {has_endpoint}")
+                            return (model, model_id) if has_endpoint else None
+                    
+                    results = await asyncio.gather(*[check_free_model(fm) for fm in free_models], return_exceptions=True)
+                    free_models_with_endpoints = []
+                    failed_models = []
+                    
+                    for i, result in enumerate(results):
+                        model_id = free_models[i][1] if i < len(free_models) else "unknown"
+                        if isinstance(result, Exception):
+                            logger.warning(f"Exception checking endpoints for {model_id}: {result}")
+                            if "grok" in model_id.lower():
+                                logger.error(f"Grok model {model_id} had exception during endpoint check!")
+                            failed_models.append(model_id)
+                        elif result is not None:
+                            free_models_with_endpoints.append(result)
+                            if "grok" in model_id.lower():
+                                logger.info(f"Grok model {model_id} successfully added to free_models_with_endpoints")
+                        else:
+                            # Model returned None (no endpoints)
+                            if "grok" in model_id.lower():
+                                logger.error(f"Grok model {model_id} returned None from endpoint check (no endpoints found)")
+                            failed_models.append(model_id)
+                    
+                    filtered_count = len(free_models) - len(free_models_with_endpoints)
+                    if filtered_count > 0:
+                        logger.info(f"Filtered out {filtered_count} free models without active endpoints")
+                        if failed_models:
+                            logger.debug(f"Models filtered out: {failed_models[:10]}...")  # Log first 10
+                    
+                    # Log successful models for debugging
+                    successful_models = [m[1] for m in free_models_with_endpoints]
+                    if successful_models:
+                        logger.debug(f"Free models with endpoints ({len(successful_models)}): {successful_models[:10]}...")
+                elif free_models:
+                    # If no API key, include all free models (can't check endpoints)
+                    logger.warning("No API key available for endpoint checking - including all free models")
+                    free_models_with_endpoints = free_models
+                
+                # Combine paid models (all included) + free models with active endpoints
+                all_valid_models = paid_models + free_models_with_endpoints
+                
+                # Log Grok models in final list
+                grok_models = [m_id for _, m_id in all_valid_models if "grok" in m_id.lower()]
+                if grok_models:
+                    logger.info(f"Grok models in final valid list: {grok_models}")
+                else:
+                    logger.warning("No Grok models found in final valid models list!")
+                
+                logger.info(f"Total valid models to process: {len(all_valid_models)} ({len(paid_models)} paid + {len(free_models_with_endpoints)} free with endpoints)")
+                
+                # Process all valid models
+                for model, model_id in all_valid_models:
+                    # Extract provider from model ID (e.g., "openai/gpt-4o" -> "openai")
+                    provider = model_id.split('/')[0] if '/' in model_id else "unknown"
+                    model_name_part = model_id.split('/')[-1] if '/' in model_id else model_id
+                    family = model_name_part.split(':')[0].split('-')[0]
+                    
+                    # Extract pricing information
+                    pricing = model.get("pricing", {})
+                    prompt_price = pricing.get("prompt", 0)
+                    completion_price = pricing.get("completion", 0)
+                    is_free = (prompt_price == 0 and completion_price == 0) or ":free" in model_id.lower()
+                    
+                    # Extract context length and parameter size hints
+                    context_length = model.get("context_length")
+                    architecture = model.get("architecture", {})
+                    
+                    # Try to extract parameter size from model name or architecture
+                    parameter_size_str = "N/A"
+                    parameter_size_num = 0
+                    model_name_lower = model_id.lower()
+                    if "70b" in model_name_lower or "70-b" in model_name_lower:
+                        parameter_size_str = "70B"
+                        parameter_size_num = 70
+                    elif "34b" in model_name_lower or "34-b" in model_name_lower:
+                        parameter_size_str = "34B"
+                        parameter_size_num = 34
+                    elif "20b" in model_name_lower or "20-b" in model_name_lower:
+                        parameter_size_str = "20B"
+                        parameter_size_num = 20
+                    elif "13b" in model_name_lower or "13-b" in model_name_lower:
+                        parameter_size_str = "13B"
+                        parameter_size_num = 13
+                    elif "8b" in model_name_lower or "8-b" in model_name_lower:
+                        parameter_size_str = "8B"
+                        parameter_size_num = 8
+                    elif "7b" in model_name_lower or "7-b" in model_name_lower:
+                        parameter_size_str = "7B"
+                        parameter_size_num = 7
+                    elif "3b" in model_name_lower or "3-b" in model_name_lower:
+                        parameter_size_str = "3B"
+                        parameter_size_num = 3
+                    elif "1b" in model_name_lower or "1-b" in model_name_lower:
+                        parameter_size_str = "1B"
+                        parameter_size_num = 1
+                    
+                    # Check if uncensored (ONLY Dolphin-based models are truly uncensored)
+                    # Most models with "uncensored" in name still have guardrails
+                    is_uncensored = "dolphin" in model_name_lower
+                    
+                    # Get model description
+                    description = model.get("name", model_id)
+
+                    models.append({
+                        "name": model_id,
+                        "size": 0,  # Not available from OpenRouter API
+                        "modified_at": datetime.datetime.fromtimestamp(
+                            model.get("created", 0), tz=datetime.timezone.utc
+                        ).isoformat(),
+                        "digest": model_id, # Use ID as a stand-in for digest
+                        "details": {
+                            "parent_model": "",
+                            "format": "openrouter",
+                            "family": family,
+                            "families": [family] if family else None,
+                            "parameter_size": parameter_size_str,
+                            "parameter_size_num": parameter_size_num,
+                            "quantization_level": "N/A",
+                            "provider": provider,
+                            "is_free": is_free,
+                            "is_uncensored": is_uncensored,
+                            "context_length": context_length,
+                            "description": description,
+                            "pricing": pricing
+                        }
+                    })
             else:  # Default to "ollama"
                 endpoint_url = f"{server.url.rstrip('/')}/api/tags"
                 response = await client.get(endpoint_url)
@@ -141,6 +332,44 @@ async def fetch_and_update_models(db: AsyncSession, server_id: int) -> dict:
         server.available_models = models
         server.models_last_updated = datetime.datetime.utcnow()
         server.last_error = None
+        
+        # For OpenRouter servers: if enabled_models is None (never been set), auto-enable all newly fetched models
+        # This ensures new models appear automatically on first refresh
+        # Also, if enabled_models is an empty list but we have new models, merge them in
+        # (This handles the case where models were previously disabled but new ones are fetched)
+        if server.server_type == "openrouter":
+            model_names = [m.get("name") for m in models if isinstance(m, dict) and "name" in m]
+            
+            # Check if Grok is in the models list
+            grok_in_models = [m for m in model_names if "grok" in m.lower()]
+            if grok_in_models:
+                logger.info(f"Grok models in models list before enabled_models update: {grok_in_models}")
+            
+            if server.enabled_models is None:
+                # First time: enable all models
+                server.enabled_models = model_names
+                logger.info(f"Auto-enabled {len(model_names)} OpenRouter models (first-time setup)")
+                if grok_in_models:
+                    logger.info(f"Grok models auto-enabled: {grok_in_models}")
+            elif isinstance(server.enabled_models, list):
+                # Merge new models into existing enabled list (avoid duplicates)
+                existing_set = set(server.enabled_models)
+                new_models = [m for m in model_names if m not in existing_set]
+                if new_models:
+                    server.enabled_models = list(existing_set) + new_models
+                    logger.info(f"Auto-enabled {len(new_models)} newly fetched OpenRouter models (merged with existing)")
+                    grok_new = [m for m in new_models if "grok" in m.lower()]
+                    if grok_new:
+                        logger.info(f"Grok models in new_models: {grok_new}")
+            
+            # Final check: is Grok in enabled_models?
+            if isinstance(server.enabled_models, list):
+                grok_enabled = [m for m in server.enabled_models if "grok" in m.lower()]
+                if grok_enabled:
+                    logger.info(f"Grok models in enabled_models after update: {grok_enabled}")
+                else:
+                    logger.error(f"Grok models NOT in enabled_models! Available: {grok_in_models}, enabled_models count: {len(server.enabled_models)}")
+        
         await db.commit()
         await db.refresh(server)
 
@@ -167,6 +396,8 @@ async def pull_model_on_server(http_client: httpx.AsyncClient, server: OllamaSer
     """Pulls a model on a specific Ollama server."""
     if server.server_type == 'vllm':
         return {"success": False, "message": "Pulling models is not supported for vLLM servers."}
+    if server.server_type == 'openrouter':
+        return {"success": False, "message": "Pulling models is not supported for OpenRouter servers. Models are managed through OpenRouter's platform."}
         
     headers = _get_auth_headers(server)
     pull_url = f"{server.url.rstrip('/')}/api/pull"
@@ -198,6 +429,8 @@ async def delete_model_on_server(http_client: httpx.AsyncClient, server: OllamaS
     """Deletes a model from a specific Ollama server."""
     if server.server_type == 'vllm':
         return {"success": False, "message": "Deleting models is not supported for vLLM servers."}
+    if server.server_type == 'openrouter':
+        return {"success": False, "message": "Deleting models is not supported for OpenRouter servers. Models are managed through OpenRouter's platform."}
 
     headers = _get_auth_headers(server)
     delete_url = f"{server.url.rstrip('/')}/api/delete"
@@ -226,6 +459,8 @@ async def load_model_on_server(http_client: httpx.AsyncClient, server: OllamaSer
     """Sends a dummy request to a server to load a model into memory."""
     if server.server_type == 'vllm':
         return {"success": False, "message": "Explicit model loading is not applicable for vLLM servers."}
+    if server.server_type == 'openrouter':
+        return {"success": False, "message": "Explicit model loading is not applicable for OpenRouter servers. Models are loaded automatically on request."}
 
     headers = _get_auth_headers(server)
     generate_url = f"{server.url.rstrip('/')}/api/generate"
@@ -253,6 +488,8 @@ async def unload_model_on_server(http_client: httpx.AsyncClient, server: OllamaS
     """Sends a request to a server to unload a model from memory."""
     if server.server_type == 'vllm':
         return {"success": False, "message": "Explicit model unloading is not applicable for vLLM servers."}
+    if server.server_type == 'openrouter':
+        return {"success": False, "message": "Explicit model unloading is not applicable for OpenRouter servers. Models are managed by OpenRouter's infrastructure."}
 
     headers = _get_auth_headers(server)
     generate_url = f"{server.url.rstrip('/')}/api/generate"
@@ -296,9 +533,17 @@ async def get_servers_with_model(db: AsyncSession, model_name: str) -> list[Olla
                     # 1. Exact match (e.g., "llama3:8b" == "llama3:8b")
                     # 2. Prefix match (e.g., "llama3" matches "llama3:8b")
                     # 3. Substring match for vLLM (e.g., "Llama-2-7b" matches "models--meta-llama--Llama-2-7b-chat-hf")
+                    # 4. OpenRouter models: exact match for "provider/model" format (e.g., "openai/gpt-4o")
+                    # 5. OpenRouter partial match: match model name without provider (e.g., "gpt-4o" matches "openai/gpt-4o")
                     if (available_model_name == model_name or 
                         available_model_name.startswith(f"{model_name}:") or
-                        (server.server_type == 'vllm' and model_name in available_model_name)):
+                        (server.server_type == 'vllm' and model_name in available_model_name) or
+                        (server.server_type == 'openrouter' and (
+                            available_model_name == model_name or  # Exact match
+                            available_model_name.endswith(f"/{model_name}") or  # Match "provider/model" when searching for "model"
+                            (model_name.startswith('/') and available_model_name.endswith(model_name)) or  # Match "/model" format
+                            (model_name.count('/') == 1 and available_model_name == model_name)  # Full "provider/model" match
+                        ))):
                         servers_with_model.append(server)
                         break  # Found on this server, move to the next
     return servers_with_model
@@ -307,7 +552,7 @@ def is_embedding_model(model_name: str) -> bool:
     """Heuristically determines if a model is for embeddings."""
     return "embed" in model_name.lower()
 
-async def get_all_available_model_names(db: AsyncSession, filter_type: Optional[str] = None) -> List[str]:
+async def get_all_available_model_names(db: AsyncSession, filter_type: Optional[str] = None, include_disabled: bool = False) -> List[str]:
     """
     Gets a unique, sorted list of all model names across all active servers.
     Can be filtered by type ('chat' or 'embedding').
@@ -331,6 +576,18 @@ async def get_all_available_model_names(db: AsyncSession, filter_type: Optional[
         for model in models_list:
             if isinstance(model, dict) and "name" in model:
                 model_name = model["name"]
+                
+                # For OpenRouter servers, filter by enabled_models if not including disabled
+                # BUT: Always include models with "free" in the name (they have active endpoints)
+                # NOTE: If enabled_models is None, all models are enabled (show all)
+                if server.server_type == "openrouter" and not include_disabled:
+                    is_free_model = "free" in model_name.lower()
+                    # Only filter if enabled_models is explicitly set (not None)
+                    # None means "all enabled", empty list means "none enabled", list with items means "only these enabled"
+                    if server.enabled_models is not None:
+                        if model_name not in server.enabled_models and not is_free_model:
+                            continue  # Skip disabled models (unless they're free models)
+                
                 is_embed = is_embedding_model(model_name)
                 
                 if filter_type == 'embedding' and is_embed:
@@ -394,13 +651,14 @@ async def get_all_models_grouped_by_server(db: AsyncSession, filter_type: Option
 async def get_active_models_all_servers(db: AsyncSession, http_client: httpx.AsyncClient) -> List[Dict[str, Any]]:
     """
     Fetches running models (`/api/ps`) from active Ollama servers and
-    lists available models from active vLLM servers as they are always 'active'.
+    lists available models from active vLLM and OpenRouter servers as they are always 'active'.
     """
     servers = await get_servers(db)
     active_servers = [s for s in servers if s.is_active]
     
     ollama_servers = [s for s in active_servers if s.server_type == 'ollama']
     vllm_servers = [s for s in active_servers if s.server_type == 'vllm']
+    openrouter_servers = [s for s in active_servers if s.server_type == 'openrouter']
     
     all_models = []
 
@@ -435,6 +693,18 @@ async def get_active_models_all_servers(db: AsyncSession, http_client: httpx.Asy
                     "server_name": server.name,
                     "size": model_info.get("size", 0),
                     "size_vram": 1,  # Assume GPU placement for vLLM
+                    "expires_at": "N/A (Always Active)",
+                })
+    
+    # 3. Add available models from OpenRouter servers
+    for server in openrouter_servers:
+        if server.available_models:
+            for model_info in server.available_models:
+                all_models.append({
+                    "name": model_info.get("name"),
+                    "server_name": server.name,
+                    "size": model_info.get("size", 0),
+                    "size_vram": 0,  # OpenRouter manages infrastructure
                     "expires_at": "N/A (Always Active)",
                 })
     return all_models
@@ -480,6 +750,10 @@ async def check_server_health(http_client: httpx.AsyncClient, server: OllamaServ
         # vLLM servers have a /health endpoint, Ollama root is enough
         if server.server_type == 'vllm':
             ping_url += '/health'
+        elif server.server_type == 'openrouter':
+            # OpenRouter: check /api/v1/models endpoint (requires auth)
+            from app.core.openrouter_translator import OPENROUTER_BASE_URL
+            ping_url = f"{OPENROUTER_BASE_URL}/models"
             
         response = await http_client.get(ping_url, timeout=3.0, headers=headers)
         

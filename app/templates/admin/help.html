@@ -83,10 +83,84 @@
             <div class="space-y-4 text-current">
                 <p>This is where you configure the backend AI servers that the proxy will manage and distribute requests to.</p>
                 <ul class="list-disc list-inside space-y-3 pl-4">
-                    <li><strong>Adding Servers:</strong> You can add both standard <code class="inline-code">Ollama</code> servers and <code class="inline-code">vLLM</code> (or any OpenAI-compatible) servers. The proxy handles the translation automatically. You can also add an optional API key if your backend server requires one.</li>
-                    <li><strong>Refreshing Models:</strong> Clicking "Refresh" fetches the latest list of available models from a server and stores it in the proxy's database. This is crucial for the "Smart Model Routing" feature. Model lists are also refreshed automatically in the background.</li>
-                    <li><strong>Managing Models:</strong> Clicking "Manage Models" takes you to a detailed view for that server. For Ollama servers, you can pull new models, update existing ones, delete models from disk, and trigger a model to be loaded into or unloaded from memory. These actions are not applicable to vLLM servers.</li>
+                    <li><strong>Adding Servers:</strong> You can add multiple types of servers:
+                        <ul class="list-['-_'] list-inside pl-4 mt-2">
+                            <li><strong>Ollama:</strong> Standard Ollama instances running locally or remotely.</li>
+                            <li><strong>vLLM:</strong> Any OpenAI-compatible server (vLLM, TGI, etc.). The proxy handles translation automatically.</li>
+                            <li><strong>OpenRouter:</strong> Connect to OpenRouter API to access 300+ models from various providers. Requires an OpenRouter API key. Models are automatically fetched and can be enabled/disabled individually.</li>
+                        </ul>
+                        You can add an optional API key if your backend server requires one. For OpenRouter servers, the API key is required and is stored encrypted.
+                    </li>
+                    <li><strong>Refreshing Models:</strong> Clicking "Refresh" fetches the latest list of available models from a server and stores it in the proxy's database. This is crucial for the "Auto-Routing" feature. Model lists are also refreshed automatically in the background. For OpenRouter servers, this fetches all available models (free and paid) and checks their endpoint availability.</li>
+                    <li><strong>Managing Models:</strong> Clicking "Manage Models" takes you to a detailed view for that server. For Ollama servers, you can pull new models, update existing ones, delete models from disk, and trigger a model to be loaded into or unloaded from memory. For OpenRouter servers, you can enable/disable specific models. These actions are not applicable to vLLM servers.</li>
+                    <li><strong>OpenRouter Credits:</strong> When you have OpenRouter servers configured, the Chat Playground displays your account credits (total, used, and remaining) in real-time. This helps you monitor your usage and budget.</li>
                 </ul>
+            </div>
+        </div>
+        
+        <!-- Models Manager & Auto-Routing Section -->
+        <div id="models-manager" class="card-style scroll-mt-20">
+            <h2 class="card-header text-2xl font-bold mb-6 pb-2">🤖 Models Manager & Auto-Routing</h2>
+            <div class="space-y-6 text-current">
+                <p>The Models Manager is a powerful feature that enables intelligent automatic model selection. When users request the model named <code class="inline-code">"auto"</code>, the proxy analyzes their request and routes it to the best-suited model based on capabilities, priorities, and request characteristics.</p>
+                
+                <div>
+                    <h3 class="text-xl font-semibold mb-2">How Auto-Routing Works</h3>
+                    <p>When a request comes in for the <code class="inline-code">"auto"</code> model, the system:</p>
+                    <ol class="list-decimal list-inside space-y-2 mt-2 pl-4">
+                        <li><strong>Analyzes the Request:</strong> Detects if the request needs images, code generation, tool calling, internet access, thinking capabilities, or fast responses.</li>
+                        <li><strong>Filters by Capabilities:</strong> Only considers models that have the required capabilities enabled (e.g., if the request contains an image, only models marked "Supports Images" are considered).</li>
+                        <li><strong>Applies Priority Mode:</strong> Uses your selected priority mode (Free, Daily Drive, Advanced, or Luxury) to filter models by cost and quality.</li>
+                        <li><strong>Scores Models:</strong> Each eligible model receives a score based on how well it matches the request characteristics, its description, and pricing.</li>
+                        <li><strong>Selects Best Model:</strong> Chooses the model with the highest score and lowest priority number.</li>
+                        <li><strong>Automatic Fallback:</strong> If the selected model fails (e.g., no endpoints, 404 error), the system automatically tries the next best model until one succeeds or all are exhausted.</li>
+                    </ol>
+                </div>
+                
+                <div>
+                    <h3 class="text-xl font-semibold mb-2">Configuring Model Capabilities</h3>
+                    <p>In the <a href="{{ url_for('admin_models_manager') }}" class="font-semibold text-[var(--color-primary-600)] hover:underline">Models Manager</a> page, you can configure each model's capabilities:</p>
+                    <ul class="list-disc list-inside space-y-2 mt-2 pl-4">
+                        <li><strong>Supports Images:</strong> Enable for vision models that can process images.</li>
+                        <li><strong>Code Model:</strong> Enable for models optimized for code generation and understanding.</li>
+                        <li><strong>Fast Model:</strong> Enable for models optimized for speed (lower latency).</li>
+                        <li><strong>Tool Calling:</strong> Enable for models that support function calling and tool use.</li>
+                        <li><strong>Internet:</strong> Enable for models that can access the web or use web search.</li>
+                        <li><strong>Thinking:</strong> Enable for models that support extended reasoning or chain-of-thought.</li>
+                    </ul>
+                </div>
+                
+                <div>
+                    <h3 class="text-xl font-semibold mb-2">Priority Modes</h3>
+                    <p>You can configure auto-routing to prioritize different types of models:</p>
+                    <ul class="list-disc list-inside space-y-2 mt-2 pl-4">
+                        <li><strong>🆓 Free Mode:</strong> Prioritizes free models (e.g., Grok, Llama 3.2, etc.). Best for testing and development.</li>
+                        <li><strong>🚗 Daily Drive Mode:</strong> Balances cost and quality. Uses affordable models for most tasks, premium models only when needed.</li>
+                        <li><strong>⚡ Advanced Mode:</strong> Prioritizes high-quality models with advanced capabilities. Good for production workloads.</li>
+                        <li><strong>💎 Luxury Mode:</strong> Uses the best available models regardless of cost. For critical applications requiring top performance.</li>
+                    </ul>
+                    <p class="mt-2">You can use the "Auto-Priority Inventory" button to automatically calculate priorities for all models based on the selected mode.</p>
+                </div>
+                
+                <div>
+                    <h3 class="text-xl font-semibold mb-2">Model Priority Numbers</h3>
+                    <p>Each model has a priority number (1-10, where 1 is highest priority). When multiple models have the same score, the one with the lower priority number is selected. You can manually adjust priorities in the Models Manager table.</p>
+                </div>
+                
+                <div>
+                    <h3 class="text-xl font-semibold mb-2">Using Auto-Routing</h3>
+                    <p>To use auto-routing, simply specify <code class="inline-code">"model": "auto"</code> in your API requests:</p>
+                    <div class="code-block-wrapper mt-2">
+                        <pre><code class="language-json">{
+  "model": "auto",
+  "messages": [
+    {"role": "user", "content": "Analyze this image: [image data]"}
+  ]
+}</code></pre>
+                        <button class="copy-button">Copy</button>
+                    </div>
+                    <p class="mt-2">The system will automatically route to a model that supports images, even if you don't know which models are available.</p>
+                </div>
             </div>
         </div>
         
@@ -119,7 +193,9 @@
                     <h3 class="text-xl font-semibold mb-2">Chat Playground</h3>
                     <p>This is your interactive command center for testing conversational models.</p>
                     <ul class="list-disc list-inside space-y-2 mt-3 pl-4">
+                        <li><strong>Model Selection:</strong> Choose from any available model, including the <code class="inline-code">"auto"</code> model for intelligent routing. The model selector is searchable, making it easy to find models among hundreds of options.</li>
                         <li><strong>Real-time Interaction:</strong> Chat with any available model and see responses stream in token by token.</li>
+                        <li><strong>OpenRouter Credits Display:</strong> When using OpenRouter servers, the playground displays your account credits (total purchased, used, and remaining) in real-time. This helps you monitor usage and budget.</li>
                         <li><strong>Multi-modal Support:</strong>
                             <ul class="list-['-_'] list-inside pl-4 mt-2">
                                 <li>**Images:** Simply paste an image into the chat box or use the image attach button.</li>
@@ -127,6 +203,15 @@
                             </ul>
                         </li>
                         <li><strong>System Prompts:</strong> Use the settings icon (<svg class="w-4 h-4 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>) to set a system prompt, defining the model's persona or rules. We've included powerful presets like "Chain of Thought" and "Image Bounding Box Detection".</li>
+                        <li><strong>Advanced Controls:</strong>
+                            <ul class="list-['-_'] list-inside pl-4 mt-2">
+                                <li><strong>Thinking:</strong> Enable extended reasoning/chain-of-thought for models that support it.</li>
+                                <li><strong>Annotate:</strong> Enable image annotation capabilities for vision models.</li>
+                                <li><strong>Verbosity:</strong> Control the level of detail in responses.</li>
+                                <li><strong>Web Search:</strong> Toggle automatic web search integration (see Web Search section below).</li>
+                            </ul>
+                        </li>
+                        <li><strong>Add Message:</strong> Use the "+" button to manually add user or AI messages to the conversation, useful for testing specific scenarios or editing conversation flow.</li>
                         <li><strong>Code Block Actions:</strong> Hover over any code block in a response to reveal "Copy" and "Save" buttons. The save button will automatically suggest a file extension based on the language (e.g., <code class="inline-code">.py</code> for Python).</li>
                         <li><strong>Message Controls:</strong> Hover over any message to Copy, Edit, Delete, or Regenerate. Editing a message forks the conversation from that point.</li>
                         <li><strong>Import/Export:</strong> Save your entire chat history to a JSON file or load a previous conversation.</li>
@@ -145,6 +230,53 @@
             </div>
         </div>
         
+        <!-- Web Search Section -->
+        <div id="web-search" class="card-style scroll-mt-20">
+            <h2 class="card-header text-2xl font-bold mb-6 pb-2">🌐 Web Search Integration</h2>
+            <div class="space-y-6 text-current">
+                <p>The proxy includes intelligent web search capabilities that automatically enhance chat requests with current information when needed.</p>
+                
+                <div>
+                    <h3 class="text-xl font-semibold mb-2">How It Works</h3>
+                    <p>When web search is enabled (via the toggle in Chat Playground or in Settings), the system uses a sophisticated decision matrix to determine if a query needs live internet data:</p>
+                    <ul class="list-disc list-inside space-y-2 mt-2 pl-4">
+                        <li><strong>Automatic Detection:</strong> The system analyzes your message for time-sensitive keywords and patterns (e.g., "current price", "latest news", "today's weather").</li>
+                        <li><strong>Intelligent Scoring:</strong> Uses a scoring system that adds points for time-sensitive indicators and subtracts points for general knowledge queries.</li>
+                        <li><strong>Smart Triggering:</strong> Only triggers web search when the score exceeds a threshold, avoiding unnecessary API calls for questions that can be answered from the model's training data.</li>
+                        <li><strong>Seamless Integration:</strong> Search results are automatically included in the context sent to the model, allowing it to provide current, accurate information.</li>
+                    </ul>
+                </div>
+                
+                <div>
+                    <h3 class="text-xl font-semibold mb-2">Search Engines</h3>
+                    <p>The system supports multiple search backends with automatic fallback:</p>
+                    <ul class="list-disc list-inside space-y-2 mt-2 pl-4">
+                        <li><strong>SearXNG (Recommended):</strong> Self-hosted, privacy-focused metasearch engine. Configure the URL in Settings (default: <code class="inline-code">http://localhost:7019</code>).</li>
+                        <li><strong>Ollama Cloud Search:</strong> Automatic fallback if SearXNG is unavailable. Requires an Ollama API key (free tier available). Configure in Settings.</li>
+                    </ul>
+                </div>
+                
+                <div>
+                    <h3 class="text-xl font-semibold mb-2">Using Web Search</h3>
+                    <ul class="list-disc list-inside space-y-2 mt-2 pl-4">
+                        <li><strong>In Chat Playground:</strong> Toggle the "Web Search" button in the header. When enabled, queries that need current information will automatically trigger a search.</li>
+                        <li><strong>In API Requests:</strong> Enable proxy-wide web search in Settings. The system will automatically detect and enhance time-sensitive queries.</li>
+                        <li><strong>Manual Search:</strong> Visit <code class="inline-code">/search?q=your+query</code> in your browser or use the JSON API: <code class="inline-code">/api/v1/search?q=your+query&format=json</code></li>
+                    </ul>
+                </div>
+                
+                <div>
+                    <h3 class="text-xl font-semibold mb-2">Configuration</h3>
+                    <p>Configure web search settings in the <a href="{{ url_for('admin_settings') }}" class="font-semibold text-[var(--color-primary-600)] hover:underline">Settings</a> page:</p>
+                    <ul class="list-disc list-inside space-y-2 mt-2 pl-4">
+                        <li><strong>SearXNG URL:</strong> Set the URL of your SearXNG instance (e.g., <code class="inline-code">http://localhost:7019</code>).</li>
+                        <li><strong>Ollama API Keys:</strong> Configure your Ollama cloud search API keys for fallback.</li>
+                        <li><strong>Enable Proxy Web Search:</strong> Toggle to automatically enable web search for all API requests.</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+        
         <!-- Statistics Section -->
         <div id="statistics" class="card-style scroll-mt-20">
             <h2 class="card-header text-2xl font-bold mb-6 pb-2">📈 Usage Statistics</h2>
@@ -155,6 +287,101 @@
                     <li><strong>Per-User Analytics:</strong> From the <a href="{{ url_for('admin_users') }}" class="font-semibold text-[var(--color-primary-600)] hover:underline">User Management</a> page, click "View Usage" for any user to see the same set of detailed charts filtered specifically for them.</li>
                     <li><strong>Sortable Tables:</strong> The tables on the statistics and user management pages are sortable. Just click on a column header to reorder the data.</li>
                 </ul>
+            </div>
+        </div>
+
+        <!-- OpenAI Compatibility Section -->
+        <div id="openai-compat" class="card-style scroll-mt-20">
+            <h2 class="card-header text-2xl font-bold mb-6 pb-2">🔌 OpenAI-Compatible API</h2>
+            <div class="space-y-6 text-current">
+                <p>The proxy provides full OpenAI-compatible endpoints, allowing you to use it as a drop-in replacement for OpenAI's API. This makes it compatible with hundreds of applications, libraries, and frameworks that expect OpenAI's API format.</p>
+                
+                <div>
+                    <h3 class="text-xl font-semibold mb-2">Supported Endpoints</h3>
+                    <ul class="list-disc list-inside space-y-2 mt-2 pl-4">
+                        <li><strong><code class="inline-code">/v1/chat/completions</code>:</strong> Chat completions endpoint (primary endpoint for most applications).</li>
+                        <li><strong><code class="inline-code">/v1/completions</code>:</strong> Legacy text completions endpoint (automatically converted to chat format).</li>
+                        <li><strong><code class="inline-code">/v1/embeddings</code>:</strong> Text embeddings endpoint.</li>
+                        <li><strong><code class="inline-code">/v1/models</code>:</strong> List available models.</li>
+                    </ul>
+                </div>
+                
+                <div>
+                    <h3 class="text-xl font-semibold mb-2">Using with OpenAI Clients</h3>
+                    <p>You can use the proxy with any OpenAI-compatible client by simply changing the base URL:</p>
+                    <div class="code-block-wrapper mt-2">
+                        <pre><code class="language-python">from openai import OpenAI
+
+# Point client to your proxy instead of OpenAI
+client = OpenAI(
+    api_key="op_prefix_secret",  # Your proxy API key
+    base_url="http://127.0.0.1:8080"  # Your proxy URL
+)
+
+# Use exactly like OpenAI's API
+response = client.chat.completions.create(
+    model="llama3",  # or "auto" for intelligent routing
+    messages=[
+        {"role": "user", "content": "Hello!"}
+    ]
+)</code></pre>
+                        <button class="copy-button">Copy</button>
+                    </div>
+                </div>
+                
+                <div>
+                    <h3 class="text-xl font-semibold mb-2">Auto Model Support</h3>
+                    <p>The <code class="inline-code">"auto"</code> model works with OpenAI-compatible endpoints too. Simply specify <code class="inline-code">"model": "auto"</code> and the system will intelligently route to the best model based on your request.</p>
+                </div>
+                
+                <div>
+                    <h3 class="text-xl font-semibold mb-2">Compatible Applications</h3>
+                    <p>This makes the proxy compatible with:</p>
+                    <ul class="list-disc list-inside space-y-2 mt-2 pl-4">
+                        <li>LangChain, LangGraph, and other AI frameworks</li>
+                        <li>OpenAI Python SDK and JavaScript SDK</li>
+                        <li>Any application using OpenAI's API format</li>
+                        <li>MSTY and other AI assistants</li>
+                        <li>Custom applications expecting OpenAI endpoints</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Theming Section -->
+        <div id="theming" class="card-style scroll-mt-20">
+            <h2 class="card-header text-2xl font-bold mb-6 pb-2">🎨 Theming & Customization</h2>
+            <div class="space-y-6 text-current">
+                <p>The proxy includes a powerful theming engine that lets you customize the entire UI to match your preferences.</p>
+                
+                <div>
+                    <h3 class="text-xl font-semibold mb-2">UI Styles</h3>
+                    <p>Choose from multiple UI styles in the <a href="{{ url_for('admin_settings') }}" class="font-semibold text-[var(--color-primary-600)] hover:underline">Settings</a> page:</p>
+                    <ul class="list-disc list-inside space-y-2 mt-2 pl-4">
+                        <li><strong>Dark Glass:</strong> Modern glassmorphism design with transparency effects.</li>
+                        <li><strong>Dark Flat:</strong> Clean, flat dark theme.</li>
+                        <li><strong>Light Glass:</strong> Light theme with glass effects.</li>
+                        <li><strong>Light Flat:</strong> Clean, flat light theme.</li>
+                    </ul>
+                </div>
+                
+                <div>
+                    <h3 class="text-xl font-semibold mb-2">Theme Colors</h3>
+                    <p>Customize the accent color with 10 built-in themes:</p>
+                    <ul class="list-disc list-inside space-y-2 mt-2 pl-4">
+                        <li>Indigo, Sky, Teal, Rose, Amber, Emerald, Fuchsia, Orange, Black, White</li>
+                    </ul>
+                    <p class="mt-2">Each theme provides a complete color palette that's applied consistently throughout the UI.</p>
+                </div>
+                
+                <div>
+                    <h3 class="text-xl font-semibold mb-2">Branding</h3>
+                    <p>Customize your instance's branding:</p>
+                    <ul class="list-disc list-inside space-y-2 mt-2 pl-4">
+                        <li><strong>Title:</strong> Change the application title displayed in the UI.</li>
+                        <li><strong>Logo:</strong> Upload a custom logo that appears in the sidebar and header.</li>
+                    </ul>
+                </div>
             </div>
         </div>
 
@@ -185,6 +412,10 @@
                  <div>
                     <h3 class="text-xl font-semibold mb-2">Rate Limiting & Brute-Force Protection</h3>
                     <p>When Redis is enabled, you can set global or per-key rate limits. The proxy also automatically blocks IPs that have too many failed admin login attempts.</p>
+                </div>
+                <div>
+                    <h3 class="text-xl font-semibold mb-2">Encrypted API Key Storage</h3>
+                    <p>All API keys (both user API keys and server API keys) are stored encrypted in the database using industry-standard encryption. This protects sensitive credentials even if database access is compromised.</p>
                 </div>
             </div>
         </div>
@@ -295,8 +526,12 @@ print(response.json())
                         <li><a href="#getting-started" class="toc-link">Getting Started</a></li>
                         <li><a href="#dashboard" class="toc-link">The Dashboard</a></li>
                         <li><a href="#server-management" class="toc-link">Server Management</a></li>
+                        <li><a href="#models-manager" class="toc-link">Models Manager & Auto-Routing</a></li>
                         <li><a href="#user-management" class="toc-link">User Management</a></li>
                         <li><a href="#playgrounds" class="toc-link">Playgrounds</a></li>
+                        <li><a href="#web-search" class="toc-link">Web Search</a></li>
+                        <li><a href="#openai-compat" class="toc-link">OpenAI Compatibility</a></li>
+                        <li><a href="#theming" class="toc-link">Theming & Customization</a></li>
                         <li><a href="#statistics" class="toc-link">Usage Statistics</a></li>
                         <li><a href="#security" class="toc-link">Security Features</a></li>
                         <li><a href="#examples" class="toc-link">Usage Examples</a></li>

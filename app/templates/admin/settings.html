@@ -185,6 +185,58 @@
             </div>
         </div>
 
+        <!-- Ollama Web Search Settings -->
+        <div>
+            <h2 class="card-header text-xl font-bold mb-4 pb-2">Ollama Web Search</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                    <label for="ollama_api_key" class="block text-sm font-medium text-current">Ollama API Key (Account 1)</label>
+                    <input type="password" name="ollama_api_key" id="ollama_api_key" value="{{ settings.ollama_api_key or '' }}" placeholder="Enter Account 1 API key" class="mt-1 block w-full px-3 py-2 rounded-md shadow-sm focus:outline-none focus:ring-[var(--color-primary-500)] focus:border-[var(--color-primary-500)]">
+                    <p class="mt-1 text-xs text-gray-400">Primary API key for web search and fetch.</p>
+                </div>
+                <div>
+                    <label for="ollama_api_key_2" class="block text-sm font-medium text-current">Ollama API Key (Account 2)</label>
+                    <input type="password" name="ollama_api_key_2" id="ollama_api_key_2" value="{{ settings.ollama_api_key_2 or '' }}" placeholder="Enter Account 2 API key" class="mt-1 block w-full px-3 py-2 rounded-md shadow-sm focus:outline-none focus:ring-[var(--color-primary-500)] focus:border-[var(--color-primary-500)]">
+                    <p class="mt-1 text-xs text-gray-400">Backup/load balancing API key (optional).</p>
+                </div>
+                <div class="md:col-span-2">
+                    <label class="flex items-center space-x-3 cursor-pointer">
+                        <input 
+                            type="checkbox" 
+                            name="enable_proxy_web_search" 
+                            id="enable_proxy_web_search" 
+                            value="true"
+                            {% if settings.enable_proxy_web_search %}checked{% endif %}
+                            class="h-4 w-4 text-[var(--color-primary-600)] rounded focus:ring-[var(--color-primary-500)]"
+                        >
+                        <div>
+                            <span class="text-sm font-medium text-current">Enable Automatic Web Search for Proxy Requests</span>
+                            <p class="text-xs text-gray-400 mt-1">When enabled, all chat requests through the proxy will automatically include web search results when needed. Disable this if external tools have their own web search logic to avoid interference.</p>
+                        </div>
+                    </label>
+                </div>
+                <div class="md:col-span-2">
+                    <p class="text-xs text-gray-400">Get your API keys from <a href="https://ollama.com/settings/keys" target="_blank" class="text-blue-400 hover:underline">ollama.com/settings/keys</a>. Required for web search and fetch functionality. Keys will be rotated automatically for load balancing.</p>
+                </div>
+                <div class="md:col-span-2">
+                    <label class="flex items-center space-x-3 cursor-pointer">
+                        <input 
+                            type="checkbox" 
+                            name="enable_proxy_web_search" 
+                            id="enable_proxy_web_search" 
+                            value="true"
+                            {% if settings.enable_proxy_web_search %}checked{% endif %}
+                            class="h-4 w-4 text-[var(--color-primary-600)] rounded focus:ring-[var(--color-primary-500)]"
+                        >
+                        <div>
+                            <span class="text-sm font-medium text-current">Enable Automatic Web Search for Proxy Requests</span>
+                            <p class="text-xs text-gray-400 mt-1">When enabled, all chat requests through the proxy will automatically include web search results when needed. Disable this if external tools have their own web search logic to avoid interference.</p>
+                        </div>
+                    </label>
+                </div>
+            </div>
+        </div>
+
         <!-- HTTPS/SSL Settings -->
         <div>
             <h2 class="card-header text-xl font-bold mb-4 pb-2">HTTPS/SSL Settings</h2>
