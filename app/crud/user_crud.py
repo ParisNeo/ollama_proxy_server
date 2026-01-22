@@ -1,35 +1,35 @@
-from sqlalchemy.future import select
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import func
-from app.database.models import User, APIKey, UsageLog
-from app.schema.user import UserCreate
-from app.core.security import get_password_hash
+"""User CRUD operations for Ollama Proxy Server."""
+
 from typing import Optional
+
+from sqlalchemy import func
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.future import select
+
+from app.core.security import get_password_hash
+from app.database.models import APIKey, UsageLog, User
+from app.schema.user import UserCreate
+
+func: callable
 
 
 async def get_user_by_username(db: AsyncSession, username: str) -> User | None:
+    """Get user by username from database."""
     result = await db.execute(select(User).filter(User.username == username))
     return result.scalars().first()
 
 
 async def get_user_by_id(db: AsyncSession, user_id: int) -> User | None:
+    """Get user by ID from database."""
     result = await db.execute(select(User).filter(User.id == user_id))
     return result.scalars().first()
 
 
 async def get_users(db: AsyncSession, skip: int = 0, limit: int = 100, sort_by: str = "username", sort_order: str = "asc") -> list:
-    """
-    Retrieves a list of users along with their statistics, with sorting.
-    """
+    """Retrieve a list of users along with their statistics, with sorting."""
     # Subquery to find the last usage time for each user
     last_used_subq = (
-        select(
-            APIKey.user_id,
-            func.max(UsageLog.request_timestamp).label("last_used")
-        )
-        .join(UsageLog, APIKey.id == UsageLog.api_key_id)
-        .group_by(APIKey.user_id)
-        .subquery()
+        select(APIKey.user_id, func.max(UsageLog.request_timestamp).label("last_used")).join(UsageLog, APIKey.id == UsageLog.api_key_id).group_by(APIKey.user_id).subquery()
     )
 
     # Main query components
@@ -40,17 +40,12 @@ async def get_users(db: AsyncSession, skip: int = 0, limit: int = 100, sort_by: 
             User.is_admin,
             func.count(func.distinct(APIKey.id)).label("key_count"),
             func.count(UsageLog.id).label("request_count"),
-            last_used_subq.c.last_used
+            last_used_subq.c.last_used,
         )
         .outerjoin(APIKey, User.id == APIKey.user_id)
         .outerjoin(UsageLog, APIKey.id == UsageLog.api_key_id)
         .outerjoin(last_used_subq, User.id == last_used_subq.c.user_id)
-        .group_by(
-            User.id,
-            User.username,
-            User.is_admin,
-            last_used_subq.c.last_used
-        )
+        .group_by(User.id, User.username, User.is_admin, last_used_subq.c.last_used)
     )
 
     # Sorting logic
@@ -58,7 +53,7 @@ async def get_users(db: AsyncSession, skip: int = 0, limit: int = 100, sort_by: 
         "username": User.username,
         "key_count": func.count(func.distinct(APIKey.id)),
         "request_count": func.count(UsageLog.id),
-        "last_used": last_used_subq.c.last_used
+        "last_used": last_used_subq.c.last_used,
     }
     sort_column = sort_column_map.get(sort_by, User.username)
 
@@ -74,6 +69,7 @@ async def get_users(db: AsyncSession, skip: int = 0, limit: int = 100, sort_by: 
 
 
 async def create_user(db: AsyncSession, user: UserCreate, is_admin: bool = False) -> User:
+    """Create a new user in the database."""
     hashed_password = get_password_hash(user.password)
     db_user = User(
         username=user.username,
@@ -87,7 +83,7 @@ async def create_user(db: AsyncSession, user: UserCreate, is_admin: bool = False
 
 
 async def update_user(db: AsyncSession, user_id: int, username: str, password: Optional[str] = None) -> User | None:
-    """Updates a user's username and optionally their password."""
+    """Update a user's username and optionally their password."""
     user = await get_user_by_id(db, user_id=user_id)
     if not user:
         return None
@@ -95,13 +91,14 @@ async def update_user(db: AsyncSession, user_id: int, username: str, password: O
     user.username = username
     if password:
         user.hashed_password = get_password_hash(password)
-    
+
     await db.commit()
     await db.refresh(user)
     return user
 
 
 async def delete_user(db: AsyncSession, user_id: int) -> User | None:
+    """Delete a user from database."""
     user = await get_user_by_id(db, user_id=user_id)
     if user:
         await db.delete(user)

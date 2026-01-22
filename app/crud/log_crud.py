@@ -1,28 +1,29 @@
 # app/crud/log_crud.py
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import func, select, text, Date # <-- Import Date
-from app.database.models import UsageLog, APIKey, User, OllamaServer
+"""Usage log CRUD operations for Ollama Proxy Server."""
+
 import datetime
 
-async def create_usage_log(
+from sqlalchemy import Date, func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.database.models import APIKey, OllamaServer, UsageLog, User
+
+func: callable
+
+
+async def create_usage_log(  # pylint: disable=too-many-arguments
     db: AsyncSession, *, api_key_id: int, endpoint: str, status_code: int, server_id: int | None, model: str | None = None
 ) -> UsageLog:
-    db_log = UsageLog(
-        api_key_id=api_key_id,
-        endpoint=endpoint,
-        status_code=status_code,
-        server_id=server_id,
-        model=model
-    )
+    """Create usage log entry in database."""
+    db_log = UsageLog(api_key_id=api_key_id, endpoint=endpoint, status_code=status_code, server_id=server_id, model=model)
     db.add(db_log)
     await db.commit()
     await db.refresh(db_log)
     return db_log
 
+
 async def get_usage_statistics(db: AsyncSession, sort_by: str = "request_count", sort_order: str = "desc"):
-    """
-    Returns aggregated usage statistics for all API keys, with sorting.
-    """
+    """Return aggregated usage statistics for all API keys with sorting."""
     sort_column_map = {
         "username": User.username,
         "key_name": APIKey.key_name,
@@ -56,56 +57,42 @@ async def get_usage_statistics(db: AsyncSession, sort_by: str = "request_count",
     result = await db.execute(stmt)
     return result.all()
 
+
 # --- NEW STATISTICS FUNCTIONS ---
 
+
 async def get_daily_usage_stats(db: AsyncSession, days: int = 30):
-    """Returns total requests per day for the last N days."""
+    """Return total requests per day for the last N days."""
     start_date = datetime.datetime.utcnow() - datetime.timedelta(days=days)
-    
+
     # --- CRITICAL FIX: Cast the date function output to a Date type ---
     # This ensures that we get a date object back, not just a string,
     # which is required for the strftime formatting in the admin route.
     date_column = func.date(UsageLog.request_timestamp, type_=Date).label("date")
     # --- END FIX ---
-    
-    stmt = (
-        select(
-            date_column,
-            func.count(UsageLog.id).label("request_count")
-        )
-        .filter(UsageLog.request_timestamp >= start_date)
-        .group_by(date_column)
-        .order_by(date_column.asc())
-    )
+
+    stmt = select(date_column, func.count(UsageLog.id).label("request_count")).filter(UsageLog.request_timestamp >= start_date).group_by(date_column).order_by(date_column.asc())
     result = await db.execute(stmt)
     return result.all()
 
+
 async def get_hourly_usage_stats(db: AsyncSession):
-    """Returns total requests aggregated by the hour of the day (UTC)."""
+    """Return total requests aggregated by the hour of the day (UTC)."""
     # This uses strftime which is specific to SQLite.
     # For PostgreSQL, you would use: func.extract('hour', UsageLog.request_timestamp)
-    hour_extract = func.strftime('%H', UsageLog.request_timestamp)
-    
-    stmt = (
-        select(
-            hour_extract.label("hour"),
-            func.count(UsageLog.id).label("request_count")
-        )
-        .group_by("hour")
-        .order_by("hour")
-    )
+    hour_extract = func.strftime("%H", UsageLog.request_timestamp)
+
+    stmt = select(hour_extract.label("hour"), func.count(UsageLog.id).label("request_count")).group_by("hour").order_by("hour")  # pylint: disable=not-callable
     result = await db.execute(stmt)
     # Ensure all 24 hours are present
     stats_dict = {row.hour: row.request_count for row in result.all()}
     return [{"hour": f"{h:02d}:00", "request_count": stats_dict.get(f"{h:02d}", 0)} for h in range(24)]
 
+
 async def get_server_load_stats(db: AsyncSession):
-    """Returns total requests per backend server."""
+    """Return total requests per backend server."""
     stmt = (
-        select(
-            OllamaServer.name.label("server_name"),
-            func.count(UsageLog.id).label("request_count")
-        )
+        select(OllamaServer.name.label("server_name"), func.count(UsageLog.id).label("request_count"))
         .select_from(OllamaServer)
         .outerjoin(UsageLog, OllamaServer.id == UsageLog.server_id)
         .group_by(OllamaServer.name)
@@ -114,13 +101,11 @@ async def get_server_load_stats(db: AsyncSession):
     result = await db.execute(stmt)
     return result.all()
 
+
 async def get_model_usage_stats(db: AsyncSession):
-    """Returns total requests per model."""
+    """Return total requests per model."""
     stmt = (
-        select(
-            UsageLog.model.label("model_name"),
-            func.count(UsageLog.id).label("request_count")
-        )
+        select(UsageLog.model.label("model_name"), func.count(UsageLog.id).label("request_count"))
         .filter(UsageLog.model.isnot(None))
         .group_by(UsageLog.model)
         .order_by(func.count(UsageLog.id).desc())
@@ -128,18 +113,17 @@ async def get_model_usage_stats(db: AsyncSession):
     result = await db.execute(stmt)
     return result.all()
 
+
 # --- NEW USER-SPECIFIC STATISTICS FUNCTIONS ---
 
+
 async def get_daily_usage_stats_for_user(db: AsyncSession, user_id: int, days: int = 30):
-    """Returns total requests per day for the last N days for a specific user."""
+    """Return total requests per day for the last N days for a specific user."""
     start_date = datetime.datetime.utcnow() - datetime.timedelta(days=days)
     date_column = func.date(UsageLog.request_timestamp, type_=Date).label("date")
-    
+
     stmt = (
-        select(
-            date_column,
-            func.count(UsageLog.id).label("request_count")
-        )
+        select(date_column, func.count(UsageLog.id).label("request_count"))
         .join(APIKey, UsageLog.api_key_id == APIKey.id)
         .filter(APIKey.user_id == user_id)
         .filter(UsageLog.request_timestamp >= start_date)
@@ -149,15 +133,13 @@ async def get_daily_usage_stats_for_user(db: AsyncSession, user_id: int, days: i
     result = await db.execute(stmt)
     return result.all()
 
+
 async def get_hourly_usage_stats_for_user(db: AsyncSession, user_id: int):
-    """Returns total requests aggregated by the hour for a specific user."""
-    hour_extract = func.strftime('%H', UsageLog.request_timestamp)
-    
+    """Return total requests aggregated by the hour for a specific user."""
+    hour_extract = func.strftime("%H", UsageLog.request_timestamp)
+
     stmt = (
-        select(
-            hour_extract.label("hour"),
-            func.count(UsageLog.id).label("request_count")
-        )
+        select(hour_extract.label("hour"), func.count(UsageLog.id).label("request_count"))
         .join(APIKey, UsageLog.api_key_id == APIKey.id)
         .filter(APIKey.user_id == user_id)
         .group_by("hour")
@@ -167,13 +149,11 @@ async def get_hourly_usage_stats_for_user(db: AsyncSession, user_id: int):
     stats_dict = {row.hour: row.request_count for row in result.all()}
     return [{"hour": f"{h:02d}:00", "request_count": stats_dict.get(f"{h:02d}", 0)} for h in range(24)]
 
+
 async def get_server_load_stats_for_user(db: AsyncSession, user_id: int):
-    """Returns total requests per backend server for a specific user."""
+    """Return total requests per backend server for a specific user."""
     stmt = (
-        select(
-            OllamaServer.name.label("server_name"),
-            func.count(UsageLog.id).label("request_count")
-        )
+        select(OllamaServer.name.label("server_name"), func.count(UsageLog.id).label("request_count"))
         .select_from(UsageLog)
         .join(APIKey, UsageLog.api_key_id == APIKey.id)
         .outerjoin(OllamaServer, UsageLog.server_id == OllamaServer.id)
@@ -184,13 +164,11 @@ async def get_server_load_stats_for_user(db: AsyncSession, user_id: int):
     result = await db.execute(stmt)
     return result.all()
 
+
 async def get_model_usage_stats_for_user(db: AsyncSession, user_id: int):
-    """Returns total requests per model for a specific user."""
+    """Return total requests per model for a specific user."""
     stmt = (
-        select(
-            UsageLog.model.label("model_name"),
-            func.count(UsageLog.id).label("request_count")
-        )
+        select(UsageLog.model.label("model_name"), func.count(UsageLog.id).label("request_count"))
         .join(APIKey, UsageLog.api_key_id == APIKey.id)
         .filter(APIKey.user_id == user_id)
         .filter(UsageLog.model.isnot(None))

@@ -1,1 +1,1 @@
-# API v1 module initialization
+"""API v1 module for the Ollama Proxy Server."""
