@@ -91,6 +91,28 @@ def validate_content_type(content_type: str, allowed_types: list) -> bool:
     return main_type in allowed_types
 
 
+# --- Security: Path Validation Helper ---
+def is_path_within_directory(target_path: Path, allowed_dir: Path) -> bool:
+    """
+    SECURITY FIX: Properly validate that a path is within an allowed directory.
+    This prevents path traversal attacks by resolving both paths and checking
+    that the target is a subpath of the allowed directory.
+    
+    Returns True only if target_path is within allowed_dir.
+    """
+    try:
+        # Resolve both paths to absolute, normalized paths
+        resolved_allowed = allowed_dir.resolve()
+        resolved_target = target_path.resolve()
+        
+        # Check if resolved_target is the same as or a subpath of resolved_allowed
+        # This handles all path traversal attempts including symlinks, .., etc.
+        return str(resolved_target).startswith(str(resolved_allowed) + os.sep) or resolved_target == resolved_allowed
+    except (OSError, ValueError, RuntimeError) as e:
+        logger.error(f"Path validation error: {e}")
+        return False
+
+
 # --- Sync helper for system info (to be run in threadpool) ---
 def get_system_info():
     """Returns a dictionary with system usage information."""
@@ -242,6 +264,13 @@ async def admin_login_post(request: Request, db: AsyncSession = Depends(get_db),
     if redis_client:
         await redis_client.delete(f"login_fail:{client_ip}")
 
+    # SECURITY FIX: Regenerate session ID on successful login to prevent session fixation
+    old_session_data = dict(request.session)
+    request.session.clear()
+    for key, value in old_session_data.items():
+        if key != "_messages":  # Don't copy flash messages to new session
+            request.session[key] = value
+    
     request.session["user_id"] = user.id
     flash(request, "Successfully logged in.", "success")
     return RedirectResponse(url=request.url_for("admin_dashboard"), status_code=status.HTTP_303_SEE_OTHER)
@@ -853,15 +882,24 @@ async def admin_settings_post(
     if form_data.get("remove_logo"):
         if is_uploaded_logo:
             logo_to_remove = Path("app" + final_logo_url)
-            # Security: Ensure path is within uploads directory
+            # SECURITY FIX: Use the new robust path validation helper
+            # This properly prevents all path traversal attacks
+            if not is_path_within_directory(logo_to_remove, UPLOADS_DIR):
+                logger.warning(f"Path traversal attempt detected in logo removal: {logo_to_remove}")
+                flash(request, "Security error: Invalid logo path", "error")
+                return RedirectResponse(url=request.url_for("admin_settings"), status_code=status.HTTP_303_SEE_OTHER)
+            
+            # Only remove if validation passed
             try:
-                logo_to_remove.resolve().relative_to(UPLOADS_DIR.resolve())
                 if logo_to_remove.exists(): 
                     os.remove(logo_to_remove)
-            except (ValueError, RuntimeError):
-                logger.warning(f"Attempted path traversal in logo removal: {logo_to_remove}")
+            except OSError as e:
+                logger.error(f"Error removing logo file: {e}")
+                # Continue - don't let file system errors stop the update
+                
         final_logo_url = None
         flash(request, "Logo removed successfully.", "success")
+        
     elif logo_file and logo_file.filename:
         # SECURITY: Validate file upload
         safe_filename = sanitize_filename(logo_file.filename)
@@ -892,10 +930,8 @@ async def admin_settings_post(
         secure_filename = f"{secrets.token_hex(16)}{file_ext}"
         save_path = UPLOADS_DIR / secure_filename
         
-        # Security: Ensure save_path is within UPLOADS_DIR
-        try:
-            save_path.resolve().relative_to(UPLOADS_DIR.resolve())
-        except (ValueError, RuntimeError):
+        # SECURITY FIX: Use the new robust path validation helper
+        if not is_path_within_directory(save_path, UPLOADS_DIR):
             flash(request, "Invalid save path", "error")
             return RedirectResponse(url=request.url_for("admin_settings"), status_code=status.HTTP_303_SEE_OTHER)
         
@@ -903,20 +939,24 @@ async def admin_settings_post(
             with open(save_path, "wb") as buffer: 
                 buffer.write(file_content)
                 
+            # Remove old logo if it was uploaded
             if is_uploaded_logo:
                 old_logo_path = Path("app" + current_settings.branding_logo_url)
-                try:
-                    old_logo_path.resolve().relative_to(UPLOADS_DIR.resolve())
-                    if old_logo_path.exists(): 
-                        os.remove(old_logo_path)
-                except (ValueError, RuntimeError):
-                    logger.warning(f"Could not remove old logo: {old_logo_path}")
+                if is_path_within_directory(old_logo_path, UPLOADS_DIR):
+                    try:
+                        if old_logo_path.exists(): 
+                            os.remove(old_logo_path)
+                    except OSError:
+                        logger.warning(f"Could not remove old logo: {old_logo_path}")
+                else:
+                    logger.warning(f"Old logo path is outside uploads directory: {old_logo_path}")
                     
             final_logo_url = f"/static/uploads/{secure_filename}"
             flash(request, "New logo uploaded successfully.", "success")
         except Exception as e:
             logger.error(f"Failed to save uploaded logo: {e}")
             flash(request, f"Error saving logo: {e}", "error")
+            return RedirectResponse(url=request.url_for("admin_settings"), status_code=status.HTTP_303_SEE_OTHER)
     else:
         url_input = form_data.get("branding_logo_url", "")
         # Validate URL format if provided
@@ -946,20 +986,26 @@ async def admin_settings_post(
         file_type: str # 'key' or 'cert'
     ) -> (Optional[str], Optional[str]):
         
-        managed_filename = f"uploaded_{file_type}.pem"
+        # SECURITY FIX: Use cryptographically secure random filename to prevent prediction attacks
+        managed_filename = f"{secrets.token_hex(16)}_{file_type}.pem"
         managed_path = SSL_DIR / managed_filename
 
-        # Security: Ensure managed_path is within SSL_DIR
-        try:
-            managed_path.resolve().relative_to(SSL_DIR.resolve())
-        except (ValueError, RuntimeError):
+        # Security: Ensure managed_path is within SSL_DIR using robust validation
+        if not is_path_within_directory(managed_path, SSL_DIR):
             logger.error(f"Path traversal attempt in SSL file: {managed_path}")
             return current_path, current_content
 
         # Priority 1: Removal
         if remove_flag:
+            # SECURITY FIX: Only remove if file exists and is within SSL_DIR
             if managed_path.exists():
-                os.remove(managed_path)
+                if is_path_within_directory(managed_path, SSL_DIR):
+                    try:
+                        os.remove(managed_path)
+                    except OSError as e:
+                        logger.error(f"Could not remove SSL file: {e}")
+                else:
+                    logger.warning(f"SSL file path is outside SSL_DIR: {managed_path}")
             flash(request, f"Uploaded SSL {file_type} file removed.", "success")
             return None, None
 
@@ -1018,14 +1064,24 @@ async def admin_settings_post(
                 path_obj = Path(form_path).resolve()
                 # Allow only if in SSL_DIR or absolute path
                 if not path_obj.is_absolute():
-                    path_obj.relative_to(SSL_DIR.resolve())
+                    if not is_path_within_directory(path_obj, SSL_DIR):
+                        return current_path, current_content
+                else:
+                    # For absolute paths, still validate it's not a sensitive system path
+                    # and ideally should be within SSL_DIR
+                    if not is_path_within_directory(path_obj, SSL_DIR):
+                        logger.warning(f"Absolute SSL path outside SSL_DIR: {form_path}")
+                        # Allow but log warning - admin might have valid reason
             except (ValueError, RuntimeError):
                 logger.warning(f"Path traversal attempt in SSL path: {form_path}")
                 return current_path, current_content
                 
             # If a path is specified, it overrides any uploaded file
             if managed_path.exists():
-                os.remove(managed_path)
+                try:
+                    os.remove(managed_path)
+                except OSError:
+                    pass
             return form_path, None
 
         # No changes

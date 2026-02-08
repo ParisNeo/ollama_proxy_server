@@ -5,11 +5,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import redis.asyncio as redis
 import time
 import secrets
+import hmac
 
 from app.schema.settings import AppSettingsModel # <-- NEW
 from app.database.session import get_db
 from app.crud import apikey_crud
-from app.core.security import verify_api_key
+from app.core.security import verify_api_key, get_api_key_hash
 from app.database.models import APIKey
 
 logger = logging.getLogger(__name__)
@@ -103,26 +104,45 @@ async def get_valid_api_key(
             detail="Invalid API key format",
         )
 
+    # --- TIMING ATTACK FIX: Always perform hash verification ---
+    # Look up the API key by prefix
     db_api_key = await apikey_crud.get_api_key_by_prefix(db, prefix=prefix)
-
-    if not db_api_key:
-        logger.warning(f"API key with prefix '{prefix}' not found.")
+    
+    # Prepare a dummy hash for constant-time comparison when key doesn't exist
+    # This ensures the timing of the hash verification is always similar
+    if db_api_key is None:
+        # Use a fixed dummy hash that will never match
+        # This ensures we always perform a hash comparison, preventing timing attacks
+        # that could reveal whether a prefix exists
+        dummy_hash = "$2b$12$" + "0" * 53  # Valid-looking bcrypt hash format that will fail verification
+        verify_api_key(secret, dummy_hash)  # Always fails, but takes similar time
+        
+        # Generic error message to prevent information leakage
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API Key"
         )
 
+    # If key exists but is revoked or inactive, still verify hash first (timing protection)
+    # then reject with appropriate message
+    needs_hash_check = True
+    
     if db_api_key.is_revoked:
+        # Perform hash verification anyway to maintain constant timing
+        verify_api_key(secret, db_api_key.hashed_key)
         logger.warning(f"Attempt to use revoked API key with prefix '{prefix}'.")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="API Key has been revoked"
         )
 
     if not db_api_key.is_active:
+        # Perform hash verification anyway to maintain constant timing
+        verify_api_key(secret, db_api_key.hashed_key)
         logger.warning(f"Attempt to use disabled API key with prefix '{prefix}'.")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="API Key is disabled"
         )
 
+    # Only verify the hash if we haven't already (for valid, active, non-revoked keys)
     if not verify_api_key(secret, db_api_key.hashed_key):
         logger.warning(f"Invalid secret for API key with prefix '{prefix}'.")
         raise HTTPException(

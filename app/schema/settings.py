@@ -43,22 +43,22 @@ class AppSettingsModel(BaseModel):
 
     model_update_interval_minutes: int = 10
 
-    # Retry configuration for backend requests
+    # Retry configuration for backend requests - OPTIMIZED FOR SPEED
     max_retries: int = Field(
-        default=5,
+        default=2,  # REDUCED from 5 to 2
         ge=0,
         le=20,
         description="Maximum number of retry attempts when a backend server request fails"
     )
     retry_total_timeout_seconds: float = Field(
-        default=2.0,
+        default=1.0,  # REDUCED from 2.0 to 1.0
         ge=0.1,
         le=30.0,
         description="Total time budget (in seconds) for all retry attempts"
     )
     retry_base_delay_ms: int = Field(
-        default=50,
-        ge=10,
+        default=10,  # REDUCED from 50 to 10
+        ge=1,
         le=5000,
         description="Base delay in milliseconds for exponential backoff between retries"
     )

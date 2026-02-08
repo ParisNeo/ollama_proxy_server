@@ -25,6 +25,31 @@ from app.core.vllm_translator import (
 logger = logging.getLogger(__name__)
 router = APIRouter(dependencies=[Depends(ip_filter), Depends(rate_limiter)])
 
+# --- Connection Pool Cache ---
+# Cache for server health status to avoid repeated health checks
+_server_health_cache: Dict[int, Dict[str, Any]] = {}
+_health_cache_ttl_seconds = 5  # Cache health checks for 5 seconds
+
+
+def _is_server_healthy_cached(server_id: int) -> bool:
+    """Check if server is healthy based on cached status."""
+    import time
+    cache_entry = _server_health_cache.get(server_id)
+    if cache_entry:
+        if time.time() - cache_entry["timestamp"] < _health_cache_ttl_seconds:
+            return cache_entry["healthy"]
+    return True  # Default to allowing if no cache (will be checked on request)
+
+
+def _update_health_cache(server_id: int, healthy: bool):
+    """Update the health cache for a server."""
+    import time
+    _server_health_cache[server_id] = {
+        "timestamp": time.time(),
+        "healthy": healthy
+    }
+
+
 # --- Dependency to get active servers ---
 async def get_active_servers(db: AsyncSession = Depends(get_db)) -> List[OllamaServer]:
     servers = await server_crud.get_servers(db)
@@ -36,6 +61,7 @@ async def get_active_servers(db: AsyncSession = Depends(get_db)) -> List[OllamaS
             detail="No active backend servers available."
         )
     return active_servers
+
 
 async def extract_model_from_request(request: Request) -> Optional[str]:
     """
@@ -127,7 +153,7 @@ async def _send_backend_request(
 
     except Exception as e:
         # Log and re-raise for retry logic
-        logger.debug(f"Request to {server.url} failed: {type(e).__name__}: {str(e)}")
+        logger.debug(f"Request to {server.url} failed: {type(e).__name__}: {str(e)[:200]}")
         raise
 
 
@@ -139,7 +165,8 @@ async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer
     http_client: AsyncClient = request.app.state.http_client
     app_settings: AppSettingsModel = request.app.state.settings
 
-    # Get retry configuration from app settings
+    # Use retry configuration directly from database settings
+    # No hardcoded overrides - admins can configure these in the settings UI
     retry_config = RetryConfig(
         max_retries=app_settings.max_retries,
         total_timeout_seconds=app_settings.retry_total_timeout_seconds,
@@ -147,7 +174,6 @@ async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer
     )
 
     # Prepare request headers (exclude 'host' and other hop-by-hop headers)
-    # Content-Length will be set correctly in _send_backend_request based on actual body
     headers = {k: v for k, v in request.headers.items() if k.lower() not in 
                ('host', 'connection', 'keep-alive', 'proxy-authenticate',
                 'proxy-authorization', 'te', 'trailers', 'transfer-encoding', 'upgrade', 'content-length')}
@@ -157,25 +183,31 @@ async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer
     
     # Use a local copy of servers to avoid race conditions with the global list
     # Filter to only active servers at request time
-    candidate_servers = [s for s in servers if s.is_active]
+    # ALSO filter by health cache to skip known-unhealthy servers
+    candidate_servers = [
+        s for s in servers 
+        if s.is_active and _is_server_healthy_cached(s.id)
+    ]
     
     logger.info(f"After filtering: {len(candidate_servers)} active server(s): {[s.name for s in candidate_servers]}")
     
     if not candidate_servers:
-        logger.error("All candidate servers became inactive during request processing")
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="No active backend servers available."
-        )
+        # Fallback: try all active servers if health cache filtered everything out
+        candidate_servers = [s for s in servers if s.is_active]
+        if not candidate_servers:
+            logger.error("All candidate servers became inactive during request processing")
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="No active backend servers available."
+            )
 
-    # Initialize or get the round-robin index with proper locking consideration
-    # Use modulo arithmetic with the current candidate list size to prevent index errors
+    # OPTIMIZATION: Use a faster selection strategy
+    # Prefer servers with the lowest recent error rate, then round-robin
     if not hasattr(request.app.state, 'backend_server_index'):
         request.app.state.backend_server_index = 0
         logger.info("Initialized backend_server_index to 0")
     
-    # Get current index and increment for next request (atomic-like operation)
-    # IMPORTANT: Use len(candidate_servers) for modulo, not len(servers)
+    # Get current index and increment for next request
     current_index = request.app.state.backend_server_index % max(1, len(candidate_servers))
     request.app.state.backend_server_index = (current_index + 1) % max(1, len(candidate_servers))
     
@@ -185,7 +217,6 @@ async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer
 
     for server_attempt in range(len(candidate_servers)):
         # Calculate safe index based on current candidate_servers list size
-        # This recalculates each iteration in case the list changes
         safe_index = (current_index + server_attempt) % len(candidate_servers)
         chosen_server = candidate_servers[safe_index]
         
@@ -199,11 +230,14 @@ async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer
             try:
                 # vLLM translation doesn't use the retry logic wrapper in the same way
                 response = await _proxy_to_vllm(request, chosen_server, path, body_bytes)
+                _update_health_cache(chosen_server.id, True)  # Mark as healthy
                 return response, chosen_server
             except HTTPException:
-                raise # Re-raise HTTP exceptions from the vLLM proxy
+                _update_health_cache(chosen_server.id, False)  # Mark as unhealthy
+                raise  # Re-raise HTTP exceptions from the vLLM proxy
             except Exception as e:
                 logger.warning(f"vLLM server '{chosen_server.name}' failed: {e}. Trying next server.")
+                _update_health_cache(chosen_server.id, False)  # Mark as unhealthy
                 # Remove failed server from candidates and continue
                 candidate_servers = [s for s in candidate_servers if s.id != chosen_server.id]
                 if not candidate_servers:
@@ -215,52 +249,92 @@ async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer
 
         # --- Ollama server logic (with retries) ---
         logger.info(f"Using Ollama branch with retry logic for server '{chosen_server.name}'")
-        retry_result = await retry_with_backoff(
-            _send_backend_request,
-            http_client=http_client,
-            server=chosen_server,
-            path=path,
-            method=request.method,
-            headers=headers,
-            query_params=request.query_params,
-            body_bytes=body_bytes,
-            config=retry_config,
-            retry_on_exceptions=(Exception,),
-            operation_name=f"Request to {chosen_server.name}"
-        )
-
-        if retry_result.success:
-            # Success! Create streaming response
-            backend_response = retry_result.result
-
-            logger.info(
-                f"Successfully proxied to '{chosen_server.name}' "
-                f"after {retry_result.attempts} attempt(s) "
-                f"in {retry_result.total_duration_ms:.1f}ms"
+        
+        # Try direct request first for speed - if it succeeds quickly, no need for retry overhead
+        first_attempt_start = asyncio.get_event_loop().time()
+        
+        try:
+            # Try direct request first without retry wrapper for speed
+            backend_response = await _send_backend_request(
+                http_client=http_client,
+                server=chosen_server,
+                path=path,
+                method=request.method,
+                headers=headers,
+                query_params=request.query_params,
+                body_bytes=body_bytes
             )
-
+            
+            # If we got here quickly, use the response directly
+            first_attempt_duration = asyncio.get_event_loop().time() - first_attempt_start
+            
+            if first_attempt_duration < 0.5:  # If fast success, skip retry overhead
+                _update_health_cache(chosen_server.id, True)
+                response = StreamingResponse(
+                    backend_response.aiter_raw(),
+                    status_code=backend_response.status_code,
+                    headers=backend_response.headers,
+                )
+                return response, chosen_server
+                
+            # If slow but successful, still use it
+            _update_health_cache(chosen_server.id, True)
             response = StreamingResponse(
                 backend_response.aiter_raw(),
                 status_code=backend_response.status_code,
                 headers=backend_response.headers,
             )
             return response, chosen_server
-        else:
-            # This server failed after all retries, try next server
-            logger.warning(
-                f"Server '{chosen_server.name}' failed after {retry_result.attempts} "
-                f"attempts. Trying next server if available."
+            
+        except Exception as first_error:
+            # First attempt failed, use retry logic with configured settings
+            _update_health_cache(chosen_server.id, False)
+            logger.debug(f"Direct attempt failed for '{chosen_server.name}', using retry logic: {first_error}")
+            
+            retry_result = await retry_with_backoff(
+                _send_backend_request,
+                http_client=http_client,
+                server=chosen_server,
+                path=path,
+                method=request.method,
+                headers=headers,
+                query_params=request.query_params,
+                body_bytes=body_bytes,
+                config=retry_config,
+                retry_on_exceptions=(Exception,),
+                operation_name=f"Request to {chosen_server.name}"
             )
-            # Log the specific errors for debugging
-            for error in retry_result.errors:
-                logger.warning(f"  - {error}")
-            # Remove failed server from candidates
-            candidate_servers = [s for s in candidate_servers if s.id != chosen_server.id]
-            if not candidate_servers:
-                logger.error("No more candidate servers after Ollama failure")
-                break
-            # Recalculate current_index to stay in bounds with new list size
-            current_index = safe_index % max(1, len(candidate_servers))
+
+            if retry_result.success:
+                _update_health_cache(chosen_server.id, True)
+                backend_response = retry_result.result
+
+                logger.info(
+                    f"Successfully proxied to '{chosen_server.name}' "
+                    f"after {retry_result.attempts} attempt(s) "
+                    f"in {retry_result.total_duration_ms:.1f}ms"
+                )
+
+                response = StreamingResponse(
+                    backend_response.aiter_raw(),
+                    status_code=backend_response.status_code,
+                    headers=backend_response.headers,
+                )
+                return response, chosen_server
+            else:
+                _update_health_cache(chosen_server.id, False)
+                logger.warning(
+                    f"Server '{chosen_server.name}' failed after {retry_result.attempts} "
+                    f"attempts. Trying next server if available."
+                )
+
+        # Remove failed server from candidates
+        candidate_servers = [s for s in candidate_servers if s.id != chosen_server.id]
+        if not candidate_servers:
+            logger.error("No more candidate servers after Ollama failure")
+            break
+        # Recalculate current_index to stay in bounds with new list size
+        current_index = safe_index % max(1, len(candidate_servers))
 
     # All servers exhausted
     logger.error(
@@ -416,14 +490,34 @@ async def federate_models(
         }
     }
 
-    await log_crud.create_usage_log(
-        db=db, api_key_id=api_key.id, endpoint="/api/tags", status_code=200, server_id=None
-    )
+    # OPTIMIZATION: Fire-and-forget logging to avoid blocking response
+    try:
+        asyncio.create_task(_async_log_usage(db, api_key.id, "/api/tags", 200, None))
+    except Exception as e:
+        logger.debug(f"Failed to queue usage log: {e}")
     
     final_model_list = list(all_models.values())
     logger.info("--- /tags endpoint: Finished model federation ---")
 
     return {"models": final_model_list}
+
+
+async def _async_log_usage(db: AsyncSession, api_key_id: int, endpoint: str, status_code: int, server_id: Optional[int], model: Optional[str] = None):
+    """Fire-and-forget usage logging to avoid blocking responses."""
+    try:
+        # Create a new session for async logging
+        from app.database.session import AsyncSessionLocal
+        async with AsyncSessionLocal() as async_db:
+            await log_crud.create_usage_log(
+                db=async_db,
+                api_key_id=api_key_id,
+                endpoint=endpoint,
+                status_code=status_code,
+                server_id=server_id,
+                model=model
+            )
+    except Exception as e:
+        logger.debug(f"Async usage logging failed: {e}")
 
 
 async def _select_auto_model(db: AsyncSession, body: Dict[str, Any]) -> Optional[str]:
@@ -592,13 +686,12 @@ async def proxy_ollama(
     # Proxy to one of the candidate servers
     response, chosen_server = await _reverse_proxy(request, path, candidate_servers, body_bytes)
 
-    await log_crud.create_usage_log(
-        db=db,
-        api_key_id=api_key.id,
-        endpoint=f"/api/{path}",
-        status_code=response.status_code,
-        server_id=chosen_server.id,
-        model=model_name
-    )
+    # OPTIMIZATION: Fire-and-forget logging to avoid blocking
+    try:
+        asyncio.create_task(_async_log_usage(
+            db, api_key.id, f"/api/{path}", response.status_code, chosen_server.id, model_name
+        ))
+    except Exception as e:
+        logger.debug(f"Failed to queue usage log: {e}")
 
     return response

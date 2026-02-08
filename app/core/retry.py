@@ -16,9 +16,9 @@ T = TypeVar('T')
 @dataclass
 class RetryConfig:
     """Configuration for retry behavior."""
-    max_retries: int = 5
-    total_timeout_seconds: float = 2.0
-    base_delay_ms: int = 50
+    max_retries: int = 2  # REDUCED from 5 to 2 for faster failover
+    total_timeout_seconds: float = 1.0  # REDUCED from 2.0 to 1.0
+    base_delay_ms: int = 10  # REDUCED from 50 to 10 for faster retries
 
     def __post_init__(self):
         """Validate configuration."""
@@ -111,7 +111,7 @@ async def retry_with_backoff(
             )
 
         except retry_on_exceptions as e:
-            error_msg = f"Attempt {attempt + 1}: {type(e).__name__}: {str(e)}"
+            error_msg = f"Attempt {attempt + 1}: {type(e).__name__}: {str(e)[:200]}"  # Truncate error message
             errors.append(error_msg)
 
             # Don't log on last attempt (we'll log the failure below)
@@ -139,18 +139,19 @@ async def retry_with_backoff(
                 # Cap the delay to remaining time
                 actual_delay = min(delay_seconds, remaining_time)
 
-                logger.debug(
-                    f"{operation_name}: Waiting {actual_delay * 1000:.1f}ms before retry "
-                    f"({remaining_time:.2f}s remaining of {config.total_timeout_seconds}s budget)"
-                )
-
-                await asyncio.sleep(actual_delay)
+                # ONLY sleep if we actually need to retry
+                if actual_delay > 0.001:  # Only sleep if delay is meaningful (>1ms)
+                    logger.debug(
+                        f"{operation_name}: Waiting {actual_delay * 1000:.1f}ms before retry "
+                        f"({remaining_time:.2f}s remaining of {config.total_timeout_seconds}s budget)"
+                    )
+                    await asyncio.sleep(actual_delay)
 
     # All retries exhausted
     total_duration_ms = (time.time() - start_time) * 1000
     logger.error(
         f"{operation_name}: Failed after {attempt + 1} attempts "
-        f"in {total_duration_ms:.1f}ms. Errors: {errors[-3:]}"  # Show last 3 errors
+        f"in {total_duration_ms:.1f}ms. Errors: {errors[-2:]}"  # Show last 2 errors instead of 3
     )
 
     return RetryResult(
