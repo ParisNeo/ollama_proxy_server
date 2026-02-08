@@ -297,6 +297,26 @@ async def migrate_usage_logs_table(engine: AsyncEngine) -> None:
         "VARCHAR"
     )
 
+    # Add token usage columns if missing
+    await add_column_if_missing(
+        engine,
+        "usage_logs",
+        "prompt_tokens",
+        "INTEGER"
+    )
+    await add_column_if_missing(
+        engine,
+        "usage_logs",
+        "completion_tokens",
+        "INTEGER"
+    )
+    await add_column_if_missing(
+        engine,
+        "usage_logs",
+        "total_tokens",
+        "INTEGER"
+    )
+
     # Create index on model column if it doesn't exist
     # Note: SQLite will silently ignore if index already exists
     async with engine.begin() as conn:
@@ -347,9 +367,9 @@ async def migrate_app_settings_data(engine: AsyncEngine) -> None:
 
         # Default values for new retry settings
         default_retry_settings = {
-            "max_retries": 5,
-            "retry_total_timeout_seconds": 2.0,
-            "retry_base_delay_ms": 50
+            "max_retries": 2,
+            "retry_total_timeout_seconds": 1.0,
+            "retry_base_delay_ms": 10
         }
 
         # Add missing fields
@@ -527,6 +547,9 @@ async def run_all_migrations(engine: AsyncEngine) -> None:
             },
             "usage_logs": {
                 "model": "VARCHAR",
+                "prompt_tokens": "INTEGER",
+                "completion_tokens": "INTEGER",
+                "total_tokens": "INTEGER",
                 "server_id": "INTEGER",
             },
             "model_metadata": {

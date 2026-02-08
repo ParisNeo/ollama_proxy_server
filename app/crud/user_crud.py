@@ -20,6 +20,7 @@ async def get_user_by_id(db: AsyncSession, user_id: int) -> User | None:
 async def get_users(db: AsyncSession, skip: int = 0, limit: int = 100, sort_by: str = "username", sort_order: str = "asc") -> list:
     """
     Retrieves a list of users along with their statistics, with sorting.
+    Includes token usage totals.
     """
     # Subquery to find the last usage time for each user
     last_used_subq = (
@@ -40,6 +41,7 @@ async def get_users(db: AsyncSession, skip: int = 0, limit: int = 100, sort_by: 
             User.is_admin,
             func.count(func.distinct(APIKey.id)).label("key_count"),
             func.count(UsageLog.id).label("request_count"),
+            func.coalesce(func.sum(UsageLog.total_tokens), 0).label("total_tokens"),
             last_used_subq.c.last_used
         )
         .outerjoin(APIKey, User.id == APIKey.user_id)
@@ -58,6 +60,7 @@ async def get_users(db: AsyncSession, skip: int = 0, limit: int = 100, sort_by: 
         "username": User.username,
         "key_count": func.count(func.distinct(APIKey.id)),
         "request_count": func.count(UsageLog.id),
+        "total_tokens": func.coalesce(func.sum(UsageLog.total_tokens), 0),
         "last_used": last_used_subq.c.last_used
     }
     sort_column = sort_column_map.get(sort_by, User.username)

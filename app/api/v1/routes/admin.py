@@ -335,6 +335,8 @@ async def get_system_and_ollama_info(
         "queue_status": rate_limits
     }
     
+
+
 @router.get("/stats", response_class=HTMLResponse, name="admin_stats")
 async def admin_stats(
     request: Request,
@@ -344,7 +346,7 @@ async def admin_stats(
     sort_order: str = Query("desc"),
 ):
     # Whitelist allowed sort values
-    allowed_sort = ["username", "key_name", "key_prefix", "request_count"]
+    allowed_sort = ["username", "key_name", "key_prefix", "request_count", "total_tokens", "total_prompt_tokens", "total_completion_tokens"]
     if sort_by not in allowed_sort:
         sort_by = "request_count"
     if sort_order not in ["asc", "desc"]:
@@ -356,9 +358,25 @@ async def admin_stats(
     hourly_stats = await log_crud.get_hourly_usage_stats(db)
     server_stats = await log_crud.get_server_load_stats(db)
     model_stats = await log_crud.get_model_usage_stats(db)
+    
+    # Calculate token totals for summary
+    total_prompt_tokens = sum(row.total_prompt_tokens for row in key_usage_stats if hasattr(row, 'total_prompt_tokens'))
+    total_completion_tokens = sum(row.total_completion_tokens for row in key_usage_stats if hasattr(row, 'total_completion_tokens'))
+    total_tokens = sum(row.total_tokens for row in key_usage_stats if hasattr(row, 'total_tokens'))
+    
+    # Prepare token data by model
+    model_prompt_tokens = [row.total_prompt_tokens for row in model_stats]
+    model_completion_tokens = [row.total_completion_tokens for row in model_stats]
+    model_total_tokens = [row.total_tokens for row in model_stats]
+    
     context.update({
         "key_usage_stats": key_usage_stats,
-        "daily_labels": [row.date.strftime('%Y-%m-%d') for row in daily_stats],
+        "daily_labels": [
+            row.date if isinstance(row.date, str) 
+            else row.date.strftime('%Y-%m-%d') if hasattr(row.date, 'strftime')
+            else str(row.date)
+            for row in daily_stats
+        ],
         "daily_data": [row.request_count for row in daily_stats],
         "hourly_labels": [row['hour'] for row in hourly_stats],
         "hourly_data": [row['request_count'] for row in hourly_stats],
@@ -366,10 +384,17 @@ async def admin_stats(
         "server_data": [row.request_count for row in server_stats],
         "model_labels": [row.model_name for row in model_stats],
         "model_data": [row.request_count for row in model_stats],
+        "model_prompt_tokens": model_prompt_tokens,
+        "model_completion_tokens": model_completion_tokens,
+        "model_total_tokens": model_total_tokens,
+        "total_prompt_tokens": total_prompt_tokens,
+        "total_completion_tokens": total_completion_tokens,
+        "total_tokens": total_tokens,
         "sort_by": sort_by,
         "sort_order": sort_order,
     })
     return templates.TemplateResponse("admin/statistics.html", context)
+
 
 @router.get("/help", response_class=HTMLResponse, name="admin_help")
 async def admin_help_page(request: Request, admin_user: User = Depends(require_admin_user)): 
@@ -613,7 +638,7 @@ async def admin_pull_model(
         return RedirectResponse(url=request.url_for("admin_manage_server_models", server_id=server_id), status_code=status.HTTP_303_SEE_OTHER)
         
     # Sanitize model name - only allow alphanumeric, dashes, dots, colons
-    if not re.match(r'^[\w\.\-:]+$', model_name):
+    if not re.match(r'^[\w\.\-:@]+$', model_name):
         flash(request, "Model name contains invalid characters", "error")
         return RedirectResponse(url=request.url_for("admin_manage_server_models", server_id=server_id), status_code=status.HTTP_303_SEE_OTHER)
         
@@ -658,7 +683,7 @@ async def admin_delete_model(
         return RedirectResponse(url=request.url_for("admin_manage_server_models", server_id=server_id), status_code=status.HTTP_303_SEE_OTHER)
         
     # Sanitize model name
-    if not re.match(r'^[\w\.\-:]+$', model_name):
+    if not re.match(r'^[\w\.\-:@]+$', model_name):
         flash(request, "Model name contains invalid characters", "error")
         return RedirectResponse(url=request.url_for("admin_manage_server_models", server_id=server_id), status_code=status.HTTP_303_SEE_OTHER)
         
@@ -700,7 +725,7 @@ async def admin_load_model(
         return RedirectResponse(url=request.url_for("admin_dashboard"), status_code=status.HTTP_303_SEE_OTHER)
         
     # Sanitize model name
-    if not re.match(r'^[\w\.\-:]+$', model_name):
+    if not re.match(r'^[\w\.\-:@]+$', model_name):
         flash(request, "Model name contains invalid characters", "error")
         return RedirectResponse(url=request.url_for("admin_dashboard"), status_code=status.HTTP_303_SEE_OTHER)
         
@@ -737,7 +762,7 @@ async def admin_unload_model(
         return RedirectResponse(url=request.url_for("admin_dashboard"), status_code=status.HTTP_303_SEE_OTHER)
         
     # Sanitize model name
-    if not re.match(r'^[\w\.\-:]+$', model_name):
+    if not re.match(r'^[\w\.\-:@]+$', model_name):
         flash(request, "Model name contains invalid characters", "error")
         return RedirectResponse(url=request.url_for("admin_dashboard"), status_code=status.HTTP_303_SEE_OTHER)
         
@@ -762,7 +787,7 @@ async def admin_unload_model_dashboard(
     server_name: str = Form(...)
 ):
     # Validate and sanitize inputs
-    if not model_name or len(model_name) > 256 or not re.match(r'^[\w\.\-:]+$', model_name):
+    if not model_name or len(model_name) > 256 or not re.match(r'^[\w\.\-:@]+$', model_name):
         flash(request, "Invalid model name", "error")
         return RedirectResponse(url=request.url_for("admin_dashboard"), status_code=status.HTTP_303_SEE_OTHER)
         
@@ -797,7 +822,7 @@ async def admin_models_manager_page(
     all_model_names = await server_crud.get_all_available_model_names(db)
     for model_name in all_model_names:
         # Validate model name before processing
-        if model_name and len(model_name) <= 256 and re.match(r'^[\w\.\-:]+$', model_name):
+        if model_name and len(model_name) <= 256 and re.match(r'^[\w\.\-:@]+$', model_name):
             await model_metadata_crud.get_or_create_metadata(db, model_name=model_name)
         
     context["metadata_list"] = await model_metadata_crud.get_all_metadata(db)
@@ -1311,7 +1336,12 @@ async def admin_user_stats(
 
     context.update({
         "user": user,
-        "daily_labels": [row.date.strftime('%Y-%m-%d') for row in daily_stats],
+        "daily_labels": [
+            row.date if isinstance(row.date, str) 
+            else row.date.strftime('%Y-%m-%d') if hasattr(row.date, 'strftime')
+            else str(row.date)
+            for row in daily_stats
+        ],
         "daily_data": [row.request_count for row in daily_stats],
         "hourly_labels": [row['hour'] for row in hourly_stats],
         "hourly_data": [row['request_count'] for row in hourly_stats],
@@ -1449,3 +1479,4 @@ async def delete_user_account(request: Request, user_id: int, db: AsyncSession =
     await user_crud.delete_user(db, user_id=user_id)
     flash(request, f"User '{user.username}' has been deleted.", "success")
     return RedirectResponse(url=request.url_for("admin_users"), status_code=status.HTTP_303_SEE_OTHER)
+

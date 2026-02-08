@@ -19,6 +19,32 @@
 
 {% block content %}
 <div class="space-y-8">
+
+    <!-- Token Usage Summary Card -->
+    <div class="card-style">
+        <h2 class="card-header text-2xl font-bold mb-4 pb-2">Token Usage Summary</h2>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div class="p-4 rounded-lg text-center" style="background-color: rgba(128,128,128,0.1);">
+                <h3 class="text-sm font-medium uppercase text-gray-400 mb-2">Total Prompt Tokens</h3>
+                <div class="text-3xl font-bold text-[var(--color-primary-500)]">
+                    {{ "{:,}".format(total_prompt_tokens|default(0)) }}
+                </div>
+            </div>
+            <div class="p-4 rounded-lg text-center" style="background-color: rgba(128,128,128,0.1);">
+                <h3 class="text-sm font-medium uppercase text-gray-400 mb-2">Total Completion Tokens</h3>
+                <div class="text-3xl font-bold text-[var(--color-primary-500)]">
+                    {{ "{:,}".format(total_completion_tokens|default(0)) }}
+                </div>
+            </div>
+            <div class="p-4 rounded-lg text-center" style="background-color: rgba(128,128,128,0.1);">
+                <h3 class="text-sm font-medium uppercase text-gray-400 mb-2">Total Tokens</h3>
+                <div class="text-3xl font-bold text-[var(--color-primary-500)]">
+                    {{ "{:,}".format(total_tokens|default(0)) }}
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Top Row: Line and Bar Charts -->
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
         <div class="card-style">
@@ -67,6 +93,18 @@
         </div>
     </div>
 
+    <!-- Token Usage by Model Chart -->
+    <div class="card-style">
+        <h2 class="card-header flex justify-between items-center text-xl font-bold mb-4 pb-2">
+            <span>Token Usage by Model</span>
+            <div class="space-x-2">
+                <button onclick="exportChartToPNG('tokenUsageChart', 'token-usage-by-model.png')" class="text-sm text-[var(--color-primary-500)] hover:underline">PNG</button>
+                <button onclick="exportDataToCSV(['Model Name', 'Prompt Tokens', 'Completion Tokens', 'Total Tokens'], {{ model_labels | tojson }}, {{ model_prompt_tokens | tojson }}, {{ model_completion_tokens | tojson }}, {{ model_total_tokens | tojson }}, 'token-usage-by-model.csv')" class="text-sm text-[var(--color-primary-500)] hover:underline">CSV</button>
+            </div>
+        </h2>
+        {% if model_data and model_tokens_total %}<canvas id="tokenUsageChart"></canvas>{% else %}<div class="flex items-center justify-center h-64"><p>No token usage data available.</p></div>{% endif %}
+    </div>
+
     <!-- Bottom Row: Key Usage Table -->
     <div class="card-style">
          <h2 class="card-header flex justify-between items-center text-xl font-bold mb-4 pb-2">
@@ -81,6 +119,9 @@
                         {{ sortable_header('key_name', 'Key Name') }}
                         {{ sortable_header('key_prefix', 'Key Prefix') }}
                         {{ sortable_header('request_count', 'Requests', 'text-right') }}
+                        <th scope="col" class="px-6 py-3 text-right text-xs font-medium text-gray-400 uppercase tracking-wider">Prompt Tokens</th>
+                        <th scope="col" class="px-6 py-3 text-right text-xs font-medium text-gray-400 uppercase tracking-wider">Completion Tokens</th>
+                        <th scope="col" class="px-6 py-3 text-right text-xs font-medium text-gray-400 uppercase tracking-wider">Total Tokens</th>
                     </tr>
                 </thead>
                 <tbody class="divide-y divide-white/10">
@@ -90,9 +131,12 @@
                         <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-current">{{ stat.key_name }}</td>
                         <td class="px-6 py-4 whitespace-nowrap text-sm font-mono">{{ stat.key_prefix }}</td>
                         <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium text-current">{{ stat.request_count }}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-right text-sm">{{ "{:,}".format(stat.total_prompt_tokens|default(0)) }}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-right text-sm">{{ "{:,}".format(stat.total_completion_tokens|default(0)) }}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">{{ "{:,}".format(stat.total_tokens|default(0)) }}</td>
                     </tr>
                     {% else %}
-                    <tr><td colspan="4" class="px-6 py-4 text-center">No usage data available.</td></tr>
+                    <tr><td colspan="7" class="px-6 py-4 text-center">No usage data available.</td></tr>
                     {% endfor %}
                 </tbody>
             </table>
@@ -229,6 +273,40 @@
                     }]
                 },
                 options: { responsive: true }
+            });
+        }
+
+        // 5. Token Usage by Model Chart (Stacked Bar)
+        const tokenCtx = document.getElementById('tokenUsageChart')?.getContext('2d');
+        if (tokenCtx && {{ model_prompt_tokens | tojson }} && {{ model_completion_tokens | tojson }}) {
+            new Chart(tokenCtx, {
+                type: 'bar',
+                data: {
+                    labels: {{ model_labels | tojson }},
+                    datasets: [
+                        {
+                            label: 'Prompt Tokens',
+                            data: {{ model_prompt_tokens | tojson }},
+                            backgroundColor: primaryColorTransparent,
+                            borderColor: primaryColor,
+                            borderWidth: 1
+                        },
+                        {
+                            label: 'Completion Tokens',
+                            data: {{ model_completion_tokens | tojson }},
+                            backgroundColor: '#f97316',
+                            borderColor: '#ea580c',
+                            borderWidth: 1
+                        }
+                    ]
+                },
+                options: { 
+                    responsive: true, 
+                    scales: { 
+                        y: { beginAtZero: true, stacked: true },
+                        x: { stacked: true }
+                    } 
+                }
             });
         }
     });
