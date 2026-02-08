@@ -80,11 +80,29 @@ async def _send_backend_request(
     normalized_url = server.url.rstrip('/')
     backend_url = f"{normalized_url}/api/{path}"
 
-    request_headers = headers.copy()
+    request_headers = {}
+    
+    # Copy headers from original request, but fix critical ones
+    for k, v in headers.items():
+        k_lower = k.lower()
+        # Skip hop-by-hop headers that should not be forwarded
+        if k_lower in ('host', 'connection', 'keep-alive', 'proxy-authenticate', 
+                       'proxy-authorization', 'te', 'trailers', 'transfer-encoding', 'upgrade'):
+            continue
+        # Skip content-length - we'll set it correctly based on actual body
+        if k_lower == 'content-length':
+            continue
+        request_headers[k] = v
+    
+    # Set correct content-length based on actual body bytes
+    if body_bytes:
+        request_headers['content-length'] = str(len(body_bytes))
+    
+    # Add API key authentication if configured
     if server.encrypted_api_key:
         api_key = decrypt_data(server.encrypted_api_key)
         if api_key:
-            request_headers["Authorization"] = f"Bearer {api_key}"
+            request_headers["authorization"] = f"Bearer {api_key}"
 
     backend_request = http_client.build_request(
         method=method,
@@ -128,31 +146,56 @@ async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer
         base_delay_ms=app_settings.retry_base_delay_ms
     )
 
+    # Prepare request headers (exclude 'host' and other hop-by-hop headers)
+    # Content-Length will be set correctly in _send_backend_request based on actual body
+    headers = {k: v for k, v in request.headers.items() if k.lower() not in 
+               ('host', 'connection', 'keep-alive', 'proxy-authenticate',
+                'proxy-authorization', 'te', 'trailers', 'transfer-encoding', 'upgrade', 'content-length')}
+
+    # DEFENSIVE: Log what we received
+    logger.info(f"_reverse_proxy called with {len(servers)} total server(s), filtering to active...")
+    
+    # Use a local copy of servers to avoid race conditions with the global list
+    # Filter to only active servers at request time
+    candidate_servers = [s for s in servers if s.is_active]
+    
+    logger.info(f"After filtering: {len(candidate_servers)} active server(s): {[s.name for s in candidate_servers]}")
+    
+    if not candidate_servers:
+        logger.error("All candidate servers became inactive during request processing")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="No active backend servers available."
+        )
+
+    # Initialize or get the round-robin index with proper locking consideration
+    # Use modulo arithmetic with the current candidate list size to prevent index errors
     if not hasattr(request.app.state, 'backend_server_index'):
         request.app.state.backend_server_index = 0
+        logger.info("Initialized backend_server_index to 0")
+    
+    # Get current index and increment for next request (atomic-like operation)
+    # IMPORTANT: Use len(candidate_servers) for modulo, not len(servers)
+    current_index = request.app.state.backend_server_index % max(1, len(candidate_servers))
+    request.app.state.backend_server_index = (current_index + 1) % max(1, len(candidate_servers))
+    
+    logger.info(f"Round-robin: current_index={current_index}, next_index will be {request.app.state.backend_server_index}, candidate_count={len(candidate_servers)}")
 
-    # Prepare request headers (exclude 'host' header)
-    headers = {k: v for k, v in request.headers.items() if k.lower() != 'host'}
-
-    # Try each server in round-robin fashion
-    num_servers = len(servers)
     servers_tried = []
 
-    for server_attempt in range(num_servers):
-        # Select next server using round-robin
-        index = request.app.state.backend_server_index
-        chosen_server = servers[index]
-        request.app.state.backend_server_index = (index + 1) % len(servers)
+    for server_attempt in range(len(candidate_servers)):
+        # Calculate safe index based on current candidate_servers list size
+        # This recalculates each iteration in case the list changes
+        safe_index = (current_index + server_attempt) % len(candidate_servers)
+        chosen_server = candidate_servers[safe_index]
+        
+        logger.info(f"Server attempt {server_attempt + 1}/{len(candidate_servers)}: selected '{chosen_server.name}' at index {safe_index}")
 
         servers_tried.append(chosen_server.name)
 
-        logger.info(
-            f"Attempting request to server '{chosen_server.name}' "
-            f"({server_attempt + 1}/{num_servers})"
-        )
-
         # --- BRANCH: Handle vLLM servers differently ---
         if chosen_server.server_type == 'vllm':
+            logger.info(f"Using vLLM branch for server '{chosen_server.name}'")
             try:
                 # vLLM translation doesn't use the retry logic wrapper in the same way
                 response = await _proxy_to_vllm(request, chosen_server, path, body_bytes)
@@ -161,9 +204,17 @@ async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer
                 raise # Re-raise HTTP exceptions from the vLLM proxy
             except Exception as e:
                 logger.warning(f"vLLM server '{chosen_server.name}' failed: {e}. Trying next server.")
-                continue # Try next server
+                # Remove failed server from candidates and continue
+                candidate_servers = [s for s in candidate_servers if s.id != chosen_server.id]
+                if not candidate_servers:
+                    logger.error("No more candidate servers after vLLM failure")
+                    break
+                # Recalculate current_index to stay in bounds with new list size
+                current_index = safe_index % max(1, len(candidate_servers))
+                continue
 
         # --- Ollama server logic (with retries) ---
+        logger.info(f"Using Ollama branch with retry logic for server '{chosen_server.name}'")
         retry_result = await retry_with_backoff(
             _send_backend_request,
             http_client=http_client,
@@ -200,10 +251,20 @@ async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer
                 f"Server '{chosen_server.name}' failed after {retry_result.attempts} "
                 f"attempts. Trying next server if available."
             )
+            # Log the specific errors for debugging
+            for error in retry_result.errors:
+                logger.warning(f"  - {error}")
+            # Remove failed server from candidates
+            candidate_servers = [s for s in candidate_servers if s.id != chosen_server.id]
+            if not candidate_servers:
+                logger.error("No more candidate servers after Ollama failure")
+                break
+            # Recalculate current_index to stay in bounds with new list size
+            current_index = safe_index % max(1, len(candidate_servers))
 
     # All servers exhausted
     logger.error(
-        f"All {num_servers} backend server(s) failed after retries. "
+        f"All {len(servers_tried)} backend server(s) failed after retries. "
         f"Servers tried: {', '.join(servers_tried)}"
     )
     raise HTTPException(
@@ -500,13 +561,17 @@ async def proxy_ollama(
         body_bytes = json.dumps(body).encode('utf-8')
 
     # Smart routing: filter servers by model availability
+    # DEFENSIVE: Log the servers we received from dependency
+    logger.info(f"proxy_ollama: Received {len(servers)} server(s) from get_active_servers dependency: {[s.name for s in servers]}")
+    
     candidate_servers = servers
     if model_name:
+        logger.info(f"proxy_ollama: Looking for servers with model '{model_name}'")
         servers_with_model = await server_crud.get_servers_with_model(db, model_name)
 
         if servers_with_model:
             candidate_servers = servers_with_model
-            logger.info(f"Smart routing: Found {len(servers_with_model)} server(s) with model '{model_name}'")
+            logger.info(f"Smart routing: Found {len(servers_with_model)} server(s) with model '{model_name}': {[s.name for s in servers_with_model]}")
         else:
             # Model not found in any server's catalog, or catalogs not fetched yet
             # Fall back to all active servers
@@ -515,6 +580,14 @@ async def proxy_ollama(
                 f"Falling back to round-robin across all {len(servers)} active server(s). "
                 f"Make sure to refresh model lists for accurate routing."
             )
+
+    # DEFENSIVE: Double-check we have servers before calling _reverse_proxy
+    if not candidate_servers:
+        logger.error(f"proxy_ollama: No candidate servers available for model '{model_name}'")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"No servers available for model '{model_name}'. Please check server status and model availability."
+        )
 
     # Proxy to one of the candidate servers
     response, chosen_server = await _reverse_proxy(request, path, candidate_servers, body_bytes)
