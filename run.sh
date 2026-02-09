@@ -7,6 +7,10 @@ set -euo pipefail
 #
 # ====================================================================
 
+# --- UPGRADE FIX: Clear setup state on every run to ensure clean upgrades ---
+# The -f flag ensures this command succeeds silently even if the file doesn't exist
+rm -f .setup_state
+
 VENV_DIR="venv"
 REQUIREMENTS_FILE="requirements.txt"
 GUNICORN_CONF="gunicorn_conf.py"
