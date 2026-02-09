@@ -4,10 +4,7 @@ setlocal enabledelayedexpansion
 :: ==================================================================
 :: Ollama Proxy Server - Alembic-Free Installer for Windows
 :: ==================================================================
-
-:: --- UPGRADE FIX: Clear setup state on every run to ensure clean upgrades ---
-:: The /f and /q flags ensure this command succeeds silently even if the file doesn't exist
-del /f /q .setup_state >nul 2>nul
+:: This script now relies on the application to create the database.
 
 set VENV_DIR=venv
 set REQUIREMENTS_FILE=requirements.txt
