@@ -427,36 +427,21 @@ async def admin_add_server(
         flash(request, "Server URL is required", "error")
         return RedirectResponse(url=request.url_for("admin_servers"), status_code=status.HTTP_303_SEE_OTHER)
     
-    # Check for SSRF - block internal/private IPs
+    # Validate Server URL format
     try:
         from urllib.parse import urlparse
         parsed = urlparse(server_url)
         
-        # Block non-http protocols
+        # Ensure only HTTP/HTTPS protocols
         if parsed.scheme not in ('http', 'https'):
             flash(request, "Only HTTP and HTTPS URLs are allowed", "error")
             return RedirectResponse(url=request.url_for("admin_servers"), status_code=status.HTTP_303_SEE_OTHER)
             
-        # Block localhost and private IPs
-        hostname = parsed.hostname
-        if hostname:
-            import socket
-            try:
-                ip = socket.getaddrinfo(hostname, None)[0][4][0]
-                # Check for private/local IPs
-                if ip.startswith(('127.', '10.', '192.168.', '172.')):
-                    if ip.startswith('172.'):
-                        # Check 172.16-31 range
-                        second_octet = int(ip.split('.')[1])
-                        if 16 <= second_octet <= 31:
-                            flash(request, "Internal IP addresses are not allowed for security reasons", "error")
-                            return RedirectResponse(url=request.url_for("admin_servers"), status_code=status.HTTP_303_SEE_OTHER)
-                    else:
-                        flash(request, "Internal IP addresses are not allowed for security reasons", "error")
-                        return RedirectResponse(url=request.url_for("admin_servers"), status_code=status.HTTP_303_SEE_OTHER)
-            except socket.gaierror:
-                pass  # DNS resolution failed, will fail validation anyway
-        
+        # Ensure netloc is present (e.g., localhost:11434 or 192.168.1.1)
+        if not parsed.netloc:
+            flash(request, "Invalid server URL: missing hostname or IP", "error")
+            return RedirectResponse(url=request.url_for("admin_servers"), status_code=status.HTTP_303_SEE_OTHER)
+
         # Check URL length
         if len(server_url) > 2048:
             flash(request, "Server URL is too long", "error")

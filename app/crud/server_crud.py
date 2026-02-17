@@ -27,41 +27,24 @@ def _get_auth_headers(server: OllamaServer) -> Dict[str, str]:
 
 def _is_safe_url(url: str) -> bool:
     """
-    Security check: Prevent SSRF by blocking internal/private IP addresses.
+    Validates that the provided URL is well-formed and uses a supported scheme.
+    SSRF protection relies on the fact that only authenticated admins can add servers.
+    Localhost and private IPs are explicitly allowed for local infrastructure.
     """
     try:
         parsed = urlparse(str(url))
+        # Ensure only http/https schemes are used
         if parsed.scheme not in ('http', 'https'):
             return False
             
-        hostname = parsed.hostname
-        if not hostname:
+        # Ensure there is a valid hostname/netloc
+        if not parsed.netloc:
             return False
-            
-        # Check for localhost
-        if hostname in ('localhost', '127.0.0.1', '0.0.0.0', '::1'):
-            return False
-            
-        # Check for private IPs
-        try:
-            ip = socket.getaddrinfo(hostname, None)[0][4][0]
-            if ip.startswith(('127.', '10.', '192.168.')):
-                return False
-            if ip.startswith('172.'):
-                second_octet = int(ip.split('.')[1])
-                if 16 <= second_octet <= 31:
-                    return False
-            # Check for IPv6 loopback and private
-            if ip == '::1' or ip.startswith('fe80:') or ip.startswith('fc00:'):
-                return False
-        except (socket.gaierror, IndexError, ValueError):
-            # DNS resolution failed - allow it (will fail at connection time)
-            pass
             
         return True
         
     except Exception as e:
-        logger.warning(f"URL safety check failed for {url}: {e}")
+        logger.warning(f"URL validation check failed for {url}: {e}")
         return False
 
 
