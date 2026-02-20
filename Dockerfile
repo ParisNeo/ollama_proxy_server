@@ -23,7 +23,9 @@ WORKDIR /home/app
 COPY ./app ./app
 COPY gunicorn_conf.py .
 
-RUN chmod 0755 -R ./app gunicorn_conf.py
+RUN chmod 0755 -R ./app gunicorn_conf.py && \
+    mkdir -p ./app/static/uploads ./.ssl ./benchmarks && \
+    chown app:app ./app/static/uploads ./.ssl ./benchmarks
 
 USER app
 
