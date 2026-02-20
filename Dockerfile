@@ -16,13 +16,16 @@ RUN poetry config virtualenvs.create false && \
 
 # Set a non-root user
 RUN addgroup --system app && adduser --system --group app
-USER app
 
 # Set working directory
 WORKDIR /home/app
 
 COPY ./app ./app
 COPY gunicorn_conf.py .
+
+RUN chmod 0755 -R ./app gunicorn_conf.py
+
+USER app
 
 # Expose the port the app runs on
 EXPOSE 8080
