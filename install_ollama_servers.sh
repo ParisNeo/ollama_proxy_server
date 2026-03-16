@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ---------------------------
-# Ollama Multi-Instance Installer / Updater (Detect & Reuse)
+# Ollama Multi-Instance Installer / Updater (Colorful & Safe Reuse)
 # ---------------------------
 
 # Colors
@@ -43,16 +43,19 @@ CONTEXTS=()
 FLASH_FLAGS=()
 
 if [[ "$reuse" =~ ^[Yy] ]]; then
-  # Load existing hosts and GPU from systemd environment
+  # Load existing hosts and GPU from systemd environment properly
   for f in "${EXISTING_SERVICES[@]}"; do
     IDX=$(echo $f | grep -oP '(?<=@)\d+(?=\.service)')
-    HOST=$(systemctl show $f | grep OLLAMA_HOST | cut -d= -f2)
-    GPU=$(systemctl show $f | grep CUDA_VISIBLE_DEVICES | cut -d= -f2)
-    CTX=$(systemctl show $f | grep OLLAMA_CONTEXT_LENGTH | cut -d= -f2)
-    FLASH=$(systemctl show $f | grep OLLAMA_FLASH_ATTENTION | cut -d= -f2)
+    # Extract environment variables
+    ENV_VARS=$(systemctl show "$f" -p Environment | cut -d'=' -f2-)
+    GPU=$(echo "$ENV_VARS" | grep -oP 'CUDA_VISIBLE_DEVICES=\K[^ ]+')
+    HOST=$(echo "$ENV_VARS" | grep -oP 'OLLAMA_HOST=\K[^ ]+')
+    CONTEXT=$(echo "$ENV_VARS" | grep -oP 'OLLAMA_CONTEXT_LENGTH=\K[^ ]+')
+    FLASH=$(echo "$ENV_VARS" | grep -oP 'OLLAMA_FLASH_ATTENTION=\K[^ ]+')
+
     GPU_INSTANCES[IDX]=$GPU
     HOSTS[IDX]=$HOST
-    CONTEXTS[IDX]=$CTX
+    CONTEXTS[IDX]=$CONTEXT
     FLASH_FLAGS[IDX]=$FLASH
   done
 else
