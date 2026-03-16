@@ -1,19 +1,21 @@
 #!/bin/bash
 
 # ---------------------------
-# Ollama Multi-Instance Installer / Updater (Colorful & Safe Reuse)
+# Ollama Multi-Instance Installer / Updater
 # ---------------------------
-# Check if script is run as root
-if [[ $EUID -ne 0 ]]; then
-   echo -e "\e[33mThis script must be run as root or with sudo. Exiting.\e[0m" 
-   exit 1
-fi
+
 # Colors
 GREEN="\e[32m"
 YELLOW="\e[33m"
 CYAN="\e[36m"
 MAGENTA="\e[35m"
 RESET="\e[0m"
+
+# Root check
+if [[ $EUID -ne 0 ]]; then
+   echo -e "${YELLOW}This script must be run as root or with sudo. Exiting.${RESET}" 
+   exit 1
+fi
 
 echo -e "${CYAN}Welcome to the Ollama multi-instance installer/updater!${RESET}"
 
@@ -30,14 +32,13 @@ LIB_DIR=${LIB_DIR:-/data/ollama/lib}
 
 # Detect existing instances
 EXISTING_SERVICES=($(ls $SERVICE_DIR/ollama@*.service 2>/dev/null | xargs -n1 basename 2>/dev/null))
+reuse="n"
 if [ ${#EXISTING_SERVICES[@]} -gt 0 ]; then
   echo -e "${YELLOW}Detected existing Ollama instances:${RESET}"
   for s in "${EXISTING_SERVICES[@]}"; do
     echo -e " - $s"
   done
   read -p "Do you want to reuse the existing configuration? (y/n): " reuse
-else
-  reuse="n"
 fi
 
 # Arrays for instance configuration
@@ -50,7 +51,6 @@ if [[ "$reuse" =~ ^[Yy] ]]; then
   # Load existing hosts and GPU from systemd environment properly
   for f in "${EXISTING_SERVICES[@]}"; do
     IDX=$(echo $f | grep -oP '(?<=@)\d+(?=\.service)')
-    # Extract environment variables
     ENV_VARS=$(systemctl show "$f" -p Environment | cut -d'=' -f2-)
     GPU=$(echo "$ENV_VARS" | grep -oP 'CUDA_VISIBLE_DEVICES=\K[^ ]+')
     HOST=$(echo "$ENV_VARS" | grep -oP 'OLLAMA_HOST=\K[^ ]+')
@@ -63,6 +63,23 @@ if [[ "$reuse" =~ ^[Yy] ]]; then
     FLASH_FLAGS[IDX]=$FLASH
   done
 else
+  # Ask if they want to remove old instances
+  if [ ${#EXISTING_SERVICES[@]} -gt 0 ]; then
+      read -p "Do you want to remove the old Ollama instances? (stop, disable, delete service files) (y/n): " remove_old
+      if [[ "$remove_old" =~ ^[Yy] ]]; then
+          for f in "${EXISTING_SERVICES[@]}"; do
+              echo -e "${YELLOW}Stopping and disabling $f...${RESET}"
+              systemctl stop "$f" 2>/dev/null
+              systemctl disable "$f" 2>/dev/null
+              echo -e "${YELLOW}Deleting service file $SERVICE_DIR/$f...${RESET}"
+              rm -f "$SERVICE_DIR/$f"
+          done
+          echo -e "${GREEN}Old Ollama instances removed.${RESET}"
+      else
+          echo -e "${CYAN}Old instances left in place. Make sure ports and GPUs do not conflict.${RESET}"
+      fi
+  fi
+
   # New configuration
   echo -e "${MAGENTA}Current GPUs available:${RESET}"
   nvidia-smi --list-gpus
@@ -91,20 +108,20 @@ else
 fi
 
 # Create directories if they don't exist
-sudo mkdir -p "$LIB_DIR" "$MODEL_DIR"
-sudo chown -R ollama:ollama "$LIB_DIR" "$MODEL_DIR"
-sudo chmod -R 770 "$LIB_DIR" "$MODEL_DIR"
+mkdir -p "$LIB_DIR" "$MODEL_DIR"
+chown -R ollama:ollama "$LIB_DIR" "$MODEL_DIR"
+chmod -R 770 "$LIB_DIR" "$MODEL_DIR"
 
 # Backup existing Ollama service files
 DATE=$(date +%Y-%m-%d_%H-%M-%S)
 for f in "$SERVICE_DIR"/ollama@*.service; do
-  [ -f "$f" ] && sudo cp "$f" "$f.$DATE.bak"
+  [ -f "$f" ] && cp "$f" "$f.$DATE.bak"
 done
 
-# Stop and disable existing Ollama services individually
+# Stop & disable any old Ollama services before install
 for f in "$SERVICE_DIR"/ollama@*.service; do
-  sudo systemctl stop "$(basename $f .service)" 2>/dev/null
-  sudo systemctl disable "$(basename $f .service)" 2>/dev/null
+  systemctl stop "$(basename $f .service)" 2>/dev/null
+  systemctl disable "$(basename $f .service)" 2>/dev/null
 done
 
 # Move Ollama libraries if needed
@@ -112,7 +129,7 @@ if [ -d "/usr/local/lib/ollama" ]; then
   if [ -d "$LIB_DIR/ollama" ]; then
     echo -e "${YELLOW}Libraries already exist in $LIB_DIR${RESET}"
   else
-    sudo mv /usr/local/lib/ollama "$LIB_DIR" || echo "Could not move libraries"
+    mv /usr/local/lib/ollama "$LIB_DIR" || echo "Could not move libraries"
   fi
 fi
 
@@ -121,7 +138,7 @@ if [ -d "/usr/local/models" ]; then
   if [ -d "$MODEL_DIR" ]; then
     echo -e "${YELLOW}Models already exist in $MODEL_DIR${RESET}"
   else
-    sudo mv /usr/local/models "$MODEL_DIR" || echo "Could not move models"
+    mv /usr/local/models "$MODEL_DIR" || echo "Could not move models"
   fi
 fi
 
@@ -130,8 +147,8 @@ echo -e "${CYAN}Installing latest Ollama...${RESET}"
 curl -fsSL https://ollama.com/install.sh | sh
 
 # Ensure correct ownership
-sudo chown -R ollama:ollama "$LIB_DIR" "$MODEL_DIR"
-sudo chmod -R 770 "$LIB_DIR" "$MODEL_DIR"
+chown -R ollama:ollama "$LIB_DIR" "$MODEL_DIR"
+chmod -R 770 "$LIB_DIR" "$MODEL_DIR"
 
 # Create systemd services for each instance
 for i in "${!GPU_INSTANCES[@]}"; do
@@ -144,7 +161,7 @@ for i in "${!GPU_INSTANCES[@]}"; do
   ENV_CTX=""
   [ -n "$CONTEXT" ] && ENV_CTX="Environment=\"OLLAMA_CONTEXT_LENGTH=$CONTEXT\""
 
-  sudo tee "$SERVICE_FILE" > /dev/null <<EOL
+  tee "$SERVICE_FILE" > /dev/null <<EOL
 [Unit]
 Description=Ollama LLM Service Instance $i
 After=network.target
@@ -164,16 +181,20 @@ Restart=always
 [Install]
 WantedBy=multi-user.target
 EOL
-
-  sudo systemctl daemon-reload
-  sudo systemctl enable "ollama@$i"
-  sudo systemctl start "ollama@$i"
 done
 
-# ✅ Installation Complete – Show Help
+# Reload systemd, enable & start all instances
+echo -e "\n${CYAN}Starting all Ollama instances...${RESET}"
+for i in "${!GPU_INSTANCES[@]}"; do
+  systemctl daemon-reload
+  systemctl enable "ollama@$i"
+  systemctl restart "ollama@$i"
+  echo -e "${GREEN}✅ Instance $i started and enabled at boot.${RESET}"
+done
+
+# Summary
 echo -e "\n${GREEN}🎉 Ollama update & multi-instance setup completed!${RESET}"
 echo -e "${CYAN}Summary of your instances:${RESET}"
-
 for i in "${!GPU_INSTANCES[@]}"; do
   echo -e "${MAGENTA}Instance $i${RESET} -> GPUs: ${YELLOW}${GPU_INSTANCES[i]}${RESET}, Host: ${CYAN}${HOSTS[i]}${RESET}, Flash Attention: ${GREEN}${FLASH_FLAGS[i]}${RESET}, Context: ${CONTEXTS[i]:-auto}"
 done
