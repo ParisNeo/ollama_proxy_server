@@ -3,7 +3,11 @@
 # ---------------------------
 # Ollama Multi-Instance Installer / Updater (Colorful & Safe Reuse)
 # ---------------------------
-
+# Check if script is run as root
+if [[ $EUID -ne 0 ]]; then
+   echo -e "\e[33mThis script must be run as root or with sudo. Exiting.\e[0m" 
+   exit 1
+fi
 # Colors
 GREEN="\e[32m"
 YELLOW="\e[33m"
