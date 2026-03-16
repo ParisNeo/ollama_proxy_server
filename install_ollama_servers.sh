@@ -1,49 +1,92 @@
 #!/bin/bash
 
 # ---------------------------
-# Ollama Generic Updater & Multi-Instance Installer
+# Ollama Multi-Instance Installer / Updater (Detect & Reuse)
 # ---------------------------
 
-OLLAMA_DIR="/data/ollama"
-LIB_DIR="$OLLAMA_DIR/lib"
-MODEL_DIR="$OLLAMA_DIR/models"
-SERVICE_DIR="/etc/systemd/system"
-OLLAMA_BIN="/usr/local/bin/ollama"
+# Colors
+GREEN="\e[32m"
+YELLOW="\e[33m"
+CYAN="\e[36m"
+MAGENTA="\e[35m"
+RESET="\e[0m"
 
-echo "Welcome to the Ollama multi-instance installer!"
-echo "Current GPUs available:"
-nvidia-smi --list-gpus
+echo -e "${CYAN}Welcome to the Ollama multi-instance installer/updater!${RESET}"
 
-# Ask user how many instances
-read -p "How many Ollama instances do you want to run? " NUM_INSTANCES
+OLLAMA_BIN=${OLLAMA_BIN:-/usr/local/bin/ollama}
+SERVICE_DIR=${SERVICE_DIR:-/etc/systemd/system}
+DEFAULT_PORT=5000
 
-# Arrays to hold user input
+# Ask user where to store models and libraries
+read -p "Where do you want to store Ollama models? [/data/ollama/models]: " MODEL_DIR
+MODEL_DIR=${MODEL_DIR:-/data/ollama/models}
+
+read -p "Where do you want to install Ollama libraries? [/data/ollama/lib]: " LIB_DIR
+LIB_DIR=${LIB_DIR:-/data/ollama/lib}
+
+# Detect existing instances
+EXISTING_SERVICES=($(ls $SERVICE_DIR/ollama@*.service 2>/dev/null | xargs -n1 basename 2>/dev/null))
+if [ ${#EXISTING_SERVICES[@]} -gt 0 ]; then
+  echo -e "${YELLOW}Detected existing Ollama instances:${RESET}"
+  for s in "${EXISTING_SERVICES[@]}"; do
+    echo -e " - $s"
+  done
+  read -p "Do you want to reuse the existing configuration? (y/n): " reuse
+else
+  reuse="n"
+fi
+
+# Arrays for instance configuration
 GPU_INSTANCES=()
 HOSTS=()
 CONTEXTS=()
 FLASH_FLAGS=()
 
-for ((i=0;i<NUM_INSTANCES;i++)); do
-  read -p "Enter comma-separated GPU IDs for instance $i (e.g., 0,1): " gpus
-  GPU_INSTANCES+=("$gpus")
-  read -p "Enter OLLAMA_HOST for instance $i (e.g., localhost:5000): " host
-  HOSTS+=("$host")
+if [[ "$reuse" =~ ^[Yy] ]]; then
+  # Load existing hosts and GPU from systemd environment
+  for f in "${EXISTING_SERVICES[@]}"; do
+    IDX=$(echo $f | grep -oP '(?<=@)\d+(?=\.service)')
+    HOST=$(systemctl show $f | grep OLLAMA_HOST | cut -d= -f2)
+    GPU=$(systemctl show $f | grep CUDA_VISIBLE_DEVICES | cut -d= -f2)
+    CTX=$(systemctl show $f | grep OLLAMA_CONTEXT_LENGTH | cut -d= -f2)
+    FLASH=$(systemctl show $f | grep OLLAMA_FLASH_ATTENTION | cut -d= -f2)
+    GPU_INSTANCES[IDX]=$GPU
+    HOSTS[IDX]=$HOST
+    CONTEXTS[IDX]=$CTX
+    FLASH_FLAGS[IDX]=$FLASH
+  done
+else
+  # New configuration
+  echo -e "${MAGENTA}Current GPUs available:${RESET}"
+  nvidia-smi --list-gpus
+  read -p "How many Ollama instances do you want to run? " NUM_INSTANCES
 
-  read -p "Do you want to specify context length for instance $i? Leave empty to let Ollama manage: " ctx
-  CONTEXTS+=("$ctx")
+  for ((i=0;i<NUM_INSTANCES;i++)); do
+    read -p "Enter comma-separated GPU IDs for instance $i (e.g., 0,1): " gpus
+    GPU_INSTANCES+=("$gpus")
 
-  read -p "Enable Flash Attention for instance $i? Recommended for large models (y/n): " flash
-  if [[ "$flash" =~ ^[Yy] ]]; then
-    FLASH_FLAGS+=("1")
-  else
-    FLASH_FLAGS+=("0")
-  fi
-done
+    read -p "Enter OLLAMA_HOST for instance $i (leave empty to auto-increment port): " host
+    if [ -z "$host" ]; then
+      host="localhost:$((DEFAULT_PORT + i))"
+    fi
+    HOSTS+=("$host")
+
+    read -p "Do you want to specify context length for instance $i? Leave empty to let Ollama manage: " ctx
+    CONTEXTS+=("$ctx")
+
+    read -p "Enable Flash Attention for instance $i? Recommended for large models (y/n): " flash
+    if [[ "$flash" =~ ^[Yy] ]]; then
+      FLASH_FLAGS+=("1")
+    else
+      FLASH_FLAGS+=("0")
+    fi
+  done
+fi
 
 # Create directories if they don't exist
 sudo mkdir -p "$LIB_DIR" "$MODEL_DIR"
-sudo chown -R ollama:ollama "$OLLAMA_DIR"
-sudo chmod -R 770 "$OLLAMA_DIR"
+sudo chown -R ollama:ollama "$LIB_DIR" "$MODEL_DIR"
+sudo chmod -R 770 "$LIB_DIR" "$MODEL_DIR"
 
 # Backup existing Ollama service files
 DATE=$(date +%Y-%m-%d_%H-%M-%S)
@@ -51,19 +94,32 @@ for f in "$SERVICE_DIR"/ollama@*.service; do
   [ -f "$f" ] && sudo cp "$f" "$f.$DATE.bak"
 done
 
-# Stop existing Ollama services
-sudo systemctl stop ollama@*
-sudo systemctl disable ollama@*
+# Stop and disable existing Ollama services individually
+for f in "$SERVICE_DIR"/ollama@*.service; do
+  sudo systemctl stop "$(basename $f .service)" 2>/dev/null
+  sudo systemctl disable "$(basename $f .service)" 2>/dev/null
+done
 
-# Move Ollama libraries/models if needed
+# Move Ollama libraries if needed
 if [ -d "/usr/local/lib/ollama" ]; then
-  sudo mv /usr/local/lib/ollama "$LIB_DIR" || echo "Libraries already in $LIB_DIR"
+  if [ -d "$LIB_DIR/ollama" ]; then
+    echo -e "${YELLOW}Libraries already exist in $LIB_DIR${RESET}"
+  else
+    sudo mv /usr/local/lib/ollama "$LIB_DIR" || echo "Could not move libraries"
+  fi
 fi
+
+# Move Ollama models if needed
 if [ -d "/usr/local/models" ]; then
-  sudo mv /usr/local/models "$MODEL_DIR" || echo "Models already in $MODEL_DIR"
+  if [ -d "$MODEL_DIR" ]; then
+    echo -e "${YELLOW}Models already exist in $MODEL_DIR${RESET}"
+  else
+    sudo mv /usr/local/models "$MODEL_DIR" || echo "Could not move models"
+  fi
 fi
 
 # Install latest Ollama
+echo -e "${CYAN}Installing latest Ollama...${RESET}"
 curl -fsSL https://ollama.com/install.sh | sh
 
 # Ensure correct ownership
@@ -102,14 +158,23 @@ Restart=always
 WantedBy=multi-user.target
 EOL
 
-  # Enable and start the service
   sudo systemctl daemon-reload
-  sudo systemctl enable ollama@$i
-  sudo systemctl start ollama@$i
+  sudo systemctl enable "ollama@$i"
+  sudo systemctl start "ollama@$i"
 done
 
-echo "Ollama update & multi-instance setup completed."
+# ✅ Installation Complete – Show Help
+echo -e "\n${GREEN}🎉 Ollama update & multi-instance setup completed!${RESET}"
+echo -e "${CYAN}Summary of your instances:${RESET}"
+
 for i in "${!GPU_INSTANCES[@]}"; do
-  echo "- Instance $i on GPUs ${GPU_INSTANCES[i]} listening at ${HOSTS[i]}, Flash Attention=${FLASH_FLAGS[i]}, Context=${CONTEXTS[i]:-auto}"
+  echo -e "${MAGENTA}Instance $i${RESET} -> GPUs: ${YELLOW}${GPU_INSTANCES[i]}${RESET}, Host: ${CYAN}${HOSTS[i]}${RESET}, Flash Attention: ${GREEN}${FLASH_FLAGS[i]}${RESET}, Context: ${CONTEXTS[i]:-auto}"
 done
-echo "Ready to be used with a proxy server for multi-user access."
+
+echo -e "\n${CYAN}💡 Next Steps:${RESET}"
+echo -e "1. Open your Ollama Proxy Server UI (e.g., http://localhost:8080)"
+echo -e "2. Add each instance to the proxy using the ${YELLOW}OLLAMA_HOST${RESET} values listed above"
+echo -e "3. Test the connections and start multi-user requests"
+echo -e "4. Use colored labels in the proxy UI to track GPU allocation and instance numbers"
+
+echo -e "\n${GREEN}✅ All done! Your Ollama instances are ready to serve multiple users.${RESET}"
