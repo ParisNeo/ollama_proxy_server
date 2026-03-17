@@ -26,18 +26,39 @@
     <div id="status-tooltip"></div>
 
     <!-- Header -->
-    <div class="p-4 border-b border-white/10 flex justify-between items-center bg-black/40 backdrop-blur-md z-20">
+    <div class="p-4 border-b border-white/10 flex flex-col md:flex-row justify-between items-center bg-black/40 backdrop-blur-md z-20 gap-4">
         <div class="flex items-center gap-4">
             <div class="h-10 w-10 rounded-full bg-[var(--color-primary-600)] flex items-center justify-center shadow-[0_0_15px_rgba(99,102,241,0.5)]">
                 <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
             </div>
             <div>
                 <h2 class="text-xl font-bold text-white tracking-tight">Live Request Pipeline</h2>
-                <p class="text-[10px] text-gray-500 uppercase tracking-widest font-bold">Hover over nodes for details</p>
+                <div class="flex items-center gap-3 mt-0.5">
+                    <span id="connection-status" class="text-[9px] font-black px-2 py-0.5 rounded border border-white/10">OFFLINE</span>
+                    <p class="text-[10px] text-gray-500 uppercase tracking-widest font-bold">Session Telemetry Active</p>
+                </div>
             </div>
+            <button onclick="window.location.reload()" class="p-2 hover:bg-white/10 rounded-lg text-gray-500 hover:text-white transition-colors" title="Reset View">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+            </button>
         </div>
-        <div id="connection-status" class="text-[10px] font-black px-3 py-1 rounded-md border">
-            CONNECTING...
+
+        <!-- Session Stats Bar -->
+        <div class="flex gap-6 items-center px-6 py-2 bg-white/5 rounded-2xl border border-white/5">
+            <div class="text-center">
+                <div class="text-[10px] text-gray-500 font-bold uppercase">Active Load</div>
+                <div id="stat-load" class="text-lg font-black text-indigo-400">0</div>
+            </div>
+            <div class="w-px h-8 bg-white/10"></div>
+            <div class="text-center">
+                <div class="text-[10px] text-gray-500 font-bold uppercase">Session Tokens</div>
+                <div id="stat-tokens" class="text-lg font-black text-emerald-400">0</div>
+            </div>
+            <div class="w-px h-8 bg-white/10"></div>
+            <div class="text-center">
+                <div class="text-[10px] text-gray-500 font-bold uppercase">Avg. TTFT</div>
+                <div id="stat-avg-ttft" class="text-lg font-black text-amber-400">0<span class="text-[10px] ml-0.5 text-gray-500">ms</span></div>
+            </div>
         </div>
     </div>
     
@@ -63,8 +84,17 @@ document.addEventListener('DOMContentLoaded', () => {
     let width, height;
     let mouse = { x: 0, y: 0 };
     const particles = new Map();
+    const historyQueue = []; // Array of completed particles
+    const MAX_HISTORY = 10;
     const serverNodes = new Map(); 
     
+    // Global session stats
+    let sessionStats = {
+        totalTokens: 0,
+        ttftSum: 0,
+        ttftCount: 0
+    };
+
     const THEME = {
         bg: '#030305',
         lineBase: 'rgba(255, 255, 255, 0.05)',
@@ -109,28 +139,56 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     function handleEvent(data) {
-        const { type, id, server, model, sender } = data;
-        if (type === 'received') {
+        const { type, id, server, model, sender, ttft, tps, tokens } = data;
+        if (!particles.has(id) && type !== 'completed') {
             particles.set(id, {
                 id, state: 'queued', progress: 0,
-                sender: sender || 'anon', model: model,
+                sender: sender || 'anon', model: model || 'unknown',
                 color: THEME.received, size: 5, alpha: 1,
                 yOffset: (Math.random() - 0.5) * 15,
-                startTime: Date.now()
+                startTime: Date.now(),
+                lastSeen: Date.now(), // GC timestamp
+                ttft: 0, tps: 0
             });
-        } else if (type === 'assigned') {
+        } else         if (type === 'assigned') {
             const p = particles.get(id);
             if (p) { 
-                p.state = 'traveling'; 
+                p.lastSeen = Date.now();
+                if (p.state === 'queued') { p.state = 'traveling'; p.progress = 0; }
                 p.targetServer = server;
                 if (!serverNodes.has(server)) updateServerLayout(server);
             }
         } else if (type === 'active') {
             const p = particles.get(id);
-            if (p) { p.state = 'active'; p.color = THEME.active; }
+            if (p) { 
+                p.lastSeen = Date.now();
+                p.state = 'active'; 
+                p.color = THEME.active; 
+                p.ttft = ttft;
+                // Update Session Avg TTFT
+                sessionStats.ttftSum += ttft;
+                sessionStats.ttftCount++;
+                document.getElementById('stat-avg-ttft').innerHTML = `${Math.round(sessionStats.ttftSum / sessionStats.ttftCount)}<span class="text-[10px] ml-0.5 text-gray-500">ms</span>`;
+            }
         } else if (type === 'completed') {
             const p = particles.get(id);
-            if (p) { p.state = 'exiting'; p.exitProgress = 0; }
+            if (p) { 
+                p.state = 'completed'; 
+                p.tps = tps;
+                p.finalTokens = tokens;
+                p.finishTime = Date.now();
+                
+                // Add to history queue
+                historyQueue.unshift(p);
+                if (historyQueue.length > MAX_HISTORY) {
+                    const removed = historyQueue.pop();
+                    particles.delete(removed.id);
+                }
+
+                // Update Session Tokens
+                sessionStats.totalTokens += tokens;
+                document.getElementById('stat-tokens').innerText = sessionStats.totalTokens.toLocaleString();
+            }
         } else if (type === 'error') {
             const p = particles.get(id);
             if (p) { p.state = 'failed'; p.color = THEME.error; p.vY = -3; }
@@ -168,7 +226,15 @@ document.addEventListener('DOMContentLoaded', () => {
         const startX = 60;
         const splitX = width * 0.4;
         const centerY = height / 2;
+        const historyX = 80;
+        const historyTopY = height - 60;
         let activeHover = null;
+
+        // 0. Pre-pass for hover detection to toggle labels
+        particles.forEach((p) => {
+            const dist = Math.hypot(mouse.x - p.x, mouse.y - p.y);
+            if (dist < 15) activeHover = { type: 'request', data: p };
+        });
 
         // 1. Draw Paths
         ctx.lineWidth = 2;
@@ -205,7 +271,27 @@ document.addEventListener('DOMContentLoaded', () => {
         ctx.arc(startX, centerY, 22, 0, Math.PI*2);
         ctx.fill(); ctx.stroke();
 
-        // 3. Particles
+        // 2.5 Draw History Header (Cemetery)
+        if (historyQueue.length > 0) {
+            ctx.fillStyle = 'rgba(255,255,255,0.15)';
+            ctx.font = 'bold 9px ui-monospace';
+            ctx.textAlign = 'left';
+            ctx.fillText('⚰️ CEMETERY (LAST FINISHED)', historyX - 10, historyTopY - 15);
+        }
+
+        // 3. Prepare Server Slots (to prevent overlapping)
+        const serverSlots = new Map(); // serverName -> count of active particles
+        const now = Date.now();
+        particles.forEach((p, id) => {
+            const age = now - p.lastSeen;
+            // Purge if active for > 5m or queued for > 2m without updates
+            if ((p.state === 'active' && age > 300000) || (p.state === 'queued' && age > 120000)) {
+                particles.delete(id);
+                return;
+            }
+        });
+
+        // 5. Particles
         particles.forEach((p, id) => {
             let x, y;
             const speed = 0.008;
@@ -214,6 +300,27 @@ document.addEventListener('DOMContentLoaded', () => {
                 x = startX; y = centerY + p.yOffset;
                 p.progress += 0.05;
                 p.size = 5 + Math.sin(p.progress) * 2;
+            } else if (p.state === 'completed') {
+                // Determine target position in the history list (Cemetery - Horizontal)
+                const historyIndex = historyQueue.indexOf(p);
+                if (historyIndex === -1) return;
+
+                const targetX = historyX + (historyIndex * 30);
+                const targetY = historyTopY;
+                
+                // Smoothly glide to history slot at the bottom
+                p.x += (targetX - p.x) * 0.05;
+                p.y += (targetY - p.y) * 0.05;
+                x = p.x; y = p.y;
+                
+                // Fade out as they get pushed to the bottom edge
+                const fadeThreshold = MAX_HISTORY * 0.6;
+                if (historyIndex > fadeThreshold) {
+                    p.alpha = Math.max(0, 0.6 * (1 - (historyIndex - fadeThreshold) / (MAX_HISTORY - fadeThreshold)));
+                } else {
+                    p.alpha = 0.6;
+                }
+                p.size = 3;
             } else if (p.state === 'traveling') {
                 p.progress += speed * 2;
                 const s = serverNodes.get(p.targetServer);
@@ -228,7 +335,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (p.progress >= 1) p.state = 'active';
             } else if (p.state === 'active') {
                 const s = serverNodes.get(p.targetServer);
-                x = s.x; y = s.y;
+                // Calculate slot offset to prevent superposition (Horizontal)
+                const slot = serverSlots.get(p.targetServer) || 0;
+                serverSlots.set(p.targetServer, slot + 1);
+                
+                const offset = (slot * 15); // Horizontal separation
+                x = s.x + 10 + offset; 
+                y = s.y;
+                
                 p.size = 6 + Math.sin(Date.now()/100) * 2;
             } else if (p.state === 'exiting') {
                 p.exitProgress += 0.02;
@@ -248,10 +362,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
             p.x = x; p.y = y;
 
-            // Hover Check
-            const dist = Math.hypot(mouse.x - x, mouse.y - y);
-            if (dist < 15) activeHover = { type: 'request', data: p };
-
             ctx.save();
             ctx.globalAlpha = p.alpha;
             ctx.shadowBlur = 15;
@@ -261,27 +371,37 @@ document.addEventListener('DOMContentLoaded', () => {
             ctx.arc(x, y, p.size, 0, Math.PI*2);
             ctx.fill();
 
-            // REFINED LABELS: Background pill for absolute readability
-            if (p.state !== 'exiting' && p.state !== 'failed') {
+            // REFINED LABELS: Only show when hovered
+            if (p.state !== 'failed' && activeHover && activeHover.data.id === id) {
                 ctx.font = 'bold 10px ui-monospace';
-                const label = `[${p.sender}] ${p.model}`;
-                const m = ctx.measureText(label);
+                let labelText = `[${p.sender}] ${p.model}`;
+                if (p.state === 'completed' || p.state === 'active') {
+                    labelText += ` | ${p.ttft}ms | ${p.tps}t/s`;
+                }
+                const m = ctx.measureText(labelText);
                 
                 ctx.shadowBlur = 0;
-                ctx.fillStyle = 'rgba(0,0,0,0.7)';
+                ctx.fillStyle = 'rgba(0,0,0,0.85)';
                 ctx.beginPath();
-                // Position label on top of dot
-                ctx.roundRect(x - m.width/2 - 5, y - 25, m.width + 10, 16, 4);
+                
+                const labelY = y - 13;
+                const pillY = y - 25;
+                const labelX = x;
+
+                ctx.roundRect(x - m.width/2 - 8, pillY, m.width + 16, 16, 4);
                 ctx.fill();
                 
-                ctx.fillStyle = p.state === 'active' ? THEME.active : '#fff';
+                ctx.fillStyle = '#fff';
                 ctx.textAlign = 'center';
-                ctx.fillText(label, x, y - 13);
+                ctx.fillText(labelText, labelX, labelY);
             }
             ctx.restore();
         });
 
         // 4. Tooltip Logic
+        // Update Load Stat
+        document.getElementById('stat-load').innerText = Array.from(particles.values()).filter(p => p.state === 'active').length;
+
         if (activeHover) {
             tooltip.style.display = 'block';
             tooltip.style.left = (mouse.x + 20) + 'px';
@@ -292,12 +412,18 @@ document.addEventListener('DOMContentLoaded', () => {
                 const elapsed = ((Date.now() - p.startTime) / 1000).toFixed(1);
                 tooltip.innerHTML = `
                     <div class="text-[var(--color-primary-400)] font-bold mb-1">REQUEST INFO</div>
-                    <div class="text-white text-xs">
+                    <div class="text-white text-xs border-b border-white/5 pb-2 mb-2">
                         ID: <span class="text-gray-400">${p.id}</span><br>
                         USER: <span class="text-gray-400">${p.sender}</span><br>
                         MODEL: <span class="text-gray-400">${p.model}</span><br>
-                        TIME: <span class="text-gray-400">${elapsed}s</span><br>
                         STATE: <span style="color:${p.color}">${p.state.toUpperCase()}</span>
+                    </div>
+                    <div class="text-[var(--color-primary-400)] font-bold mb-1">METRICS</div>
+                    <div class="text-white text-xs">
+                        TTFT: <span class="text-amber-400">${(p.ttft !== undefined && p.ttft !== null) ? p.ttft : '--'} ms</span><br>
+                        SPEED: <span class="text-emerald-400">${(p.tps !== undefined && p.tps !== null) ? p.tps : '--'} t/s</span><br>
+                        TOKENS: <span class="text-emerald-400">${p.finalTokens || '--'}</span><br>
+                        TOTAL TIME: <span class="text-gray-400">${elapsed}s</span>
                     </div>
                 `;
             } else {

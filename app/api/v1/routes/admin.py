@@ -16,6 +16,7 @@ from fastapi import APIRouter, Depends, Request, Form, HTTPException, status, Qu
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.concurrency import run_in_threadpool
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError
 
@@ -25,6 +26,8 @@ from app.database.session import get_db
 from app.database.models import User
 from app.crud import user_crud, apikey_crud, log_crud, server_crud, settings_crud, model_metadata_crud
 from app.core.events import event_manager
+from app.core.instance_manager import supervisor
+from app.database.models import ManagedInstance
 from app.schema.user import UserCreate
 from app.schema.server import ServerCreate, ServerUpdate
 from app.schema.settings import AppSettingsModel
@@ -1169,6 +1172,8 @@ async def admin_settings_post(
         "allowed_ips": form_data.get("allowed_ips", "")[:2048],
         "denied_ips": form_data.get("denied_ips", "")[:2048],
         "blocked_ollama_endpoints": form_data.get("blocked_ollama_endpoints", "")[:1024],
+        "instance_scan_start_port": int(form_data.get("instance_scan_start_port", 11434)),
+        "instance_scan_end_port": int(form_data.get("instance_scan_end_port", 11445)),
     })
     
     if new_redis_password:
@@ -1480,4 +1485,123 @@ async def delete_user_account(request: Request, user_id: int, db: AsyncSession =
     await user_crud.delete_user(db, user_id=user_id)
     flash(request, f"User '{user.username}' has been deleted.", "success")
     return RedirectResponse(url=request.url_for("admin_users"), status_code=status.HTTP_303_SEE_OTHER)
+
+# --- INSTANCE MANAGER ROUTES ---
+
+@router.get("/instances", response_class=HTMLResponse, name="admin_instances")
+async def admin_instances_page(request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
+    context = get_template_context(request)
+    result = await db.execute(select(ManagedInstance))
+    instances = result.scalars().all()
+    
+    instance_list = []
+    for inst in instances:
+        instance_list.append({
+            "config": inst,
+            "running": supervisor.is_running(inst.id)
+        })
+        
+    # Discover unmanaged local instances
+    app_settings: AppSettingsModel = request.app.state.settings
+    managed_ports = [inst.port for inst in instances]
+    discovered = await supervisor.discover_local_instances(
+        managed_ports, 
+        start_port=app_settings.instance_scan_start_port,
+        end_port=app_settings.instance_scan_end_port
+    )
+        
+    context["instances"] = instance_list
+    context["discovered"] = discovered
+    context["csrf_token"] = await get_csrf_token(request)
+    return templates.TemplateResponse("admin/instances.html", context)
+
+@router.post("/instances/adopt", name="admin_adopt_instance", dependencies=[Depends(validate_csrf_token)])
+async def adopt_instance(
+    request: Request, 
+    db: AsyncSession = Depends(get_db), 
+    admin_user: User = Depends(require_admin_user),
+    name: str = Form(...), 
+    port: int = Form(...)
+):
+    # Check if already exists
+    existing = await db.execute(select(ManagedInstance).filter(ManagedInstance.port == port))
+    if existing.scalars().first():
+        flash(request, f"Instance on port {port} is already being tracked.", "error")
+        return RedirectResponse(url=request.url_for("admin_instances"), status_code=303)
+
+    new_inst = ManagedInstance(
+        name=name, 
+        port=port, 
+        is_enabled=True # Mark as enabled since it's already running
+    )
+    db.add(new_inst)
+    await db.commit()
+    
+    # Also ensure it's in the main server list for the load balancer
+    server_url = f"http://127.0.0.1:{port}"
+    srv_exists = await server_crud.get_server_by_url(db, server_url)
+    if not srv_exists:
+        await server_crud.create_server(db, ServerCreate(name=f"[Adopted] {name}", url=server_url))
+
+    flash(request, f"Successfully adopted instance '{name}' on port {port}.", "success")
+    return RedirectResponse(url=request.url_for("admin_instances"), status_code=303)
+
+@router.post("/instances/add", name="admin_add_instance", dependencies=[Depends(validate_csrf_token)])
+async def admin_add_instance(
+    request: Request, 
+    db: AsyncSession = Depends(get_db), 
+    admin_user: User = Depends(require_admin_user),
+    name: str = Form(...), 
+    port: int = Form(...),
+    gpu_ids: str = Form(""),
+    models_path: str = Form(""),
+    keep_alive: str = Form("5m")
+):
+    new_inst = ManagedInstance(name=name, port=port, gpu_ids=gpu_ids, models_path=models_path, keep_alive=keep_alive)
+    db.add(new_inst)
+    try:
+        await db.commit()
+        flash(request, f"Instance configuration '{name}' added.", "success")
+    except Exception as e:
+        await db.rollback()
+        flash(request, f"Error adding instance: {str(e)}", "error")
+        
+    return RedirectResponse(url=request.url_for("admin_instances"), status_code=303)
+
+@router.post("/instances/{instance_id}/toggle", name="admin_toggle_instance", dependencies=[Depends(validate_csrf_token)])
+async def toggle_instance(instance_id: int, request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
+    inst = await db.get(ManagedInstance, instance_id)
+    if not inst:
+        raise HTTPException(status_code=404, detail="Instance not found")
+
+    if supervisor.is_running(instance_id):
+        await supervisor.stop_instance(instance_id)
+        flash(request, f"Instance '{inst.name}' stopped.")
+    else:
+        success = await supervisor.start_instance(inst)
+        if success:
+            # Auto-add to server list if not exists
+            server_url = f"http://127.0.0.1:{inst.port}"
+            existing = await server_crud.get_server_by_url(db, server_url)
+            if not existing:
+                await server_crud.create_server(db, ServerCreate(name=f"[Managed] {inst.name}", url=server_url))
+            flash(request, f"Instance '{inst.name}' started successfully.", "success")
+        else:
+            flash(request, f"Failed to start '{inst.name}'. Check if port {inst.port} is free and Ollama is in your PATH.", "error")
+            
+    return RedirectResponse(url=request.url_for("admin_instances"), status_code=303)
+
+@router.post("/instances/{instance_id}/delete", name="admin_delete_instance", dependencies=[Depends(validate_csrf_token)])
+async def delete_instance(instance_id: int, request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
+    inst = await db.get(ManagedInstance, instance_id)
+    if not inst:
+        raise HTTPException(status_code=404, detail="Instance not found")
+        
+    if supervisor.is_running(instance_id):
+        await supervisor.stop_instance(instance_id)
+        
+    await db.delete(inst)
+    await db.commit()
+    flash(request, f"Instance '{inst.name}' removed from manager.")
+    return RedirectResponse(url=request.url_for("admin_instances"), status_code=303)
 

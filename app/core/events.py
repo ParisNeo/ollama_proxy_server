@@ -14,6 +14,9 @@ class ProxyEvent:
     server: str = "none"
     sender: str = "anon"
     timestamp: float = 0.0
+    ttft: float = 0.0      # Time To First Token (ms)
+    tps: float = 0.0       # Tokens Per Second
+    token_count: int = 0   # Total tokens processed
 
 class EventManager:
     def __init__(self):
@@ -49,7 +52,10 @@ class EventManager:
             "model": event.model,
             "server": event.server,
             "sender": event.sender,
-            "ts": event.timestamp or asyncio.get_event_loop().time()
+            "ts": event.timestamp or asyncio.get_event_loop().time(),
+            "ttft": event.ttft,
+            "tps": event.tps,
+            "tokens": event.token_count
         }
         
         for queue in self.subscribers:

@@ -157,6 +157,22 @@
                 </div>
             </div>
         </div>
+
+        <!-- Instance Management Settings -->
+        <div>
+            <h2 class="card-header text-xl font-bold mb-4 pb-2">Instance Management</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                    <label for="instance_scan_start_port" class="block text-sm font-medium text-current">Scan Start Port</label>
+                    <input type="number" name="instance_scan_start_port" id="instance_scan_start_port" value="{{ settings.instance_scan_start_port }}" class="mt-1 block w-full px-3 py-2 rounded-md shadow-sm focus:outline-none focus:ring-[var(--color-primary-500)] focus:border-[var(--color-primary-500)]">
+                </div>
+                <div>
+                    <label for="instance_scan_end_port" class="block text-sm font-medium text-current">Scan End Port</label>
+                    <input type="number" name="instance_scan_end_port" id="instance_scan_end_port" value="{{ settings.instance_scan_end_port }}" class="mt-1 block w-full px-3 py-2 rounded-md shadow-sm focus:outline-none focus:ring-[var(--color-primary-500)] focus:border-[var(--color-primary-500)]">
+                </div>
+            </div>
+            <p class="mt-2 text-xs text-gray-400">Controls the range of local ports the Fortress scans to discover unmanaged Ollama instances.</p>
+        </div>
         
         <!-- IP Filtering -->
         <div>

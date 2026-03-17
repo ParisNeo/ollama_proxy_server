@@ -1,0 +1,104 @@
+{% extends "admin/base.html" %}
+{% block title %}Ollama Instance Manager{% endblock %}
+{% block header_title %}Local Instance Manager{% endblock %}
+
+{% block content %}
+<div class="space-y-8">
+    <!-- Creation Form -->
+    <div class="card-style">
+        <h2 class="card-header text-xl font-bold mb-4">Create New Local Instance</h2>
+        <form action="{{ url_for('admin_add_instance') }}" method="post" class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <div>
+                <label class="block text-xs text-gray-400 uppercase font-bold">Instance Name</label>
+                <input type="text" name="name" placeholder="e.g. RTX-3090-Instance" required class="w-full p-2 rounded bg-black/20 border border-white/10">
+            </div>
+            <div>
+                <label class="block text-xs text-gray-400 uppercase font-bold">Port</label>
+                <input type="number" name="port" value="11435" required class="w-full p-2 rounded bg-black/20 border border-white/10">
+            </div>
+            <div>
+                <label class="block text-xs text-gray-400 uppercase font-bold">GPU IDs (CUDA_VISIBLE_DEVICES)</label>
+                <input type="text" name="gpu_ids" placeholder="0" class="w-full p-2 rounded bg-black/20 border border-white/10">
+            </div>
+            <div class="md:col-span-2">
+                <label class="block text-xs text-gray-400 uppercase font-bold">Custom Models Path (Optional)</label>
+                <input type="text" name="models_path" placeholder="/data/ollama/models" class="w-full p-2 rounded bg-black/20 border border-white/10">
+            </div>
+            <div>
+                <label class="block text-xs text-gray-400 uppercase font-bold">Keep Alive</label>
+                <input type="text" name="keep_alive" value="5m" class="w-full p-2 rounded bg-black/20 border border-white/10">
+            </div>
+            <div class="md:col-span-3 flex justify-end">
+                <button type="submit" class="bg-indigo-600 hover:bg-indigo-500 px-6 py-2 rounded font-bold text-sm">Deploy Instance</button>
+            </div>
+        </form>
+    </div>
+
+    <!-- Discovery Section -->
+    {% if discovered %}
+    <div class="card-style border-l-4 border-yellow-500 bg-yellow-500/5">
+        <div class="flex items-center gap-3 mb-4">
+            <svg class="w-6 h-6 text-yellow-500 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+            <h2 class="text-lg font-bold text-yellow-500">Unmanaged Local Instances Detected</h2>
+        </div>
+        <p class="text-sm text-gray-400 mb-4">The following Ollama instances are running locally but are not yet managed by the Fortress supervisor.</p>
+        <div class="space-y-3">
+            {% for found in discovered %}
+            <form action="{{ url_for('admin_adopt_instance') }}" method="post" class="flex items-center justify-between p-3 bg-black/40 rounded-lg border border-white/5">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <input type="hidden" name="port" value="{{ found.port }}">
+                <div class="flex items-center gap-4">
+                    <span class="text-xs font-mono bg-white/10 px-2 py-1 rounded text-indigo-300">PORT {{ found.port }}</span>
+                    <input type="text" name="name" placeholder="Give this instance a name..." required class="text-sm bg-transparent border-b border-white/20 focus:border-indigo-500 outline-none px-1">
+                </div>
+                <button type="submit" class="text-xs font-black text-yellow-500 hover:text-yellow-400 uppercase tracking-widest">Adopt Management</button>
+            </form>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Instance List -->
+    <div class="card-style">
+        <h2 class="card-header text-xl font-bold mb-4">Managed Instances</h2>
+        <table class="w-full text-left">
+            <thead>
+                <tr class="text-gray-500 text-xs uppercase">
+                    <th class="p-3">Name</th>
+                    <th class="p-3">Port</th>
+                    <th class="p-3">Config</th>
+                    <th class="p-3">Status</th>
+                    <th class="p-3 text-right">Actions</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-white/5">
+                {% for item in instances %}
+                <tr>
+                    <td class="p-3 font-bold">{{ item.config.name }}</td>
+                    <td class="p-3 font-mono text-indigo-400">{{ item.config.port }}</td>
+                    <td class="p-3 text-xs text-gray-400">
+                        GPU: {{ item.config.gpu_ids or 'All' }} | Alive: {{ item.config.keep_alive }}
+                    </td>
+                    <td class="p-3">
+                        {% if item.running %}
+                        <span class="px-2 py-1 bg-green-500/20 text-green-400 text-[10px] font-black rounded border border-green-500/30 animate-pulse">RUNNING</span>
+                        {% else %}
+                        <span class="px-2 py-1 bg-gray-500/20 text-gray-400 text-[10px] font-black rounded border border-white/10">STOPPED</span>
+                        {% endif %}
+                    </td>
+                    <td class="p-3 text-right">
+                        <form action="{{ url_for('admin_toggle_instance', instance_id=item.config.id) }}" method="post" class="inline">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                            <button type="submit" class="text-xs font-bold uppercase {{ 'text-red-400' if item.running else 'text-green-400' }}">
+                                {{ 'Stop' if item.running else 'Start' }}
+                            </button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

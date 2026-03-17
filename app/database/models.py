@@ -92,6 +92,17 @@ class AppSettings(Base):
     id = Column(Integer, primary_key=True)
     settings_data = Column(JSON, nullable=False)
 
+class ManagedInstance(Base):
+    __tablename__ = "managed_instances"
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    port = Column(Integer, nullable=False, unique=True)
+    gpu_ids = Column(String, nullable=True)  # e.g. "0" or "0,1"
+    models_path = Column(String, nullable=True)
+    keep_alive = Column(String, default="5m")
+    is_enabled = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
 class ModelMetadata(Base):
     __tablename__ = "model_metadata"
     id = Column(Integer, primary_key=True, index=True)

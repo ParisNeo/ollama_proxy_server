@@ -445,6 +445,8 @@ def _wrap_response_for_token_tracking(
     async def token_tracking_stream():
         buffer = ""
         is_first_token = True
+        start_time = asyncio.get_event_loop().time()
+        first_token_time = 0.0
         accumulated_tokens = {
             "prompt_tokens": None,
             "completion_tokens": None,
@@ -466,12 +468,15 @@ def _wrap_response_for_token_tracking(
                 
                 if is_first_token and request_id:
                     is_first_token = False
+                    first_token_time = asyncio.get_event_loop().time()
+                    ttft_ms = (first_token_time - start_time) * 1000
                     event_manager.emit(ProxyEvent(
                         event_type="active", 
                         request_id=request_id, 
                         model=model, 
                         server=server.name, 
-                        sender=sender
+                        sender=sender,
+                        ttft=round(ttft_ms, 1)
                     ))
 
                 # Process for token tracking (after yielding to not block)
@@ -519,12 +524,17 @@ def _wrap_response_for_token_tracking(
             
             # Emit event: request finished
             if request_id:
+                total_duration = asyncio.get_event_loop().time() - (first_token_time or start_time)
+                tps = (accumulated_tokens["completion_tokens"] or 0) / max(total_duration, 0.001)
+                
                 event_manager.emit(ProxyEvent(
                     event_type="completed", 
                     request_id=request_id, 
                     model=model, 
                     server=server.name, 
-                    sender=sender
+                    sender=sender,
+                    token_count=accumulated_tokens["total_tokens"] or 0,
+                    tps=round(tps, 2)
                 ))
 
             # Process any remaining buffer

@@ -42,6 +42,10 @@ class AppSettingsModel(BaseModel):
     denied_ips: str = ""
 
     model_update_interval_minutes: int = 10
+    
+    # Instance Management
+    instance_scan_start_port: int = 11434
+    instance_scan_end_port: int = 11445
 
     # Retry configuration for backend requests - OPTIMIZED FOR SPEED
     max_retries: int = Field(
