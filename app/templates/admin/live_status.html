@@ -5,7 +5,26 @@
 {% block header_title %}System Architecture Flow{% endblock %}
 
 {% block content %}
+<style>
+    #status-tooltip {
+        pointer-events: none;
+        position: fixed;
+        z-index: 100;
+        background: rgba(10, 10, 15, 0.95);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        padding: 10px;
+        border-radius: 8px;
+        box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+        display: none;
+        font-family: ui-monospace, monospace;
+        backdrop-filter: blur(10px);
+    }
+</style>
+
 <div class="card-style h-[80vh] flex flex-col p-0 overflow-hidden relative border-2 border-white/5 bg-[#030305]">
+    <!-- Tooltip Element -->
+    <div id="status-tooltip"></div>
+
     <!-- Header -->
     <div class="p-4 border-b border-white/10 flex justify-between items-center bg-black/40 backdrop-blur-md z-20">
         <div class="flex items-center gap-4">
@@ -14,7 +33,7 @@
             </div>
             <div>
                 <h2 class="text-xl font-bold text-white tracking-tight">Live Request Pipeline</h2>
-                <p class="text-[10px] text-gray-500 uppercase tracking-widest font-bold">Inbound ➔ Dispatcher ➔ Backend</p>
+                <p class="text-[10px] text-gray-500 uppercase tracking-widest font-bold">Hover over nodes for details</p>
             </div>
         </div>
         <div id="connection-status" class="text-[10px] font-black px-3 py-1 rounded-md border">
@@ -22,10 +41,10 @@
         </div>
     </div>
     
-    <div class="flex-grow relative" id="canvas-container">
+    <div class="flex-grow relative cursor-crosshair" id="canvas-container">
         <canvas id="flowCanvas" class="w-full h-full"></canvas>
         
-        <!-- Trash Bin (Bottom Right) -->
+        <!-- Trash Bin -->
         <div id="trash-bin" class="absolute bottom-6 right-6 p-4 rounded-xl bg-white/5 border border-white/10 flex flex-col items-center opacity-40">
             <svg class="w-6 h-6 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
         </div>
@@ -38,21 +57,21 @@ document.addEventListener('DOMContentLoaded', () => {
     const ctx = canvas.getContext('2d');
     const container = document.getElementById('canvas-container');
     const statusEl = document.getElementById('connection-status');
+    const tooltip = document.getElementById('status-tooltip');
     const trashBin = document.getElementById('trash-bin');
     
     let width, height;
+    let mouse = { x: 0, y: 0 };
     const particles = new Map();
     const serverNodes = new Map(); 
     
     const THEME = {
         bg: '#030305',
         lineBase: 'rgba(255, 255, 255, 0.05)',
-        lineActive: 'rgba(99, 102, 241, 0.2)',
         received: '#6366f1',
         assigned: '#f59e0b',
         active: '#10b981',
-        error: '#ff4444',
-        text: 'rgba(255,255,255,0.7)'
+        error: '#ff4444'
     };
 
     function resize() {
@@ -64,6 +83,12 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     window.addEventListener('resize', resize);
     resize();
+
+    container.addEventListener('mousemove', (e) => {
+        const rect = container.getBoundingClientRect();
+        mouse.x = e.clientX - rect.left;
+        mouse.y = e.clientY - rect.top;
+    });
 
     async function syncServers() {
         try {
@@ -89,8 +114,9 @@ document.addEventListener('DOMContentLoaded', () => {
             particles.set(id, {
                 id, state: 'queued', progress: 0,
                 sender: sender || 'anon', model: model,
-                color: THEME.received, size: 4, alpha: 1,
-                yOffset: (Math.random() - 0.5) * 10
+                color: THEME.received, size: 5, alpha: 1,
+                yOffset: (Math.random() - 0.5) * 15,
+                startTime: Date.now()
             });
         } else if (type === 'assigned') {
             const p = particles.get(id);
@@ -107,7 +133,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (p) { p.state = 'exiting'; p.exitProgress = 0; }
         } else if (type === 'error') {
             const p = particles.get(id);
-            if (p) { p.state = 'failed'; p.color = THEME.error; p.vY = -2; }
+            if (p) { p.state = 'failed'; p.color = THEME.error; p.vY = -3; }
         }
     }
 
@@ -116,15 +142,23 @@ document.addEventListener('DOMContentLoaded', () => {
         const names = Array.from(serverNodes.keys()).sort();
         const padding = 100;
         const availableHeight = height - (padding * 2);
-        const spacing = availableHeight / Math.max(1, names.length - 1 || 1);
+        const step = names.length > 1 ? availableHeight / (names.length - 1) : 0;
         
         names.forEach((n, i) => {
             serverNodes.set(n, {
                 name: n,
-                x: width - 220,
-                y: padding + (i * (names.length === 1 ? availableHeight/2 : spacing))
+                x: width - 200,
+                y: names.length > 1 ? padding + (i * step) : height / 2
             });
         });
+    }
+
+    function getQuadraticPoint(t, p0, p1, p2) {
+        const invT = 1 - t;
+        return {
+            x: invT * invT * p0.x + 2 * invT * t * p1.x + t * t * p2.x,
+            y: invT * invT * p0.y + 2 * invT * t * p1.y + t * t * p2.y
+        };
     }
 
     function draw() {
@@ -134,37 +168,41 @@ document.addEventListener('DOMContentLoaded', () => {
         const startX = 60;
         const splitX = width * 0.4;
         const centerY = height / 2;
+        let activeHover = null;
 
-        // 1. Draw Step-Tree Grid
+        // 1. Draw Paths
         ctx.lineWidth = 2;
         serverNodes.forEach(s => {
             ctx.beginPath();
             ctx.strokeStyle = THEME.lineBase;
             ctx.moveTo(startX, centerY);
-            ctx.lineTo(splitX - 20, centerY); // Horizontal Trunk
-            ctx.quadraticCurveTo(splitX, centerY, splitX, centerY + (s.y > centerY ? 20 : -20)); // Small curve
-            ctx.lineTo(splitX, s.y + (s.y > centerY ? -20 : 20)); // Vertical Splice
-            ctx.quadraticCurveTo(splitX, s.y, splitX + 20, s.y); // Corner curve
-            ctx.lineTo(s.x, s.y); // Horizontal Branch
+            ctx.lineTo(splitX - 30, centerY);
+            ctx.quadraticCurveTo(splitX, centerY, splitX, centerY + (s.y > centerY ? 30 : -30));
+            ctx.lineTo(splitX, s.y + (s.y > centerY ? -30 : 30));
+            ctx.quadraticCurveTo(splitX, s.y, splitX + 30, s.y);
+            ctx.lineTo(s.x, s.y);
             ctx.stroke();
 
-            // Server Node
-            ctx.fillStyle = '#0a0a0f';
-            ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+            // Server Box
+            const isHover = mouse.x > s.x && mouse.x < s.x + 180 && Math.abs(mouse.y - s.y) < 20;
+            ctx.fillStyle = isHover ? 'rgba(255,255,255,0.05)' : '#0a0a0f';
+            ctx.strokeStyle = isHover ? THEME.active : 'rgba(255,255,255,0.1)';
             ctx.beginPath();
-            ctx.roundRect(s.x, s.y - 15, 180, 30, 4);
+            ctx.roundRect(s.x, s.y - 15, 180, 30, 6);
             ctx.fill(); ctx.stroke();
             ctx.fillStyle = '#fff';
-            ctx.font = '9px ui-monospace';
+            ctx.font = 'bold 10px ui-monospace';
             ctx.textAlign = 'left';
-            ctx.fillText(s.name, s.x + 8, s.y + 3);
+            ctx.fillText(s.name, s.x + 10, s.y + 3);
+
+            if (isHover) activeHover = { type: 'server', data: s };
         });
 
-        // 2. Dispatcher Node
+        // 2. Gateway
         ctx.fillStyle = '#0a0a0f';
         ctx.strokeStyle = THEME.received;
         ctx.beginPath();
-        ctx.arc(startX, centerY, 20, 0, Math.PI*2);
+        ctx.arc(startX, centerY, 22, 0, Math.PI*2);
         ctx.fill(); ctx.stroke();
 
         // 3. Particles
@@ -174,67 +212,104 @@ document.addEventListener('DOMContentLoaded', () => {
 
             if (p.state === 'queued') {
                 x = startX; y = centerY + p.yOffset;
-                p.progress += 0.1;
-                p.size = 4 + Math.sin(p.progress) * 2;
+                p.progress += 0.05;
+                p.size = 5 + Math.sin(p.progress) * 2;
             } else if (p.state === 'traveling') {
                 p.progress += speed * 2;
                 const s = serverNodes.get(p.targetServer);
-                
-                // Rectilinear Interpolation
-                if (p.progress < 0.4) { // On Trunk
-                    const t = p.progress / 0.4;
-                    x = startX + (splitX - startX) * t;
+                if (p.progress < 0.4) {
+                    x = startX + (splitX - startX) * (p.progress / 0.4);
                     y = centerY;
-                } else { // On Branch
+                } else {
                     const t = (p.progress - 0.4) / 0.6;
                     x = splitX + (s.x - splitX) * t;
                     y = centerY + (s.y - centerY) * t;
                 }
-                
                 if (p.progress >= 1) p.state = 'active';
             } else if (p.state === 'active') {
                 const s = serverNodes.get(p.targetServer);
                 x = s.x; y = s.y;
-                p.size = 5 + Math.sin(Date.now()/100) * 2;
+                p.size = 6 + Math.sin(Date.now()/100) * 2;
             } else if (p.state === 'exiting') {
                 p.exitProgress += 0.02;
-                const s = serverNodes.get(p.targetServer);
+                const s = serverNodes.get(p.targetServer) || {x: width/2, y: height/2};
                 x = s.x + ( (width - 40) - s.x ) * p.exitProgress;
                 y = s.y + ( (height - 40) - s.y ) * p.exitProgress;
                 p.alpha = 1 - p.exitProgress;
                 if (p.exitProgress >= 1) particles.delete(id);
             } else if (p.state === 'failed') {
-                // Gravity fall effect
                 p.vY += 0.2;
-                p.x = p.x || splitX; // fallback to split point if failed early
+                p.x = p.x || splitX;
                 p.y = (p.y || centerY) + p.vY;
                 x = p.x; y = p.y;
-                p.alpha -= 0.01;
+                p.alpha -= 0.02;
                 if (p.alpha <= 0) particles.delete(id);
             }
 
-            // Save last pos for failed state
             p.x = x; p.y = y;
+
+            // Hover Check
+            const dist = Math.hypot(mouse.x - x, mouse.y - y);
+            if (dist < 15) activeHover = { type: 'request', data: p };
 
             ctx.save();
             ctx.globalAlpha = p.alpha;
-            ctx.shadowBlur = 10;
+            ctx.shadowBlur = 15;
             ctx.shadowColor = p.color;
             ctx.fillStyle = p.color;
             ctx.beginPath();
             ctx.arc(x, y, p.size, 0, Math.PI*2);
             ctx.fill();
 
-            // Clear horizontal labels
+            // REFINED LABELS: Background pill for absolute readability
             if (p.state !== 'exiting' && p.state !== 'failed') {
+                ctx.font = 'bold 10px ui-monospace';
+                const label = `[${p.sender}] ${p.model}`;
+                const m = ctx.measureText(label);
+                
                 ctx.shadowBlur = 0;
-                ctx.fillStyle = 'rgba(255,255,255,0.5)';
-                ctx.font = '8px ui-monospace';
-                ctx.textAlign = 'left';
-                ctx.fillText(`${p.sender} > ${p.model}`, x + 10, y - 8);
+                ctx.fillStyle = 'rgba(0,0,0,0.7)';
+                ctx.beginPath();
+                // Position label on top of dot
+                ctx.roundRect(x - m.width/2 - 5, y - 25, m.width + 10, 16, 4);
+                ctx.fill();
+                
+                ctx.fillStyle = p.state === 'active' ? THEME.active : '#fff';
+                ctx.textAlign = 'center';
+                ctx.fillText(label, x, y - 13);
             }
             ctx.restore();
         });
+
+        // 4. Tooltip Logic
+        if (activeHover) {
+            tooltip.style.display = 'block';
+            tooltip.style.left = (mouse.x + 20) + 'px';
+            tooltip.style.top = (mouse.y + 20) + 'px';
+            
+            if (activeHover.type === 'request') {
+                const p = activeHover.data;
+                const elapsed = ((Date.now() - p.startTime) / 1000).toFixed(1);
+                tooltip.innerHTML = `
+                    <div class="text-[var(--color-primary-400)] font-bold mb-1">REQUEST INFO</div>
+                    <div class="text-white text-xs">
+                        ID: <span class="text-gray-400">${p.id}</span><br>
+                        USER: <span class="text-gray-400">${p.sender}</span><br>
+                        MODEL: <span class="text-gray-400">${p.model}</span><br>
+                        TIME: <span class="text-gray-400">${elapsed}s</span><br>
+                        STATE: <span style="color:${p.color}">${p.state.toUpperCase()}</span>
+                    </div>
+                `;
+            } else {
+                const s = activeHover.data;
+                tooltip.innerHTML = `
+                    <div class="text-green-400 font-bold mb-1">SERVER NODE</div>
+                    <div class="text-white text-xs">NAME: ${s.name}</div>
+                `;
+            }
+        } else {
+            tooltip.style.display = 'none';
+        }
 
         requestAnimationFrame(draw);
     }

@@ -5,7 +5,7 @@ import datetime
 from typing import List, Tuple, Optional, Dict, Any
 from fastapi import APIRouter, Depends, Request, Response, HTTPException, status
 from fastapi.responses import StreamingResponse, JSONResponse
-from httpx import AsyncClient
+import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.session import get_db
@@ -80,7 +80,7 @@ async def extract_model_from_request(request: Request) -> Optional[str]:
 
 
 async def _send_backend_request(
-    http_client: AsyncClient,
+    http_client: httpx.AsyncClient,
     server: OllamaServer,
     path: str,
     method: str,
@@ -127,12 +127,17 @@ async def _send_backend_request(
     try:
         # Emit event: assigned to specific server
         if request_id:
-            event_manager.emit(ProxyEvent("assigned", request_id, model, server.name, timestamp=sender)) # Hack: use timestamp field for sender to avoid core change
+            event_manager.emit(ProxyEvent(
+                event_type="assigned", 
+                request_id=request_id, 
+                model=model, 
+                server=server.name, 
+                sender=sender
+            ))
 
-        # TTFT MITIGATION: Set a aggressive connect timeout for backend attempts.
-        # This prevents the proxy from hanging if one backend is unresponsive.
-        timeout = httpx.Timeout(read=600.0, write=600.0, connect=2.0, pool=10.0)
-        backend_response = await http_client.send(backend_request, stream=True, timeout=timeout)
+        # TTFT MITIGATION: The global client in main.py is configured with a 3s connect timeout.
+        # send() uses the client's default timeout settings.
+        backend_response = await http_client.send(backend_request, stream=True)
 
         if backend_response.status_code >= 500:
             await backend_response.aclose()
@@ -215,7 +220,7 @@ async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer
     """
     Core reverse proxy logic with retry support and token tracking.
     """
-    http_client: AsyncClient = request.app.state.http_client
+    http_client: httpx.AsyncClient = request.app.state.http_client
     app_settings: AppSettingsModel = request.app.state.settings
 
     retry_config = RetryConfig(
@@ -309,9 +314,9 @@ async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer
             is_streaming = _is_streaming_response(backend_response)
             
             if is_streaming and log_id:
-                # Wrap for token tracking
+                # Wrap for token tracking and live visualization
                 wrapped_response = _wrap_response_for_token_tracking(
-                    backend_response, chosen_server, api_key_id, log_id, path, request_id, model
+                    backend_response, chosen_server, api_key_id, log_id, path, request_id, model, sender
                 )
                 return wrapped_response, chosen_server
             else:
@@ -416,8 +421,14 @@ async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer
         f"All {len(servers_tried)} backend server(s) failed after retries. "
         f"Servers tried: {', '.join(servers_tried)}"
     )
-    if request_id:
-        event_manager.emit(ProxyEvent("error", request_id, model, "none", sender))
+                if request_id:
+                    event_manager.emit(ProxyEvent(
+                        event_type="completed", 
+                        request_id=request_id, 
+                        model=model, 
+                        server=server.name, 
+                        sender=sender
+                    ))
 
     raise HTTPException(
         status_code=status.HTTP_504_GATEWAY_TIMEOUT,
@@ -432,7 +443,8 @@ def _wrap_response_for_token_tracking(
     log_id: Optional[int] = None,
     path: str = "",
     request_id: Optional[str] = None,
-    model: str = "unknown"
+    model: str = "unknown",
+    sender: str = "anon"
 ) -> StreamingResponse:
     """Wraps a streaming response to capture token usage from chunks."""
     
@@ -460,7 +472,13 @@ def _wrap_response_for_token_tracking(
                 
                 if is_first_token and request_id:
                     is_first_token = False
-                    event_manager.emit(ProxyEvent("active", request_id, model, server.name))
+                    event_manager.emit(ProxyEvent(
+                        event_type="active", 
+                        request_id=request_id, 
+                        model=model, 
+                        server=server.name, 
+                        sender=sender
+                    ))
 
                 # Process for token tracking (after yielding to not block)
                 buffer += chunk_text
@@ -507,7 +525,13 @@ def _wrap_response_for_token_tracking(
             
             # Emit event: request finished
             if request_id:
-                event_manager.emit(ProxyEvent("completed", request_id, model, server.name))
+                event_manager.emit(ProxyEvent(
+                    event_type="completed", 
+                    request_id=request_id, 
+                    model=model, 
+                    server=server.name, 
+                    sender=sender
+                ))
 
             # Process any remaining buffer
             if buffer.strip():
@@ -578,7 +602,7 @@ async def _proxy_to_vllm(
     """
     Handles proxying a request to a vLLM server with token tracking.
     """
-    http_client: AsyncClient = request.app.state.http_client
+    http_client: httpx.AsyncClient = request.app.state.http_client
     
     try:
         ollama_payload = json.loads(body_bytes) if body_bytes else {}
@@ -639,8 +663,14 @@ async def _proxy_to_vllm(
 
                         if is_first_token and request_id:
                             is_first_token = False
-                            event_manager.emit(ProxyEvent("active", request_id, model, server.name))
-                        
+                            event_manager.emit(ProxyEvent(
+                                event_type="active", 
+                                request_id=request_id, 
+                                model=model, 
+                                server=server.name, 
+                                sender=sender
+                            ))
+
                         # Process for token tracking
                         buffer += chunk_text
                         lines = buffer.split('\n')
@@ -959,7 +989,7 @@ async def proxy_ollama(
         event_type="received", 
         request_id=req_id, 
         model=model_name or "unknown",
-        server=api_key.key_prefix # Temporarily use server field to pass sender for 'received'
+        sender=api_key.key_prefix
     ))
 
     logger.info(f"proxy_ollama: Received {len(servers)} server(s) from get_active_servers dependency: {[s.name for s in servers]}")
