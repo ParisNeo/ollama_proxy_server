@@ -421,14 +421,8 @@ async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer
         f"All {len(servers_tried)} backend server(s) failed after retries. "
         f"Servers tried: {', '.join(servers_tried)}"
     )
-                if request_id:
-                    event_manager.emit(ProxyEvent(
-                        event_type="completed", 
-                        request_id=request_id, 
-                        model=model, 
-                        server=server.name, 
-                        sender=sender
-                    ))
+    if request_id:
+        event_manager.emit(ProxyEvent("error", request_id, model, "none", sender))
 
     raise HTTPException(
         status_code=status.HTTP_504_GATEWAY_TIMEOUT,
@@ -663,14 +657,8 @@ async def _proxy_to_vllm(
 
                         if is_first_token and request_id:
                             is_first_token = False
-                            event_manager.emit(ProxyEvent(
-                                event_type="active", 
-                                request_id=request_id, 
-                                model=model, 
-                                server=server.name, 
-                                sender=sender
-                            ))
-
+                            event_manager.emit(ProxyEvent("active", request_id, model, server.name))
+                        
                         # Process for token tracking
                         buffer += chunk_text
                         lines = buffer.split('\n')
