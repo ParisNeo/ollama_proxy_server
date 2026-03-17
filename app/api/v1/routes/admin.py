@@ -24,6 +24,7 @@ from app.core.security import verify_password
 from app.database.session import get_db
 from app.database.models import User
 from app.crud import user_crud, apikey_crud, log_crud, server_crud, settings_crud, model_metadata_crud
+from app.core.events import event_manager
 from app.schema.user import UserCreate
 from app.schema.server import ServerCreate, ServerUpdate
 from app.schema.settings import AppSettingsModel
@@ -285,6 +286,21 @@ async def admin_dashboard(request: Request, db: AsyncSession = Depends(get_db), 
     context = get_template_context(request)
     context["csrf_token"] = await get_csrf_token(request)
     return templates.TemplateResponse("admin/dashboard.html", context)
+
+@router.get("/live-status", response_class=HTMLResponse, name="admin_live_status")
+async def live_status_view(request: Request, admin_user: User = Depends(require_admin_user)):
+    context = get_template_context(request)
+    return templates.TemplateResponse("admin/live_status.html", context)
+
+@router.get("/servers/nodes", name="admin_get_server_nodes")
+async def get_server_nodes(db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
+    servers = await server_crud.get_servers(db)
+    return [{"name": s.name, "id": s.id} for s in servers if s.is_active]
+
+@router.get("/events")
+async def sse_events(request: Request, admin_user: User = Depends(require_admin_user)):
+    from fastapi.responses import StreamingResponse
+    return StreamingResponse(event_manager.subscribe(), media_type="text/event-stream")
 
 # --- API ENDPOINT FOR DYNAMIC DASHBOARD DATA ---
 @router.get("/system-info", response_class=JSONResponse, name="admin_system_info")

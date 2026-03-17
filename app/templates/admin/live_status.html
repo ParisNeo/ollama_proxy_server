@@ -1,0 +1,245 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Live System Flow{% endblock %}
+
+{% block header_title %}System Architecture Flow{% endblock %}
+
+{% block content %}
+<div class="card-style h-[80vh] flex flex-col p-0 overflow-hidden relative border-2 border-white/5 bg-[#030305]">
+    <!-- Header -->
+    <div class="p-4 border-b border-white/10 flex justify-between items-center bg-black/40 backdrop-blur-md z-20">
+        <div class="flex items-center gap-4">
+            <div class="h-10 w-10 rounded-full bg-[var(--color-primary-600)] flex items-center justify-center shadow-[0_0_15px_rgba(99,102,241,0.5)]">
+                <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+            </div>
+            <div>
+                <h2 class="text-xl font-bold text-white tracking-tight">Live Request Pipeline</h2>
+                <p class="text-[10px] text-gray-500 uppercase tracking-widest font-bold">Inbound ➔ Dispatcher ➔ Backend</p>
+            </div>
+        </div>
+        <div id="connection-status" class="text-[10px] font-black px-3 py-1 rounded-md border">
+            CONNECTING...
+        </div>
+    </div>
+    
+    <div class="flex-grow relative" id="canvas-container">
+        <canvas id="flowCanvas" class="w-full h-full"></canvas>
+        
+        <!-- Trash Bin (Bottom Right) -->
+        <div id="trash-bin" class="absolute bottom-6 right-6 p-4 rounded-xl bg-white/5 border border-white/10 flex flex-col items-center opacity-40">
+            <svg class="w-6 h-6 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const canvas = document.getElementById('flowCanvas');
+    const ctx = canvas.getContext('2d');
+    const container = document.getElementById('canvas-container');
+    const statusEl = document.getElementById('connection-status');
+    const trashBin = document.getElementById('trash-bin');
+    
+    let width, height;
+    const particles = new Map();
+    const serverNodes = new Map(); 
+    
+    const THEME = {
+        bg: '#030305',
+        lineBase: 'rgba(255, 255, 255, 0.05)',
+        lineActive: 'rgba(99, 102, 241, 0.2)',
+        received: '#6366f1',
+        assigned: '#f59e0b',
+        active: '#10b981',
+        error: '#ff4444',
+        text: 'rgba(255,255,255,0.7)'
+    };
+
+    function resize() {
+        width = container.clientWidth;
+        height = container.clientHeight;
+        canvas.width = width * window.devicePixelRatio;
+        canvas.height = height * window.devicePixelRatio;
+        ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+    }
+    window.addEventListener('resize', resize);
+    resize();
+
+    async function syncServers() {
+        try {
+            const resp = await fetch("{{ url_for('admin_get_server_nodes') }}");
+            const data = await resp.json();
+            data.forEach(s => updateServerLayout(s.name));
+        } catch(e) { console.error(e); }
+    }
+    syncServers();
+
+    const evtSource = new EventSource("{{ url_for('sse_events') }}");
+    evtSource.onopen = () => {
+        statusEl.innerHTML = '● LIVE PIPELINE';
+        statusEl.className = "text-[10px] font-black px-3 py-1 rounded-md border border-green-500/30 text-green-500 bg-green-500/10";
+    };
+    evtSource.onmessage = (e) => {
+        try { handleEvent(JSON.parse(e.data)); } catch(err) {}
+    };
+
+    function handleEvent(data) {
+        const { type, id, server, model, sender } = data;
+        if (type === 'received') {
+            particles.set(id, {
+                id, state: 'queued', progress: 0,
+                sender: sender || 'anon', model: model,
+                color: THEME.received, size: 4, alpha: 1,
+                yOffset: (Math.random() - 0.5) * 10
+            });
+        } else if (type === 'assigned') {
+            const p = particles.get(id);
+            if (p) { 
+                p.state = 'traveling'; 
+                p.targetServer = server;
+                if (!serverNodes.has(server)) updateServerLayout(server);
+            }
+        } else if (type === 'active') {
+            const p = particles.get(id);
+            if (p) { p.state = 'active'; p.color = THEME.active; }
+        } else if (type === 'completed') {
+            const p = particles.get(id);
+            if (p) { p.state = 'exiting'; p.exitProgress = 0; }
+        } else if (type === 'error') {
+            const p = particles.get(id);
+            if (p) { p.state = 'failed'; p.color = THEME.error; p.vY = -2; }
+        }
+    }
+
+    function updateServerLayout(name) {
+        serverNodes.set(name, { name });
+        const names = Array.from(serverNodes.keys()).sort();
+        const padding = 100;
+        const availableHeight = height - (padding * 2);
+        const spacing = availableHeight / Math.max(1, names.length - 1 || 1);
+        
+        names.forEach((n, i) => {
+            serverNodes.set(n, {
+                name: n,
+                x: width - 220,
+                y: padding + (i * (names.length === 1 ? availableHeight/2 : spacing))
+            });
+        });
+    }
+
+    function draw() {
+        ctx.fillStyle = THEME.bg;
+        ctx.fillRect(0, 0, width, height);
+
+        const startX = 60;
+        const splitX = width * 0.4;
+        const centerY = height / 2;
+
+        // 1. Draw Step-Tree Grid
+        ctx.lineWidth = 2;
+        serverNodes.forEach(s => {
+            ctx.beginPath();
+            ctx.strokeStyle = THEME.lineBase;
+            ctx.moveTo(startX, centerY);
+            ctx.lineTo(splitX - 20, centerY); // Horizontal Trunk
+            ctx.quadraticCurveTo(splitX, centerY, splitX, centerY + (s.y > centerY ? 20 : -20)); // Small curve
+            ctx.lineTo(splitX, s.y + (s.y > centerY ? -20 : 20)); // Vertical Splice
+            ctx.quadraticCurveTo(splitX, s.y, splitX + 20, s.y); // Corner curve
+            ctx.lineTo(s.x, s.y); // Horizontal Branch
+            ctx.stroke();
+
+            // Server Node
+            ctx.fillStyle = '#0a0a0f';
+            ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+            ctx.beginPath();
+            ctx.roundRect(s.x, s.y - 15, 180, 30, 4);
+            ctx.fill(); ctx.stroke();
+            ctx.fillStyle = '#fff';
+            ctx.font = '9px ui-monospace';
+            ctx.textAlign = 'left';
+            ctx.fillText(s.name, s.x + 8, s.y + 3);
+        });
+
+        // 2. Dispatcher Node
+        ctx.fillStyle = '#0a0a0f';
+        ctx.strokeStyle = THEME.received;
+        ctx.beginPath();
+        ctx.arc(startX, centerY, 20, 0, Math.PI*2);
+        ctx.fill(); ctx.stroke();
+
+        // 3. Particles
+        particles.forEach((p, id) => {
+            let x, y;
+            const speed = 0.008;
+
+            if (p.state === 'queued') {
+                x = startX; y = centerY + p.yOffset;
+                p.progress += 0.1;
+                p.size = 4 + Math.sin(p.progress) * 2;
+            } else if (p.state === 'traveling') {
+                p.progress += speed * 2;
+                const s = serverNodes.get(p.targetServer);
+                
+                // Rectilinear Interpolation
+                if (p.progress < 0.4) { // On Trunk
+                    const t = p.progress / 0.4;
+                    x = startX + (splitX - startX) * t;
+                    y = centerY;
+                } else { // On Branch
+                    const t = (p.progress - 0.4) / 0.6;
+                    x = splitX + (s.x - splitX) * t;
+                    y = centerY + (s.y - centerY) * t;
+                }
+                
+                if (p.progress >= 1) p.state = 'active';
+            } else if (p.state === 'active') {
+                const s = serverNodes.get(p.targetServer);
+                x = s.x; y = s.y;
+                p.size = 5 + Math.sin(Date.now()/100) * 2;
+            } else if (p.state === 'exiting') {
+                p.exitProgress += 0.02;
+                const s = serverNodes.get(p.targetServer);
+                x = s.x + ( (width - 40) - s.x ) * p.exitProgress;
+                y = s.y + ( (height - 40) - s.y ) * p.exitProgress;
+                p.alpha = 1 - p.exitProgress;
+                if (p.exitProgress >= 1) particles.delete(id);
+            } else if (p.state === 'failed') {
+                // Gravity fall effect
+                p.vY += 0.2;
+                p.x = p.x || splitX; // fallback to split point if failed early
+                p.y = (p.y || centerY) + p.vY;
+                x = p.x; y = p.y;
+                p.alpha -= 0.01;
+                if (p.alpha <= 0) particles.delete(id);
+            }
+
+            // Save last pos for failed state
+            p.x = x; p.y = y;
+
+            ctx.save();
+            ctx.globalAlpha = p.alpha;
+            ctx.shadowBlur = 10;
+            ctx.shadowColor = p.color;
+            ctx.fillStyle = p.color;
+            ctx.beginPath();
+            ctx.arc(x, y, p.size, 0, Math.PI*2);
+            ctx.fill();
+
+            // Clear horizontal labels
+            if (p.state !== 'exiting' && p.state !== 'failed') {
+                ctx.shadowBlur = 0;
+                ctx.fillStyle = 'rgba(255,255,255,0.5)';
+                ctx.font = '8px ui-monospace';
+                ctx.textAlign = 'left';
+                ctx.fillText(`${p.sender} > ${p.model}`, x + 10, y - 8);
+            }
+            ctx.restore();
+        });
+
+        requestAnimationFrame(draw);
+    }
+    
+    draw();
+});
+</script>
+{% endblock %}

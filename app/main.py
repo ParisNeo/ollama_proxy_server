@@ -154,7 +154,8 @@ async def lifespan(app: FastAPI):
     await create_initial_admin_user()
 
     # Configure HTTP client (timeouts are now hardcoded for simplicity)
-    timeout = httpx.Timeout(10.0, read=600.0, write=600.0, pool=60.0)
+    # TTFT MITIGATION: Lower connect timeout globally to avoid stalling on slow/dead servers
+    timeout = httpx.Timeout(read=600.0, write=600.0, connect=3.0, pool=60.0)
     limits = httpx.Limits(max_keepalive_connections=20, max_connections=100, keepalive_expiry=60.0)
     app.state.http_client = httpx.AsyncClient(timeout=timeout, limits=limits)
 
