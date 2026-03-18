@@ -987,7 +987,7 @@ async def proxy_ollama(
         event_type="received", 
         request_id=req_id, 
         model=model_name or "unknown",
-        sender=api_key.key_prefix
+        sender=api_key.user.username
     ))
 
     logger.info(f"proxy_ollama: Received {len(servers)} server(s) from get_active_servers dependency: {[s.name for s in servers]}")
@@ -1029,7 +1029,7 @@ async def proxy_ollama(
         api_key_id=api_key.id, log_id=log_id,
         request_id=req_id, 
         model=model_name or "unknown",
-        sender=api_key.key_prefix
+        sender=api_key.user.username
     )
 
     # Update log with server_id if we have a log entry

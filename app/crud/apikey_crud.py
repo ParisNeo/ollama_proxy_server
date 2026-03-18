@@ -2,6 +2,7 @@
 import secrets
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
+from sqlalchemy.orm import selectinload
 from sqlalchemy import update
 from typing import Optional
 
@@ -10,7 +11,11 @@ from app.core.security import get_api_key_hash
 
 
 async def get_api_key_by_prefix(db: AsyncSession, prefix: str) -> APIKey | None:
-    result = await db.execute(select(APIKey).filter(APIKey.key_prefix == prefix))
+    result = await db.execute(
+        select(APIKey)
+        .filter(APIKey.key_prefix == prefix)
+        .options(selectinload(APIKey.user))
+    )
     return result.scalars().first()
 
 

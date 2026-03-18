@@ -101,7 +101,8 @@ document.addEventListener('DOMContentLoaded', () => {
         received: '#6366f1',
         assigned: '#f59e0b',
         active: '#10b981',
-        error: '#ff4444'
+        success: '#10b981',
+        error: '#ef4444'
     };
 
     function resize() {
@@ -140,20 +141,25 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function handleEvent(data) {
         const { type, id, server, model, sender, ttft, tps, tokens } = data;
-        if (!particles.has(id) && type !== 'completed') {
+        
+        // Always update lastSeen for existing particles to prevent GC during long streams
+        if (particles.has(id)) {
+            particles.get(id).lastSeen = Date.now();
+        }
+
+        if (!particles.has(id) && type !== 'completed' && type !== 'error') {
             particles.set(id, {
                 id, state: 'queued', progress: 0,
                 sender: sender || 'anon', model: model || 'unknown',
                 color: THEME.received, size: 5, alpha: 1,
                 yOffset: (Math.random() - 0.5) * 15,
                 startTime: Date.now(),
-                lastSeen: Date.now(), // GC timestamp
+                lastSeen: Date.now(),
                 ttft: 0, tps: 0
             });
-        } else         if (type === 'assigned') {
+        } else if (type === 'assigned') {
             const p = particles.get(id);
             if (p) { 
-                p.lastSeen = Date.now();
                 if (p.state === 'queued') { p.state = 'traveling'; p.progress = 0; }
                 p.targetServer = server;
                 if (!serverNodes.has(server)) updateServerLayout(server);
@@ -161,7 +167,6 @@ document.addEventListener('DOMContentLoaded', () => {
         } else if (type === 'active') {
             const p = particles.get(id);
             if (p) { 
-                p.lastSeen = Date.now();
                 p.state = 'active'; 
                 p.color = THEME.active; 
                 p.ttft = ttft;
@@ -174,6 +179,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const p = particles.get(id);
             if (p) { 
                 p.state = 'completed'; 
+                p.color = THEME.success;
                 p.tps = tps;
                 p.finalTokens = tokens;
                 p.finishTime = Date.now();
@@ -191,7 +197,17 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         } else if (type === 'error') {
             const p = particles.get(id);
-            if (p) { p.state = 'failed'; p.color = THEME.error; p.vY = -3; }
+            if (p) { 
+                p.state = 'completed'; // Send to cemetery
+                p.color = THEME.error; 
+                p.finishTime = Date.now();
+                
+                historyQueue.unshift(p);
+                if (historyQueue.length > MAX_HISTORY) {
+                    const removed = historyQueue.pop();
+                    particles.delete(removed.id);
+                }
+            }
         }
     }
 
@@ -205,18 +221,54 @@ document.addEventListener('DOMContentLoaded', () => {
         names.forEach((n, i) => {
             serverNodes.set(n, {
                 name: n,
-                x: width - 200,
+                x: width - 220, // Move server slightly left to leave room for the line
                 y: names.length > 1 ? padding + (i * step) : height / 2
             });
         });
     }
 
-    function getQuadraticPoint(t, p0, p1, p2) {
-        const invT = 1 - t;
-        return {
-            x: invT * invT * p0.x + 2 * invT * t * p1.x + t * t * p2.x,
-            y: invT * invT * p0.y + 2 * invT * t * p1.y + t * t * p2.y
-        };
+    // Helper to get exact coordinates along the multi-segment path
+    function getPathPos(t, s) {
+        const startX = 60;
+        const centerY = height / 2;
+        const splitX = width * 0.4;
+        const endX = s.x;
+        const endY = s.y;
+
+        // segment lengths (approx proportions)
+        // 1: x-line, 2: curve, 3: y-line, 4: curve, 5: x-line
+        if (t <= 0.3) { // Segment 1: Horizontal
+            const st = t / 0.3;
+            return { x: startX + (splitX - 30 - startX) * st, y: centerY };
+        } else if (t <= 0.4) { // Segment 2: First Curve
+            const st = (t - 0.3) / 0.1;
+            const inv = 1 - st;
+            const p0 = { x: splitX - 30, y: centerY };
+            const p1 = { x: splitX, y: centerY };
+            const p2 = { x: splitX, y: centerY + (endY > centerY ? 30 : -30) };
+            return {
+                x: inv * inv * p0.x + 2 * inv * st * p1.x + st * st * p2.x,
+                y: inv * inv * p0.y + 2 * inv * st * p1.y + st * st * p2.y
+            };
+        } else if (t <= 0.6) { // Segment 3: Vertical
+            const st = (t - 0.4) / 0.2;
+            const yStart = centerY + (endY > centerY ? 30 : -30);
+            const yEnd = endY - (endY > centerY ? 30 : -30);
+            return { x: splitX, y: yStart + (yEnd - yStart) * st };
+        } else if (t <= 0.7) { // Segment 4: Second Curve
+            const st = (t - 0.6) / 0.1;
+            const inv = 1 - st;
+            const p0 = { x: splitX, y: endY - (endY > centerY ? 30 : -30) };
+            const p1 = { x: splitX, y: endY };
+            const p2 = { x: splitX + 30, y: endY };
+            return {
+                x: inv * inv * p0.x + 2 * inv * st * p1.x + st * st * p2.x,
+                y: inv * inv * p0.y + 2 * inv * st * p1.y + st * st * p2.y
+            };
+        } else { // Segment 5: Final Horizontal
+            const st = (t - 0.7) / 0.3;
+            return { x: (splitX + 30) + (endX - (splitX + 30)) * st, y: endY };
+        }
     }
 
     function draw() {
@@ -281,15 +333,27 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // 3. Prepare Server Slots (to prevent overlapping)
         const serverSlots = new Map(); // serverName -> count of active particles
+        // 4. Garbage Collection (Clear artifacts from disconnected clients)
         const now = Date.now();
         particles.forEach((p, id) => {
             const age = now - p.lastSeen;
-            // Purge if active for > 5m or queued for > 2m without updates
-            if ((p.state === 'active' && age > 300000) || (p.state === 'queued' && age > 120000)) {
-                particles.delete(id);
+            
+            // Aggressive cleanup: 
+            // - Queued requests that never assigned within 30s
+            // - Active requests with no updates for 60s (likely lost SSE connection)
+            if ((p.state === 'active' && age > 60000) || (p.state === 'queued' && age > 30000)) {
+                // If it was active but "died", move it to history as an error before deleting
+                if (p.state === 'active' && !historyQueue.includes(p)) {
+                    p.state = 'completed';
+                    p.color = THEME.error;
+                    historyQueue.unshift(p);
+                } else {
+                    particles.delete(id);
+                }
                 return;
             }
         });
+
 
         // 5. Particles
         particles.forEach((p, id) => {
@@ -322,26 +386,20 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 p.size = 3;
             } else if (p.state === 'traveling') {
-                p.progress += speed * 2;
+                p.progress += speed * 1.5;
                 const s = serverNodes.get(p.targetServer);
-                if (p.progress < 0.4) {
-                    x = startX + (splitX - startX) * (p.progress / 0.4);
-                    y = centerY;
-                } else {
-                    const t = (p.progress - 0.4) / 0.6;
-                    x = splitX + (s.x - splitX) * t;
-                    y = centerY + (s.y - centerY) * t;
-                }
+                const pos = getPathPos(p.progress, s);
+                x = pos.x; y = pos.y;
                 if (p.progress >= 1) p.state = 'active';
             } else if (p.state === 'active') {
                 const s = serverNodes.get(p.targetServer);
-                // Calculate slot offset to prevent superposition (Horizontal)
                 const slot = serverSlots.get(p.targetServer) || 0;
                 serverSlots.set(p.targetServer, slot + 1);
                 
-                const offset = (slot * 15); // Horizontal separation
-                x = s.x + 10 + offset; 
-                y = s.y;
+                // Stay on the line (Segment 5) by mapping slot to a slightly-less-than-1 progress
+                // Each particle sits ~20 pixels apart on the horizontal line segment
+                const pos = getPathPos(0.98 - (slot * 0.025), s);
+                x = pos.x; y = pos.y;
                 
                 p.size = 6 + Math.sin(Date.now()/100) * 2;
             } else if (p.state === 'exiting') {
@@ -351,13 +409,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 y = s.y + ( (height - 40) - s.y ) * p.exitProgress;
                 p.alpha = 1 - p.exitProgress;
                 if (p.exitProgress >= 1) particles.delete(id);
-            } else if (p.state === 'failed') {
-                p.vY += 0.2;
-                p.x = p.x || splitX;
-                p.y = (p.y || centerY) + p.vY;
-                x = p.x; y = p.y;
-                p.alpha -= 0.02;
-                if (p.alpha <= 0) particles.delete(id);
             }
 
             p.x = x; p.y = y;
@@ -404,9 +455,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (activeHover) {
             tooltip.style.display = 'block';
-            tooltip.style.left = (mouse.x + 20) + 'px';
-            tooltip.style.top = (mouse.y + 20) + 'px';
             
+            // Boundary-aware positioning
+            let tx = mouse.x + 20;
+            let ty = mouse.y + 20;
+            
+            // Temporarily set content to measure
             if (activeHover.type === 'request') {
                 const p = activeHover.data;
                 const elapsed = ((Date.now() - p.startTime) / 1000).toFixed(1);
@@ -433,6 +487,14 @@ document.addEventListener('DOMContentLoaded', () => {
                     <div class="text-white text-xs">NAME: ${s.name}</div>
                 `;
             }
+
+            // Flip tooltip if near edges
+            const bounds = container.getBoundingClientRect();
+            if (tx + 220 > bounds.width) tx = mouse.x - 240;
+            if (ty + 180 > bounds.height) ty = mouse.y - 200;
+
+            tooltip.style.left = tx + 'px';
+            tooltip.style.top = ty + 'px';
         } else {
             tooltip.style.display = 'none';
         }
