@@ -1,0 +1,97 @@
+{% extends "admin/base.html" %}
+{% block title %}Model Bundles{% endblock %}
+{% block header_title %}Model Bundles (Ensemble Orchestrator){% endblock %}
+
+{% block content %}
+<div class="space-y-8">
+    <div class="card-style">
+        <h2 class="card-header text-xl font-bold mb-4">Create New Bundle</h2>
+        <form action="{{ url_for('admin_add_bundle') }}" method="post" class="space-y-4">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-xs text-gray-400 uppercase font-bold">Bundle Name (listed as a model)</label>
+                    <input type="text" name="name" placeholder="e.g. super-mixture" required class="w-full p-2 rounded bg-black/20 border border-white/10">
+                </div>
+                <div class="flex items-end pb-1">
+                    <label class="flex items-center gap-2 cursor-pointer group">
+                        <input type="checkbox" name="show_monologue" value="true" class="h-5 w-5 rounded text-indigo-600">
+                        <span class="text-xs text-gray-400 uppercase font-bold group-hover:text-white transition-colors">Forward Internal Monologue</span>
+                    </label>
+                </div>
+                <div>
+                    <label class="block text-xs text-gray-400 uppercase font-bold">Master Model (Orchestrator)</label>
+                    <select name="master_model" class="w-full p-2 rounded bg-black/20 border border-white/10">
+                        {% for m in available_models %}
+                        <option value="{{ m }}">{{ m }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+
+            <div>
+                <label class="block text-xs text-gray-400 uppercase font-bold">Parallel Models (Participants)</label>
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-2 max-h-48 overflow-y-auto p-2 bg-black/20 rounded border border-white/10">
+                    {% for m in available_models %}
+                    <label class="flex items-center gap-2 text-sm">
+                        <input type="checkbox" name="parallel_models" value="{{ m }}" class="rounded text-indigo-600"> {{ m }}
+                    </label>
+                    {% endfor %}
+                </div>
+                <p class="text-[10px] text-gray-500 mt-1 italic">When you call the bundle, the prompt is sent to ALL selected models simultaneously. Their results are then synthesized by the Master.</p>
+            </div>
+
+            <div class="flex justify-end">
+                <button type="submit" class="bg-indigo-600 hover:bg-indigo-500 px-6 py-2 rounded font-bold text-sm">Deploy Bundle</button>
+            </div>
+        </form>
+    </div>
+
+    <div class="card-style">
+        <h2 class="card-header text-xl font-bold mb-4">Active Bundles</h2>
+        <table class="w-full text-left">
+            <thead>
+                <tr class="text-gray-500 text-xs uppercase">
+                    <th class="p-3">Name</th>
+                    <th class="p-3">Master</th>
+                    <th class="p-3 text-center">Monologue</th>
+                    <th class="p-3">Parallel Models</th>
+                    <th class="p-3 text-right">Actions</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-white/5">
+                {% for b in bundles %}
+                <tr>
+                    <td class="p-3 font-bold text-indigo-400">{{ b.name }}</td>
+                    <td class="p-3 font-mono text-xs">{{ b.master_model }}</td>
+                    <td class="p-3 text-center">
+                        {% if b.show_monologue %}
+                        <span class="text-green-400 text-[10px] font-bold">VISIBLE</span>
+                        {% else %}
+                        <span class="text-gray-600 text-[10px] font-bold">HIDDEN</span>
+                        {% endif %}
+                    </td>
+                    <td class="p-3">
+                        <div class="flex flex-wrap gap-1">
+                            {% for pm in b.parallel_models %}
+                            <span class="px-2 py-0.5 bg-white/5 border border-white/10 rounded text-[10px]">{{ pm }}</span>
+                            {% endfor %}
+                        </div>
+                    </td>
+                    <td class="p-3 text-right">
+                        <form action="{{ url_for('admin_delete_bundle', bundle_id=b.id) }}" method="post" onsubmit="return confirm('Delete this bundle?');">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                            <button type="submit" class="text-red-400 font-bold text-xs uppercase">Delete</button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+                {% if not bundles %}
+                <tr><td colspan="4" class="p-10 text-center text-gray-500 italic">No bundles configured.</td></tr>
+                {% endif %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

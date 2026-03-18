@@ -552,6 +552,15 @@ async def run_all_migrations(engine: AsyncEngine) -> None:
                 "total_tokens": "INTEGER",
                 "server_id": "INTEGER",
             },
+            "model_bundles": {
+                "id": "INTEGER NOT NULL PRIMARY KEY",
+                "name": "VARCHAR NOT NULL",
+                "description": "VARCHAR",
+                "parallel_models": "JSON NOT NULL",
+                "master_model": "VARCHAR NOT NULL",
+                "show_monologue": "BOOLEAN DEFAULT 0 NOT NULL",
+                "is_active": "BOOLEAN DEFAULT 1 NOT NULL",
+            },
             "model_metadata": {
                 "id": "INTEGER NOT NULL PRIMARY KEY",
                 "model_name": "VARCHAR NOT NULL",
@@ -560,6 +569,8 @@ async def run_all_migrations(engine: AsyncEngine) -> None:
                 "is_code_model": "BOOLEAN NOT NULL DEFAULT 0",
                 "is_chat_model": "BOOLEAN NOT NULL DEFAULT 1",
                 "is_fast_model": "BOOLEAN NOT NULL DEFAULT 0",
+                "is_reasoning_model": "BOOLEAN NOT NULL DEFAULT 0",
+                "max_context": "INTEGER NOT NULL DEFAULT 4096",
                 "priority": "INTEGER NOT NULL DEFAULT 10",
             },
         }

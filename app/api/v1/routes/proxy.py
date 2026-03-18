@@ -6,6 +6,7 @@ from typing import List, Tuple, Optional, Dict, Any
 from fastapi import APIRouter, Depends, Request, Response, HTTPException, status
 from fastapi.responses import StreamingResponse, JSONResponse
 import httpx
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.session import get_db
@@ -320,12 +321,12 @@ async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer
                 )
                 return wrapped_response, chosen_server
             else:
-                # Non-streaming, return as-is (tokens will be extracted if possible)
-                if log_id and backend_response.status_code == 200:
-                    # Try to extract tokens from non-streaming response
-                    try:
-                        body = await backend_response.aread()
-                        if body:
+                # Non-streaming, return as Starlette Response (tokens will be extracted if possible)
+                # Consuming the body here is necessary for both token extraction and to prevent socket-serialization errors.
+                try:
+                    body = await backend_response.aread()
+                    if log_id and backend_response.status_code == 200 and body:
+                        try:
                             data = json.loads(body.decode('utf-8'))
                             tokens = _extract_tokens_from_chunk(data)
                             if tokens.get("total_tokens") is not None or tokens.get("prompt_tokens") is not None:
@@ -335,16 +336,18 @@ async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer
                                     tokens["completion_tokens"],
                                     tokens["total_tokens"]
                                 ))
-                        # Need to create a new response since we consumed the body
-                        return Response(
-                            content=body,
-                            status_code=backend_response.status_code,
-                            headers=dict(backend_response.headers)
-                        ), chosen_server
-                    except Exception:
-                        pass
-                # Return original response if we couldn't extract tokens
-                return backend_response, chosen_server
+                        except Exception:
+                            pass
+                    
+                    # Return a standard Starlette Response instead of raw httpx.Response
+                    return Response(
+                        content=body,
+                        status_code=backend_response.status_code,
+                        headers=dict(backend_response.headers)
+                    ), chosen_server
+                except Exception as e:
+                    logger.error(f"Failed to read backend response body: {e}")
+                    raise
             
         except Exception as first_error:
             _update_health_cache(chosen_server.id, False)
@@ -562,8 +565,9 @@ def _wrap_response_for_token_tracking(
                     pass
                 
         except Exception as e:
+            error_detail = str(e)[:200]
             logger.error(f"Error in token tracking stream: {e}")
-            # Don't re-raise, just stop processing tokens
+            event_manager.emit(ProxyEvent("error", request_id, model, server.name, sender, error_message=error_detail))
     
     # Return StreamingResponse with proper headers
     response_headers = dict(backend_response.headers)
@@ -796,6 +800,30 @@ async def federate_models(
 
     logger.info(f"/tags: Total unique models before adding 'auto': {len(all_models)}")
 
+    # Add Bundles to the list
+    try:
+        from app.database.models import ModelBundle
+        result = await db.execute(select(ModelBundle).filter(ModelBundle.is_active == True))
+        bundles = result.scalars().all()
+        for b in bundles:
+            all_models[b.name] = {
+                "name": b.name,
+                "model": b.name,
+                "modified_at": b.created_at.isoformat() + "Z",
+                "size": 0,
+                "digest": f"bundle-{b.id}",
+                "details": {
+                    "parent_model": "",
+                    "format": "bundle",
+                    "family": "ensemble",
+                    "families": ["ensemble"],
+                    "parameter_size": "multiple",
+                    "quantization_level": "N/A"
+                }
+            }
+    except Exception as e:
+        logger.error(f"Failed to load bundles for /tags: {e}")
+
     all_models["auto"] = {
         "name": "auto",
         "model": "auto",
@@ -859,24 +887,38 @@ async def _async_log_usage(
 
 
 async def _select_auto_model(db: AsyncSession, body: Dict[str, Any]) -> Optional[str]:
-    """Selects the best model based on metadata and request content."""
+    """Selects the best model based on metadata, request content, and context length."""
     
     has_images = "images" in body and body["images"]
     
-    prompt_content = ""
+    # 1. Extract and Analyze Content
+    full_history_text = ""
+    last_user_prompt = ""
+    
     if "prompt" in body:
-        prompt_content = body["prompt"]
+        last_user_prompt = body["prompt"]
+        full_history_text = last_user_prompt
     elif "messages" in body:
-        last_message = body["messages"][-1] if body["messages"] else {}
-        if isinstance(last_message.get("content"), str):
-            prompt_content = last_message["content"]
-        elif isinstance(last_message.get("content"), list):
-             text_part = next((p.get("text", "") for p in last_message["content"] if p.get("type") == "text"), "")
-             prompt_content = text_part
+        for msg in body["messages"]:
+            content = msg.get("content", "")
+            if isinstance(content, list):
+                content = " ".join([p.get("text", "") for p in content if p.get("type") == "text"])
+            full_history_text += content + " "
+            if msg.get("role") == "user":
+                last_user_prompt = content
 
+    # Detect Reasoning Intent
+    reasoning_keywords = ["solve", "prove", "math", "why", "logic", "calculate", "step by step", "complex"]
+    is_reasoning_task = any(kw in last_user_prompt.lower() for kw in reasoning_keywords)
+
+    # Detect Coding Intent
     code_keywords = ["def ", "class ", "import ", "const ", "let ", "var ", "function ", "public static void", "int main("]
-    contains_code = any(kw.lower() in prompt_content.lower() for kw in code_keywords)
+    contains_code = any(kw.lower() in last_user_prompt.lower() for kw in code_keywords)
 
+    # Estimate Context Length (approx 4 chars per token)
+    estimated_tokens = len(full_history_text) // 4
+
+    # 2. Filter Candidates
     all_metadata = await model_metadata_crud.get_all_metadata(db)
     all_available_models = await server_crud.get_all_available_model_names(db)
     available_metadata = [m for m in all_metadata if m.model_name in all_available_models]
@@ -887,34 +929,143 @@ async def _select_auto_model(db: AsyncSession, body: Dict[str, Any]) -> Optional
 
     candidate_models = available_metadata
 
+    # Tier 1: Capability Matching
     if has_images:
-        logger.info("Auto-routing: Filtering for models that support images.")
         candidate_models = [m for m in candidate_models if m.supports_images]
     
+    if is_reasoning_task:
+        reasoning_models = [m for m in candidate_models if m.is_reasoning_model]
+        if reasoning_models:
+            candidate_models = reasoning_models
+
     if contains_code:
-        logger.info("Auto-routing: Filtering for code models.")
         code_models = [m for m in candidate_models if m.is_code_model]
         if code_models:
             candidate_models = code_models
 
+    # Tier 2: Resource/Constraint Matching
     if body.get("options", {}).get("fast_model"):
-        logger.info("Auto-routing: Filtering for fast models.")
         fast_models = [m for m in candidate_models if m.is_fast_model]
         if fast_models:
             candidate_models = fast_models
 
+    # Filter by context window (don't route huge prompts to tiny models)
+    capable_context = [m for m in candidate_models if m.max_context >= estimated_tokens]
+    if capable_context:
+        candidate_models = capable_context
+
     if not candidate_models:
-        logger.warning("Auto-routing: No models matched the request criteria. Falling back to the highest priority model available.")
+        logger.warning("Auto-routing: Strict criteria failed. Falling back to priority list.")
         candidate_models = available_metadata
 
     if not candidate_models:
         return None
 
-    best_model = candidate_models[0]
-    logger.info(f"Auto-routing selected model '{best_model.model_name}' with priority {best_model.priority}.")
+    # Sort by priority
+    candidate_models.sort(key=lambda x: x.priority)
+    top_priority = candidate_models[0].priority
     
+    # Tier 3: Load Balancing (Random choice among tied top-priority models)
+    best_tier = [m for m in candidate_models if m.priority == top_priority]
+    best_model = secrets.choice(best_tier)
+    
+    logger.info(f"Auto-routing: Detected [Tokens: ~{estimated_tokens}, Reasoning: {is_reasoning_task}, Code: {contains_code}]. Selected '{best_model.model_name}'.")
     return best_model.model_name
 
+
+async def _handle_bundle_request(db: AsyncSession, request: Request, bundle_name: str, body: Dict[str, Any], api_key: APIKey):
+    """Orchestrates parallel model execution and synthesis."""
+    from app.database.models import ModelBundle
+    result = await db.execute(select(ModelBundle).filter(ModelBundle.name == bundle_name))
+    bundle = result.scalars().first()
+    if not bundle:
+        raise HTTPException(status_code=404, detail="Bundle not found")
+
+    request_id = secrets.token_hex(4)
+    event_manager.emit(ProxyEvent("received", request_id, bundle_name, "orchestrator", api_key.user.username))
+
+    # 1. Parallel Execution
+    async def get_sub_response(m_name):
+        sub_body = body.copy()
+        sub_body["model"] = m_name
+        sub_body["stream"] = False # Must be sync for synthesis
+        try:
+            # Re-use proxy logic to find right server for each sub-model
+            servers = await server_crud.get_servers_with_model(db, m_name)
+            if not servers: return f"Model {m_name} not found."
+            
+            resp, _ = await _reverse_proxy(request, "chat" if "messages" in body else "generate", 
+                                         servers, json.dumps(sub_body).encode(), sender="bundle-agent")
+            
+            # Read full body
+            if isinstance(resp, StreamingResponse):
+                content = ""
+                async for chunk in resp.body_iterator:
+                    data = json.loads(chunk.decode())
+                    content += data.get("message", {}).get("content", "") or data.get("response", "")
+                return content
+            return resp.json().get("message", {}).get("content", "") or resp.json().get("response", "")
+        except Exception as e:
+            return f"Error from {m_name}: {str(e)}"
+
+    event_manager.emit(ProxyEvent("assigned", request_id, bundle_name, "parallel-agents", api_key.user.username))
+    tasks = [get_sub_response(m) for m in bundle.parallel_models]
+    results = await asyncio.gather(*tasks)
+
+    # 2. Synthesis Prompt Construction
+    agent_outputs = "\n\n".join([f"### RESPONSE FROM AGENT {i+1} ({bundle.parallel_models[i]}):\n{res}" for i, res in enumerate(results)])
+    
+    user_query = body.get("prompt") or (body.get("messages", [{}])[-1].get("content") if body.get("messages") else "N/A")
+    
+    synthesis_prompt = f"""You are a Master Synthesis Model. You have received several responses to the following user query:
+"{user_query}"
+
+Here are the responses from different models:
+{agent_outputs}
+
+TASK:
+1. Evaluate the quality and accuracy of the responses.
+2. Synthesize a single, definitive, and high-quality "Golden Answer" based on the best parts of all responses.
+3. If there are contradictions, use your own reasoning to determine the correct path.
+
+Respond only with the final synthesis."""
+
+    # 3. Master Synthesis Call
+    master_body = body.copy()
+    master_body["model"] = bundle.master_model
+    if "prompt" in master_body:
+        master_body["prompt"] = synthesis_prompt
+    else:
+        master_body["messages"] = [{"role": "user", "content": synthesis_prompt}]
+    
+    event_manager.emit(ProxyEvent("active", request_id, bundle_name, bundle.master_model, api_key.user.username))
+    
+    servers = await server_crud.get_servers_with_model(db, bundle.master_model)
+    final_resp, _ = await _reverse_proxy(request, "chat" if "messages" in body else "generate", 
+                                        servers, json.dumps(master_body).encode(), sender=api_key.user.username)
+    
+    # 4. Optional Monologue Injection
+    if bundle.show_monologue:
+        # We need to wrap the response to inject the monologue at the start
+        monologue_header = f"\n\n"
+        
+        if isinstance(final_resp, StreamingResponse):
+            async def monologue_stream():
+                # Yield the monologue first
+                yield (json.dumps({"model": bundle_name, "message": {"role": "assistant", "content": monologue_header}, "done": False}) + "\n").encode()
+                async for chunk in final_resp.body_iterator:
+                    yield chunk
+            return StreamingResponse(monologue_stream(), media_type="application/x-ndjson")
+        else:
+            # Sync response modification
+            data = final_resp.json()
+            if "message" in data:
+                data["message"]["content"] = monologue_header + data["message"]["content"]
+            elif "response" in data:
+                data["response"] = monologue_header + data["response"]
+            return JSONResponse(content=data)
+
+    return final_resp
 
 @router.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"])
 async def proxy_ollama(
@@ -981,6 +1132,12 @@ async def proxy_ollama(
         model_name = chosen_model_name
         body["model"] = model_name
         body_bytes = json.dumps(body).encode('utf-8')
+
+    # Detect Bundle
+    from app.database.models import ModelBundle
+    bundle_check = await db.execute(select(ModelBundle).filter(ModelBundle.name == model_name))
+    if bundle_check.scalars().first():
+        return await _handle_bundle_request(db, request, model_name, body, api_key)
 
     # Emit event: proxy received the connection
     event_manager.emit(ProxyEvent(

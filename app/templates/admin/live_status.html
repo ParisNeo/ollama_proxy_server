@@ -140,7 +140,7 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     function handleEvent(data) {
-        const { type, id, server, model, sender, ttft, tps, tokens } = data;
+        const { type, id, server, model, sender, ttft, tps, tokens, error } = data;
         
         // Always update lastSeen for existing particles to prevent GC during long streams
         if (particles.has(id)) {
@@ -200,9 +200,10 @@ document.addEventListener('DOMContentLoaded', () => {
             if (p) { 
                 p.state = 'completed'; // Send to cemetery
                 p.color = THEME.error; 
+                p.error = error || "Unknown Server Error";
                 p.finishTime = Date.now();
                 
-                historyQueue.unshift(p);
+                if (!historyQueue.includes(p)) historyQueue.unshift(p);
                 if (historyQueue.length > MAX_HISTORY) {
                     const removed = historyQueue.pop();
                     particles.delete(removed.id);
@@ -463,7 +464,15 @@ document.addEventListener('DOMContentLoaded', () => {
             // Temporarily set content to measure
             if (activeHover.type === 'request') {
                 const p = activeHover.data;
-                const elapsed = ((Date.now() - p.startTime) / 1000).toFixed(1);
+                const elapsed = ((Date.now() - (p.finishTime || p.startTime)) / 1000).toFixed(1);
+                
+                let errorHtml = p.error ? `
+                    <div class="text-red-400 font-bold mt-2 mb-1">FAILURE REASON</div>
+                    <div class="text-red-300 text-[10px] bg-red-900/20 p-2 rounded border border-red-500/20 max-w-[200px] break-words">
+                        ${p.error}
+                    </div>
+                ` : '';
+
                 tooltip.innerHTML = `
                     <div class="text-[var(--color-primary-400)] font-bold mb-1">REQUEST INFO</div>
                     <div class="text-white text-xs border-b border-white/5 pb-2 mb-2">
@@ -476,9 +485,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     <div class="text-white text-xs">
                         TTFT: <span class="text-amber-400">${(p.ttft !== undefined && p.ttft !== null) ? p.ttft : '--'} ms</span><br>
                         SPEED: <span class="text-emerald-400">${(p.tps !== undefined && p.tps !== null) ? p.tps : '--'} t/s</span><br>
-                        TOKENS: <span class="text-emerald-400">${p.finalTokens || '--'}</span><br>
-                        TOTAL TIME: <span class="text-gray-400">${elapsed}s</span>
+                        TOKENS: <span class="text-emerald-400">${p.finalTokens || '--'}</span>
                     </div>
+                    ${errorHtml}
                 `;
             } else {
                 const s = activeHover.data;

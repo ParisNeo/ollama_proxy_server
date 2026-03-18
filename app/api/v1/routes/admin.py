@@ -871,6 +871,8 @@ async def admin_update_model_metadata(
                 "supports_images": f"supports_images_{meta_id}" in form_data,
                 "is_code_model": f"is_code_model_{meta_id}" in form_data,
                 "is_fast_model": f"is_fast_model_{meta_id}" in form_data,
+                "is_reasoning_model": f"is_reasoning_model_{meta_id}" in form_data,
+                "max_context": int(form_data.get(f"max_context_{meta_id}", 4096)),
                 "priority": int(form_data.get(f"priority_{meta_id}", 10)),
             }
             await model_metadata_crud.update_metadata(db, model_name=metadata.model_name, **update_data)
@@ -1487,6 +1489,53 @@ async def delete_user_account(request: Request, user_id: int, db: AsyncSession =
     return RedirectResponse(url=request.url_for("admin_users"), status_code=status.HTTP_303_SEE_OTHER)
 
 # --- INSTANCE MANAGER ROUTES ---
+
+# --- MODEL BUNDLE ROUTES ---
+@router.get("/bundles", response_class=HTMLResponse, name="admin_bundles")
+async def admin_bundles_page(request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
+    from app.database.models import ModelBundle
+    context = get_template_context(request)
+    result = await db.execute(select(ModelBundle))
+    context["bundles"] = result.scalars().all()
+    context["available_models"] = await server_crud.get_all_available_model_names(db)
+    context["csrf_token"] = await get_csrf_token(request)
+    return templates.TemplateResponse("admin/bundles.html", context)
+
+@router.post("/bundles/add", name="admin_add_bundle", dependencies=[Depends(validate_csrf_token)])
+async def admin_add_bundle(
+    request: Request, 
+    db: AsyncSession = Depends(get_db), 
+    admin_user: User = Depends(require_admin_user),
+    name: str = Form(...),
+    master_model: str = Form(...),
+    parallel_models: List[str] = Form(...),
+    show_monologue: bool = Form(False)
+):
+    from app.database.models import ModelBundle
+    # Sanitize name to look like a model name
+    name = re.sub(r'[^a-z0-9.-]', '-', name.lower())
+    
+    new_bundle = ModelBundle(
+        name=name,
+        master_model=master_model,
+        parallel_models=parallel_models,
+        show_monologue=show_monologue,
+        description=f"Ensemble: {', '.join(parallel_models)} -> {master_model}"
+    )
+    db.add(new_bundle)
+    await db.commit()
+    flash(request, f"Bundle '{name}' created successfully.", "success")
+    return RedirectResponse(url=request.url_for("admin_bundles"), status_code=303)
+
+@router.post("/bundles/{bundle_id}/delete", name="admin_delete_bundle", dependencies=[Depends(validate_csrf_token)])
+async def admin_delete_bundle(bundle_id: int, request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
+    from app.database.models import ModelBundle
+    bundle = await db.get(ModelBundle, bundle_id)
+    if bundle:
+        await db.delete(bundle)
+        await db.commit()
+        flash(request, "Bundle deleted.")
+    return RedirectResponse(url=request.url_for("admin_bundles"), status_code=303)
 
 @router.get("/instances", response_class=HTMLResponse, name="admin_instances")
 async def admin_instances_page(request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):

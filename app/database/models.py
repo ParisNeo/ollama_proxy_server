@@ -112,6 +112,19 @@ class ModelMetadata(Base):
     is_code_model = Column(Boolean, default=False, nullable=False)
     is_chat_model = Column(Boolean, default=True, nullable=False)
     is_fast_model = Column(Boolean, default=False, nullable=False)
+    is_reasoning_model = Column(Boolean, default=False, nullable=False)
+    max_context = Column(Integer, default=4096, nullable=False)
     priority = Column(Integer, default=10, nullable=False)
     
     __table_args__ = (UniqueConstraint("model_name", name="uq_model_name"),)
+
+class ModelBundle(Base):
+    __tablename__ = "model_bundles"
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, unique=True, index=True, nullable=False)
+    description = Column(String, nullable=True)
+    parallel_models = Column(JSON, nullable=False) # List of model names
+    master_model = Column(String, nullable=False)
+    show_monologue = Column(Boolean, default=False) # Whether to show raw agent outputs
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)

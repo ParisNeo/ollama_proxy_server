@@ -28,8 +28,10 @@
                         <th class="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Model Name</th>
                         <th class="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Description</th>
                         <th class="px-4 py-3 text-center text-xs font-medium text-gray-400 uppercase tracking-wider">Supports Images</th>
-                        <th class="px-4 py-3 text-center text-xs font-medium text-gray-400 uppercase tracking-wider">Code Model</th>
-                        <th class="px-4 py-3 text-center text-xs font-medium text-gray-400 uppercase tracking-wider">Fast Model</th>
+                        <th class="px-4 py-3 text-center text-xs font-medium text-gray-400 uppercase tracking-wider">Code</th>
+                        <th class="px-4 py-3 text-center text-xs font-medium text-gray-400 uppercase tracking-wider">Fast</th>
+                        <th class="px-4 py-3 text-center text-xs font-medium text-gray-400 uppercase tracking-wider">Reasoning</th>
+                        <th class="px-4 py-3 text-center text-xs font-medium text-gray-400 uppercase tracking-wider">Max Context</th>
                         <th class="px-4 py-3 text-center text-xs font-medium text-gray-400 uppercase tracking-wider">Priority</th>
                     </tr>
                 </thead>
@@ -50,7 +52,13 @@
                             <input type="checkbox" name="is_fast_model_{{ meta.id }}" value="true" class="h-5 w-5 rounded text-[var(--color-primary-600)]" {% if meta.is_fast_model %}checked{% endif %}>
                         </td>
                         <td class="px-4 py-4 whitespace-nowrap text-center">
-                             <input type="number" name="priority_{{ meta.id }}" value="{{ meta.priority }}" class="w-20 px-2 py-1 rounded-md shadow-sm sm:text-sm text-center">
+                            <input type="checkbox" name="is_reasoning_model_{{ meta.id }}" value="true" class="h-5 w-5 rounded text-[var(--color-primary-600)]" {% if meta.is_reasoning_model %}checked{% endif %}>
+                        </td>
+                        <td class="px-4 py-4 whitespace-nowrap text-center">
+                             <input type="number" name="max_context_{{ meta.id }}" value="{{ meta.max_context }}" step="1024" class="w-24 px-2 py-1 rounded-md shadow-sm sm:text-sm text-center">
+                        </td>
+                        <td class="px-4 py-4 whitespace-nowrap text-center">
+                             <input type="number" name="priority_{{ meta.id }}" value="{{ meta.priority }}" class="w-16 px-2 py-1 rounded-md shadow-sm sm:text-sm text-center">
                         </td>
                     </tr>
                     {% else %}
