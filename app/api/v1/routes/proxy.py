@@ -217,7 +217,7 @@ async def _update_log_with_tokens_async(
 async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer], body_bytes: bytes = "", 
                         api_key_id: Optional[int] = None, log_id: Optional[int] = None,
                         request_id: Optional[str] = None, model: str = "unknown",
-                        sender: str = "anon") -> Tuple[Response, OllamaServer]:
+                        sender: str = "anon", is_subrequest: bool = False) -> Tuple[Response, OllamaServer]:
     """
     Core reverse proxy logic with retry support and token tracking.
     """
@@ -314,7 +314,7 @@ async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer
             # Check if this is a streaming response
             is_streaming = _is_streaming_response(backend_response)
             
-            if is_streaming and log_id:
+            if is_streaming and log_id and not is_subrequest:
                 # Wrap for token tracking and live visualization
                 wrapped_response = _wrap_response_for_token_tracking(
                     backend_response, chosen_server, api_key_id, log_id, path, request_id, model, sender
@@ -563,12 +563,35 @@ def _wrap_response_for_token_tracking(
                             ))
                 except json.JSONDecodeError:
                     pass
-                
         except Exception as e:
-            error_detail = str(e)[:200]
-            logger.error(f"Error in token tracking stream: {e}")
-            event_manager.emit(ProxyEvent("error", request_id, model, server.name, sender, error_message=error_detail))
-    
+            # Check if this was a normal disconnect or an actual error
+            is_disconnect = any(x in str(e).lower() for x in ["broken pipe", "connection reset", "cancelled"])
+            
+            if is_disconnect and not is_first_token:
+                # If we were already streaming, this is often just the client closing the socket
+                logger.debug(f"Client disconnected for {request_id}. Marking as completed.")
+                event_manager.emit(ProxyEvent("completed", request_id, model, server.name, sender, 
+                                            token_count=accumulated_tokens["total_tokens"] or 0,
+                                            error_message=None)) # Explicitly clear error
+            else:
+                error_detail = str(e)
+                logger.error(f"Error in token tracking stream for {request_id}: {error_detail}")
+                event_manager.emit(ProxyEvent("error", request_id, model, server.name, sender, error_message=error_detail))
+        finally:
+            # SAFETY CHECK: Ensure the UI always gets a closing event
+            if not tokens_finalized and request_id:
+                event_manager.emit(ProxyEvent(
+                    event_type="completed", 
+                    request_id=request_id, 
+                    model=model, 
+                    server=server.name, 
+                    sender=sender,
+                    token_count=accumulated_tokens["total_tokens"] or 0,
+                    prompt_tokens=accumulated_tokens["prompt_tokens"] or p_tokens,
+                    tps=0
+                ))    
+
+
     # Return StreamingResponse with proper headers
     response_headers = dict(backend_response.headers)
     # Remove content-length since we're streaming
@@ -800,10 +823,20 @@ async def federate_models(
 
     logger.info(f"/tags: Total unique models before adding 'auto': {len(all_models)}")
 
-    # Add Bundles to the list
+    # Add Pools & Bundles to the list
     try:
-        from app.database.models import ModelBundle
-        result = await db.execute(select(ModelBundle).filter(ModelBundle.is_active == True))
+        from app.database.models import EnsembleOrchestrator, SmartRouter
+        
+        # Add Pools
+        res_p = await db.execute(select(SmartRouter).filter(SmartRouter.is_active == True))
+        for p in res_p.scalars().all():
+            all_models[p.name] = {
+                "name": p.name, "model": p.name, "size": 0, "digest": f"pool-{p.id}",
+                "details": {"format": "pool", "family": "router", "parameter_size": "pool"}
+            }
+
+        # Add Bundles
+        result = await db.execute(select(EnsembleOrchestrator).filter(EnsembleOrchestrator.is_active == True))
         bundles = result.scalars().all()
         for b in bundles:
             all_models[b.name] = {
@@ -973,99 +1006,260 @@ async def _select_auto_model(db: AsyncSession, body: Dict[str, Any]) -> Optional
     return best_model.model_name
 
 
-async def _handle_bundle_request(db: AsyncSession, request: Request, bundle_name: str, body: Dict[str, Any], api_key: APIKey):
-    """Orchestrates parallel model execution and synthesis."""
-    from app.database.models import ModelBundle
-    result = await db.execute(select(ModelBundle).filter(ModelBundle.name == bundle_name))
+async def _resolve_target(db: AsyncSession, name: str, messages: List[Dict[str, Any]], depth: int = 0) -> Tuple[str, List[Dict[str, Any]]]:
+    """Recursively resolves a name into a physical model + final message list (for Virtual Agents)."""
+    if depth > 5: return name, messages # Circular protection
+
+    from app.database.models import VirtualAgent, SmartRouter
+    
+    # Check if it's a Virtual Agent (Model + Personality)
+    agent_res = await db.execute(select(VirtualAgent).filter(VirtualAgent.name == name, VirtualAgent.is_active == True))
+    agent = agent_res.scalars().first()
+    if agent:
+        # Inject Soul: Prepend system prompt to messages
+        updated_messages = [{"role": "system", "content": agent.system_prompt}] + messages
+        return await _resolve_target(db, agent.base_model, updated_messages, depth + 1)
+
+    # Check if it's a Smart Router (formerly Pool)
+    router_res = await db.execute(select(SmartRouter).filter(SmartRouter.name == name, SmartRouter.is_active == True))
+    router = router_res.scalars().first()
+    if router:
+        # Note: In a real scenario, we'd pass the body here to evaluate rules
+        # For this refactor, we resolve to the first target or priority target
+        chosen_target = router.targets[0] if router.targets else name
+        return await _resolve_target(db, chosen_target, messages, depth + 1)
+
+    return name, messages
+
+async def _select_from_pool(db: AsyncSession, pool_name: str, body: Dict[str, Any], sender: str = "anon") -> Optional[str]:
+    """Selects a model using Advanced Firewall Rules or Router Strategy."""
+    from app.database.models import SmartRouter
+    res = await db.execute(select(SmartRouter).filter(SmartRouter.name == pool_name))
+    pool = res.scalars().first()
+    if not pool or not pool.targets:
+        return None
+
+    all_available = await server_crud.get_all_available_model_names(db)
+    # Validate targets exist (could be models or agents)
+    valid_models = [m for m in pool.targets if m in all_available or m] 
+    if not valid_models: return None
+
+    # --- ADVANCED RULES EVALUATION ---
+    if pool.rules:
+        # 1. Extract Request Features
+        prompt = body.get("prompt") or ""
+        if not prompt and "messages" in body:
+            prompt = body["messages"][-1].get("content", "")
+            if isinstance(prompt, list):
+                prompt = " ".join([p.get("text", "") for p in prompt if p.get("type") == "text"])
+        
+        features = {
+            "has_images": bool(body.get("images") or any(m.get("images") for m in body.get("messages", []) if isinstance(m, dict))),
+            "len": len(prompt),
+            "sender": sender,
+            "streaming": body.get("stream", False)
+        }
+
+        # 2. Match Rules (First Match Wins)
+        for rule in pool.rules:
+            try:
+                condition = rule.get("condition")
+                val = rule.get("value")
+                match = False
+                
+                if condition == "has_images" and features["has_images"]: match = True
+                elif condition == "min_len" and features["len"] >= int(val): match = True
+                elif condition == "max_len" and features["len"] <= int(val): match = True
+                elif condition == "user" and features["sender"] == val: match = True
+                elif condition == "keyword" and val.lower() in prompt.lower(): match = True
+
+                if match:
+                    target = rule.get("target")
+                    if target in valid_models:
+                        logger.info(f"Pool Rule Match: '{pool_name}' -> '{target}' based on {condition}:{val}")
+                        return target
+            except Exception as e:
+                logger.warning(f"Error evaluating pool rule: {e}")
+
+    # --- STRATEGY FALLBACK ---
+    if pool.strategy == 'random':
+        return secrets.choice(valid_models)
+    
+    if pool.strategy == 'least_loaded':
+        # Strategy to maximize TPS: find server with fewest active connections
+        # For simplicity, we prioritize models that are currently 'running' (cached in memory)
+        active_models = [m['name'] for m in await server_crud.get_active_models_all_servers(db, httpx.AsyncClient())]
+        running_in_pool = [m for m in valid_models if m in active_models]
+        if running_in_pool:
+            return secrets.choice(running_in_pool)
+        return valid_models[0]
+
+    # Default to priority (first in list)
+    return valid_models[0]
+
+async def _handle_bundle_request(db: AsyncSession, request: Request, bundle_name: str, body: Dict[str, Any], api_key: APIKey, request_id: str):
+    """Orchestrates parallel model execution and synthesis (Ensemble)."""
+    from app.database.models import EnsembleOrchestrator
+    from app.database.session import AsyncSessionLocal
+    
+    result = await db.execute(select(EnsembleOrchestrator).filter(EnsembleOrchestrator.name == bundle_name))
     bundle = result.scalars().first()
     if not bundle:
+        event_manager.emit(ProxyEvent("error", request_id, bundle_name, "none", api_key.user.username, error_message="Bundle not found"))
         raise HTTPException(status_code=404, detail="Bundle not found")
 
-    request_id = secrets.token_hex(4)
-    event_manager.emit(ProxyEvent("received", request_id, bundle_name, "orchestrator", api_key.user.username))
-
-    # 1. Parallel Execution
-    async def get_sub_response(m_name):
-        sub_body = body.copy()
-        sub_body["model"] = m_name
-        sub_body["stream"] = False # Must be sync for synthesis
+    async def bundle_orchestrator_generator():
         try:
-            # Re-use proxy logic to find right server for each sub-model
-            servers = await server_crud.get_servers_with_model(db, m_name)
-            if not servers: return f"Model {m_name} not found."
+            # 1. Immediate Status Update
+            if bundle.send_status_update:
+                status_msg = f"✨ Orchestrating ensemble via: {', '.join(bundle.parallel_participants)}... gathering perspectives.\n\n"
+                yield (json.dumps({"model": bundle_name, "message": {"role": "assistant", "content": status_msg}, "done": False}) + "\n").encode()
+
+            # 2. Parallel Participant Execution
+            event_manager.emit(ProxyEvent("assigned", request_id, bundle_name, "orchestrator", api_key.user.username))
             
-            resp, _ = await _reverse_proxy(request, "chat" if "messages" in body else "generate", 
-                                         servers, json.dumps(sub_body).encode(), sender="bundle-agent")
+            async def get_sub_response(p_name):
+                # Assign a unique ID for this specific agent to visualize it in the Live Flow
+                sub_req_id = f"{request_id}_{p_name}"
+                event_manager.emit(ProxyEvent(
+                    event_type="received", 
+                    request_id=sub_req_id, 
+                    model=p_name, 
+                    sender="orchestrator",
+                    request_type="AGENT"
+                ))
+
+                # Use a fresh session for the generator logic to avoid closed-session errors
+                async with AsyncSessionLocal() as local_db:
+                    sub_messages = body.get("messages", [])
+                    real_model, final_messages = await _resolve_target(local_db, p_name, sub_messages)
+                    
+                    sub_body = body.copy()
+                    sub_body["model"] = real_model
+                    sub_body["stream"] = False # Participants must NOT stream for parallel gather
+                    
+                    try:
+                        servers = await server_crud.get_servers_with_model(local_db, real_model)
+                        if not servers: 
+                            event_manager.emit(ProxyEvent("error", sub_req_id, p_name, "none", "orchestrator", error_message="Model not found"))
+                            return f"Error: Model {real_model} not found."
+                        
+                        path_suffix = "chat" if "messages" in sub_body else "generate"
+                        
+                        # Use is_subrequest=True to ensure we get a synchronous body back
+                        resp, _ = await _reverse_proxy(
+                            request, path_suffix, servers, 
+                            json.dumps(sub_body).encode(), 
+                            request_id=sub_req_id,
+                            model=p_name,
+                            sender="orchestrator",
+                            is_subrequest=True
+                        )
+                        
+                        if hasattr(resp, 'body'):
+                            try:
+                                data = json.loads(resp.body.decode())
+                                return data.get("message", {}).get("content", "") or data.get("response", "")
+                            except Exception as parse_err:
+                                return f"Error parsing response from {p_name}: {parse_err}"
+                        return "Error: Unexpected response type from agent."
+                    except Exception as e:
+                        return f"Error from {p_name}: {str(e)}"
+
+            tasks = [get_sub_response(m) for m in bundle.parallel_participants]
+            results = await asyncio.gather(*tasks)
+
+            # Failure Check
+            if all(r.startswith("Error") or r.startswith("Model") for r in results):
+                err_msg = "All bundle agents failed to respond. Check backend server logs."
+                event_manager.emit(ProxyEvent("error", request_id, bundle_name, "orchestrator", api_key.user.username, error_message=err_msg))
+                yield (json.dumps({"model": bundle_name, "error": err_msg, "done": True}) + "\n").encode()
+                return
+
+            # 3. Monologue Injection
+            agent_outputs = "\n\n".join([f"### AGENT: {bundle.parallel_participants[i]}\n{res}" for i, res in enumerate(results)])
+            if bundle.show_monologue:
+                # Wrap in \n"
+                yield (json.dumps({
+                    "model": bundle_name, 
+                    "message": {"role": "assistant", "content": monologue_payload}, 
+                    "done": False
+                }) + "\n").encode()
+
+            # 4. Master Synthesis
+            user_query = body.get("prompt") or (body.get("messages", [{}])[-1].get("content") if body.get("messages") else "N/A")
+            if isinstance(user_query, list): # Handle multi-modal prompts
+                user_query = " ".join([p.get("text", "") for p in user_query if p.get("type") == "text"])
+
+            synthesis_prompt = f"### PANEL INPUTS:\n{agent_outputs}\n\n### USER QUERY:\n{user_query}\n\n### MANDATE:\nReview inputs and provide a high-quality unified synthesis."
             
-            # Read full body
-            if isinstance(resp, StreamingResponse):
-                content = ""
-                async for chunk in resp.body_iterator:
-                    data = json.loads(chunk.decode())
-                    content += data.get("message", {}).get("content", "") or data.get("response", "")
-                return content
-            return resp.json().get("message", {}).get("content", "") or resp.json().get("response", "")
-        except Exception as e:
-            return f"Error from {m_name}: {str(e)}"
+            master_body = body.copy()
+            master_body["model"] = bundle.master_model
+            # Ensembles should stream the final answer for better UX
+            master_body["stream"] = True 
 
-    event_manager.emit(ProxyEvent("assigned", request_id, bundle_name, "parallel-agents", api_key.user.username))
-    tasks = [get_sub_response(m) for m in bundle.parallel_models]
-    results = await asyncio.gather(*tasks)
+            if "prompt" in master_body: 
+                master_body["prompt"] = synthesis_prompt
+            else: 
+                master_body["messages"] = [{"role": "user", "content": synthesis_prompt}]
 
-    # 2. Synthesis Prompt Construction
-    agent_outputs = "\n\n".join([f"### RESPONSE FROM AGENT {i+1} ({bundle.parallel_models[i]}):\n{res}" for i, res in enumerate(results)])
-    
-    user_query = body.get("prompt") or (body.get("messages", [{}])[-1].get("content") if body.get("messages") else "N/A")
-    
-    synthesis_prompt = f"""You are a Master Synthesis Model. You have received several responses to the following user query:
-"{user_query}"
+            # Determine endpoint
+            master_path = "chat" if "messages" in master_body else "generate"
+            
+            # Fresh lookup for the master model server
+            async with AsyncSessionLocal() as local_db:
+                servers = await server_crud.get_servers_with_model(local_db, bundle.master_model)
+                # Create log entry for the synthesis phase
+                master_log_id = await _async_log_usage(
+                    local_db, api_key.id, f"/api/{master_path}", 200, None, bundle.master_model
+                )
+            
+            if not servers:
+                err_msg = f"Master model '{bundle.master_model}' not found for synthesis."
+                event_manager.emit(ProxyEvent("error", request_id, bundle_name, bundle.master_model, api_key.user.username, error_message=err_msg))
+                yield (json.dumps({"model": bundle_name, "error": err_msg, "done": True}) + "\n").encode()
+                return
 
-Here are the responses from different models:
-{agent_outputs}
+            try:
+                # Manually stream from backend for the Master synthesis 
+                # to allow rewriting model names in chunks.
+                target_server = servers[0]
+                from app.crud.server_crud import _get_auth_headers
+                headers = _get_auth_headers(target_server)
+                
+                master_url = f"{target_server.url.rstrip('/')}/api/{master_path}"
+                event_manager.emit(ProxyEvent("assigned", request_id, bundle_name, target_server.name, api_key.user.username))
 
-TASK:
-1. Evaluate the quality and accuracy of the responses.
-2. Synthesize a single, definitive, and high-quality "Golden Answer" based on the best parts of all responses.
-3. If there are contradictions, use your own reasoning to determine the correct path.
+                async with request.app.state.http_client.stream(
+                    "POST", master_url, json=master_body, headers=headers, timeout=600.0
+                ) as backend_resp:
+                    if backend_resp.status_code != 200:
+                        err_text = await backend_resp.aread()
+                        yield (json.dumps({"error": f"Master backend error: {err_text.decode()}"}) + "\n").encode()
+                        return
 
-Respond only with the final synthesis."""
+                    async for line in backend_resp.aiter_lines():
+                        if not line: continue
+                        try:
+                            # Rewrite model name to match the bundle requested by user
+                            chunk_data = json.loads(line)
+                            chunk_data["model"] = bundle_name
+                            yield (json.dumps(chunk_data) + "\n").encode()
+                        except json.JSONDecodeError:
+                            yield (line + "\n").encode()
 
-    # 3. Master Synthesis Call
-    master_body = body.copy()
-    master_body["model"] = bundle.master_model
-    if "prompt" in master_body:
-        master_body["prompt"] = synthesis_prompt
-    else:
-        master_body["messages"] = [{"role": "user", "content": synthesis_prompt}]
-    
-    event_manager.emit(ProxyEvent("active", request_id, bundle_name, bundle.master_model, api_key.user.username))
-    
-    servers = await server_crud.get_servers_with_model(db, bundle.master_model)
-    final_resp, _ = await _reverse_proxy(request, "chat" if "messages" in body else "generate", 
-                                        servers, json.dumps(master_body).encode(), sender=api_key.user.username)
-    
-    # 4. Optional Monologue Injection
-    if bundle.show_monologue:
-        # We need to wrap the response to inject the monologue at the start
-        monologue_header = f"\n\n"
-        
-        if isinstance(final_resp, StreamingResponse):
-            async def monologue_stream():
-                # Yield the monologue first
-                yield (json.dumps({"model": bundle_name, "message": {"role": "assistant", "content": monologue_header}, "done": False}) + "\n").encode()
-                async for chunk in final_resp.body_iterator:
-                    yield chunk
-            return StreamingResponse(monologue_stream(), media_type="application/x-ndjson")
-        else:
-            # Sync response modification
-            data = final_resp.json()
-            if "message" in data:
-                data["message"]["content"] = monologue_header + data["message"]["content"]
-            elif "response" in data:
-                data["response"] = monologue_header + data["response"]
-            return JSONResponse(content=data)
+            except Exception as e:
+                logger.error(f"Master synthesis failed: {e}")
+                event_manager.emit(ProxyEvent("error", request_id, bundle_name, bundle.master_model, api_key.user.username, error_message=str(e)))
+                yield (json.dumps({"error": f"Synthesis failed: {str(e)}"}) + "\n").encode()
 
-    return final_resp
+        except Exception as global_err:
+            logger.error(f"Ensemble orchestration failed: {global_err}", exc_info=True)
+            event_manager.emit(ProxyEvent("error", request_id, bundle_name, "orchestrator", api_key.user.username, error_message=str(global_err)))
+            yield (json.dumps({"error": "Orchestration failed", "details": str(global_err)}) + "\n").encode()
+
+    # Always return a stream for Bundles to keep the UI active
+    return StreamingResponse(bundle_orchestrator_generator(), media_type="application/x-ndjson")
 
 @router.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"])
 async def proxy_ollama(
@@ -1133,19 +1327,47 @@ async def proxy_ollama(
         body["model"] = model_name
         body_bytes = json.dumps(body).encode('utf-8')
 
-    # Detect Bundle
-    from app.database.models import ModelBundle
-    bundle_check = await db.execute(select(ModelBundle).filter(ModelBundle.name == model_name))
-    if bundle_check.scalars().first():
-        return await _handle_bundle_request(db, request, model_name, body, api_key)
+    # (Functionality moved to the top of proxy_ollama for visibility)
 
-    # Emit event: proxy received the connection
+    # Determine Request Type
+    req_type = path.upper()
+    if "CHAT" in req_type: req_type = "CHAT"
+    elif "GENERATE" in req_type: req_type = "GEN"
+    elif "EMBED" in req_type: req_type = "EMBED"
+
+    # Estimate input tokens
+    p_tokens = len(str(body)) // 4
+
+    # --- CRITICAL: Emit 'received' event BEFORE routing logic ---
+    # This ensures particles appear for Ensembles and Routers immediately.
     event_manager.emit(ProxyEvent(
         event_type="received", 
         request_id=req_id, 
         model=model_name or "unknown",
-        sender=api_key.user.username
+        sender=api_key.user.username,
+        request_type=req_type,
+        prompt_tokens=p_tokens
     ))
+
+    # Detect Pool
+    from app.database.models import SmartRouter
+    pool_check = await db.execute(select(SmartRouter).filter(SmartRouter.name == model_name))
+    if pool_check.scalars().first():
+        resolved_model = await _select_from_pool(db, model_name, body, sender=api_key.user.username)
+        if resolved_model:
+            model_name = resolved_model
+            body["model"] = model_name
+            body_bytes = json.dumps(body).encode('utf-8')
+        else:
+            event_manager.emit(ProxyEvent("error", req_id, model_name, "none", api_key.user.username, error_message="Pool empty"))
+            raise HTTPException(status_code=503, detail=f"Model Pool '{model_name}' has no available models.")
+
+    # Detect Bundle
+    from app.database.models import EnsembleOrchestrator
+    bundle_check = await db.execute(select(EnsembleOrchestrator).filter(EnsembleOrchestrator.name == model_name))
+    if bundle_check.scalars().first():
+        # Pass the req_id to the handler so it can update the existing particle
+        return await _handle_bundle_request(db, request, model_name, body, api_key, req_id)
 
     logger.info(f"proxy_ollama: Received {len(servers)} server(s) from get_active_servers dependency: {[s.name for s in servers]}")
     
@@ -1165,6 +1387,7 @@ async def proxy_ollama(
 
     if not candidate_servers:
         logger.error(f"proxy_ollama: No candidate servers available for model '{model_name}'")
+        event_manager.emit(ProxyEvent("error", req_id, model_name, "none", api_key.user.username, error_message="No servers found"))
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=f"No servers available for model '{model_name}'. Please check server status and model availability."

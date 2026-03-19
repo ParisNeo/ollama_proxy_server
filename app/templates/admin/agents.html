@@ -1,0 +1,83 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Virtual Agents{% endblock %}
+
+{% block header_title %}Virtual Agents (Personas){% endblock %}
+
+{% block content %}
+<div class="space-y-8">
+    <!-- Creation Form -->
+    <div class="card-style">
+        <h2 class="card-header text-xl font-bold mb-4">Create New Virtual Agent</h2>
+        <form action="{{ url_for('admin_add_agent') }}" method="post" class="space-y-4">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-xs text-gray-400 uppercase font-bold">Agent Name (Unique ID)</label>
+                    <input type="text" name="name" placeholder="e.g. coding-assistant" required class="w-full p-2 rounded bg-black/20 border border-white/10">
+                    <p class="text-[10px] text-gray-500 mt-1">This will appear as a model name in your model list.</p>
+                </div>
+                <div>
+                    <label class="block text-xs text-gray-400 uppercase font-bold">Base Model</label>
+                    <select name="base_model" class="w-full p-2 rounded bg-black/20 border border-white/10">
+                        {% for m in available_models %}
+                        <option value="{{ m }}">{{ m }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+
+            <div>
+                <label class="block text-xs text-gray-400 uppercase font-bold">System Prompt (The Agent's Soul)</label>
+                <textarea name="system_prompt" rows="5" placeholder="You are a helpful assistant that specializes in..." required class="w-full p-2 rounded bg-black/20 border border-white/10 font-sans"></textarea>
+            </div>
+
+            <div class="flex justify-end">
+                <button type="submit" class="bg-indigo-600 hover:bg-indigo-500 px-6 py-2 rounded font-bold text-sm">Deploy Agent</button>
+            </div>
+        </form>
+    </div>
+
+    <!-- Agent List -->
+    <div class="card-style">
+        <h2 class="card-header text-xl font-bold mb-4">Active Agents</h2>
+        <div class="overflow-x-auto">
+            <table class="w-full text-left">
+                <thead>
+                    <tr class="text-gray-500 text-xs uppercase border-b border-white/10">
+                        <th class="p-3">Name</th>
+                        <th class="p-3">Base Model</th>
+                        <th class="p-3">System Prompt Snippet</th>
+                        <th class="p-3 text-right">Actions</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-white/5">
+                    {% for agent in agents %}
+                    <tr>
+                        <td class="p-3 font-bold text-indigo-400">{{ agent.name }}</td>
+                        <td class="p-3 font-mono text-xs">{{ agent.base_model }}</td>
+                        <td class="p-3 text-xs text-gray-400 italic">
+                            {{ agent.system_prompt[:100] }}{% if agent.system_prompt|length > 100 %}...{% endif %}
+                        </td>
+                        <td class="p-3 text-right">
+                            <div class="flex justify-end gap-4">
+                                <a href="{{ url_for('admin_edit_agent_form', agent_id=agent.id) }}" class="text-indigo-400 font-bold text-xs uppercase hover:text-indigo-300">Edit</a>
+                                <form action="{{ url_for('admin_delete_agent', agent_id=agent.id) }}" method="post" onsubmit="return confirm('Delete this agent?');" class="m-0">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                    <button type="submit" class="text-red-400 font-bold text-xs uppercase hover:text-red-300">Remove</button>
+                                </form>
+                            </div>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="4" class="p-6 text-center text-gray-500 italic">No virtual agents defined. Create one above to give your models a personality.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}

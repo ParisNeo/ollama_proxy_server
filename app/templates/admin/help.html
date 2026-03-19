@@ -76,6 +76,25 @@
                 </ul>
             </div>
         </div>
+
+        <!-- Live Flow Section -->
+        <div id="live-flow" class="card-style scroll-mt-20">
+            <h2 class="card-header text-2xl font-bold mb-6 pb-2">📡 Live System Flow: Real-Time Telemetry</h2>
+            <div class="space-y-4 text-current">
+                <p>The <a href="{{ url_for('admin_live_status') }}" class="font-semibold text-[var(--color-primary-600)] hover:underline">Live Flow</a> provides a high-fidelity visual representation of your request pipeline using SSE (Server-Sent Events).</p>
+                <ul class="list-disc list-inside space-y-3 pl-4">
+                    <li><strong>Visual Life-cycle:</strong> Particles represent requests moving from the <strong>Gateway</strong> (left) to <strong>Compute Nodes</strong> (right).
+                        <ul class="list-['-_'] list-inside pl-4 mt-2">
+                            <li><span class="text-indigo-400 font-bold">Received:</span> Request accepted and routing logic is being evaluated.</li>
+                            <li><span class="text-amber-400 font-bold">Assigned:</span> A specific backend or orchestrator has been locked in.</li>
+                            <li><span class="text-emerald-400 font-bold">Active:</span> Real-time streaming is occurring. Hover to see live <strong>TTFT</strong> and <strong>TPS</strong>.</li>
+                        </ul>
+                    </li>
+                    <li><strong>Parallel Trace:</strong> When using Ensembles, you will see multiple sub-particles branch out simultaneously toward individual agents, while the main request remains active until synthesis.</li>
+                    <li><strong>The Cemetery:</strong> Failed or completed requests glide to the bottom bar. Clicking the <strong>Diagnostic Button</strong> on a cemetery particle allows you to copy the full JSON trace or error logs for debugging.</li>
+                </ul>
+            </div>
+        </div>
         
         <!-- Server Management Section -->
         <div id="server-management" class="card-style scroll-mt-20">
@@ -86,6 +105,19 @@
                     <li><strong>Adding Servers:</strong> You can add both standard <code class="inline-code">Ollama</code> servers and <code class="inline-code">vLLM</code> (or any OpenAI-compatible) servers. The proxy handles the translation automatically. You can also add an optional API key if your backend server requires one.</li>
                     <li><strong>Refreshing Models:</strong> Clicking "Refresh" fetches the latest list of available models from a server and stores it in the proxy's database. This is crucial for the "Smart Model Routing" feature. Model lists are also refreshed automatically in the background.</li>
                     <li><strong>Managing Models:</strong> Clicking "Manage Models" takes you to a detailed view for that server. For Ollama servers, you can pull new models, update existing ones, delete models from disk, and trigger a model to be loaded into or unloaded from memory. These actions are not applicable to vLLM servers.</li>
+                </ul>
+            </div>
+        </div>
+
+        <!-- Instance Manager Section -->
+        <div id="instance-manager" class="card-style scroll-mt-20">
+            <h2 class="card-header text-2xl font-bold mb-6 pb-2">🏗️ Local Instance Manager</h2>
+            <div class="space-y-4 text-current">
+                <p>The <a href="{{ url_for('admin_instances') }}" class="font-semibold text-[var(--color-primary-600)] hover:underline">Instance Manager</a> allows the Fortress to supervise separate Ollama processes directly on the host machine.</p>
+                <ul class="list-disc list-inside space-y-3 pl-4">
+                    <li><strong>Process Isolation:</strong> You can start multiple Ollama instances on different ports. This is highly recommended for multi-GPU setups, where you can assign specific <code class="inline-code">CUDA_VISIBLE_DEVICES</code> to each instance.</li>
+                    <li><strong>Auto-Discovery:</strong> The Fortress scans your local network for unmanaged Ollama instances. You can "Adopt" these to bring them under the dashboard's management.</li>
+                    <li><strong>Lifecycle Control:</strong> Start, stop, and monitor the health of managed local processes without ever leaving the UI.</li>
                 </ul>
             </div>
         </div>
@@ -140,6 +172,58 @@
                         <li><strong>How it Works:</strong> You define groups of related words ("concepts"). The tool gets the vector embeddings for each text and uses PCA to project them into a 2D graph.</li>
                         <li><strong>Interpreting the Results:</strong> Texts with similar meanings should appear clustered together. Well-defined, tight clusters indicate that the model has a good grasp of semantic similarity.</li>
                         <li><strong>Benchmarks:</strong> Use pre-built benchmarks, create your own in the UI, or load/save them as JSON files. Any <code class="inline-code">.json</code> file you add to the <code class="inline-code">benchmarks/</code> folder will automatically appear in the "Load Pre-built" list.</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <!-- Virtual Agents Section -->
+        <div id="virtual-agents" class="card-style scroll-mt-20">
+            <h2 class="card-header text-2xl font-bold mb-6 pb-2">🎭 Virtual Agents: Giving AI a Soul</h2>
+            <div class="space-y-4 text-current">
+                <p>Virtual Agents allow you to transform a raw base model into a specialized persona by hardcoding a "Soul" (System Prompt).</p>
+                <ul class="list-disc list-inside space-y-3 pl-4">
+                    <li><strong>Abstraction:</strong> Create names like <code class="inline-code">coding-guru</code> or <code class="inline-code">legal-expert</code>. Users simply call these names as if they were real models.</li>
+                    <li><strong>Automatic Injection:</strong> Every time an agent is called, the Fortress automatically prepends the system prompt to the conversation, ensuring the model stays in character.</li>
+                </ul>
+            </div>
+        </div>
+
+        <!-- Advanced Routing Section -->
+        <div id="model-routing" class="card-style scroll-mt-20">
+            <h2 class="card-header text-2xl font-bold mb-6 pb-2">🧠 Advanced Orchestration & Routing</h2>
+            <div class="space-y-8 text-current">
+                <div>
+                    <h3 class="text-xl font-semibold mb-2">Smart Routers (Load Balancing & Firewalls)</h3>
+                    <p>Routers are "virtual traffic controllers" that distribute incoming requests to a set of target models or agents.</p>
+                    <ul class="list-disc list-inside space-y-2 mt-3 pl-4">
+                        <li><strong>Strategies:</strong> 
+                            <ul class="list-['-_'] list-inside pl-4 mt-2">
+                                <li><strong>Priority:</strong> Always uses the first available model in the list.</li>
+                                <li><strong>Random:</strong> Even distribution for large clusters.</li>
+                                <li><strong>Least Loaded:</strong> Routes to the backend with the lowest active request count (best for high-TPS apps).</li>
+                            </ul>
+                        </li>
+                        <li><strong>Firewall Rules:</strong> Add conditional logic (e.g., "If prompt contains 'image', use LLaVA", "If length < 100, use TinyLlama"). Rules are processed top-to-bottom.</li>
+                    </ul>
+                </div>
+
+                <div>
+                    <h3 class="text-xl font-semibold mb-2">Ensemble Orchestrators (MoE)</h3>
+                    <p>An Ensemble acts as a **Mixture-of-Experts** pipeline. It allows you to query multiple models in parallel and synthesize a single, high-quality answer.</p>
+                    <ul class="list-disc list-inside space-y-2 mt-3 pl-4">
+                        <li><strong>Parallel Brains:</strong> The user's query is sent to every agent in the ensemble at the same time.</li>
+                        <li><strong>Master Synthesis:</strong> A "Master Model" reviews the outputs of all parallel agents and produces a final consolidated response.</li>
+                        <li><strong>Internal Monologue:</strong> Enable "Show Monologue" to wrap agent responses in <code class="inline-code">&lt;think&gt;</code> tags, allowing the user to collapse/expand the "reasoning" of each sub-agent.</li>
+                    </ul>
+                </div>
+                
+                <div>
+                    <h3 class="text-xl font-semibold mb-2">The 'auto' Model (Intelligent Selection)</h3>
+                    <p>When a user requests the <code class="inline-code">auto</code> model, the Fortress analyzes the prompt intent and chooses the best candidate from the <strong>Models Manager</strong>.</p>
+                    <ul class="list-disc list-inside space-y-2 mt-3 pl-4">
+                        <li><strong>Metadata Powered:</strong> Use the <a href="{{ url_for('admin_models_manager') }}" class="underline">Models Manager</a> to tag models as "Reasoning", "Fast", "Code", or "Multi-modal".</li>
+                        <li><strong>Logic:</strong> If a prompt looks like code, it goes to a "Code" model. If it contains images, it goes to an "Image" model.</li>
                     </ul>
                 </div>
             </div>
@@ -295,8 +379,12 @@ print(response.json())
                         <li><a href="#getting-started" class="toc-link">Getting Started</a></li>
                         <li><a href="#dashboard" class="toc-link">The Dashboard</a></li>
                         <li><a href="#server-management" class="toc-link">Server Management</a></li>
+                        <li><a href="#instance-manager" class="toc-link">Local Instance Manager</a></li>
+                        <li><a href="#live-flow" class="toc-link">Live System Flow</a></li>
                         <li><a href="#user-management" class="toc-link">User Management</a></li>
                         <li><a href="#playgrounds" class="toc-link">Playgrounds</a></li>
+                        <li><a href="#virtual-agents" class="toc-link">Virtual Agents</a></li>
+                        <li><a href="#model-routing" class="toc-link">Orchestrators & Routers</a></li>
                         <li><a href="#statistics" class="toc-link">Usage Statistics</a></li>
                         <li><a href="#security" class="toc-link">Security Features</a></li>
                         <li><a href="#examples" class="toc-link">Usage Examples</a></li>

@@ -658,8 +658,16 @@ SUPPORTED ANNOTATION SCHEMAS:
                             }
                         }
 
-                        if (data.error) throw new Error(data.details || data.error);
-                    } catch (err) { console.warn("JSON parsing error in stream, probably a partial chunk. Buffering.", err) }
+                        if (data.error) {
+                            botContentElement.innerHTML += `<div class="p-3 bg-red-900/20 border border-red-500/50 rounded-lg text-red-400 mt-2"><strong>Orchestration Error:</strong> ${data.details || data.error}</div>`;
+                            isLoading = false;
+                            toggleLoading(false);
+                        }
+                    } catch (err) { 
+                        if (!line.includes('processing')) {
+                            console.warn("JSON parsing error in stream:", err, "Line:", line); 
+                        }
+                    }
                 }
                 if (shouldScroll) {
                     chatContainer.scrollTop = chatContainer.scrollHeight;
@@ -781,6 +789,8 @@ SUPPORTED ANNOTATION SCHEMAS:
         if (isLoading) {
             appendMessage({role: 'assistant', content: ''}, messages.length, true);
         }
+        // Force scroll to bottom on new render
+        chatContainer.scrollTop = chatContainer.scrollHeight;
         highlightAndMathify(chatContainer);
         processAnnotations();
     }
@@ -792,7 +802,13 @@ SUPPORTED ANNOTATION SCHEMAS:
         messageWrapper.dataset.messageIndex = messageIndex;
 
         const contentWrapper = document.createElement('div');
-        contentWrapper.className = `max-w-3xl w-full p-3 rounded-lg relative ${role === 'user' ? 'bg-[var(--color-primary-700)] text-white' : 'bg-gray-700/50'}`;
+        // Theming the bubbles: User gets primary color, Assistant gets a tinted transparent background
+        const bubbleBaseClass = "max-w-3xl w-full p-4 rounded-2xl relative shadow-sm transition-all";
+        const bubbleThemeClass = role === 'user' 
+            ? 'bg-[var(--color-primary-600)] text-white ml-12' 
+            : 'bg-white/5 border border-white/10 mr-12';
+            
+        contentWrapper.className = `${bubbleBaseClass} ${bubbleThemeClass}`;
         
         const actionsDiv = document.createElement('div');
         actionsDiv.className = 'message-actions absolute -top-3 right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity';

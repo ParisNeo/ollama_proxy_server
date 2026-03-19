@@ -1,0 +1,56 @@
+{% extends "admin/base.html" %}
+{% block title %}Edit Ensemble: {{ ensemble.name }}{% endblock %}
+{% block header_title %}Edit Ensemble Orchestrator{% endblock %}
+
+{% block content %}
+<div class="max-w-4xl mx-auto space-y-8">
+    <a href="{{ url_for('admin_ensembles_page') }}" class="text-indigo-400 hover:underline text-sm">← Back to Ensembles</a>
+    
+    <div class="card-style">
+        <form action="{{ url_for('admin_edit_ensemble_post', ensemble_id=ensemble.id) }}" method="post" class="space-y-4">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-xs text-gray-400 uppercase font-bold">Ensemble Name</label>
+                    <input type="text" name="name" value="{{ ensemble.name }}" required class="w-full p-2 rounded bg-black/20 border border-white/10">
+                </div>
+                <div class="flex flex-col gap-2 justify-end pb-1">
+                    <label class="flex items-center gap-2 cursor-pointer group">
+                        <input type="checkbox" name="show_monologue" value="true" class="h-5 w-5 rounded text-indigo-600" {% if ensemble.show_monologue %}checked{% endif %}>
+                        <span class="text-xs text-gray-400 uppercase font-bold group-hover:text-white transition-colors">Show Internal Monologue</span>
+                    </label>
+                    <label class="flex items-center gap-2 cursor-pointer group">
+                        <input type="checkbox" name="send_status_update" value="true" class="h-5 w-5 rounded text-indigo-600" {% if ensemble.send_status_update %}checked{% endif %}>
+                        <span class="text-xs text-gray-400 uppercase font-bold group-hover:text-white transition-colors">Send "Processing..." Feedback</span>
+                    </label>
+                </div>
+            </div>
+
+            <div>
+                <label class="block text-xs text-gray-400 uppercase font-bold">Master Model (Final Synthesis)</label>
+                <select name="master_model" class="w-full p-2 rounded bg-black/20 border border-white/10">
+                    {% for m in available_models %}
+                    <option value="{{ m }}" {% if m == ensemble.master_model %}selected{% endif %}>{{ m }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div>
+                <label class="block text-xs text-gray-400 uppercase font-bold">Parallel Participants (Agents/Models)</label>
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-2 max-h-48 overflow-y-auto p-2 bg-black/20 rounded border border-white/10">
+                    {% for m in available_models %}
+                    <label class="flex items-center gap-2 text-sm">
+                        <input type="checkbox" name="parallel_models" value="{{ m }}" class="rounded text-indigo-600" {% if m in ensemble.parallel_participants %}checked{% endif %}> {{ m }}
+                    </label>
+                    {% endfor %}
+                </div>
+            </div>
+
+            <div class="flex justify-end pt-4">
+                <button type="submit" class="bg-indigo-600 hover:bg-indigo-500 px-8 py-2 rounded font-bold text-sm">Save Changes</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

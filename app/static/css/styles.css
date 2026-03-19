@@ -261,8 +261,36 @@ body.sidebar-collapsed #sidebar-open-btn { display: block; }
 .ui-light-glass .copy-button:hover { background-color: #9ca3af; }
 
 /* --- Select Dropdown Option Styling --- */
-.ui-dark-glass select option, .ui-dark-flat select option, .ui-black select option, .ui-aurora select option, .ui-dark-neumorphic select option, .ui-retro-terminal select option, .ui-cyberpunk select option { background-color: #1f2937; color: #e5e7eb; }
-.ui-light-glass select option, .ui-light-flat select option, .ui-white select option, .ui-light-neumorphic select option, .ui-brutalism select option, .ui-material-flat select option, .ui-ink select option { background-color: #ffffff; color: #111827; }
+select { cursor: pointer; transition: all 0.2s ease; }
+#model-selector { border-width: 1px; font-weight: 600; }
+
+.ui-dark-glass select, .ui-dark-flat select, .ui-black select, .ui-aurora select, .ui-cyberpunk select {
+    background-color: rgba(0,0,0,0.3);
+    border-color: rgba(255,255,255,0.1);
+    color: white;
+}
+
+.ui-dark-glass select option, .ui-dark-flat select option, .ui-black select option, .ui-aurora select option, .ui-dark-neumorphic select option, .ui-retro-terminal select option, .ui-cyberpunk select option { 
+    background-color: #111827; 
+    color: #e5e7eb; 
+}
+
+.ui-light-glass select option, .ui-light-flat select option, .ui-white select option, .ui-light-neumorphic select option, .ui-brutalism select option, .ui-material-flat select option, .ui-ink select option { 
+    background-color: #ffffff; 
+    color: #111827; 
+}
+
+/* --- Chat Bubble Polish --- */
+.message-content { line-height: 1.6; }
+.message-content p { margin-bottom: 0.75rem !important; }
+.message-content p:last-child { margin-bottom: 0 !important; }
+
+/* Brutalism specific overrides for bubbles */
+.ui-brutalism .message-wrapper [class*="rounded"] {
+    border-radius: 0 !important;
+    border: 3px solid black !important;
+    box-shadow: 6px 6px 0px black !important;
+}
 
 /* --- Collapsible 'Thinking' Block --- */
 .think-block { background-color: rgba(128, 128, 128, 0.1); border-left: 3px solid var(--color-primary-500); border-radius: 4px; margin: 1em 0; }

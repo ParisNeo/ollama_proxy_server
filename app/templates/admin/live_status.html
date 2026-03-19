@@ -7,17 +7,19 @@
 {% block content %}
 <style>
     #status-tooltip {
-        pointer-events: none;
-        position: fixed;
+        pointer-events: auto; 
+        position: absolute; /* Changed to absolute to stay inside relative container */
         z-index: 100;
-        background: rgba(10, 10, 15, 0.95);
-        border: 1px solid rgba(255, 255, 255, 0.1);
-        padding: 10px;
-        border-radius: 8px;
-        box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+        background: rgba(15, 15, 25, 0.98);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        padding: 14px;
+        border-radius: 12px;
+        box-shadow: 0 20px 40px rgba(0,0,0,0.9), 0 0 20px rgba(99, 102, 241, 0.2);
         display: none;
         font-family: ui-monospace, monospace;
-        backdrop-filter: blur(10px);
+        backdrop-filter: blur(20px);
+        width: 280px;
+        transition: opacity 0.2s ease;
     }
 </style>
 
@@ -83,6 +85,8 @@ document.addEventListener('DOMContentLoaded', () => {
     
     let width, height;
     let mouse = { x: 0, y: 0 };
+    let hoveredParticleId = null;
+    let tooltipHideTimer = null;
     const particles = new Map();
     const historyQueue = []; // Array of completed particles
     const MAX_HISTORY = 10;
@@ -119,15 +123,80 @@ document.addEventListener('DOMContentLoaded', () => {
         const rect = container.getBoundingClientRect();
         mouse.x = e.clientX - rect.left;
         mouse.y = e.clientY - rect.top;
+        checkProximity();
     });
+
+    tooltip.addEventListener('mouseenter', () => {
+        if (tooltipHideTimer) clearTimeout(tooltipHideTimer);
+    });
+
+    tooltip.addEventListener('mouseleave', () => {
+        startHideTimer();
+    });
+
+    function startHideTimer() {
+        if (tooltipHideTimer) clearTimeout(tooltipHideTimer);
+        tooltipHideTimer = setTimeout(() => {
+            hoveredParticleId = null;
+            tooltip.style.display = 'none';
+        }, 300);
+    }
+
+    function checkProximity() {
+        let foundParticle = null;
+        
+        for (const p of particles.values()) {
+            const dist = Math.hypot(mouse.x - p.x, mouse.y - p.y);
+            if (dist < 25) { 
+                foundParticle = p;
+                break;
+            }
+        }
+
+        if (foundParticle) {
+            if (tooltipHideTimer) clearTimeout(tooltipHideTimer);
+            
+            // CRITICAL FIX: Only update the HTML if the hovered particle has CHANGED
+            // This prevents the DOM from refreshing while you are trying to click the button
+            if (hoveredParticleId !== foundParticle.id) {
+                hoveredParticleId = foundParticle.id;
+                updateTooltip(foundParticle);
+            }
+        } else {
+            // Only start hide timer if we aren't hovering the tooltip itself
+            const tooltipRect = tooltip.getBoundingClientRect();
+            const containerRect = container.getBoundingClientRect();
+            // Check if mouse is inside the tooltip area
+            const isOverTooltip = (
+                (mouse.x + containerRect.left) >= tooltipRect.left && 
+                (mouse.x + containerRect.left) <= tooltipRect.right &&
+                (mouse.y + containerRect.top) >= tooltipRect.top && 
+                (mouse.y + containerRect.top) <= tooltipRect.bottom
+            );
+
+            if (!isOverTooltip) startHideTimer();
+        }
+    }
+
+    let serversLoaded = false;
+    let pendingSnapshot = null;
 
     async function syncServers() {
         try {
             const resp = await fetch("{{ url_for('admin_get_server_nodes') }}");
             const data = await resp.json();
             data.forEach(s => updateServerLayout(s.name));
+            serversLoaded = true;
+            
+            // If a snapshot arrived while we were loading servers, process it now
+            if (pendingSnapshot) {
+                handleSnapshot(pendingSnapshot);
+                pendingSnapshot = null;
+            }
         } catch(e) { console.error(e); }
     }
+
+    // Start loading servers immediately
     syncServers();
 
     const evtSource = new EventSource("{{ url_for('sse_events') }}");
@@ -136,8 +205,80 @@ document.addEventListener('DOMContentLoaded', () => {
         statusEl.className = "text-[10px] font-black px-3 py-1 rounded-md border border-green-500/30 text-green-500 bg-green-500/10";
     };
     evtSource.onmessage = (e) => {
-        try { handleEvent(JSON.parse(e.data)); } catch(err) {}
+        try { 
+            const msg = JSON.parse(e.data);
+            if (msg.type === 'snapshot') {
+                handleSnapshot(msg.data);
+            } else {
+                handleEvent(msg); 
+            }
+        } catch(err) {
+            console.error("SSE Parse Error:", err);
+        }
     };
+
+    evtSource.onerror = (e) => {
+        statusEl.innerHTML = '● CONNECTION LOST';
+        statusEl.className = "text-[10px] font-black px-3 py-1 rounded-md border border-red-500/30 text-red-500 bg-red-500/10";
+        console.warn("EventSource failed. Attempting to reconnect...");
+    };
+
+    function handleSnapshot(data) {
+        // If servers aren't mapped yet, buffer the snapshot
+        if (!serversLoaded) {
+            pendingSnapshot = data;
+            return;
+        }
+
+        // Reality check: Synchronize with server state
+        particles.clear();
+        historyQueue.length = 0;
+        sessionStats.totalTokens = 0;
+        sessionStats.ttftSum = 0;
+        sessionStats.ttftCount = 0;
+
+        // Restore active particles
+        data.active.forEach(req => {
+            // Re-map server state to UI particle state
+            const stateMap = { 'received': 'queued', 'assigned': 'traveling', 'active': 'active' };
+            
+            // Ensure the server node exists in our layout
+            if (req.server && req.server !== 'none' && !serverNodes.has(req.server)) {
+                updateServerLayout(req.server);
+            }
+
+            particles.set(req.id, {
+                ...req,
+                state: stateMap[req.type] || 'active',
+                progress: req.type === 'active' ? 1 : 0,
+                color: req.type === 'active' ? THEME.active : THEME.received,
+                size: 5, alpha: 1, yOffset: (Math.random() - 0.5) * 15,
+                startTime: req.ts * 1000, 
+                lastSeen: Date.now(),
+                targetServer: req.server
+            });
+
+            // Update session stats from snapshot
+            if (req.tokens) sessionStats.totalTokens += req.tokens;
+            if (req.ttft) {
+                sessionStats.ttftSum += req.ttft;
+                sessionStats.ttftCount++;
+            }
+        });
+
+        // Restore Cemetery
+        data.history.forEach(req => {
+            const p = {
+                ...req,
+                state: 'completed',
+                color: req.type === 'error' ? THEME.error : THEME.success,
+                alpha: 0.6, size: 3,
+                finishTime: req.ts * 1000
+            };
+            particles.set(req.id, p);
+            historyQueue.push(p);
+        });
+    }
 
     function handleEvent(data) {
         const { type, id, server, model, sender, ttft, tps, tokens, error } = data;
@@ -160,9 +301,21 @@ document.addEventListener('DOMContentLoaded', () => {
         } else if (type === 'assigned') {
             const p = particles.get(id);
             if (p) { 
-                if (p.state === 'queued') { p.state = 'traveling'; p.progress = 0; }
+                if (p.state === 'queued') { 
+                    p.state = 'traveling'; 
+                    p.progress = 0; 
+                }
+                // Transitioning to a new node? Reset progress for the line animation
+                if (p.targetServer && p.targetServer !== server) {
+                    p.progress = 0;
+                }
+                
                 p.targetServer = server;
-                if (!serverNodes.has(server)) updateServerLayout(server);
+                
+                // CRITICAL: Dynamically add virtual nodes (orchestrator, etc) to layout
+                if (server && server !== 'none' && !serverNodes.has(server)) {
+                    updateServerLayout(server);
+                }
             }
         } else if (type === 'active') {
             const p = particles.get(id);
@@ -213,8 +366,17 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function updateServerLayout(name) {
+        if (!name || name === 'none') return;
         serverNodes.set(name, { name });
-        const names = Array.from(serverNodes.keys()).sort();
+        
+        // Split real servers from virtual orchestrators for layout
+        const allNames = Array.from(serverNodes.keys());
+        const orchestrators = allNames.filter(n => n === 'orchestrator' || n === 'ensemble-agents');
+        const servers = allNames.filter(n => !orchestrators.includes(n)).sort();
+        
+        // Combine them: Orchestrators at the bottom
+        const names = [...servers, ...orchestrators];
+        
         const padding = 100;
         const availableHeight = height - (padding * 2);
         const step = names.length > 1 ? availableHeight / (names.length - 1) : 0;
@@ -282,12 +444,6 @@ document.addEventListener('DOMContentLoaded', () => {
         const historyX = 80;
         const historyTopY = height - 60;
         let activeHover = null;
-
-        // 0. Pre-pass for hover detection to toggle labels
-        particles.forEach((p) => {
-            const dist = Math.hypot(mouse.x - p.x, mouse.y - p.y);
-            if (dist < 15) activeHover = { type: 'request', data: p };
-        });
 
         // 1. Draw Paths
         ctx.lineWidth = 2;
@@ -414,11 +570,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
             p.x = x; p.y = y;
 
+            // Deriving visual color from data state to prevent Red/Success mismatch
+            const errorMsg = p.error || p.error_message;
+            const drawColor = errorMsg ? THEME.error : (p.state === 'completed' ? THEME.success : p.color);
+
             ctx.save();
             ctx.globalAlpha = p.alpha;
             ctx.shadowBlur = 15;
-            ctx.shadowColor = p.color;
-            ctx.fillStyle = p.color;
+            ctx.shadowColor = drawColor;
+            ctx.fillStyle = drawColor;
             ctx.beginPath();
             ctx.arc(x, y, p.size, 0, Math.PI*2);
             ctx.fill();
@@ -450,67 +610,127 @@ document.addEventListener('DOMContentLoaded', () => {
             ctx.restore();
         });
 
-        // 4. Tooltip Logic
-        // Update Load Stat
+        // 4. Update Load Stat
         document.getElementById('stat-load').innerText = Array.from(particles.values()).filter(p => p.state === 'active').length;
-
-        if (activeHover) {
-            tooltip.style.display = 'block';
-            
-            // Boundary-aware positioning
-            let tx = mouse.x + 20;
-            let ty = mouse.y + 20;
-            
-            // Temporarily set content to measure
-            if (activeHover.type === 'request') {
-                const p = activeHover.data;
-                const elapsed = ((Date.now() - (p.finishTime || p.startTime)) / 1000).toFixed(1);
-                
-                let errorHtml = p.error ? `
-                    <div class="text-red-400 font-bold mt-2 mb-1">FAILURE REASON</div>
-                    <div class="text-red-300 text-[10px] bg-red-900/20 p-2 rounded border border-red-500/20 max-w-[200px] break-words">
-                        ${p.error}
-                    </div>
-                ` : '';
-
-                tooltip.innerHTML = `
-                    <div class="text-[var(--color-primary-400)] font-bold mb-1">REQUEST INFO</div>
-                    <div class="text-white text-xs border-b border-white/5 pb-2 mb-2">
-                        ID: <span class="text-gray-400">${p.id}</span><br>
-                        USER: <span class="text-gray-400">${p.sender}</span><br>
-                        MODEL: <span class="text-gray-400">${p.model}</span><br>
-                        STATE: <span style="color:${p.color}">${p.state.toUpperCase()}</span>
-                    </div>
-                    <div class="text-[var(--color-primary-400)] font-bold mb-1">METRICS</div>
-                    <div class="text-white text-xs">
-                        TTFT: <span class="text-amber-400">${(p.ttft !== undefined && p.ttft !== null) ? p.ttft : '--'} ms</span><br>
-                        SPEED: <span class="text-emerald-400">${(p.tps !== undefined && p.tps !== null) ? p.tps : '--'} t/s</span><br>
-                        TOKENS: <span class="text-emerald-400">${p.finalTokens || '--'}</span>
-                    </div>
-                    ${errorHtml}
-                `;
-            } else {
-                const s = activeHover.data;
-                tooltip.innerHTML = `
-                    <div class="text-green-400 font-bold mb-1">SERVER NODE</div>
-                    <div class="text-white text-xs">NAME: ${s.name}</div>
-                `;
-            }
-
-            // Flip tooltip if near edges
-            const bounds = container.getBoundingClientRect();
-            if (tx + 220 > bounds.width) tx = mouse.x - 240;
-            if (ty + 180 > bounds.height) ty = mouse.y - 200;
-
-            tooltip.style.left = tx + 'px';
-            tooltip.style.top = ty + 'px';
-        } else {
-            tooltip.style.display = 'none';
-        }
 
         requestAnimationFrame(draw);
     }
+
+    function updateTooltip(p) {
+        if (!p) return; // Safety check
+        
+        tooltip.style.display = 'block';
+        tooltip.style.opacity = '1';
+        
+        // Use coordinates, fallback to 0 if not yet set
+        const px = p.x || 0;
+        const py = p.y || 0;
+
+        let tx = px + 20;
+        let ty = py - 50;
+
+        // Boundary checks to keep tooltip inside the viewport
+        if (tx + 300 > width) tx = p.x - 300;
+        if (ty + 280 > height) ty = p.y - 270;
+        if (ty < 0) ty = p.y + 20;
+
+        tooltip.style.left = tx + 'px';
+        tooltip.style.top = ty + 'px';
+
+        // Deriving state and color from the actual error presence
+        const errorMsg = p.error || p.error_message;
+        const isActuallyError = !!errorMsg;
+        const displayState = isActuallyError ? "FAILED" : (p.state === 'completed' ? "SUCCESS" : p.state.toUpperCase());
+        const displayColor = isActuallyError ? THEME.error : (p.state === 'completed' ? THEME.success : p.color);
+
+        let errorHtml = errorMsg ? `
+            <div class="mt-3 pt-3 border-t border-red-500/30">
+                <div class="flex justify-between items-center mb-1">
+                    <div class="text-red-400 text-[10px] font-black uppercase tracking-tighter">Diagnostic Data</div>
+                    <button class="copy-error-btn text-[9px] bg-red-500/20 hover:bg-red-500/40 text-red-100 px-2 py-0.5 rounded border border-red-500/30 transition-colors uppercase font-bold">Copy Error</button>
+                </div>
+                <div id="error-text-content" class="text-red-200 text-[11px] leading-relaxed bg-red-950/40 p-2 rounded border border-red-500/20 break-words max-h-32 overflow-y-auto font-mono">
+                    ${errorMsg}
+                </div>
+            </div>
+        ` : `
+            <div class="mt-3 pt-3 border-t border-green-500/20 text-center">
+                <p class="text-[9px] text-gray-500 uppercase font-bold">Request successfully fulfilled</p>
+            </div>
+        `;
+
+        tooltip.innerHTML = `
+            <div class="flex justify-between items-center mb-3">
+                <div class="text-indigo-400 text-[10px] font-black uppercase tracking-widest">Active Trace</div>
+                <button class="copy-info-btn text-[9px] bg-white/5 hover:bg-white/10 text-gray-300 px-2 py-0.5 rounded border border-white/10 uppercase transition-colors font-bold">Copy JSON</button>
+            </div>
+            <div id="info-text-content" class="space-y-1.5">
+                <div class="flex justify-between text-[11px]"><span class="text-gray-500 uppercase font-bold">UUID</span> <span class="text-gray-300 font-mono">${p.id}</span></div>
+                <div class="flex justify-between text-[11px]"><span class="text-gray-500 uppercase font-bold">Origin</span> <span class="text-white font-bold">${p.sender}</span></div>
+                <div class="flex justify-between text-[11px]"><span class="text-gray-500 uppercase font-bold">Resource</span> <span class="text-white font-bold">${p.model}</span></div>
+                <div class="flex justify-between text-[11px]"><span class="text-gray-500 uppercase font-bold">State</span> <span style="color:${displayColor}" class="font-black">${displayState}</span></div>
+            </div>
+            <div class="mt-3 pt-3 border-t border-white/10 grid grid-cols-3 gap-2 text-center">
+                <div class="bg-white/5 p-1.5 rounded">
+                    <div class="text-[8px] text-gray-500 uppercase font-bold">TTFT</div>
+                    <div class="text-[11px] text-amber-400 font-black">${p.ttft ? p.ttft + 'ms' : '--'}</div>
+                </div>
+                <div class="bg-white/5 p-1.5 rounded">
+                    <div class="text-[8px] text-gray-500 uppercase font-bold">Speed</div>
+                    <div class="text-[11px] text-emerald-400 font-black">${p.tps ? p.tps + 't/s' : '--'}</div>
+                </div>
+                <div class="bg-white/5 p-1.5 rounded">
+                    <div class="text-[8px] text-gray-500 uppercase font-bold">Tokens</div>
+                    <div class="text-[11px] text-blue-400 font-black">${p.finalTokens || p.tokens || '--'}</div>
+                </div>
+            </div>
+            ${errorHtml}
+        `;
+    }
     
+    // --- Tooltip Interaction Logic ---
+    tooltip.addEventListener('click', (e) => {
+        const btn = e.target.closest('button');
+        if (!btn) return;
+
+        const isInfo = btn.classList.contains('copy-info-btn');
+        const isError = btn.classList.contains('copy-error-btn');
+        
+        if (isInfo || isError) {
+            // Pull data directly from the particle map instead of the DOM
+            const p = particles.get(hoveredParticleId);
+            if (!p) return;
+
+            let textToCopy = "";
+            if (isInfo) {
+                textToCopy = JSON.stringify({
+                    id: p.id,
+                    user: p.sender,
+                    model: p.model,
+                    server: p.targetServer,
+                    state: p.state,
+                    metrics: { ttft: p.ttft, tps: p.tps, tokens: p.finalTokens || p.tokens }
+                }, null, 2);
+            } else {
+                textToCopy = p.error || p.error_message || "Unknown error";
+            }
+            
+            navigator.clipboard.writeText(textToCopy).then(() => {
+                const originalText = btn.innerText;
+                btn.innerText = 'COPIED!';
+                btn.style.color = '#10b981'; // Success green
+                
+                setTimeout(() => {
+                    btn.innerText = originalText;
+                    btn.style.color = '';
+                }, 1500);
+            }).catch(err => {
+                console.error('Clipboard error:', err);
+                alert("Copy failed. Make sure you are using HTTPS or localhost.");
+            });
+        }
+    });
+
     draw();
 });
 </script>

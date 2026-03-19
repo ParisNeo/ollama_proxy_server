@@ -5,13 +5,14 @@ Handles schema updates when upgrading from older versions.
 
 import logging
 import re
+import sys
 from typing import Dict, Set, List
 from sqlalchemy import text, inspect
 from sqlalchemy.ext.asyncio import AsyncEngine
 from sqlalchemy.sql import quoted_name
+from ascii_colors import ASCIIColors
 
 logger = logging.getLogger(__name__)
-
 
 # --- SQL Injection Protection: Valid SQLite Identifier Pattern ---
 # SQLite identifiers must start with letter or underscore, followed by alphanumerics/underscores
@@ -138,19 +139,13 @@ def validate_column_definition(definition: str) -> str:
     # List of allowed safe patterns (SQLite types with optional constraints)
     # These are strict patterns that don't allow arbitrary SQL injection
     allowed_patterns = [
-        r'^JSON$',  # JSON type
-        r'^DATETIME$',  # DATETIME type
-        r'^VARCHAR(\s*\(\s*\d+\s*\))?$',  # VARCHAR or VARCHAR(n)
-        r'^VARCHAR\s+NOT\s+NULL$',  # VARCHAR NOT NULL
-        r'^INTEGER$',  # INTEGER
-        r'^INTEGER\s+NOT\s+NULL$',  # INTEGER NOT NULL
+        r'^JSON(\s+DEFAULT\s+\'[^\']*\')?(\s+NOT\s+NULL)?$',  # JSON type with DEFAULT support
+        r'^DATETIME(\s+DEFAULT\s+CURRENT_TIMESTAMP)?(\s+NOT\s+NULL)?$',  # DATETIME
+        r'^VARCHAR(\s*\(\s*\d+\s*\))?(\s+DEFAULT\s+\'[^\']*\')?(\s+NOT\s+NULL)?$',  # VARCHAR
+        r'^INTEGER(\s+DEFAULT\s+\d+)?(\s+NOT\s+NULL)?$',  # INTEGER
         r'^INTEGER\s+NOT\s+NULL\s+PRIMARY\s+KEY$',  # INTEGER NOT NULL PRIMARY KEY
-        r'^INTEGER\s+NOT\s+NULL\s+DEFAULT\s+\d+$',  # INTEGER NOT NULL DEFAULT n
-        r'^BOOLEAN$',  # BOOLEAN (stored as INTEGER in SQLite)
-        r'^BOOLEAN\s+NOT\s+NULL$',  # BOOLEAN NOT NULL
-        r'^BOOLEAN\s+NOT\s+NULL\s+DEFAULT\s+(0|1)$',  # BOOLEAN NOT NULL DEFAULT 0/1
-        r'^BOOLEAN\s+DEFAULT\s+(0|1|TRUE|FALSE)\s+NOT\s+NULL$',  # BOOLEAN with constraints
-        r'^BOOLEAN\s+DEFAULT\s+\d+\s+NOT\s+NULL$',  # Alternative boolean format
+        r'^BOOLEAN(\s+DEFAULT\s+(0|1))?(\s+NOT\s+NULL)?$',  # BOOLEAN
+        r'^BOOLEAN\s+DEFAULT\s+(0|1|TRUE|FALSE)\s+NOT\s+NULL$',  # BOOLEAN constraints
     ]
     
     for pattern in allowed_patterns:
@@ -520,17 +515,11 @@ async def check_and_report_schema(engine: AsyncEngine) -> None:
 
 async def run_all_migrations(engine: AsyncEngine) -> None:
     """
-    Run all database migrations to ensure backward compatibility.
-    This function should be called before Base.metadata.create_all()
-
-    This uses a centralized schema definition to automatically detect
-    and add any missing columns across all tables.
+    Run all database migrations with a stylized ASCIIColors panel using Rich tags.
     """
-    logger.info("Running database migrations for backward compatibility...")
-
+    report = []
+    
     try:
-        # Define expected schemas for all tables
-        # This is the single source of truth for what columns should exist
         table_schemas = {
             "ollama_servers": {
                 "available_models": "JSON",
@@ -553,54 +542,50 @@ async def run_all_migrations(engine: AsyncEngine) -> None:
                 "server_id": "INTEGER",
             },
             "model_bundles": {
-                "id": "INTEGER NOT NULL PRIMARY KEY",
-                "name": "VARCHAR NOT NULL",
-                "description": "VARCHAR",
-                "parallel_models": "JSON NOT NULL",
+                "parallel_participants": "JSON DEFAULT '[]' NOT NULL",
+                "parallel_models": "JSON",
                 "master_model": "VARCHAR NOT NULL",
                 "show_monologue": "BOOLEAN DEFAULT 0 NOT NULL",
+                "send_status_update": "BOOLEAN DEFAULT 0 NOT NULL",
                 "is_active": "BOOLEAN DEFAULT 1 NOT NULL",
+                "created_at": "DATETIME",
+            },
+            "model_pools": {
+                "targets": "JSON DEFAULT '[]' NOT NULL",
+                "created_at": "DATETIME",
             },
             "model_metadata": {
-                "id": "INTEGER NOT NULL PRIMARY KEY",
                 "model_name": "VARCHAR NOT NULL",
-                "description": "VARCHAR",
                 "supports_images": "BOOLEAN NOT NULL DEFAULT 0",
-                "is_code_model": "BOOLEAN NOT NULL DEFAULT 0",
-                "is_chat_model": "BOOLEAN NOT NULL DEFAULT 1",
-                "is_fast_model": "BOOLEAN NOT NULL DEFAULT 0",
                 "is_reasoning_model": "BOOLEAN NOT NULL DEFAULT 0",
-                "max_context": "INTEGER NOT NULL DEFAULT 4096",
                 "priority": "INTEGER NOT NULL DEFAULT 10",
             },
         }
 
-        # Auto-migrate all tables
         for table_name, expected_columns in table_schemas.items():
-            logger.info(f"Checking table '{table_name}' for missing columns...")
-            await auto_migrate_table(engine, table_name, expected_columns)
+            existing_columns = await get_table_columns(engine, table_name)
+            
+            if not existing_columns:
+                report.append(f" [blue]INIT[/blue]  Table '{table_name}' will be created.")
+                continue
 
-        # Handle app_settings JSON data migration separately
-        # (since it's stored as JSON, not columns)
+            for col_name, col_def in expected_columns.items():
+                if col_name not in existing_columns:
+                    try:
+                        await add_column_if_missing(engine, table_name, col_name, col_def)
+                        report.append(f" [green]FIXED[/green] Added '{col_name}' to '{table_name}'")
+                    except Exception as col_err:
+                        report.append(f" [red]ERROR[/red] Failed '{col_name}' in '{table_name}': {col_err}")
+        
         await migrate_app_settings_data(engine)
-
-        # Create any missing indexes
         await create_missing_indexes(engine)
-
-        logger.info("All database migrations completed successfully")
-
-        # Optional: Enable this for debugging schema issues
-        # Uncomment the next line if you want to see the full schema on startup
-        # await check_and_report_schema(engine)
+        
+        if report:
+            ASCIIColors.panel("\n".join(report), title="Fortress Database Migration Engine")
 
     except Exception as e:
+        ASCIIColors.error(f"Critical Migration Failure: {str(e)}")
         logger.error(f"Error running database migrations: {e}", exc_info=True)
-        # Print schema report on error to help debugging
-        try:
-            logger.error("Generating schema report to help diagnose the issue...")
-            await check_and_report_schema(engine)
-        except Exception as report_error:
-            logger.error(f"Could not generate schema report: {report_error}")
         raise
 
 

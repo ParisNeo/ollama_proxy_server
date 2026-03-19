@@ -1,0 +1,92 @@
+{% extends "admin/base.html" %}
+{% block title %}Ensembles{% endblock %}
+{% block header_title %}Ensemble Orchestrators (MoE Logic){% endblock %}
+
+{% block content %}
+<div class="space-y-8">
+    <div class="card-style">
+        <h2 class="card-header text-xl font-bold mb-4">Create New Ensemble</h2>
+        <form action="{{ url_for('admin_add_ensemble') }}" method="post" class="space-y-4">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-xs text-gray-400 uppercase font-bold">Ensemble Name (Virtual Model)</label>
+                    <input type="text" name="name" placeholder="e.g. mixture-of-experts" required class="w-full p-2 rounded bg-black/20 border border-white/10">
+                </div>
+                <div class="flex flex-col gap-2">
+                    <label class="flex items-center gap-2 cursor-pointer group">
+                        <input type="checkbox" name="show_monologue" value="true" class="h-5 w-5 rounded text-indigo-600">
+                        <span class="text-xs text-gray-400 uppercase font-bold group-hover:text-white transition-colors">Show Internal Monologue</span>
+                    </label>
+                    <label class="flex items-center gap-2 cursor-pointer group">
+                        <input type="checkbox" name="send_status_update" value="true" class="h-5 w-5 rounded text-indigo-600">
+                        <span class="text-xs text-gray-400 uppercase font-bold group-hover:text-white transition-colors">Send "Processing..." Feedback</span>
+                    </label>
+                </div>
+                <div>
+                    <label class="block text-xs text-gray-400 uppercase font-bold">Master Model (Final Synthesis)</label>
+                    <select name="master_model" class="w-full p-2 rounded bg-black/20 border border-white/10">
+                        {% for m in available_models %}
+                        <option value="{{ m }}">{{ m }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+
+            <div>
+                <label class="block text-xs text-gray-400 uppercase font-bold">Parallel Participants (Agents/Models)</label>
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-2 max-h-48 overflow-y-auto p-2 bg-black/20 rounded border border-white/10">
+                    {% for m in available_models %}
+                    <label class="flex items-center gap-2 text-sm">
+                        <input type="checkbox" name="parallel_models" value="{{ m }}" class="rounded text-indigo-600"> {{ m }}
+                    </label>
+                    {% endfor %}
+                </div>
+            </div>
+
+            <div class="flex justify-end">
+                <button type="submit" class="bg-indigo-600 hover:bg-indigo-500 px-6 py-2 rounded font-bold text-sm">Deploy Ensemble</button>
+            </div>
+        </form>
+    </div>
+
+    <div class="card-style">
+        <h2 class="card-header text-xl font-bold mb-4">Active Ensembles</h2>
+        <table class="w-full text-left">
+            <thead>
+                <tr class="text-gray-500 text-xs uppercase">
+                    <th class="p-3">Name</th>
+                    <th class="p-3">Master</th>
+                    <th class="p-3">Participants</th>
+                    <th class="p-3 text-right">Actions</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-white/5">
+                {% for e in ensembles %}
+                <tr>
+                    <td class="p-3 font-bold text-indigo-400">{{ e.name }}</td>
+                    <td class="p-3 font-mono text-xs">{{ e.master_model }}</td>
+                    <td class="p-3">
+                        <div class="flex flex-wrap gap-1">
+                            {% for pm in e.parallel_participants %}
+                            <span class="px-2 py-0.5 bg-white/5 border border-white/10 rounded text-[10px]">{{ pm }}</span>
+                            {% endfor %}
+                        </div>
+                    </td>
+                    <td class="p-3 text-right">
+                        <div class="flex justify-end gap-4">
+                            <a href="{{ url_for('admin_edit_ensemble_form', ensemble_id=e.id) }}" class="text-indigo-400 font-bold text-xs uppercase hover:text-indigo-300">Edit</a>
+                            <form action="{{ url_for('admin_delete_ensemble', ensemble_id=e.id) }}" method="post" onsubmit="return confirm('Delete this ensemble?');" class="m-0">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                <button type="submit" class="text-red-400 font-bold text-xs uppercase">Delete</button>
+                            </form>
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

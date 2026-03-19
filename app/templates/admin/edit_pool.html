@@ -1,0 +1,95 @@
+{% extends "admin/base.html" %}
+{% block title %}Edit Pool: {{ pool.name }}{% endblock %}
+{% block header_title %}Edit Model Pool{% endblock %}
+
+{% block content %}
+<div class="max-w-4xl mx-auto space-y-8">
+    <a href="{{ url_for('admin_routers_page') }}" class="text-indigo-400 hover:underline text-sm">← Back to Pools</a>
+    
+    <div class="card-style">
+        <form action="{{ url_for('admin_edit_pool_post', pool_id=pool.id) }}" method="post" class="space-y-4">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-xs text-gray-400 uppercase font-bold">Pool Name</label>
+                    <input type="text" name="name" value="{{ pool.name }}" required class="w-full p-2 rounded bg-black/20 border border-white/10">
+                </div>
+                <div>
+                    <label class="block text-xs text-gray-400 uppercase font-bold">Routing Strategy</label>
+                    <select name="strategy" class="w-full p-2 rounded bg-black/20 border border-white/10">
+                        <option value="priority" {% if pool.strategy == 'priority' %}selected{% endif %}>Priority</option>
+                        <option value="random" {% if pool.strategy == 'random' %}selected{% endif %}>Random</option>
+                        <option value="least_loaded" {% if pool.strategy == 'least_loaded' %}selected{% endif %}>Least Loaded</option>
+                    </select>
+                </div>
+            </div>
+
+            <div>
+                <label class="block text-xs text-gray-400 uppercase font-bold mb-2">Advanced Routing Rules</label>
+                <div id="rules-container" class="space-y-2 mb-4">
+                    {% if pool.rules %}
+                        {% for rule in pool.rules %}
+                        <div class="flex gap-2 items-center bg-black/40 p-2 rounded border border-white/5">
+                            <select name="rule_conditions" class="text-xs bg-transparent border border-white/10 rounded p-1">
+                                <option value="has_images" {% if rule.condition == 'has_images' %}selected{% endif %}>If has images</option>
+                                <option value="min_len" {% if rule.condition == 'min_len' %}selected{% endif %}>If prompt length >=</option>
+                                <option value="max_len" {% if rule.condition == 'max_len' %}selected{% endif %}>If prompt length <=</option>
+                                <option value="user" {% if rule.condition == 'user' %}selected{% endif %}>If user is</option>
+                                <option value="keyword" {% if rule.condition == 'keyword' %}selected{% endif %}>If contains keyword</option>
+                            </select>
+                            <input type="text" name="rule_values" value="{{ rule.value }}" placeholder="Value" class="text-xs bg-transparent border border-white/10 rounded p-1 w-24">
+                            <span class="text-[10px] text-gray-500">THEN USE</span>
+                            <select name="rule_targets" class="text-xs bg-transparent border border-white/10 rounded p-1">
+                                {% for m in available_models %}<option value="{{ m }}" {% if m == rule.target %}selected{% endif %}>{{ m }}</option>{% endfor %}
+                            </select>
+                            <button type="button" onclick="this.parentElement.remove()" class="text-red-500 px-2">×</button>
+                        </div>
+                        {% endfor %}
+                    {% endif %}
+                </div>
+                <button type="button" onclick="addRule()" class="text-[10px] bg-white/5 border border-white/10 px-3 py-1 rounded hover:bg-white/10">+ Add Rule</button>
+            </div>
+
+            <div>
+                <label class="block text-xs text-gray-400 uppercase font-bold">Pool Participants</label>
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-2 max-h-48 overflow-y-auto p-2 bg-black/20 rounded border border-white/10">
+                    {% for m in available_models %}
+                    <label class="flex items-center gap-2 text-sm">
+                        <input type="checkbox" name="models" value="{{ m }}" class="rounded text-indigo-600" {% if m in pool.models %}checked{% endif %}> {{ m }}
+                    </label>
+                    {% endfor %}
+                </div>
+            </div>
+
+            <div class="flex justify-end pt-4">
+                <button type="submit" class="bg-indigo-600 hover:bg-indigo-500 px-8 py-2 rounded font-bold text-sm">Save Changes</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+    function addRule() {
+        const container = document.getElementById('rules-container');
+        const div = document.createElement('div');
+        div.className = "flex gap-2 items-center bg-black/40 p-2 rounded border border-white/5";
+        div.innerHTML = `
+            <select name="rule_conditions" class="text-xs bg-transparent border border-white/10 rounded p-1">
+                <option value="has_images">If has images</option>
+                <option value="min_len">If prompt length >=</option>
+                <option value="max_len">If prompt length <=</option>
+                <option value="user">If user is</option>
+                <option value="keyword">If contains keyword</option>
+            </select>
+            <input type="text" name="rule_values" placeholder="Value" class="text-xs bg-transparent border border-white/10 rounded p-1 w-24">
+            <span class="text-[10px] text-gray-500">THEN USE</span>
+            <select name="rule_targets" class="text-xs bg-transparent border border-white/10 rounded p-1">
+                {% for m in available_models %}<option value="{{ m }}">{{ m }}</option>{% endfor %}
+            </select>
+            <button type="button" onclick="this.parentElement.remove()" class="text-red-500 px-2">×</button>
+        `;
+        container.appendChild(div);
+    }
+</script>
+{% endblock %}

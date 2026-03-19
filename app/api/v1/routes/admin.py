@@ -1490,52 +1490,235 @@ async def delete_user_account(request: Request, user_id: int, db: AsyncSession =
 
 # --- INSTANCE MANAGER ROUTES ---
 
-# --- MODEL BUNDLE ROUTES ---
-@router.get("/bundles", response_class=HTMLResponse, name="admin_bundles")
-async def admin_bundles_page(request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
-    from app.database.models import ModelBundle
+# --- VIRTUAL AGENT ROUTES (Model + Personality) ---
+@router.get("/agents", response_class=HTMLResponse, name="admin_agents")
+async def admin_agents_page(request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
+    from app.database.models import VirtualAgent
     context = get_template_context(request)
-    result = await db.execute(select(ModelBundle))
-    context["bundles"] = result.scalars().all()
+    result = await db.execute(select(VirtualAgent))
+    context["agents"] = result.scalars().all()
     context["available_models"] = await server_crud.get_all_available_model_names(db)
     context["csrf_token"] = await get_csrf_token(request)
-    return templates.TemplateResponse("admin/bundles.html", context)
+    return templates.TemplateResponse("admin/agents.html", context)
 
-@router.post("/bundles/add", name="admin_add_bundle", dependencies=[Depends(validate_csrf_token)])
-async def admin_add_bundle(
+@router.post("/agents/add", name="admin_add_agent", dependencies=[Depends(validate_csrf_token)])
+async def admin_add_agent(
+    request: Request, db: AsyncSession = Depends(get_db), 
+    name: str = Form(...), base_model: str = Form(...), system_prompt: str = Form(...)
+):
+    from app.database.models import VirtualAgent
+    new_agent = VirtualAgent(name=name, base_model=base_model, system_prompt=system_prompt)
+    db.add(new_agent)
+    await db.commit()
+    flash(request, f"Agent '{name}' is alive.", "success")
+    return RedirectResponse(url=request.url_for("admin_agents"), status_code=303)
+
+@router.post("/agents/{agent_id}/delete", name="admin_delete_agent", dependencies=[Depends(validate_csrf_token)])
+async def admin_delete_agent(agent_id: int, request: Request, db: AsyncSession = Depends(get_db)):
+    from app.database.models import VirtualAgent
+    agent = await db.get(VirtualAgent, agent_id)
+    if agent:
+        await db.delete(agent)
+        await db.commit()
+        flash(request, "Agent removed.")
+    return RedirectResponse(url=request.url_for("admin_agents"), status_code=303)
+
+@router.get("/agents/{agent_id}/edit", response_class=HTMLResponse, name="admin_edit_agent_form")
+async def admin_edit_agent_form(agent_id: int, request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
+    from app.database.models import VirtualAgent
+    agent = await db.get(VirtualAgent, agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    
+    context = get_template_context(request)
+    context["agent"] = agent
+    context["available_models"] = await server_crud.get_all_available_model_names(db)
+    context["csrf_token"] = await get_csrf_token(request)
+    return templates.TemplateResponse("admin/edit_agent.html", context)
+
+@router.post("/agents/{agent_id}/edit", name="admin_edit_agent_post", dependencies=[Depends(validate_csrf_token)])
+async def admin_edit_agent_post(
+    agent_id: int, request: Request, db: AsyncSession = Depends(get_db), 
+    name: str = Form(...), base_model: str = Form(...), system_prompt: str = Form(...)
+):
+    from app.database.models import VirtualAgent
+    agent = await db.get(VirtualAgent, agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    
+    # Sanitize name to be model-safe (slugify)
+    agent.name = re.sub(r'[^a-z0-9.-]', '-', name.lower())
+    agent.base_model = base_model
+    agent.system_prompt = system_prompt
+    
+    await db.commit()
+    flash(request, f"Agent '{agent.name}' updated successfully.", "success")
+    return RedirectResponse(url=request.url_for("admin_agents"), status_code=303)
+
+# --- ENSEMBLE ORCHESTRATOR ROUTES ---
+@router.get("/ensembles", response_class=HTMLResponse, name="admin_ensembles_page")
+async def admin_ensembles_page(request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
+    from app.database.models import EnsembleOrchestrator
+    context = get_template_context(request)
+    result = await db.execute(select(EnsembleOrchestrator))
+    context["ensembles"] = result.scalars().all()
+    context["available_models"] = await server_crud.get_all_available_model_names(db)
+    context["csrf_token"] = await get_csrf_token(request)
+    return templates.TemplateResponse("admin/ensembles.html", context)
+
+@router.post("/ensembles/add", name="admin_add_ensemble", dependencies=[Depends(validate_csrf_token)])
+async def admin_add_ensemble(
     request: Request, 
     db: AsyncSession = Depends(get_db), 
     admin_user: User = Depends(require_admin_user),
     name: str = Form(...),
     master_model: str = Form(...),
     parallel_models: List[str] = Form(...),
-    show_monologue: bool = Form(False)
+    show_monologue: bool = Form(False),
+    send_status_update: bool = Form(False)
 ):
-    from app.database.models import ModelBundle
-    # Sanitize name to look like a model name
+    from app.database.models import EnsembleOrchestrator
     name = re.sub(r'[^a-z0-9.-]', '-', name.lower())
     
-    new_bundle = ModelBundle(
+    new_bundle = EnsembleOrchestrator(
         name=name,
         master_model=master_model,
-        parallel_models=parallel_models,
+        parallel_participants=parallel_models,
+        parallel_models=parallel_models, # Legacy field sync
         show_monologue=show_monologue,
         description=f"Ensemble: {', '.join(parallel_models)} -> {master_model}"
     )
     db.add(new_bundle)
     await db.commit()
     flash(request, f"Bundle '{name}' created successfully.", "success")
-    return RedirectResponse(url=request.url_for("admin_bundles"), status_code=303)
+    return RedirectResponse(url=request.url_for("admin_ensembles_page"), status_code=303)
 
-@router.post("/bundles/{bundle_id}/delete", name="admin_delete_bundle", dependencies=[Depends(validate_csrf_token)])
-async def admin_delete_bundle(bundle_id: int, request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
-    from app.database.models import ModelBundle
-    bundle = await db.get(ModelBundle, bundle_id)
-    if bundle:
-        await db.delete(bundle)
+@router.post("/ensembles/{ensemble_id}/delete", name="admin_delete_ensemble", dependencies=[Depends(validate_csrf_token)])
+async def admin_delete_ensemble(ensemble_id: int, request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
+    from app.database.models import EnsembleOrchestrator
+    ensemble = await db.get(EnsembleOrchestrator, ensemble_id)
+    if ensemble:
+        await db.delete(ensemble)
         await db.commit()
-        flash(request, "Bundle deleted.")
-    return RedirectResponse(url=request.url_for("admin_bundles"), status_code=303)
+        flash(request, "Ensemble deleted.")
+    return RedirectResponse(url=request.url_for("admin_ensembles_page"), status_code=303)
+
+@router.get("/ensembles/{ensemble_id}/edit", response_class=HTMLResponse, name="admin_edit_ensemble_form")
+async def admin_edit_ensemble_form(ensemble_id: int, request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
+    from app.database.models import EnsembleOrchestrator
+    ensemble = await db.get(EnsembleOrchestrator, ensemble_id)
+    if not ensemble: raise HTTPException(status_code=404, detail="Ensemble not found")
+    context = get_template_context(request)
+    context["ensemble"] = ensemble
+    context["available_models"] = await server_crud.get_all_available_model_names(db)
+    context["csrf_token"] = await get_csrf_token(request)
+    return templates.TemplateResponse("admin/edit_ensemble.html", context)
+
+@router.post("/ensembles/{ensemble_id}/edit", name="admin_edit_ensemble_post", dependencies=[Depends(validate_csrf_token)])
+async def admin_edit_ensemble_post(
+    ensemble_id: int, request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user),
+    name: str = Form(...), master_model: str = Form(...), parallel_models: List[str] = Form(...),
+    show_monologue: bool = Form(False), send_status_update: bool = Form(False)
+):
+    from app.database.models import EnsembleOrchestrator
+    bundle = await db.get(EnsembleOrchestrator, ensemble_id)
+    if not bundle: raise HTTPException(status_code=404, detail="Bundle not found")
+    
+    bundle.name = re.sub(r'[^a-z0-9.-]', '-', name.lower())
+    bundle.master_model = master_model
+    bundle.parallel_participants = parallel_models
+    bundle.parallel_models = parallel_models # Legacy field sync
+    bundle.show_monologue = show_monologue
+    bundle.send_status_update = send_status_update
+    bundle.description = f"Ensemble: {', '.join(parallel_models)} -> {master_model}"
+    
+    display_name = bundle.name
+    await db.commit()
+    flash(request, f"Bundle '{display_name}' updated.", "success")
+    return RedirectResponse(url=request.url_for("admin_ensembles_page"), status_code=303)
+
+# --- SMART ROUTER ROUTES ---
+@router.get("/routers", response_class=HTMLResponse, name="admin_routers_page")
+async def admin_routers_page(request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
+    from app.database.models import SmartRouter
+    context = get_template_context(request)
+    result = await db.execute(select(SmartRouter))
+    context["routers"] = result.scalars().all()
+    context["available_models"] = await server_crud.get_all_available_model_names(db)
+    context["csrf_token"] = await get_csrf_token(request)
+    return templates.TemplateResponse("admin/routers.html", context)
+
+@router.post("/routers/add", name="admin_add_router", dependencies=[Depends(validate_csrf_token)])
+async def admin_add_router(
+    request: Request, 
+    db: AsyncSession = Depends(get_db), 
+    admin_user: User = Depends(require_admin_user),
+    name: str = Form(...),
+    strategy: str = Form(...),
+    models: List[str] = Form(...),
+    rule_conditions: List[str] = Form(default=[]),
+    rule_values: List[str] = Form(default=[]),
+    rule_targets: List[str] = Form(default=[])
+):
+    from app.database.models import SmartRouter
+    name = re.sub(r'[^a-z0-9.-]', '-', name.lower())
+    
+    processed_rules = []
+    for cond, val, target in zip(rule_conditions, rule_values, rule_targets):
+        if cond and target:
+            processed_rules.append({"condition": cond, "value": val, "target": target})
+            
+    new_router = SmartRouter(name=name, strategy=strategy, targets=models, rules=processed_rules)
+    db.add(new_router)
+    await db.commit()
+    flash(request, f"Router '{name}' active.", "success")
+    return RedirectResponse(url=request.url_for("admin_routers_page"), status_code=303)
+
+@router.post("/routers/{router_id}/delete", name="admin_delete_router", dependencies=[Depends(validate_csrf_token)])
+async def admin_delete_router(router_id: int, request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
+    from app.database.models import SmartRouter
+    router_obj = await db.get(SmartRouter, router_id)
+    if router_obj:
+        await db.delete(router_obj)
+        await db.commit()
+        flash(request, "Router deleted.")
+    return RedirectResponse(url=request.url_for("admin_routers_page"), status_code=303)
+
+@router.get("/routers/{router_id}/edit", response_class=HTMLResponse, name="admin_edit_router_form")
+async def admin_edit_router_form(router_id: int, request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
+    from app.database.models import SmartRouter
+    router_obj = await db.get(SmartRouter, router_id)
+    if not router_obj: raise HTTPException(status_code=404, detail="Router not found")
+    context = get_template_context(request)
+    context["router"] = router_obj
+    context["available_models"] = await server_crud.get_all_available_model_names(db)
+    context["csrf_token"] = await get_csrf_token(request)
+    return templates.TemplateResponse("admin/edit_router.html", context)
+
+@router.post("/routers/{router_id}/edit", name="admin_edit_router_post", dependencies=[Depends(validate_csrf_token)])
+async def admin_edit_router_post(
+    router_id: int, request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user),
+    name: str = Form(...), strategy: str = Form(...), models: List[str] = Form(...),
+    rule_conditions: List[str] = Form(default=[]), rule_values: List[str] = Form(default=[]), rule_targets: List[str] = Form(default=[])
+):
+    from app.database.models import SmartRouter
+    router_obj = await db.get(SmartRouter, router_id)
+    if not router_obj: raise HTTPException(status_code=404, detail="Router not found")
+    
+    processed_rules = []
+    for cond, val, target in zip(rule_conditions, rule_values, rule_targets):
+        if cond and target:
+            processed_rules.append({"condition": cond, "value": val, "target": target})
+            
+    router_obj.name = re.sub(r'[^a-z0-9.-]', '-', name.lower())
+    router_obj.strategy = strategy
+    router_obj.targets = models
+    router_obj.rules = processed_rules
+    
+    display_name = router_obj.name
+    await db.commit()
+    flash(request, f"Router '{display_name}' updated.", "success")
+    return RedirectResponse(url=request.url_for("admin_routers_page"), status_code=303)
 
 @router.get("/instances", response_class=HTMLResponse, name="admin_instances")
 async def admin_instances_page(request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):

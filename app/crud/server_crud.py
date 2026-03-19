@@ -622,10 +622,27 @@ async def get_all_models_grouped_by_server(db: AsyncSession, filter_type: Option
             safe_name = server.name[:128] if server.name else "Unknown"
             grouped_models[safe_name] = sorted(server_models)
 
-    # Create a new dictionary to control order and add proxy-native models like 'auto'
+    # Create a new dictionary to control order and add proxy-native models
     final_grouped_models = {}
     if filter_type == 'chat' or filter_type is None:
-        final_grouped_models["Proxy Features"] = ["auto"]
+        proxy_features = ["auto"]
+        
+        # Dynamically add Pools and Bundles to the selector
+        try:
+            from app.database.models import SmartRouter, EnsembleOrchestrator
+            from sqlalchemy import select
+            
+            # Fetch Pools
+            res_p = await db.execute(select(SmartRouter.name).filter(SmartRouter.is_active == True))
+            proxy_features.extend(res_p.scalars().all())
+            
+            # Fetch Bundles
+            res_b = await db.execute(select(EnsembleOrchestrator.name).filter(EnsembleOrchestrator.is_active == True))
+            proxy_features.extend(res_b.scalars().all())
+        except Exception as e:
+            logger.error(f"Error fetching proxy features for selector: {e}")
+            
+        final_grouped_models["Proxy Features"] = sorted(proxy_features)
     
     # Merge the server-specific models after the proxy features
     final_grouped_models.update(grouped_models)

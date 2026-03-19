@@ -7,6 +7,13 @@ to initialize the database on startup.
 import logging
 import os
 import sys
+import bcrypt
+
+# --- Passlib/Bcrypt 4.0.0 Compatibility Patch ---
+# Passlib requires bcrypt.__about__, which was removed in bcrypt 4.0.0.
+if not hasattr(bcrypt, "__about__"):
+    bcrypt.__about__ = bcrypt
+
 from pydantic import BaseModel, ConfigDict
 
 # --- Suppress Pydantic 'model_' namespace warning ---

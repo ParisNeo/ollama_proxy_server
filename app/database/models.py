@@ -118,13 +118,43 @@ class ModelMetadata(Base):
     
     __table_args__ = (UniqueConstraint("model_name", name="uq_model_name"),)
 
-class ModelBundle(Base):
-    __tablename__ = "model_bundles"
+class EnsembleOrchestrator(Base):
+    __tablename__ = "model_bundles" # Keep table name for data stability
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, unique=True, index=True, nullable=False)
     description = Column(String, nullable=True)
-    parallel_models = Column(JSON, nullable=False) # List of model names
+    parallel_participants = Column(JSON, nullable=False) # Names of models or agents
+    # Legacy support: matching the physical NOT NULL constraint in older DBs
+    parallel_models = Column(JSON, nullable=True) 
     master_model = Column(String, nullable=False)
-    show_monologue = Column(Boolean, default=False) # Whether to show raw agent outputs
+    show_monologue = Column(Boolean, default=False)
+    send_status_update = Column(Boolean, default=False)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+    def __init__(self, **kwargs):
+        # Synchronize parallel_participants and parallel_models for DB compatibility
+        if 'parallel_participants' in kwargs and 'parallel_models' not in kwargs:
+            kwargs['parallel_models'] = kwargs['parallel_participants']
+        super().__init__(**kwargs)
+
+class SmartRouter(Base):
+    __tablename__ = "model_pools" # Keep table name for data stability
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, unique=True, index=True, nullable=False)
+    description = Column(String, nullable=True)
+    targets = Column(JSON, nullable=False) # Names of models or agents
+    strategy = Column(String, default='priority', nullable=False)
+    rules = Column(JSON, nullable=True)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+class VirtualAgent(Base):
+    __tablename__ = "virtual_agents"
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, unique=True, index=True, nullable=False)
+    description = Column(String, nullable=True)
+    base_model = Column(String, nullable=False)
+    system_prompt = Column(String, nullable=False) # The "Soul"
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
