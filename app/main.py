@@ -163,7 +163,8 @@ async def lifespan(app: FastAPI):
     # Configure HTTP client (timeouts are now hardcoded for simplicity)
     # TTFT MITIGATION: Lower connect timeout globally to avoid stalling on slow/dead servers
     timeout = httpx.Timeout(read=600.0, write=600.0, connect=3.0, pool=60.0)
-    limits = httpx.Limits(max_keepalive_connections=20, max_connections=100, keepalive_expiry=60.0)
+    # INCREASED LIMITS: Ensembles multiply the number of connections needed.
+    limits = httpx.Limits(max_keepalive_connections=100, max_connections=500, keepalive_expiry=60.0)
     app.state.http_client = httpx.AsyncClient(timeout=timeout, limits=limits)
 
     try:

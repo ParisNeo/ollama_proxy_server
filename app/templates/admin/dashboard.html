@@ -59,6 +59,7 @@
                         <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Model</th>
                         <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Server</th>
                         <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Placement</th>
+                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Context</th>
                         <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Size</th>
                         <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Expires In</th>
                         <th scope="col" class="px-6 py-3 text-right text-xs font-medium text-gray-400 uppercase tracking-wider">Actions</th>
@@ -177,11 +178,16 @@ document.addEventListener('DOMContentLoaded', () => {
                     <button type="submit" class="text-red-400 hover:text-red-600">Unload</button>
                 </form>
             `;
+            const contextDisplay = model.context && model.context !== 'Unknown' 
+                ? `<span class="font-mono text-[var(--color-primary-500)] font-bold">${(model.context / 1024).toFixed(0)}k</span>`
+                : `<span class="text-gray-500 italic">--</span>`;
+
             const row = `
                 <tr>
                     <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-current">${model.name}</td>
                     <td class="px-6 py-4 whitespace-nowrap text-sm">${model.server_name}</td>
                     <td class="px-6 py-4 whitespace-nowrap text-sm">${placement}</td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm">${contextDisplay}</td>
                     <td class="px-6 py-4 whitespace-nowrap text-sm">${sizeGb > 0 ? (sizeGb + ' GB') : 'N/A'}</td>
                     <td class="px-6 py-4 whitespace-nowrap text-sm">${expiresIn}</td>
                     <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">

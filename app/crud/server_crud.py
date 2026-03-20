@@ -665,6 +665,11 @@ async def get_active_models_all_servers(db: AsyncSession, http_client: httpx.Asy
 
     # 1. Fetch actively running models from Ollama servers
     if ollama_servers:
+        # Fetch metadata once to avoid multiple DB calls inside the loop
+        from app.crud.model_metadata_crud import get_all_metadata
+        all_meta = await get_all_metadata(db)
+        meta_map = {m.model_name: m.max_context for m in all_meta}
+
         async def fetch_ps(server: OllamaServer):
             try:
                 # Security check
@@ -683,11 +688,19 @@ async def get_active_models_all_servers(db: AsyncSession, http_client: httpx.Asy
                 for model in data.get("models", []):
                     if not isinstance(model, dict):
                         continue
+                    
+                    m_name = str(model.get("name", ""))[:256]
+                    # Try to find context in metadata, fallback to 'Unknown'
+                    # Strip tag for matching (e.g. llama3:latest -> llama3)
+                    base_name = m_name.split(':')[0]
+                    ctx_limit = meta_map.get(m_name) or meta_map.get(base_name) or "Unknown"
+
                     safe_model = {
-                        "name": str(model.get("name", ""))[:256],
+                        "name": m_name,
                         "server_name": server.name[:128],
                         "size": int(model.get("size", 0)) if str(model.get("size", "")).isdigit() else 0,
                         "size_vram": int(model.get("size_vram", 0)) if str(model.get("size_vram", "")).isdigit() else 0,
+                        "context": ctx_limit,
                         "expires_at": str(model.get("expires_at", "N/A"))[:64],
                     }
                     result.append(safe_model)

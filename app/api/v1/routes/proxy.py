@@ -1187,12 +1187,12 @@ async def _handle_bundle_request(db: AsyncSession, request: Request, bundle_name
                         servers = await server_crud.get_servers_with_model(local_db, real_model)
                         if not servers: 
                             event_manager.emit(ProxyEvent("error", sub_req_id, p_name, "none", "orchestrator", error_message="Model not found"))
-                            return f"Error: Model {real_model} not found."
+                            return p_name, f"Error: Model {real_model} not found."
                         
                         path_suffix = "chat" if "messages" in sub_body else "generate"
                         
                         # Use is_subrequest=True to ensure we get a synchronous body back
-                        resp, _ = await _reverse_proxy(
+                        resp, server_obj = await _reverse_proxy(
                             request, path_suffix, servers, 
                             json.dumps(sub_body).encode(), 
                             request_id=sub_req_id,
@@ -1201,18 +1201,39 @@ async def _handle_bundle_request(db: AsyncSession, request: Request, bundle_name
                             is_subrequest=True
                         )
                         
+                        # Sub-requests don't use the streaming wrapper, so we emit status manually
+                        s_name = server_obj.name if server_obj else "unknown"
+                        event_manager.emit(ProxyEvent("active", sub_req_id, p_name, s_name, "orchestrator"))
+
                         if hasattr(resp, 'body'):
                             try:
                                 data = json.loads(resp.body.decode())
-                                return data.get("message", {}).get("content", "") or data.get("response", "")
+                                content = data.get("message", {}).get("content", "") or data.get("response", "")
+                                # Signal completion immediately so it goes to trash without lag
+                                event_manager.emit(ProxyEvent("completed", sub_req_id, p_name, s_name, "orchestrator", token_count=len(content)//4))
+                                return p_name, content
                             except Exception as parse_err:
-                                return f"Error parsing response from {p_name}: {parse_err}"
-                        return "Error: Unexpected response type from agent."
+                                event_manager.emit(ProxyEvent("error", sub_req_id, p_name, s_name, "orchestrator", error_message=f"JSON Parse Error: {str(parse_err)}"))
+                                return p_name, f"Error parsing response from {p_name}: {parse_err}"
+                        
+                        event_manager.emit(ProxyEvent("error", sub_req_id, p_name, s_name, "orchestrator", error_message="Invalid Response Object"))
+                        return p_name, "Error: Unexpected response type from agent."
                     except Exception as e:
-                        return f"Error from {p_name}: {str(e)}"
+                        # Ensure the dot in Live Flow turns red and goes to trash
+                        event_manager.emit(ProxyEvent("error", sub_req_id, p_name, "none", "orchestrator", error_message=str(e)))
+                        return p_name, f"Error from {p_name}: {str(e)}"
 
-            tasks = [get_sub_response(m) for m in bundle.parallel_participants]
-            results = await asyncio.gather(*tasks)
+            # 2. Parallel Participant Execution (Async Streamed)
+            tasks = [asyncio.create_task(get_sub_response(m)) for m in bundle.parallel_participants]
+            results_dict = {}
+            
+            if bundle.show_monologue:
+                # Open the thinking block immediately
+                yield (json.dumps({"model": bundle_name, "message": {"role": "assistant", "content": "\n"}, "done": False}) + "\n").encode()
+
+            # Re-assemble results in original order for the Master Synthesis
+            results = [results_dict.get(m, "Error: No response") for m in bundle.parallel_participants]
+            agent_outputs = "\n\n".join([f"### AGENT: {bundle.parallel_participants[i]}\n{res}" for i, res in enumerate(results)])
 
             # Failure Check
             if all(r.startswith("Error") or r.startswith("Model") for r in results):
@@ -1220,16 +1241,6 @@ async def _handle_bundle_request(db: AsyncSession, request: Request, bundle_name
                 event_manager.emit(ProxyEvent("error", request_id, bundle_name, "orchestrator", api_key.user.username, error_message=err_msg))
                 yield (json.dumps({"model": bundle_name, "error": err_msg, "done": True}) + "\n").encode()
                 return
-
-            # 3. Monologue Injection
-            agent_outputs = "\n\n".join([f"### AGENT: {bundle.parallel_participants[i]}\n{res}" for i, res in enumerate(results)])
-            if bundle.show_monologue:
-                # Wrap in \n"
-                yield (json.dumps({
-                    "model": bundle_name, 
-                    "message": {"role": "assistant", "content": monologue_payload}, 
-                    "done": False
-                }) + "\n").encode()
 
             # 4. Master Synthesis
             user_query = body.get("prompt") or (body.get("messages", [{}])[-1].get("content") if body.get("messages") else "N/A")

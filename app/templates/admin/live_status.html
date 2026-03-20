@@ -576,6 +576,20 @@ document.addEventListener('DOMContentLoaded', () => {
 
             ctx.save();
             ctx.globalAlpha = p.alpha;
+            
+            // --- Processing Spinner for Active Particles ---
+            if (p.state === 'active') {
+                ctx.beginPath();
+                ctx.strokeStyle = drawColor;
+                ctx.lineWidth = 2;
+                ctx.setLineDash([5, 5]);
+                // Rotate the ring based on time
+                const angle = (Date.now() / 200) % (Math.PI * 2);
+                ctx.arc(x, y, p.size + 4, angle, angle + Math.PI * 1.5);
+                ctx.stroke();
+                ctx.setLineDash([]); // Reset dash
+            }
+
             ctx.shadowBlur = 15;
             ctx.shadowColor = drawColor;
             ctx.fillStyle = drawColor;
