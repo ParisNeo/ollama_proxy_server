@@ -138,13 +138,16 @@ class EnsembleOrchestrator(Base):
             kwargs['parallel_models'] = kwargs['parallel_participants']
         super().__init__(**kwargs)
 
-class SmartRouter(Base):
-    __tablename__ = "model_pools" # Keep table name for data stability
+class SmartRouter(Base): # Keep table name for data stability
+    __tablename__ = "model_pools"
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, unique=True, index=True, nullable=False)
     description = Column(String, nullable=True)
     targets = Column(JSON, nullable=False) # Names of models or agents
     strategy = Column(String, default='priority', nullable=False)
+    # The model used to classify intent if fast rules fail
+    classifier_model = Column(String, nullable=True) 
+    # Structured as List[RuleGroup]
     rules = Column(JSON, nullable=True)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)

@@ -1655,20 +1655,43 @@ async def admin_add_router(
     admin_user: User = Depends(require_admin_user),
     name: str = Form(...),
     strategy: str = Form(...),
-    models: List[str] = Form(...),
-    rule_conditions: List[str] = Form(default=[]),
-    rule_values: List[str] = Form(default=[]),
-    rule_targets: List[str] = Form(default=[])
+    classifier_model: Optional[str] = Form(None),
+    models: List[str] = Form(...)
 ):
     from app.database.models import SmartRouter
+    form_data = await request.form()
+    
     name = re.sub(r'[^a-z0-9.-]', '-', name.lower())
     
-    processed_rules = []
-    for cond, val, target in zip(rule_conditions, rule_values, rule_targets):
-        if cond and target:
-            processed_rules.append({"condition": cond, "value": val, "target": target})
+    # Process Hierarchical Decision Groups
+    processed_groups = []
+    group_ids = form_data.getlist("group_ids")
+    
+    for gid in group_ids:
+        target = form_data.get(f"group_target_{gid}")
+        logic = form_data.get(f"group_logic_{gid}", "OR")
+        
+        types = form_data.getlist(f"cond_type_{gid}")
+        vals = form_data.getlist(f"cond_val_{gid}")
+        
+        conditions = []
+        for c_type, c_val in zip(types, vals):
+            conditions.append({"type": c_type, "value": c_val})
             
-    new_router = SmartRouter(name=name, strategy=strategy, targets=models, rules=processed_rules)
+        if conditions and target:
+            processed_groups.append({
+                "logic": logic,
+                "target": target,
+                "conditions": conditions
+            })
+            
+    new_router = SmartRouter(
+        name=name, 
+        strategy=strategy, 
+        classifier_model=classifier_model,
+        targets=models, 
+        rules=processed_groups
+    )
     db.add(new_router)
     await db.commit()
     flash(request, f"Router '{name}' active.", "success")

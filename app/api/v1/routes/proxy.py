@@ -1031,57 +1031,101 @@ async def _resolve_target(db: AsyncSession, name: str, messages: List[Dict[str, 
 
     return name, messages
 
-async def _select_from_pool(db: AsyncSession, pool_name: str, body: Dict[str, Any], sender: str = "anon") -> Optional[str]:
-    """Selects a model using Advanced Firewall Rules or Router Strategy."""
+async def _call_classifier(request: Request, db: AsyncSession, classifier_model: str, last_message: str, intent_description: str) -> bool:
+    """Uses a small LLM to check if the current message matches a specific semantic intent."""
+    classifier_prompt = (
+        f"Analyze the following user message. Does it match the intent of '{intent_description}'?\n"
+        f"Answer ONLY with 'YES' or 'NO'.\n\n"
+        f"USER MESSAGE: {last_message}"
+    )
+    
+    payload = {
+        "model": classifier_model,
+        "messages": [{"role": "user", "content": classifier_prompt}],
+        "stream": False,
+        "options": {"num_predict": 5, "temperature": 0}
+    }
+    
+    try:
+        servers = await server_crud.get_servers_with_model(db, classifier_model)
+        if not servers: return False
+        
+        # Internal sub-request (non-streaming)
+        resp, _ = await _reverse_proxy(
+            request, "chat", servers, 
+            json.dumps(payload).encode(), 
+            sender="router-classifier",
+            is_subrequest=True
+        )
+        
+        if hasattr(resp, 'body'):
+            data = json.loads(resp.body.decode())
+            answer = data.get("message", {}).get("content", "").strip().upper()
+            return "YES" in answer
+        return False
+    except Exception as e:
+        logger.error(f"Router Classifier Error: {e}")
+        return False
+
+async def _select_from_pool(db: AsyncSession, pool_name: str, body: Dict[str, Any], request: Request, sender: str = "anon") -> Optional[str]:
+    """Selects a model using Multi-Tiered Hierarchical Rules (Fast + LLM)."""
     from app.database.models import SmartRouter
     res = await db.execute(select(SmartRouter).filter(SmartRouter.name == pool_name))
     pool = res.scalars().first()
     if not pool or not pool.targets:
         return None
 
-    all_available = await server_crud.get_all_available_model_names(db)
-    # Validate targets exist (could be models or agents)
-    valid_models = [m for m in pool.targets if m in all_available or m] 
-    if not valid_models: return None
+    # 1. Extract context features (Fast)
+    prompt_text = body.get("prompt") or ""
+    if not prompt_text and "messages" in body:
+        # Get LAST user message for intent classification
+        for msg in reversed(body["messages"]):
+            if msg.get("role") == "user":
+                content = msg.get("content", "")
+                prompt_text = " ".join([p.get("text", "") for p in content if p.get("type") == "text"]) if isinstance(content, list) else content
+                break
 
-    # --- ADVANCED RULES EVALUATION ---
+    features = {
+        "has_images": bool(body.get("images") or any(m.get("images") for m in body.get("messages", []) if isinstance(m, dict))),
+        "len": len(prompt_text),
+        "sender": sender,
+        "text": prompt_text.lower()
+    }
+
+    # 2. Hierarchical Rule Evaluation
     if pool.rules:
-        # 1. Extract Request Features
-        prompt = body.get("prompt") or ""
-        if not prompt and "messages" in body:
-            prompt = body["messages"][-1].get("content", "")
-            if isinstance(prompt, list):
-                prompt = " ".join([p.get("text", "") for p in prompt if p.get("type") == "text"])
-        
-        features = {
-            "has_images": bool(body.get("images") or any(m.get("images") for m in body.get("messages", []) if isinstance(m, dict))),
-            "len": len(prompt),
-            "sender": sender,
-            "streaming": body.get("stream", False)
-        }
+        for group in pool.rules:
+            # group = {"logic": "AND"|"OR", "conditions": [...], "target": "model_name"}
+            logic = group.get("logic", "OR")
+            conditions = group.get("conditions", [])
+            matches = []
 
-        # 2. Match Rules (First Match Wins)
-        for rule in pool.rules:
-            try:
-                condition = rule.get("condition")
-                val = rule.get("value")
-                match = False
+            for cond in conditions:
+                c_type = cond.get("type")
+                c_val = cond.get("value")
+                c_match = False
+
+                # Fast Checks (Favored)
+                if c_type == "has_images": c_match = features["has_images"]
+                elif c_type == "min_len": c_match = features["len"] >= int(c_val)
+                elif c_type == "max_len": c_match = features["len"] <= int(c_val)
+                elif c_type == "keyword": c_match = c_val.lower() in features["text"]
+                elif c_type == "regex": c_match = bool(re.search(c_val, features["text"], re.I))
+                elif c_type == "user": c_match = features["sender"] == c_val
                 
-                if condition == "has_images" and features["has_images"]: match = True
-                elif condition == "min_len" and features["len"] >= int(val): match = True
-                elif condition == "max_len" and features["len"] <= int(val): match = True
-                elif condition == "user" and features["sender"] == val: match = True
-                elif condition == "keyword" and val.lower() in prompt.lower(): match = True
+                # Semantic Check (Calls LLM - Last Resort)
+                elif c_type == "intent" and pool.classifier_model:
+                    c_match = await _call_classifier(request, db, pool.classifier_model, features["text"], c_val)
 
-                if match:
-                    target = rule.get("target")
-                    if target in valid_models:
-                        logger.info(f"Pool Rule Match: '{pool_name}' -> '{target}' based on {condition}:{val}")
-                        return target
-            except Exception as e:
-                logger.warning(f"Error evaluating pool rule: {e}")
+                matches.append(c_match)
 
-    # --- STRATEGY FALLBACK ---
+            # Final group determination
+            group_matched = all(matches) if logic == "AND" else any(matches)
+            if group_matched:
+                logger.info(f"Router Match: Pool '{pool_name}' -> '{group['target']}' via {logic} logic.")
+                return group['target']
+
+    # 3. Fallback Strategy
     if pool.strategy == 'random':
         return secrets.choice(valid_models)
     
@@ -1109,6 +1153,7 @@ async def _handle_bundle_request(db: AsyncSession, request: Request, bundle_name
         raise HTTPException(status_code=404, detail="Bundle not found")
 
     async def bundle_orchestrator_generator():
+        monologue_payload = ""  # Initialize to prevent NameError
         try:
             # 1. Immediate Status Update
             if bundle.send_status_update:

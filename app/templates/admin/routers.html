@@ -9,25 +9,36 @@
         <form action="{{ url_for('admin_add_router') }}" method="post" class="space-y-4">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
                     <label class="block text-xs text-gray-400 uppercase font-bold">Router Name</label>
-                    <input type="text" name="name" placeholder="e.g. load-balanced-llama" required class="w-full p-2 rounded bg-black/20 border border-white/10">
+                    <input type="text" name="name" placeholder="e.g. smart-entry-point" required class="w-full p-2 rounded bg-black/20 border border-white/10">
                 </div>
                 <div>
-                    <label class="block text-xs text-gray-400 uppercase font-bold">Strategy</label>
+                    <label class="block text-xs text-gray-400 uppercase font-bold">Strategy (Fallback)</label>
                     <select name="strategy" class="w-full p-2 rounded bg-black/20 border border-white/10">
                         <option value="priority">Priority (First available)</option>
                         <option value="random">Random Distribution</option>
                         <option value="least_loaded">Least Loaded (TPS Optimization)</option>
                     </select>
                 </div>
+                <div>
+                    <label class="block text-xs text-gray-400 uppercase font-bold">Classifier Model (Semantic Routing)</label>
+                    <select name="classifier_model" class="w-full p-2 rounded bg-black/20 border border-white/10">
+                        <option value="">None (Fast Rules Only)</option>
+                        {% for m in available_models %}
+                        <option value="{{ m }}">{{ m }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
             </div>
 
             <div>
-                <label class="block text-xs text-gray-400 uppercase font-bold mb-2">Conditional Rules (Optional)</label>
-                <div id="rules-container" class="space-y-2 mb-4"></div>
-                <button type="button" onclick="addRule()" class="text-[10px] bg-white/5 border border-white/10 px-3 py-1 rounded hover:bg-white/10">+ Add Rule</button>
+                <label class="block text-xs text-gray-400 uppercase font-bold mb-2">Hierarchical Decision Groups</label>
+                <div id="rule-groups-container" class="space-y-4 mb-4">
+                    <!-- Groups will be added here -->
+                </div>
+                <button type="button" onclick="addRuleGroup()" class="text-xs bg-indigo-600/20 text-indigo-400 border border-indigo-500/30 px-4 py-2 rounded hover:bg-indigo-600/30">+ New Decision Group</button>
             </div>
 
             <div>
@@ -86,25 +97,61 @@
 </div>
 
 <script>
-    function addRule() {
-        const container = document.getElementById('rules-container');
+    let groupCounter = 0;
+
+    function addRuleGroup() {
+        const container = document.getElementById('rule-groups-container');
+        const groupId = groupCounter++;
         const div = document.createElement('div');
-        div.className = "flex gap-2 items-center bg-black/40 p-2 rounded border border-white/5";
+        div.className = "card-style bg-white/5 border-dashed p-4 relative group";
         div.innerHTML = `
-            <select name="rule_conditions" class="text-xs bg-transparent border border-white/10 rounded p-1">
-                <option value="has_images">If has images</option>
-                <option value="min_len">If prompt length >=</option>
-                <option value="max_len">If prompt length <=</option>
-                <option value="keyword">If contains keyword</option>
-            </select>
-            <input type="text" name="rule_values" placeholder="Value" class="text-xs bg-transparent border border-white/10 rounded p-1 w-24">
-            <span class="text-[10px] text-gray-500">THEN USE</span>
-            <select name="rule_targets" class="text-xs bg-transparent border border-white/10 rounded p-1">
-                {% for m in available_models %}<option value="{{ m }}">{{ m }}</option>{% endfor %}
-            </select>
-            <button type="button" onclick="this.parentElement.remove()" class="text-red-500 px-2">×</button>
+            <button type="button" onclick="this.parentElement.remove()" class="absolute top-2 right-2 text-red-500 opacity-0 group-hover:opacity-100 transition-opacity">Remove Group</button>
+            <div class="flex flex-wrap items-center gap-4 mb-4">
+                <span class="text-[10px] font-black uppercase text-gray-500">Match Logic:</span>
+                <select name="group_logic_${groupId}" class="text-xs bg-black/40 rounded p-1 border border-white/10">
+                    <option value="OR">ANY condition matches (OR)</option>
+                    <option value="AND">ALL conditions match (AND)</option>
+                </select>
+                <span class="text-[10px] font-black uppercase text-gray-500">Target Model:</span>
+                <select name="group_target_${groupId}" class="text-xs bg-black/40 rounded p-1 border border-white/10">
+                    {% for m in available_models %}<option value="{{ m }}">{{ m }}</option>{% endfor %}
+                </select>
+            </div>
+            <div id="cond-list-${groupId}" class="space-y-2 ml-4 border-l-2 border-white/5 pl-4">
+                <!-- Conditions added here -->
+            </div>
+            <button type="button" onclick="addCondition(${groupId})" class="mt-3 text-[10px] text-indigo-400 hover:underline">+ Add Condition</button>
+            <input type="hidden" name="group_ids" value="${groupId}">
         `;
         container.appendChild(div);
+        addCondition(groupId); // Add first condition automatically
     }
+
+    function addCondition(groupId) {
+        const list = document.getElementById(`cond-list-${groupId}`);
+        const cDiv = document.createElement('div');
+        cDiv.className = "flex items-center gap-2";
+        cDiv.innerHTML = `
+            <select name="cond_type_${groupId}" class="text-[11px] bg-black/20 border border-white/10 rounded p-1">
+                <optgroup label="Fast (Firewall)">
+                    <option value="keyword">Contains Keyword</option>
+                    <option value="regex">Matches Regex</option>
+                    <option value="min_len">Length >=</option>
+                    <option value="max_len">Length <=</option>
+                    <option value="has_images">Includes Images</option>
+                    <option value="user">User is</option>
+                </optgroup>
+                <optgroup label="Semantic (LLM)">
+                    <option value="intent">AI Intent Classifier</option>
+                </optgroup>
+            </select>
+            <input type="text" name="cond_val_${groupId}" placeholder="e.g. coding" class="text-[11px] bg-black/40 border border-white/10 rounded p-1 flex-grow">
+            <button type="button" onclick="this.parentElement.remove()" class="text-gray-500 hover:text-red-500">×</button>
+        `;
+        list.appendChild(cDiv);
+    }
+    
+    // Initialize with one group
+    addRuleGroup();
 </script>
 {% endblock %}

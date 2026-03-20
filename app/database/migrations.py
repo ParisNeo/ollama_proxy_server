@@ -552,6 +552,7 @@ async def run_all_migrations(engine: AsyncEngine) -> None:
             },
             "model_pools": {
                 "targets": "JSON DEFAULT '[]' NOT NULL",
+                "classifier_model": "VARCHAR",
                 "created_at": "DATETIME",
             },
             "model_metadata": {
