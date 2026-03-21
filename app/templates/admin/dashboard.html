@@ -167,7 +167,20 @@ document.addEventListener('DOMContentLoaded', () => {
                 expiresIn = model.expires_at;
             }
 
-            const placement = model.size_vram > 0 ? '<span class="gpu-badge">GPU</span>' : '<span class="cpu-badge">CPU</span>';
+            let placement = '';
+            if (model.size > 0) {
+                const gpuPercent = Math.round((model.size_vram / model.size) * 100);
+                if (gpuPercent >= 100) {
+                    placement = '<span class="gpu-badge">100% GPU</span>';
+                } else if (gpuPercent <= 0) {
+                    placement = '<span class="cpu-badge">100% CPU</span>';
+                } else {
+                    placement = `<span class="gpu-badge" style="background: linear-gradient(90deg, var(--color-primary-500) ${gpuPercent}%, #6b7280 ${gpuPercent}%) !important; color: white !important;">${gpuPercent}% GPU</span>`;
+                }
+            } else {
+                placement = model.size_vram > 0 ? '<span class="gpu-badge">GPU</span>' : '<span class="cpu-badge">CPU</span>';
+            }
+
             const chatUrl = `{{ url_for('admin_playground') }}?model=${encodeURIComponent(model.name)}`;
             
             const unloadForm = `
@@ -179,7 +192,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 </form>
             `;
             const contextDisplay = model.context && model.context !== 'Unknown' 
-                ? `<span class="font-mono text-[var(--color-primary-500)] font-bold">${(model.context / 1024).toFixed(0)}k</span>`
+                ? `<span class="font-mono text-[var(--color-primary-500)] font-bold">${model.context >= 1024 ? (model.context / 1024).toFixed(0) + 'k' : model.context}</span>`
                 : `<span class="text-gray-500 italic">--</span>`;
 
             const row = `

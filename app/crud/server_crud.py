@@ -690,10 +690,14 @@ async def get_active_models_all_servers(db: AsyncSession, http_client: httpx.Asy
                         continue
                     
                     m_name = str(model.get("name", ""))[:256]
-                    # Try to find context in metadata, fallback to 'Unknown'
-                    # Strip tag for matching (e.g. llama3:latest -> llama3)
-                    base_name = m_name.split(':')[0]
-                    ctx_limit = meta_map.get(m_name) or meta_map.get(base_name) or "Unknown"
+                    
+                    # Prefer API context_length, fallback to DB metadata
+                    api_ctx = model.get("context_length")
+                    if api_ctx:
+                        ctx_limit = api_ctx
+                    else:
+                        base_name = m_name.split(':')[0]
+                        ctx_limit = meta_map.get(m_name) or meta_map.get(base_name) or "Unknown"
 
                     safe_model = {
                         "name": m_name,

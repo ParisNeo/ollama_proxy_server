@@ -6,8 +6,10 @@ import platform
 import asyncio
 import socket
 import httpx
-from typing import Dict, Optional, List
+import psutil
+from typing import Dict, Optional, List, Tuple
 from pathlib import Path
+from app.core.binary_manager import LLAMACPP_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -15,87 +17,146 @@ class InstanceSupervisor:
     def __init__(self):
         self.processes: Dict[int, subprocess.Popen] = {}
 
-    def _get_env(self, instance) -> dict:
-        env = os.environ.copy()
-        env["OLLAMA_HOST"] = f"127.0.0.1:{instance.port}"
-        if instance.gpu_ids:
-            env["CUDA_VISIBLE_DEVICES"] = instance.gpu_ids
-        if instance.models_path:
-            # Ensure path is absolute for Ollama
-            env["OLLAMA_MODELS"] = str(Path(instance.models_path).absolute())
-        env["OLLAMA_KEEP_ALIVE"] = instance.keep_alive
-        env["OLLAMA_ORIGINS"] = "*"
-        return env
+    def get_instance_state(self, instance) -> Tuple[str, Optional[int]]:
+        """
+        Determines the true state of an instance.
+        Returns: (state, pid)
+        States: 'RUNNING' (Managed), 'SYSTEM' (Unmanaged/Service), 'STOPPED', 'CONFLICT' (Port busy by non-ollama)
+        """
+        # 1. Check if we are currently managing this process
+        managed_proc = self.processes.get(instance.id)
+        if managed_proc and managed_proc.poll() is None:
+            return "RUNNING", managed_proc.pid
+
+        # 2. Check if the port is busy physically
+        pid_on_port = self._get_pid_on_port(instance.port)
+        if pid_on_port:
+            # 3. Verify if it's actually an Ollama instance
+            if self._is_ollama_responding(instance.port):
+                return "SYSTEM", pid_on_port
+            return "CONFLICT", pid_on_port
+
+        return "STOPPED", None
+
+    def _get_pid_on_port(self, port: int) -> Optional[int]:
+        """Finds the PID of the process listening on a specific port."""
+        try:
+            for conn in psutil.net_connections(kind='inet'):
+                if conn.laddr.port == port and conn.status == psutil.CONN_LISTEN:
+                    return conn.pid
+        except (psutil.AccessDenied, psutil.NoSuchProcess):
+            # Fallback for systems where net_connections requires root
+            return None
+        return None
+
+    def _is_ollama_responding(self, port: int) -> bool:
+        """Probes the port to see if an Ollama API is active."""
+        try:
+            # Short timeout to prevent UI lag
+            with socket.create_connection(('127.0.0.1', port), timeout=0.2):
+                return True
+        except (socket.timeout, ConnectionRefusedError, OSError):
+            return False
 
     async def start_instance(self, instance):
-        if instance.id in self.processes:
-            await self.stop_instance(instance.id)
+        state, _ = self.get_instance_state(instance)
+        if state in ("RUNNING", "SYSTEM", "CONFLICT"):
+            logger.warning(f"Cannot start instance {instance.name}: Port {instance.port} is {state}")
+            return False
 
-        binary = "ollama.exe" if platform.system() == "Windows" else "ollama"
-        
+        env = os.environ.copy()
+        if instance.gpu_ids:
+            env["CUDA_VISIBLE_DEVICES"] = str(instance.gpu_ids)
+
+        is_win = platform.system() == "Windows"
+        cmd = []
+
+        if instance.backend_type == "ollama":
+            binary = "ollama.exe" if is_win else "ollama"
+            cmd = [binary, "serve"]
+            env["OLLAMA_HOST"] = f"127.0.0.1:{instance.port}"
+            if instance.model_path:
+                env["OLLAMA_MODELS"] = str(Path(instance.model_path).absolute())
+
+        elif instance.backend_type == "llamacpp":
+            # Target the internal binary from Binary Hub
+            binary = str(LLAMACPP_DIR / ("llama-server.exe" if is_win else "llama-server"))
+            if not Path(binary).exists():
+                logger.error(f"Llama.cpp binary not found at {binary}. Please check Binary Hub.")
+                return False
+            
+            cmd = [
+                binary,
+                "--model", str(instance.model_path),
+                "--port", str(instance.port),
+                "--ctx-size", str(instance.ctx_size or 4096),
+                "--threads", str(instance.threads or 8),
+                "--n-gpu-layers", str(instance.n_gpu_layers or 99),
+                "--host", "127.0.0.1"
+            ]
+
+        elif instance.backend_type == "vllm":
+            # vLLM usually runs via python module or 'vllm' entrypoint
+            cmd = [
+                "python", "-m", "vllm.entrypoints.openai.api_server",
+                "--model", str(instance.model_path),
+                "--port", str(instance.port),
+                "--tensor-parallel-size", str(instance.tensor_parallel_size or 1),
+                "--host", "127.0.0.1"
+            ]
+
         try:
-            logger.info(f"Starting managed instance {instance.name} on port {instance.port}")
+            logger.info(f"Launching {instance.backend_type} instance '{instance.name}' on port {instance.port}")
             proc = subprocess.Popen(
-                [binary, "serve"],
-                env=self._get_env(instance),
+                cmd,
+                env=env,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
-                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if platform.system() == "Windows" else 0
+                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if is_win else 0
             )
             self.processes[instance.id] = proc
             return True
         except Exception as e:
-            logger.error(f"Failed to start instance {instance.name}: {e}")
+            logger.error(f"Failed to launch {instance.backend_type} binary: {e}")
             return False
 
     async def stop_instance(self, instance_id: int):
         proc = self.processes.get(instance_id)
         if not proc:
-            return
+            return False
 
-        logger.info(f"Stopping managed instance ID {instance_id}")
         if platform.system() == "Windows":
             proc.send_signal(signal.CTRL_BREAK_EVENT)
         else:
             proc.terminate()
         
-        # Give it a moment to shut down
-        for _ in range(10):
-            if proc.poll() is not None:
-                break
-            await asyncio.sleep(0.5)
-        
-        if proc.poll() is None:
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
             proc.kill()
             
-        del self.processes[instance_id]
+        if instance_id in self.processes:
+            del self.processes[instance_id]
+        return True
 
-    def is_running(self, instance_id: int) -> bool:
-        proc = self.processes.get(instance_id)
-        return proc is not None and proc.poll() is None
-
-    async def discover_local_instances(self, existing_ports: List[int], start_port: int = 11434, end_port: int = 11445) -> List[dict]:
-        """Scans local ports to find running Ollama instances not managed by us."""
+    async def discover_local_instances(self, managed_ports: List[int], start_port: int, end_port: int) -> List[dict]:
         discovered = []
-        # Use provided range
         for port in range(start_port, end_port + 1):
-            if port in existing_ports:
-                continue
+            if port in managed_ports: continue
             
-            if self._is_port_open(port):
-                # Verify it's actually Ollama
+            # Use psutil to check process name if possible
+            pid = self._get_pid_on_port(port)
+            if pid:
                 try:
-                    async with httpx.AsyncClient(timeout=0.5) as client:
-                        resp = await client.get(f"http://127.0.0.1:{port}/api/tags")
-                        if resp.status_code == 200:
-                            discovered.append({"port": port, "type": "Ollama"})
-                except Exception:
-                    continue
+                    p = psutil.Process(pid)
+                    p_name = p.name().lower()
+                    # Catch Windows 'ollama app.exe' and Linux/Mac 'ollama'
+                    if "ollama" in p_name and self._is_ollama_responding(port):
+                        discovered.append({"port": port, "pid": pid, "name": p.name()})
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    # Fallback to pure socket probe
+                    if self._is_ollama_responding(port):
+                        discovered.append({"port": port, "pid": "Unknown", "name": "System Ollama"})
         return discovered
-
-    def _is_port_open(self, port: int) -> bool:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.settimeout(0.1)
-            return s.connect_ex(('127.0.0.1', port)) == 0
 
 supervisor = InstanceSupervisor()

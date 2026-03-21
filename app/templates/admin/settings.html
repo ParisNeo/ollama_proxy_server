@@ -191,6 +191,23 @@
             </div>
         </div>
 
+        <!-- Hub Orchestration -->
+        <div>
+            <h2 class="card-header text-xl font-bold mb-4 pb-2">Hub Orchestration</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                    <label for="admin_agent_name" class="block text-sm font-medium text-current">Management Agent</label>
+                    <select name="admin_agent_name" id="admin_agent_name" class="mt-1 block w-full px-3 py-2 rounded-md shadow-sm">
+                        <option value="">None (Disable internal enhancements)</option>
+                        {% for agent_name in agent_names %}
+                        <option value="{{ agent_name }}" {% if settings.admin_agent_name == agent_name %}selected{% endif %}>{{ agent_name }}</option>
+                        {% endfor %}
+                    </select>
+                    <p class="mt-1 text-xs text-gray-400">This agent is used for administrative tasks, like rewriting system prompts using the "Enhance" feature.</p>
+                </div>
+            </div>
+        </div>
+
         <!-- Endpoint Security -->
         <div>
             <h2 class="card-header text-xl font-bold mb-4 pb-2">Endpoint Security</h2>

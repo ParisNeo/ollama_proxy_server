@@ -217,7 +217,8 @@ async def _update_log_with_tokens_async(
 async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer], body_bytes: bytes = "", 
                         api_key_id: Optional[int] = None, log_id: Optional[int] = None,
                         request_id: Optional[str] = None, model: str = "unknown",
-                        sender: str = "anon", is_subrequest: bool = False) -> Tuple[Response, OllamaServer]:
+                        sender: str = "anon", is_subrequest: bool = False,
+                        client_wants_stream: bool = True) -> Tuple[Response, OllamaServer]:
     """
     Core reverse proxy logic with retry support and token tracking.
     """
@@ -314,39 +315,68 @@ async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer
             # Check if this is a streaming response
             is_streaming = _is_streaming_response(backend_response)
             
-            if is_streaming and log_id and not is_subrequest:
+            # Use streaming wrapper ONLY if client requested stream AND backend supports it
+            if is_streaming and client_wants_stream and log_id and not is_subrequest:
                 # Wrap for token tracking and live visualization
                 wrapped_response = _wrap_response_for_token_tracking(
                     backend_response, chosen_server, api_key_id, log_id, path, request_id, model, sender
                 )
                 return wrapped_response, chosen_server
             else:
-                # Non-streaming, return as Starlette Response (tokens will be extracted if possible)
-                # Consuming the body here is necessary for both token extraction and to prevent socket-serialization errors.
+                # Non-streaming, return as Starlette Response.
                 try:
-                    body = await backend_response.aread()
-                    if log_id and backend_response.status_code == 200 and body:
-                        try:
-                            data = json.loads(body.decode('utf-8'))
-                            tokens = _extract_tokens_from_chunk(data)
-                            if tokens.get("total_tokens") is not None or tokens.get("prompt_tokens") is not None:
-                                asyncio.create_task(_update_log_with_tokens_async(
-                                    log_id,
-                                    tokens["prompt_tokens"],
-                                    tokens["completion_tokens"],
-                                    tokens["total_tokens"]
-                                ))
-                        except Exception:
-                            pass
+                    raw_body = await backend_response.aread()
+                    decoded_body = raw_body.decode('utf-8')
                     
-                    # Return a standard Starlette Response instead of raw httpx.Response
-                    return Response(
-                        content=body,
+                    # DEFENSIVE FIX: If the backend returned NDJSON (multiple objects), 
+                    # we must parse them and return only the final one to the client.
+                    lines = [line.strip() for line in decoded_body.split('\n') if line.strip()]
+                    
+                    final_data = {}
+                    full_content = ""
+                    
+                    for line in lines:
+                        try:
+                            chunk = json.loads(line)
+                            if "message" in chunk:
+                                full_content += chunk["message"].get("content", "")
+                            elif "response" in chunk:
+                                full_content += chunk.get("response", "")
+                            
+                            # Use the last 'done' chunk as the base for metadata
+                            if chunk.get("done") or not final_data:
+                                final_data = chunk
+                        except json.JSONDecodeError:
+                            continue
+                    
+                    # Ensure the final object has the total aggregated text
+                    if "message" in final_data:
+                        final_data["message"]["content"] = full_content
+                    elif "response" in final_data:
+                        final_data["response"] = full_content
+
+                    # Extract tokens for logging
+                    if log_id and backend_response.status_code == 200 and final_data:
+                        tokens = _extract_tokens_from_chunk(final_data)
+                        if tokens.get("total_tokens") is not None or tokens.get("prompt_tokens") is not None:
+                            asyncio.create_task(_update_log_with_tokens_async(
+                                log_id,
+                                tokens["prompt_tokens"],
+                                tokens["completion_tokens"],
+                                tokens["total_tokens"]
+                            ))
+                    
+                    # Return a single valid JSON object to satisfy the client library
+                    # We strip Content-Length and Transfer-Encoding because JSONResponse recalculates them
+                    resp_headers = {k: v for k, v in backend_response.headers.items() 
+                                   if k.lower() not in ('content-length', 'transfer-encoding', 'content-encoding')}
+                    return JSONResponse(
+                        content=final_data,
                         status_code=backend_response.status_code,
-                        headers=dict(backend_response.headers)
+                        headers=resp_headers
                     ), chosen_server
                 except Exception as e:
-                    logger.error(f"Failed to read backend response body: {e}")
+                    logger.error(f"Failed to process backend response: {e}")
                     raise
             
         except Exception as first_error:
@@ -762,7 +792,22 @@ async def _proxy_to_vllm(
             if path == "embeddings":
                 ollama_data = translate_vllm_to_ollama_embeddings(vllm_data)
                 return JSONResponse(content=ollama_data)
-            raise NotImplementedError("Non-streaming chat for vLLM not yet implemented.")
+            
+            # Implementation for vLLM chat non-streaming
+            choices = vllm_data.get("choices", [])
+            content = choices[0].get("message", {}).get("content", "") if choices else ""
+            
+            ollama_compatible = {
+                "model": model_name,
+                "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z"),
+                "message": {"role": "assistant", "content": content},
+                "done": True,
+                "total_duration": 0, # vLLM doesn't easily provide these in this format
+                "load_duration": 0,
+                "prompt_eval_count": vllm_data.get("usage", {}).get("prompt_tokens", 0),
+                "eval_count": vllm_data.get("usage", {}).get("completion_tokens", 0)
+            }
+            return JSONResponse(content=ollama_compatible)
 
     except httpx.HTTPStatusError as e:
         error_detail = e.response.text
@@ -1008,27 +1053,32 @@ async def _select_auto_model(db: AsyncSession, body: Dict[str, Any]) -> Optional
 
 async def _resolve_target(db: AsyncSession, name: str, messages: List[Dict[str, Any]], depth: int = 0) -> Tuple[str, List[Dict[str, Any]]]:
     """Recursively resolves a name into a physical model + final message list (for Virtual Agents)."""
-    if depth > 5: return name, messages # Circular protection
+    if depth > 10: return name, messages # Circular protection
 
     from app.database.models import VirtualAgent, SmartRouter
     
-    # Check if it's a Virtual Agent (Model + Personality)
+    # 1. Resolve Virtual Agent (Persona + RAG + MCP)
     agent_res = await db.execute(select(VirtualAgent).filter(VirtualAgent.name == name, VirtualAgent.is_active == True))
     agent = agent_res.scalars().first()
     if agent:
-        # Inject Soul: Prepend system prompt to messages
+        logger.info(f"Hydrating Agent '{name}' -> Base: {agent.base_model}")
+        
+        # Soul Injection: Prepend system prompt
         updated_messages = [{"role": "system", "content": agent.system_prompt}] + messages
+        
+        # Note: RAG/MCP injection point
+        
         return await _resolve_target(db, agent.base_model, updated_messages, depth + 1)
 
-    # Check if it's a Smart Router (formerly Pool)
+    # 2. Resolve Smart Router (formerly Pool)
     router_res = await db.execute(select(SmartRouter).filter(SmartRouter.name == name, SmartRouter.is_active == True))
     router = router_res.scalars().first()
     if router:
-        # Note: In a real scenario, we'd pass the body here to evaluate rules
-        # For this refactor, we resolve to the first target or priority target
+        # Fallback to the first target in the router for recursive resolution
         chosen_target = router.targets[0] if router.targets else name
         return await _resolve_target(db, chosen_target, messages, depth + 1)
 
+    # 3. Fallback: It's a raw model name
     return name, messages
 
 async def _call_classifier(request: Request, db: AsyncSession, classifier_model: str, last_message: str, intent_description: str) -> bool:
@@ -1152,17 +1202,28 @@ async def _handle_bundle_request(db: AsyncSession, request: Request, bundle_name
         event_manager.emit(ProxyEvent("error", request_id, bundle_name, "none", api_key.user.username, error_message="Bundle not found"))
         raise HTTPException(status_code=404, detail="Bundle not found")
 
-    async def bundle_orchestrator_generator():
-        monologue_payload = ""  # Initialize to prevent NameError
-        try:
-            # 1. Immediate Status Update
-            if bundle.send_status_update:
-                status_msg = f"✨ Orchestrating ensemble via: {', '.join(bundle.parallel_participants)}... gathering perspectives.\n\n"
-                yield (json.dumps({"model": bundle_name, "message": {"role": "assistant", "content": status_msg}, "done": False}) + "\n").encode()
 
-            # 2. Parallel Participant Execution
-            event_manager.emit(ProxyEvent("assigned", request_id, bundle_name, "orchestrator", api_key.user.username))
-            
+    async def bundle_orchestrator_generator():
+        # Detect if the client expects Ollama Chat format or Generation format
+        is_chat_mode = "messages" in body
+        
+        def format_proxy_chunk(content: str, is_done: bool = False):
+            """Helper to ensure chunks match the expected format of the calling client."""
+            # Use 'Z' suffix to match Ollama's standard UTC format
+            now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z")
+            chunk = {
+                "model": bundle_name,
+                "created_at": now_iso,
+                "done": is_done
+            }
+            if is_chat_mode:
+                chunk["message"] = {"role": "assistant", "content": content}
+            else:
+                chunk["response"] = content
+            return (json.dumps(chunk) + "\n").encode()
+
+        try:
+            # Define the helper FIRST to avoid NameError
             async def get_sub_response(p_name):
                 # Assign a unique ID for this specific agent to visualize it in the Live Flow
                 sub_req_id = f"{request_id}_{p_name}"
@@ -1223,13 +1284,22 @@ async def _handle_bundle_request(db: AsyncSession, request: Request, bundle_name
                         event_manager.emit(ProxyEvent("error", sub_req_id, p_name, "none", "orchestrator", error_message=str(e)))
                         return p_name, f"Error from {p_name}: {str(e)}"
 
-            # 2. Parallel Participant Execution (Async Streamed)
+            # 1. Immediate Status Update
+            if bundle.send_status_update:
+                status_msg = f"✨ Orchestrating ensemble via: {', '.join(bundle.parallel_participants)}... gathering perspectives.\n\n"
+                yield format_proxy_chunk(status_msg)
+
+            # 2. Parallel Participant Execution
+            event_manager.emit(ProxyEvent("assigned", request_id, bundle_name, "orchestrator", api_key.user.username))
             tasks = [asyncio.create_task(get_sub_response(m)) for m in bundle.parallel_participants]
-            results_dict = {}
             
             if bundle.show_monologue:
-                # Open the thinking block immediately
-                yield (json.dumps({"model": bundle_name, "message": {"role": "assistant", "content": "\n"}, "done": False}) + "\n").encode()
+                # Open the collapsible thinking block immediately
+                yield format_proxy_chunk("\n\n")
+
+            # Await all parallel agents
+            task_results = await asyncio.gather(*tasks)
+            results_dict = {m: res for m, res in task_results}
 
             # Re-assemble results in original order for the Master Synthesis
             results = [results_dict.get(m, "Error: No response") for m in bundle.parallel_participants]
@@ -1239,7 +1309,7 @@ async def _handle_bundle_request(db: AsyncSession, request: Request, bundle_name
             if all(r.startswith("Error") or r.startswith("Model") for r in results):
                 err_msg = "All bundle agents failed to respond. Check backend server logs."
                 event_manager.emit(ProxyEvent("error", request_id, bundle_name, "orchestrator", api_key.user.username, error_message=err_msg))
-                yield (json.dumps({"model": bundle_name, "error": err_msg, "done": True}) + "\n").encode()
+                yield format_proxy_chunk(f"Error: {err_msg}", is_done=True)
                 return
 
             # 4. Master Synthesis
@@ -1251,8 +1321,8 @@ async def _handle_bundle_request(db: AsyncSession, request: Request, bundle_name
             
             master_body = body.copy()
             master_body["model"] = bundle.master_model
-            # Ensembles should stream the final answer for better UX
-            master_body["stream"] = True 
+            # Honors original client request. If client wanted non-stream, we don't force stream.
+            master_body["stream"] = body.get("stream", True)
 
             if "prompt" in master_body: 
                 master_body["prompt"] = synthesis_prompt
@@ -1294,12 +1364,21 @@ async def _handle_bundle_request(db: AsyncSession, request: Request, bundle_name
                         yield (json.dumps({"error": f"Master backend error: {err_text.decode()}"}) + "\n").encode()
                         return
 
+                    # Signal that synthesis is active to trigger the visual spinner
+                    event_manager.emit(ProxyEvent("active", request_id, bundle_name, target_server.name, api_key.user.username))
+
                     async for line in backend_resp.aiter_lines():
                         if not line: continue
                         try:
                             # Rewrite model name to match the bundle requested by user
                             chunk_data = json.loads(line)
                             chunk_data["model"] = bundle_name
+                            
+                            # If this is the final chunk, send the completion event to move particle to trash
+                            if chunk_data.get("done"):
+                                t_count = chunk_data.get("eval_count", 0) + chunk_data.get("prompt_eval_count", 0)
+                                event_manager.emit(ProxyEvent("completed", request_id, bundle_name, target_server.name, api_key.user.username, token_count=t_count))
+                            
                             yield (json.dumps(chunk_data) + "\n").encode()
                         except json.JSONDecodeError:
                             yield (line + "\n").encode()
@@ -1314,7 +1393,49 @@ async def _handle_bundle_request(db: AsyncSession, request: Request, bundle_name
             event_manager.emit(ProxyEvent("error", request_id, bundle_name, "orchestrator", api_key.user.username, error_message=str(global_err)))
             yield (json.dumps({"error": "Orchestration failed", "details": str(global_err)}) + "\n").encode()
 
-    # Always return a stream for Bundles to keep the UI active
+    # If the client doesn't want a stream, we must aggregate the entire ensemble response
+    if not body.get("stream", True):
+        full_text = ""
+        is_chat_mode = "messages" in body
+        final_data = {
+            "model": bundle_name,
+            "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z"),
+            "done": True
+        }
+        if is_chat_mode:
+            final_data["message"] = {"role": "assistant", "content": ""}
+        else:
+            final_data["response"] = ""
+        
+        async for chunk in bundle_orchestrator_generator():
+            # The generator yields bytes ending in \n. Handle buffers with multiple objects.
+            decoded_chunk = chunk.decode('utf-8')
+            lines = [l.strip() for l in decoded_chunk.split('\n') if l.strip()]
+            
+            for line in lines:
+                try:
+                    data = json.loads(line)
+                    # Accumulate text from either chat or generate format
+                    if "message" in data:
+                        full_text += data["message"].get("content", "")
+                    elif "response" in data:
+                        full_text += data.get("response", "")
+                    
+                    # Capture final metadata from any chunk (preferring the one with usage stats)
+                    if data.get("done") or not final_data.get("total_duration"):
+                        final_data.update({k: v for k, v in data.items() if k not in ("message", "response")})
+                except json.JSONDecodeError:
+                    continue
+        
+        # Inject the fully aggregated text into the single response object
+        if is_chat_mode:
+            final_data["message"]["content"] = full_text
+        else:
+            final_data["response"] = full_text
+            
+        return JSONResponse(content=final_data)
+
+    # Otherwise return the stream for UI or streaming clients
     return StreamingResponse(bundle_orchestrator_generator(), media_type="application/x-ndjson")
 
 @router.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"])
@@ -1459,13 +1580,17 @@ async def proxy_ollama(
             None, None, None
         )
     
+    # Explicitly check if the client wants a stream
+    client_wants_stream = body.get("stream", True) if isinstance(body, dict) else True
+
     # Proxy to one of the candidate servers
     response, chosen_server = await _reverse_proxy(
         request, path, candidate_servers, body_bytes,
         api_key_id=api_key.id, log_id=log_id,
         request_id=req_id, 
         model=model_name or "unknown",
-        sender=api_key.user.username
+        sender=api_key.user.username,
+        client_wants_stream=client_wants_stream
     )
 
     # Update log with server_id if we have a log entry

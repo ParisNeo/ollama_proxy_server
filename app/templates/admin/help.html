@@ -355,6 +355,27 @@ print(response.json())
             </div>
         </div>
         
+        <!-- Home AI Hub Configuration -->
+        <div id="home-hub" class="card-style scroll-mt-20">
+            <h2 class="card-header text-2xl font-bold mb-6 pb-2">🏠 Setting Up a Home AI Hub</h2>
+            <div class="space-y-4 text-current">
+                <p>To provide AI access to your whole family (Phones, Raspberry Pis, other PCs) using your main Gamer PC:</p>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div class="p-4 bg-white/5 rounded-lg border border-white/10">
+                        <h4 class="font-bold text-[var(--color-primary-500)] mb-2">1. Multi-GPU Optimization</h4>
+                        <p class="text-sm">Use the <strong>Instance Manager</strong> to start one Ollama process per GPU. Assign <code class="inline-code">0</code> to Instance A and <code class="inline-code">1</code> to Instance B. This allows your family to generate in parallel without slowing each other down.</p>
+                    </div>
+                    <div class="p-4 bg-white/5 rounded-lg border border-white/10">
+                        <h4 class="font-bold text-[var(--color-primary-500)] mb-2">2. Family API Keys</h4>
+                        <p class="text-sm">Create a user for each family member. Generate a unique API key for your daughter's PC and another for your phone's Telegram bot. This lets you track usage and set individual limits.</p>
+                    </div>
+                </div>
+                <div class="mt-4 p-3 rounded-md text-sm info-box">
+                    <strong>Pro Tip:</strong> Use <strong>Smart Routers</strong> to create an "Easy Mode" model name. Your family can just use the model <code class="inline-code">family-gpt</code>, and the proxy will automatically choose the fastest available GPU for them.
+                </div>
+            </div>
+        </div>
+
         <!-- Credits Section -->
         <div id="credits" class="card-style scroll-mt-20">
             <h2 class="card-header text-2xl font-bold mb-6 pb-2">💖 Credits & Acknowledgements</h2>
@@ -389,6 +410,7 @@ print(response.json())
                         <li><a href="#security" class="toc-link">Security Features</a></li>
                         <li><a href="#examples" class="toc-link">Usage Examples</a></li>
                         <li><a href="#redis-setup" class="toc-link">Redis Setup</a></li>
+                        <li><a href="#home-hub" class="toc-link">Home AI Hub</a></li>
                         <li><a href="#credits" class="toc-link">Credits</a></li>
                     </ul>
                 </nav>

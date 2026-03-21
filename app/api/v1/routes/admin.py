@@ -882,11 +882,17 @@ async def admin_update_model_metadata(
 
 
 @router.get("/settings", response_class=HTMLResponse, name="admin_settings")
-async def admin_settings_form(request: Request, admin_user: User = Depends(require_admin_user)):
+async def admin_settings_form(request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
+    from app.database.models import VirtualAgent
     context = get_template_context(request)
     app_settings: AppSettingsModel = request.app.state.settings
+    
+    # Get list of agents for the management dropdown
+    res = await db.execute(select(VirtualAgent.name))
+    context["agent_names"] = res.scalars().all()
+    
     context["settings"] = app_settings
-    context["themes"] = app_settings.available_themes # Pass themes to template
+    context["themes"] = app_settings.available_themes
     context["csrf_token"] = await get_csrf_token(request)
     return templates.TemplateResponse("admin/settings.html", context)
 
@@ -1164,6 +1170,7 @@ async def admin_settings_post(
         model_update_interval = 10
     
     update_data.update({
+        "admin_agent_name": (form_data.get("admin_agent_name") or None),
         "branding_title": form_data.get("branding_title", current_settings.branding_title)[:128],
         "ui_style": ui_style,
         "selected_theme": selected_theme,
@@ -1504,10 +1511,19 @@ async def admin_agents_page(request: Request, db: AsyncSession = Depends(get_db)
 @router.post("/agents/add", name="admin_add_agent", dependencies=[Depends(validate_csrf_token)])
 async def admin_add_agent(
     request: Request, db: AsyncSession = Depends(get_db), 
-    name: str = Form(...), base_model: str = Form(...), system_prompt: str = Form(...)
+    name: str = Form(...), base_model: str = Form(...), 
+    system_prompt: str = Form(...), mcp_servers_json: str = Form("[]")
 ):
     from app.database.models import VirtualAgent
-    new_agent = VirtualAgent(name=name, base_model=base_model, system_prompt=system_prompt)
+    import json
+    
+    mcp_data = json.loads(mcp_servers_json)
+    new_agent = VirtualAgent(
+        name=name, 
+        base_model=base_model, 
+        system_prompt=system_prompt,
+        mcp_servers=mcp_data
+    )
     db.add(new_agent)
     await db.commit()
     flash(request, f"Agent '{name}' is alive.", "success")
@@ -1539,9 +1555,11 @@ async def admin_edit_agent_form(agent_id: int, request: Request, db: AsyncSessio
 @router.post("/agents/{agent_id}/edit", name="admin_edit_agent_post", dependencies=[Depends(validate_csrf_token)])
 async def admin_edit_agent_post(
     agent_id: int, request: Request, db: AsyncSession = Depends(get_db), 
-    name: str = Form(...), base_model: str = Form(...), system_prompt: str = Form(...)
+    name: str = Form(...), base_model: str = Form(...), 
+    system_prompt: str = Form(...), mcp_servers_json: str = Form("[]")
 ):
     from app.database.models import VirtualAgent
+    import json
     agent = await db.get(VirtualAgent, agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
@@ -1550,6 +1568,7 @@ async def admin_edit_agent_post(
     agent.name = re.sub(r'[^a-z0-9.-]', '-', name.lower())
     agent.base_model = base_model
     agent.system_prompt = system_prompt
+    agent.mcp_servers = json.loads(mcp_servers_json)
     
     await db.commit()
     flash(request, f"Agent '{agent.name}' updated successfully.", "success")
@@ -1558,11 +1577,21 @@ async def admin_edit_agent_post(
 # --- ENSEMBLE ORCHESTRATOR ROUTES ---
 @router.get("/ensembles", response_class=HTMLResponse, name="admin_ensembles_page")
 async def admin_ensembles_page(request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
-    from app.database.models import EnsembleOrchestrator
+    from app.database.models import EnsembleOrchestrator, VirtualAgent
     context = get_template_context(request)
+    
+    # Fetch ensembles
     result = await db.execute(select(EnsembleOrchestrator))
     context["ensembles"] = result.scalars().all()
-    context["available_models"] = await server_crud.get_all_available_model_names(db)
+    
+    # Fetch agent names for highlighting in UI
+    agent_res = await db.execute(select(VirtualAgent.name))
+    context["agent_names"] = agent_res.scalars().all()
+    
+    all_models = await server_crud.get_all_available_model_names(db)
+    context["agents"] = context["agent_names"] # Already fetched in previous step
+    context["raw_models"] = [m for m in all_models if m not in context["agents"] and m != "auto"]
+    
     context["csrf_token"] = await get_csrf_token(request)
     return templates.TemplateResponse("admin/ensembles.html", context)
 
@@ -1605,12 +1634,19 @@ async def admin_delete_ensemble(ensemble_id: int, request: Request, db: AsyncSes
 
 @router.get("/ensembles/{ensemble_id}/edit", response_class=HTMLResponse, name="admin_edit_ensemble_form")
 async def admin_edit_ensemble_form(ensemble_id: int, request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
-    from app.database.models import EnsembleOrchestrator
+    from app.database.models import EnsembleOrchestrator, VirtualAgent
     ensemble = await db.get(EnsembleOrchestrator, ensemble_id)
     if not ensemble: raise HTTPException(status_code=404, detail="Ensemble not found")
+    
     context = get_template_context(request)
     context["ensemble"] = ensemble
-    context["available_models"] = await server_crud.get_all_available_model_names(db)
+    
+    # Fetch categorization data
+    all_models = await server_crud.get_all_available_model_names(db)
+    agent_res = await db.execute(select(VirtualAgent.name))
+    context["agents"] = agent_res.scalars().all()
+    context["raw_models"] = [m for m in all_models if m not in context["agents"] and m != "auto"]
+    
     context["csrf_token"] = await get_csrf_token(request)
     return templates.TemplateResponse("admin/edit_ensemble.html", context)
 
@@ -1640,11 +1676,17 @@ async def admin_edit_ensemble_post(
 # --- SMART ROUTER ROUTES ---
 @router.get("/routers", response_class=HTMLResponse, name="admin_routers_page")
 async def admin_routers_page(request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
-    from app.database.models import SmartRouter
+    from app.database.models import SmartRouter, VirtualAgent
     context = get_template_context(request)
     result = await db.execute(select(SmartRouter))
     context["routers"] = result.scalars().all()
-    context["available_models"] = await server_crud.get_all_available_model_names(db)
+    
+    # Fetch categorization data
+    all_models = await server_crud.get_all_available_model_names(db)
+    agent_res = await db.execute(select(VirtualAgent.name))
+    context["agents"] = agent_res.scalars().all()
+    context["raw_models"] = [m for m in all_models if m not in context["agents"] and m != "auto"]
+    
     context["csrf_token"] = await get_csrf_token(request)
     return templates.TemplateResponse("admin/routers.html", context)
 
@@ -1751,9 +1793,11 @@ async def admin_instances_page(request: Request, db: AsyncSession = Depends(get_
     
     instance_list = []
     for inst in instances:
+        state, pid = supervisor.get_instance_state(inst)
         instance_list.append({
             "config": inst,
-            "running": supervisor.is_running(inst.id)
+            "state": state,
+            "pid": pid
         })
         
     # Discover unmanaged local instances
@@ -1793,8 +1837,13 @@ async def adopt_instance(
     await db.commit()
     
     # Also ensure it's in the main server list for the load balancer
-    server_url = f"http://127.0.0.1:{port}"
+    # Pydantic's AnyHttpUrl normalizes host-only URLs by adding a trailing slash.
+    # We check for both versions to prevent duplicate insertion errors.
+    server_url = f"http://127.0.0.1:{port}/"
     srv_exists = await server_crud.get_server_by_url(db, server_url)
+    if not srv_exists:
+        srv_exists = await server_crud.get_server_by_url(db, server_url.rstrip('/'))
+        
     if not srv_exists:
         await server_crud.create_server(db, ServerCreate(name=f"[Adopted] {name}", url=server_url))
 
@@ -1808,11 +1857,31 @@ async def admin_add_instance(
     admin_user: User = Depends(require_admin_user),
     name: str = Form(...), 
     port: int = Form(...),
+    backend_type: str = Form("ollama"),
     gpu_ids: str = Form(""),
-    models_path: str = Form(""),
-    keep_alive: str = Form("5m")
+    model_path: Optional[str] = Form(None),
+    n_gpu_layers: int = Form(99),
+    ctx_size: int = Form(8192),
+    threads: int = Form(8),
+    tensor_parallel_size: int = Form(1)
 ):
-    new_inst = ManagedInstance(name=name, port=port, gpu_ids=gpu_ids, models_path=models_path, keep_alive=keep_alive)
+    # Validation for single-model backends where path is mandatory
+    if backend_type in ('llamacpp', 'vllm') and not model_path:
+        flash(request, f"Model path is mandatory for {backend_type} backends.", "error")
+        return RedirectResponse(url=request.url_for("admin_instances"), status_code=303)
+
+    new_inst = ManagedInstance(
+        name=name, 
+        port=port, 
+        backend_type=backend_type,
+        gpu_ids=gpu_ids, 
+        model_path=model_path,
+        n_gpu_layers=n_gpu_layers,
+        ctx_size=ctx_size,
+        threads=threads,
+        tensor_parallel_size=tensor_parallel_size,
+        is_enabled=False
+    )
     db.add(new_inst)
     try:
         await db.commit()
@@ -1836,13 +1905,19 @@ async def toggle_instance(instance_id: int, request: Request, db: AsyncSession =
         success = await supervisor.start_instance(inst)
         if success:
             # Auto-add to server list if not exists
-            server_url = f"http://127.0.0.1:{inst.port}"
+            # Construct normalized URL (with slash) to check against DB records
+            server_url = f"http://127.0.0.1:{inst.port}/"
             existing = await server_crud.get_server_by_url(db, server_url)
             if not existing:
-                await server_crud.create_server(db, ServerCreate(name=f"[Managed] {inst.name}", url=server_url))
+                existing = await server_crud.get_server_by_url(db, server_url.rstrip('/'))
+
+            if not existing:
+                # Map llamacpp and vllm to the 'vllm' server type (OpenAI-compatible)
+                s_type = "vllm" if inst.backend_type in ("vllm", "llamacpp") else "ollama"
+                await server_crud.create_server(db, ServerCreate(name=f"[{inst.backend_type.upper()}] {inst.name}", url=server_url, server_type=s_type))
             flash(request, f"Instance '{inst.name}' started successfully.", "success")
         else:
-            flash(request, f"Failed to start '{inst.name}'. Check if port {inst.port} is free and Ollama is in your PATH.", "error")
+            flash(request, f"Failed to start '{inst.name}'. Check if port {inst.port} is free and binaries are configured.", "error")
             
     return RedirectResponse(url=request.url_for("admin_instances"), status_code=303)
 
@@ -1860,3 +1935,82 @@ async def delete_instance(instance_id: int, request: Request, db: AsyncSession =
     flash(request, f"Instance '{inst.name}' removed from manager.")
     return RedirectResponse(url=request.url_for("admin_instances"), status_code=303)
 
+# Add this new route for prompt enhancement
+@router.post("/enhance-prompt", name="admin_enhance_prompt")
+async def admin_enhance_prompt(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    admin_user: User = Depends(require_admin_user)
+):
+    """
+    Uses the Management Agent set in settings to rewrite the system prompt.
+    """
+    from app.api.v1.routes.proxy import proxy_ollama
+    data = await request.json()
+    prompt_to_enhance = data.get("prompt", "")
+    
+    app_settings: AppSettingsModel = request.app.state.settings
+    target_agent = app_settings.admin_agent_name
+    
+    if not target_agent:
+        return JSONResponse({"error": "No Management Agent set in Settings."}, status_code=400)
+    
+    meta_prompt = (
+        "You are an expert Prompt Engineer. Your task is to rewrite and enhance the following system prompt "
+        "to be more effective, clear, and professional. Use markdown. Focus on adding structural constraints "
+        "and defining the persona clearly. Return ONLY the enhanced prompt text, no chat or introduction.\n\n"
+        f"ORIGINAL PROMPT:\n{prompt_to_enhance}"
+    )
+    
+    # Create a synthetic internal request
+    # We call our own proxy route as if the admin was a client
+    # This ensures it goes through the full Agent -> Model resolution stack
+    payload = {
+        "model": target_agent,
+        "messages": [{"role": "user", "content": meta_prompt}],
+        "stream": False,
+        "options": {"temperature": 0.7}
+    }
+    
+    try:
+        # Resolve the agent to a physical model
+        from app.api.v1.routes.proxy import _resolve_target, _reverse_proxy
+        
+        resolution = await _resolve_target(db, target_agent, payload["messages"])
+        if not resolution or not isinstance(resolution, tuple):
+            return JSONResponse({"error": f"Failed to resolve management agent '{target_agent}'"}, status_code=500)
+            
+        real_model, final_msgs = resolution
+        from app.crud.apikey_crud import create_api_key
+        
+        # Get or create a temporary system user for this task
+        # Simplified: Use the existing logic by calling the backend function directly
+        # Note: In a production refactor, extract the 'resolve and execute' logic to a service
+        from app.api.v1.routes.playground_chat import admin_playground_stream
+        
+        # For simplicity and to avoid circular deps, we hit the internal proxy logic
+        # via httpx but on the local loopback
+        headers = {"Content-Type": "application/json"}
+        # We'll use a more direct approach since we are inside the app:
+        from app.api.v1.routes.proxy import _reverse_proxy, _resolve_target, _async_log_usage
+        
+        real_model, final_msgs = await _resolve_target(db, target_agent, payload["messages"])
+        servers = await server_crud.get_servers_with_model(db, real_model)
+        
+        if not servers:
+            return JSONResponse({"error": f"Model for agent {target_agent} not found."}, status_code=503)
+
+        resp, _ = await _reverse_proxy(
+            request, "chat", servers, 
+            json.dumps({"model": real_model, "messages": final_msgs, "stream": False}).encode(),
+            is_subrequest=True
+        )
+        
+        if hasattr(resp, 'body'):
+            resp_data = json.loads(resp.body.decode())
+            enhanced = resp_data.get("message", {}).get("content", "").strip()
+            return {"enhanced": enhanced}
+            
+    except Exception as e:
+        logger.error(f"Enhancement failed: {e}")
+        return JSONResponse({"error": f"Enhancement failed: {str(e)}"}, status_code=500)

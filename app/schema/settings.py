@@ -47,6 +47,9 @@ class AppSettingsModel(BaseModel):
     instance_scan_start_port: int = 11434
     instance_scan_end_port: int = 11445
 
+    # Administrative Hub Agent
+    admin_agent_name: Optional[str] = None
+
     # Retry configuration for backend requests - OPTIMIZED FOR SPEED
     max_retries: int = Field(
         default=2,  # REDUCED from 5 to 2

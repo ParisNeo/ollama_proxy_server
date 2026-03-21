@@ -561,6 +561,21 @@ async def run_all_migrations(engine: AsyncEngine) -> None:
                 "is_reasoning_model": "BOOLEAN NOT NULL DEFAULT 0",
                 "priority": "INTEGER NOT NULL DEFAULT 10",
             },
+            "managed_instances": {
+                "backend_type": "VARCHAR DEFAULT 'ollama'",
+                "model_path": "VARCHAR",
+                "n_gpu_layers": "INTEGER DEFAULT 99",
+                "ctx_size": "INTEGER DEFAULT 8192",
+                "threads": "INTEGER DEFAULT 8",
+                "tensor_parallel_size": "INTEGER DEFAULT 1",
+            },
+            "virtual_agents": {
+                "name": "VARCHAR NOT NULL",
+                "base_model": "VARCHAR NOT NULL",
+                "system_prompt": "TEXT NOT NULL",
+                "mcp_servers": "JSON",
+                "is_active": "BOOLEAN DEFAULT 1 NOT NULL",
+            }
         }
 
         for table_name, expected_columns in table_schemas.items():

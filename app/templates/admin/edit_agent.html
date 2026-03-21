@@ -29,14 +29,154 @@
                 </div>
             </div>
 
-            <div>
-                <label class="block text-xs text-gray-400 uppercase font-bold mb-1">System Prompt (The Agent's Soul)</label>
-                <textarea name="system_prompt" rows="10" required class="w-full p-3 rounded bg-black/20 border border-white/10 focus:border-indigo-500 outline-none font-sans">{{ agent.system_prompt }}</textarea>
+            <div class="md:col-span-2">
+                <div class="flex justify-between items-center mb-1">
+                    <label class="block text-xs text-gray-400 uppercase font-bold">System Prompt (The Agent's Soul)</label>
+                    <button type="button" onclick="enhancePrompt()" id="enhance-btn" class="text-[10px] text-indigo-400 hover:text-indigo-300 flex items-center gap-1">
+                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                        ✨ Enhance with AI
+                    </button>
+                </div>
+                <textarea id="main-system-prompt" name="system_prompt" rows="10" required class="w-full p-3 rounded bg-black/20 border border-white/10 focus:border-indigo-500 outline-none font-sans">{{ agent.system_prompt }}</textarea>
+            </div>
+
+            <div class="space-y-4">
+                <div class="flex justify-between items-center">
+                    <label class="block text-xs text-gray-400 uppercase font-bold">MCP Servers</label>
+                    <button type="button" id="add-mcp-btn" class="text-[10px] bg-purple-600/20 text-purple-400 border border-purple-500/30 px-3 py-1 rounded hover:bg-purple-600/30">+ Add MCP</button>
+                </div>
+                <div id="active-mcps" class="grid grid-cols-1 gap-3"></div>
+                <input type="hidden" name="mcp_servers_json" id="mcp_servers_json" value='{{ agent.mcp_servers | tojson if agent.mcp_servers else "[]" }}'>
             </div>
 
             <div class="flex justify-end pt-4">
                 <button type="submit" class="bg-indigo-600 hover:bg-indigo-500 px-10 py-2 rounded font-bold text-sm transition-colors shadow-lg">Save Changes</button>
             </div>
+            <script>
+                const KNOWN_MCPS = [
+                    { name: "Brave Search", icon: "🌐", url: "http://localhost:3001", type: "sse" },
+                    { name: "Filesystem", icon: "📁", url: "npx @modelcontextprotocol/server-filesystem", type: "stdio" },
+                    { name: "Google Maps", icon: "📍", url: "http://localhost:3003", type: "sse" },
+                    { name: "Postgres DB", icon: "🐘", url: "http://localhost:3004", type: "sse" }
+                ];
+
+                let activeMCPs = JSON.parse(document.getElementById('mcp_servers_json').value);
+
+                function renderMCPs() {
+                    const container = document.getElementById('active-mcps');
+                    container.innerHTML = '';
+                    activeMCPs.forEach((mcp, index) => {
+                        const div = document.createElement('div');
+                        div.className = "flex items-center justify-between p-3 bg-white/5 border border-white/10 rounded-lg group";
+                        div.innerHTML = `
+                            <div class="flex items-center gap-3 overflow-hidden">
+                                <span class="text-xl flex-shrink-0">${mcp.icon || '🛠️'}</span>
+                                <div class="overflow-hidden">
+                                    <div class="text-xs font-bold text-white truncate">${mcp.name}</div>
+                                    <div class="text-[9px] text-gray-500 font-mono truncate">${mcp.url}</div>
+                                </div>
+                            </div>
+                            <div class="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+                                <button type="button" onclick="configureMCP(${index})" class="text-indigo-400 text-xs font-bold">Edit</button>
+                                <button type="button" onclick="removeMCP(${index})" class="text-red-400 text-lg">×</button>
+                            </div>
+                        `;
+                        container.appendChild(div);
+                    });
+                    document.getElementById('mcp_servers_json').value = JSON.stringify(activeMCPs);
+                }
+
+                function removeMCP(index) {
+                    activeMCPs.splice(index, 1);
+                    renderMCPs();
+                }
+
+                function configureMCP(index = -1) {
+                    const mcp = index >= 0 ? activeMCPs[index] : { name: '', url: '', icon: '🛠️', type: 'sse' };
+                    const title = index >= 0 ? "Edit MCP Server" : "Add Custom MCP Server";
+                    
+                    const modalBody = `
+                        <div class="space-y-4 text-left">
+                            <div>
+                                <label class="block text-xs font-bold text-gray-400 uppercase mb-1">Display Name</label>
+                                <input type="text" id="mcp-name" value="${mcp.name}" placeholder="e.g. My Database" class="w-full p-2 rounded bg-black/40 border border-white/10">
+                            </div>
+                            <div class="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-xs font-bold text-gray-400 uppercase mb-1">Connection Type</label>
+                                    <select id="mcp-type" class="w-full p-2 rounded bg-black/40 border border-white/10">
+                                        <option value="sse" ${mcp.type === 'sse' ? 'selected' : ''}>SSE (Remote URL)</option>
+                                        <option value="stdio" ${mcp.type === 'stdio' ? 'selected' : ''}>Stdio (Local Command)</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-bold text-gray-400 uppercase mb-1">Icon (Emoji/URL)</label>
+                                    <input type="text" id="mcp-icon" value="${mcp.icon}" placeholder="🛠️" class="w-full p-2 rounded bg-black/40 border border-white/10">
+                                </div>
+                            </div>
+                            <div>
+                                <label class="block text-xs font-bold text-gray-400 uppercase mb-1">Endpoint URL or Command</label>
+                                <input type="text" id="mcp-url" value="${mcp.url}" placeholder="http://... or npx ..." class="w-full p-2 rounded bg-black/40 border border-white/10 font-mono text-xs">
+                            </div>
+                            <div class="flex justify-end pt-4">
+                                <button type="button" id="save-mcp-btn" class="bg-indigo-600 hover:bg-indigo-500 px-6 py-2 rounded text-sm font-bold">Save Configuration</button>
+                            </div>
+                        </div>
+                    `;
+
+                    window.showModal(title, modalBody);
+
+                    document.getElementById('save-mcp-btn').onclick = () => {
+                        const updated = {
+                            name: document.getElementById('mcp-name').value,
+                            url: document.getElementById('mcp-url').value,
+                            icon: document.getElementById('mcp-icon').value,
+                            type: document.getElementById('mcp-type').value
+                        };
+                        if (!updated.name || !updated.url) return alert("Name and URL/Command are required.");
+                        
+                        if (index >= 0) activeMCPs[index] = updated;
+                        else activeMCPs.push(updated);
+                        
+                        renderMCPs();
+                        document.getElementById('modal-close-btn').click();
+                    };
+                }
+
+                function openCustomMCP() {
+                    configureMCP();
+                    document.getElementById('mcp-presets').classList.add('hidden');
+                }
+
+                document.getElementById('add-mcp-btn').addEventListener('click', (e) => {
+                    const menu = document.getElementById('mcp-presets');
+                    menu.classList.toggle('hidden');
+                    
+                    if (menu.children.length === 1) {
+                        KNOWN_MCPS.forEach(m => {
+                            const btn = document.createElement('button');
+                            btn.type = "button";
+                            btn.className = "w-full text-left px-3 py-2 text-xs hover:bg-white/5 rounded flex items-center gap-2";
+                            btn.innerHTML = `<span>${m.icon}</span> <span>${m.name}</span>`;
+                            btn.onclick = () => {
+                                activeMCPs.push({...m});
+                                renderMCPs();
+                                menu.classList.add('hidden');
+                            };
+                            menu.prepend(btn);
+                        });
+                    }
+                });
+
+                document.addEventListener('click', (e) => {
+                    if (!e.target.closest('#add-mcp-btn') && !e.target.closest('#mcp-presets')) {
+                        document.getElementById('mcp-presets').classList.add('hidden');
+                    }
+                });
+
+                // Initial render
+                renderMCPs();
+            </script>            
         </form>
     </div>
 </div>

@@ -41,14 +41,31 @@
                 <button type="button" onclick="addRuleGroup()" class="text-xs bg-indigo-600/20 text-indigo-400 border border-indigo-500/30 px-4 py-2 rounded hover:bg-indigo-600/30">+ New Decision Group</button>
             </div>
 
-            <div>
-                <label class="block text-xs text-gray-400 uppercase font-bold">Router Participants</label>
-                <div class="grid grid-cols-2 md:grid-cols-4 gap-2 max-h-48 overflow-y-auto p-2 bg-black/20 rounded border border-white/10">
-                    {% for m in available_models %}
-                    <label class="flex items-center gap-2 text-sm">
-                        <input type="checkbox" name="models" value="{{ m }}" class="rounded text-indigo-600"> {{ m }}
-                    </label>
-                    {% endfor %}
+            <div class="space-y-4">
+                <label class="block text-xs text-gray-400 uppercase font-bold">Router Targets</label>
+                
+                <div class="bg-indigo-500/5 border border-indigo-500/20 rounded-lg p-3">
+                    <h4 class="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-3 flex items-center gap-2">🎭 Virtual Agents</h4>
+                    <div class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-2">
+                        {% for m in agents %}
+                        <label class="flex items-center gap-2 text-[11px] p-2 rounded bg-indigo-500/10 border border-indigo-500/20 hover:border-indigo-500/50 cursor-pointer">
+                            <input type="checkbox" name="models" value="{{ m }}" class="rounded text-indigo-500 bg-black/40">
+                            <span class="text-indigo-200 font-bold">{{ m }}</span>
+                        </label>
+                        {% endfor %}
+                    </div>
+                </div>
+
+                <div class="bg-black/20 border border-white/5 rounded-lg p-3">
+                    <h4 class="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-3 flex items-center gap-2">📦 Raw Models</h4>
+                    <div class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-2 max-h-48 overflow-y-auto">
+                        {% for m in raw_models %}
+                        <label class="flex items-center gap-2 text-[11px] p-1.5 rounded hover:bg-white/5 cursor-pointer">
+                            <input type="checkbox" name="models" value="{{ m }}" class="rounded text-indigo-600 bg-black/40">
+                            <span class="text-gray-400">{{ m }}</span>
+                        </label>
+                        {% endfor %}
+                    </div>
                 </div>
             </div>
 

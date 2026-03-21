@@ -27,10 +27,38 @@
                     <tr>
                         <th class="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Model Name</th>
                         <th class="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Description</th>
-                        <th class="px-4 py-3 text-center text-xs font-medium text-gray-400 uppercase tracking-wider">Supports Images</th>
-                        <th class="px-4 py-3 text-center text-xs font-medium text-gray-400 uppercase tracking-wider">Code</th>
-                        <th class="px-4 py-3 text-center text-xs font-medium text-gray-400 uppercase tracking-wider">Fast</th>
-                        <th class="px-4 py-3 text-center text-xs font-medium text-gray-400 uppercase tracking-wider">Reasoning</th>
+                        <th class="px-4 py-3 text-center text-xs font-medium text-gray-400 uppercase tracking-wider">
+                            <div class="mb-1">Supports Images</div>
+                            <div class="flex justify-center gap-2 text-[9px] font-bold">
+                                <button type="button" onclick="toggleColumn('supports_images_', true)" class="text-indigo-400 hover:text-white uppercase">All</button>
+                                <span class="text-gray-600">|</span>
+                                <button type="button" onclick="toggleColumn('supports_images_', false)" class="text-gray-500 hover:text-white uppercase">None</button>
+                            </div>
+                        </th>
+                        <th class="px-4 py-3 text-center text-xs font-medium text-gray-400 uppercase tracking-wider">
+                            <div class="mb-1">Code</div>
+                            <div class="flex justify-center gap-2 text-[9px] font-bold">
+                                <button type="button" onclick="toggleColumn('is_code_model_', true)" class="text-indigo-400 hover:text-white uppercase">All</button>
+                                <span class="text-gray-600">|</span>
+                                <button type="button" onclick="toggleColumn('is_code_model_', false)" class="text-gray-500 hover:text-white uppercase">None</button>
+                            </div>
+                        </th>
+                        <th class="px-4 py-3 text-center text-xs font-medium text-gray-400 uppercase tracking-wider">
+                            <div class="mb-1">Fast</div>
+                            <div class="flex justify-center gap-2 text-[9px] font-bold">
+                                <button type="button" onclick="toggleColumn('is_fast_model_', true)" class="text-indigo-400 hover:text-white uppercase">All</button>
+                                <span class="text-gray-600">|</span>
+                                <button type="button" onclick="toggleColumn('is_fast_model_', false)" class="text-gray-500 hover:text-white uppercase">None</button>
+                            </div>
+                        </th>
+                        <th class="px-4 py-3 text-center text-xs font-medium text-gray-400 uppercase tracking-wider">
+                            <div class="mb-1">Reasoning</div>
+                            <div class="flex justify-center gap-2 text-[9px] font-bold">
+                                <button type="button" onclick="toggleColumn('is_reasoning_model_', true)" class="text-indigo-400 hover:text-white uppercase">All</button>
+                                <span class="text-gray-600">|</span>
+                                <button type="button" onclick="toggleColumn('is_reasoning_model_', false)" class="text-gray-500 hover:text-white uppercase">None</button>
+                            </div>
+                        </th>
                         <th class="px-4 py-3 text-center text-xs font-medium text-gray-400 uppercase tracking-wider">Max Context</th>
                         <th class="px-4 py-3 text-center text-xs font-medium text-gray-400 uppercase tracking-wider">Priority</th>
                     </tr>
@@ -79,4 +107,18 @@
         </div>
     </form>
 </div>
+
+<script>
+    /**
+     * Toggles all checkboxes in a column based on the name prefix.
+     * @param {string} prefix - The start of the input name (e.g. 'is_fast_model_')
+     * @param {boolean} value - True to check all, False to uncheck all
+     */
+    function toggleColumn(prefix, value) {
+        const checkboxes = document.querySelectorAll(`input[name^="${prefix}"]`);
+        checkboxes.forEach(cb => {
+            cb.checked = value;
+        });
+    }
+</script>
 {% endblock %}

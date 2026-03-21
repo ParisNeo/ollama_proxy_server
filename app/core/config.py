@@ -11,8 +11,8 @@ class Settings(BaseSettings):
     SECRET_KEY: str = "dd2a57833f4a2115b02644c3c332822d5b6e405d542a2258c422fb39a8e97b10"
 
     # --- App Info (Hardcoded) ---
-    APP_NAME: str = "Ollama Proxy Server"
-    APP_VERSION: str = "9.0.0"
+    APP_NAME: str = "LOLLMS Hub"
+    APP_VERSION: str = "10.0.0"
     LOG_LEVEL: str = "info"
 
     class Config:
