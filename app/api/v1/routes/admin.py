@@ -1604,7 +1604,8 @@ async def admin_add_ensemble(
     master_model: str = Form(...),
     parallel_models: List[str] = Form(...),
     show_monologue: bool = Form(False),
-    send_status_update: bool = Form(False)
+    send_status_update: bool = Form(False),
+    vision_processor: Optional[str] = Form(None)
 ):
     from app.database.models import EnsembleOrchestrator
     name = re.sub(r'[^a-z0-9.-]', '-', name.lower())
@@ -1614,6 +1615,7 @@ async def admin_add_ensemble(
         master_model=master_model,
         parallel_participants=parallel_models,
         parallel_models=parallel_models, # Legacy field sync
+        vision_processor=vision_processor if vision_processor else None,
         show_monologue=show_monologue,
         description=f"Ensemble: {', '.join(parallel_models)} -> {master_model}"
     )
@@ -1654,7 +1656,8 @@ async def admin_edit_ensemble_form(ensemble_id: int, request: Request, db: Async
 async def admin_edit_ensemble_post(
     ensemble_id: int, request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user),
     name: str = Form(...), master_model: str = Form(...), parallel_models: List[str] = Form(...),
-    show_monologue: bool = Form(False), send_status_update: bool = Form(False)
+    show_monologue: bool = Form(False), send_status_update: bool = Form(False),
+    vision_processor: Optional[str] = Form(None)
 ):
     from app.database.models import EnsembleOrchestrator
     bundle = await db.get(EnsembleOrchestrator, ensemble_id)
@@ -1664,6 +1667,7 @@ async def admin_edit_ensemble_post(
     bundle.master_model = master_model
     bundle.parallel_participants = parallel_models
     bundle.parallel_models = parallel_models # Legacy field sync
+    bundle.vision_processor = vision_processor if vision_processor else None
     bundle.show_monologue = show_monologue
     bundle.send_status_update = send_status_update
     bundle.description = f"Ensemble: {', '.join(parallel_models)} -> {master_model}"
@@ -1685,10 +1689,47 @@ async def admin_routers_page(request: Request, db: AsyncSession = Depends(get_db
     all_models = await server_crud.get_all_available_model_names(db)
     agent_res = await db.execute(select(VirtualAgent.name))
     context["agents"] = agent_res.scalars().all()
+    context["available_models"] = sorted(all_models)  # Ensure sorted for consistent display
     context["raw_models"] = [m for m in all_models if m not in context["agents"] and m != "auto"]
     
     context["csrf_token"] = await get_csrf_token(request)
     return templates.TemplateResponse("admin/routers.html", context)
+
+@router.post("/routers/vision-enabler", name="admin_add_vision_enabler", dependencies=[Depends(validate_csrf_token)])
+async def admin_add_vision_enabler(
+    request: Request, 
+    db: AsyncSession = Depends(get_db), 
+    admin_user: User = Depends(require_admin_user),
+    name: str = Form(...),
+    vision_text_model: str = Form(...),
+    vision_vlm_model: str = Form(...)
+):
+    """Quick shortcut to create a vision-enabled bundle."""
+    from app.database.models import EnsembleOrchestrator
+    
+    bundle_name = re.sub(r'[^a-z0-9.-]', '-', name.lower())
+    
+    # Check if name already exists
+    existing = await db.execute(select(EnsembleOrchestrator).filter(EnsembleOrchestrator.name == bundle_name))
+    if existing.scalars().first():
+        flash(request, f"A bundle with name '{bundle_name}' already exists.", "error")
+        return RedirectResponse(url=request.url_for("admin_routers_page"), status_code=303)
+    
+    new_bundle = EnsembleOrchestrator(
+        name=bundle_name,
+        master_model=vision_text_model,
+        parallel_participants=[],  # No parallel participants for simple vision enabler
+        parallel_models=[],
+        vision_processor=vision_vlm_model,
+        show_monologue=False,
+        send_status_update=True,
+        description=f"Vision Enabler: {vision_vlm_model} → {vision_text_model}"
+    )
+    db.add(new_bundle)
+    await db.commit()
+    flash(request, f"Vision-enabled bundle '{bundle_name}' created! Use it as a model name.", "success")
+    return RedirectResponse(url=request.url_for("admin_ensembles_page"), status_code=303)
+
 
 @router.post("/routers/add", name="admin_add_router", dependencies=[Depends(validate_csrf_token)])
 async def admin_add_router(
@@ -1698,12 +1739,11 @@ async def admin_add_router(
     name: str = Form(...),
     strategy: str = Form(...),
     classifier_model: Optional[str] = Form(None),
-    models: List[str] = Form(...)
+    models: Optional[List[str]] = Form(None)
 ):
     from app.database.models import SmartRouter
-    form_data = await request.form()
     
-    name = re.sub(r'[^a-z0-9.-]', '-', name.lower())
+    form_data = await request.form()
     
     # Process Hierarchical Decision Groups
     processed_groups = []
@@ -1726,12 +1766,15 @@ async def admin_add_router(
                 "target": target,
                 "conditions": conditions
             })
+    
+    # Ensure models is a list, default to empty if None        
+    target_models = models if models else []
             
     new_router = SmartRouter(
         name=name, 
         strategy=strategy, 
         classifier_model=classifier_model,
-        targets=models, 
+        targets=target_models, 
         rules=processed_groups
     )
     db.add(new_router)
@@ -1751,12 +1794,19 @@ async def admin_delete_router(router_id: int, request: Request, db: AsyncSession
 
 @router.get("/routers/{router_id}/edit", response_class=HTMLResponse, name="admin_edit_router_form")
 async def admin_edit_router_form(router_id: int, request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
-    from app.database.models import SmartRouter
+    from app.database.models import SmartRouter, VirtualAgent
     router_obj = await db.get(SmartRouter, router_id)
     if not router_obj: raise HTTPException(status_code=404, detail="Router not found")
     context = get_template_context(request)
     context["router"] = router_obj
-    context["available_models"] = await server_crud.get_all_available_model_names(db)
+    
+    # Fetch categorization data
+    all_models = await server_crud.get_all_available_model_names(db)
+    agent_res = await db.execute(select(VirtualAgent.name))
+    context["agents"] = agent_res.scalars().all()
+    context["available_models"] = all_models
+    context["raw_models"] = [m for m in all_models if m not in context["agents"] and m != "auto"]
+    
     context["csrf_token"] = await get_csrf_token(request)
     return templates.TemplateResponse("admin/edit_router.html", context)
 

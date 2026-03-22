@@ -493,13 +493,18 @@ async def get_servers_with_model(db: AsyncSession, model_name: str) -> list[Olla
                     if not isinstance(available_model_name, str):
                         continue
                         
-                    # Flexible matching:
-                    # 1. Exact match (e.g., "llama3:8b" == "llama3:8b")
-                    # 2. Prefix match (e.g., "llama3" matches "llama3:8b")
-                    # 3. Substring match for vLLM (e.g., "Llama-2-7b" matches "models--meta-llama--Llama-2-7b-chat-hf")
-                    if (available_model_name == model_name or 
-                        available_model_name.startswith(f"{model_name}:") or
-                        (server.server_type == 'vllm' and model_name in available_model_name)):
+                    # Matching logic:
+                    # 1. Exact match for Ollama (e.g., "llama3:8b" == "llama3:8b")
+                    # 2. Prefix match for Ollama (e.g., "llama3" matches "llama3:8b")
+                    # 3. Substring match ONLY for vLLM (e.g., "Llama-2-7b" matches "models--meta-llama--Llama-2-7b-chat-hf")
+                    is_ollama = server.server_type == 'ollama'
+                    is_match = (
+                        available_model_name == model_name or
+                        (is_ollama and available_model_name.startswith(f"{model_name}:")) or
+                        (server.server_type == 'vllm' and model_name in available_model_name)
+                    )
+                    
+                    if is_match:
                         servers_with_model.append(server)
                         break  # Found on this server, move to the next
     return servers_with_model

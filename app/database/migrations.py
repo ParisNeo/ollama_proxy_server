@@ -520,6 +520,9 @@ async def run_all_migrations(engine: AsyncEngine) -> None:
     report = []
     
     try:
+        # First, handle legacy column renames/drops for model_pools
+        await fix_model_pools_legacy_schema(engine)
+        
         table_schemas = {
             "ollama_servers": {
                 "available_models": "JSON",
@@ -545,6 +548,7 @@ async def run_all_migrations(engine: AsyncEngine) -> None:
                 "parallel_participants": "JSON DEFAULT '[]' NOT NULL",
                 "parallel_models": "JSON",
                 "master_model": "VARCHAR NOT NULL",
+                "vision_processor": "VARCHAR",  # NEW: For vision-enabled bundles
                 "show_monologue": "BOOLEAN DEFAULT 0 NOT NULL",
                 "send_status_update": "BOOLEAN DEFAULT 0 NOT NULL",
                 "is_active": "BOOLEAN DEFAULT 1 NOT NULL",
@@ -603,6 +607,53 @@ async def run_all_migrations(engine: AsyncEngine) -> None:
         ASCIIColors.error(f"Critical Migration Failure: {str(e)}")
         logger.error(f"Error running database migrations: {e}", exc_info=True)
         raise
+
+
+async def fix_model_pools_legacy_schema(engine: AsyncEngine) -> None:
+    """
+    Fix legacy schema issues with model_pools table.
+    The old table had a 'models' column that was renamed to 'targets'.
+    This ensures compatibility with old databases.
+    """
+    async with engine.begin() as conn:
+        # Check if old 'models' column exists
+        result = await conn.execute(
+            text("PRAGMA table_info(model_pools)")
+        )
+        columns = {row[1] for row in result.fetchall()}
+        
+        if "models" in columns and "targets" not in columns:
+            # Old schema detected - need to migrate
+            logger.warning("Legacy model_pools schema detected. Attempting migration...")
+            try:
+                # SQLite doesn't support DROP COLUMN, so we need to recreate
+                await conn.execute(text("""
+                    CREATE TABLE model_pools_new (
+                        id INTEGER PRIMARY KEY,
+                        name VARCHAR NOT NULL,
+                        description VARCHAR,
+                        targets JSON DEFAULT '[]' NOT NULL,
+                        strategy VARCHAR DEFAULT 'priority',
+                        classifier_model VARCHAR,
+                        rules JSON,
+                        is_active BOOLEAN DEFAULT 1,
+                        created_at DATETIME
+                    )
+                """))
+                await conn.execute(text("""
+                    INSERT INTO model_pools_new (id, name, description, targets, strategy, is_active, created_at)
+                    SELECT id, name, description, models, 'priority', is_active, created_at FROM model_pools
+                """))
+                await conn.execute(text("DROP TABLE model_pools"))
+                await conn.execute(text("ALTER TABLE model_pools_new RENAME TO model_pools"))
+                logger.info("Successfully migrated model_pools schema")
+            except Exception as e:
+                logger.error(f"Failed to migrate model_pools: {e}")
+        elif "models" in columns and "targets" in columns:
+            # Both exist - drop the old one
+            # SQLite doesn't support DROP COLUMN, so we ignore this case
+            # The code will use 'targets' which is the correct column
+            pass
 
 
 async def create_missing_indexes(engine: AsyncEngine) -> None:

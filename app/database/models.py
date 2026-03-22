@@ -136,6 +136,7 @@ class EnsembleOrchestrator(Base):
     # Legacy support: matching the physical NOT NULL constraint in older DBs
     parallel_models = Column(JSON, nullable=True) 
     master_model = Column(String, nullable=False)
+    vision_processor = Column(String, nullable=True) # Model used to extract image descriptions (for multimodal bundles)
     show_monologue = Column(Boolean, default=False)
     send_status_update = Column(Boolean, default=False)
     is_active = Column(Boolean, default=True)

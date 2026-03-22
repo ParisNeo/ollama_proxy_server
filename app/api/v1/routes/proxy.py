@@ -1202,6 +1202,99 @@ async def _handle_bundle_request(db: AsyncSession, request: Request, bundle_name
         event_manager.emit(ProxyEvent("error", request_id, bundle_name, "none", api_key.user.username, error_message="Bundle not found"))
         raise HTTPException(status_code=404, detail="Bundle not found")
 
+    # --- Vision Processing Helper ---
+    async def extract_image_descriptions(vision_model: str, images: List, messages: List[Dict], http_client: httpx.AsyncClient) -> str:
+        """
+        Sends images to a vision model to get descriptions.
+        Returns a formatted string with image descriptions to prepend to the user's message.
+        """
+        # Create a vision-only prompt
+        vision_prompt = (
+            "You are a precise image analyzer. For each image provided, "
+            "describe its contents in detail. Be thorough but concise.\n\n"
+            "Format your response as:\n"
+            "【Image 1 Description】: <detailed description>\n"
+            "【Image 2 Description】: <detailed description>\n"
+            "...\n\n"
+            "If an image is unclear or unreadable, state that clearly."
+        )
+        
+        # Build vision message with images
+        vision_messages = [
+            {
+                "role": "system",
+                "content": vision_prompt
+            },
+            {
+                "role": "user",
+                "content": [
+                    *[{"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img}"}} for img in images],
+                    {"type": "text", "text": "Please analyze these images."}
+                ]
+            }
+        ]
+        
+        vision_payload = {
+            "model": vision_model,
+            "messages": vision_messages,
+            "stream": False,
+            "options": {"temperature": 0.3}  # Low temp for consistent descriptions
+        }
+        
+        try:
+            async with AsyncSessionLocal() as vision_db:
+                servers = await server_crud.get_servers_with_model(vision_db, vision_model)
+                if not servers:
+                    return "\n\n⚠️ [Vision processor not available on any server]\n"
+                
+                target_server = servers[0]
+                vision_url = f"{target_server.url.rstrip('/')}/api/chat"
+                
+                # Emit vision processing event
+                vision_req_id = f"{request_id}_vision"
+                event_manager.emit(ProxyEvent(
+                    event_type="assigned",
+                    request_id=vision_req_id,
+                    model=vision_model,
+                    server=target_server.name,
+                    sender="orchestrator",
+                    request_type="VISION"
+                ))
+                
+                timeout = httpx.Timeout(read=120.0, write=60.0, connect=5.0)
+                response = await http_client.post(
+                    vision_url,
+                    json=vision_payload,
+                    timeout=timeout,
+                    headers={"Content-Type": "application/json"}
+                )
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    descriptions = data.get("message", {}).get("content", "")
+                    event_manager.emit(ProxyEvent(
+                        event_type="completed",
+                        request_id=vision_req_id,
+                        model=vision_model,
+                        server=target_server.name,
+                        sender="orchestrator"
+                    ))
+                    return f"\n\n📷 **Image Analysis**:\n{descriptions}\n"
+                else:
+                    error_text = response.text[:200]
+                    event_manager.emit(ProxyEvent(
+                        event_type="error",
+                        request_id=vision_req_id,
+                        model=vision_model,
+                        server=target_server.name,
+                        sender="orchestrator",
+                        error_message=f"Vision API error: {response.status_code}"
+                    ))
+                    return f"\n\n⚠️ [Failed to analyze images: {response.status_code}]\n"
+        except Exception as e:
+            logger.error(f"Vision processing failed: {e}")
+            return f"\n\n⚠️ [Vision processing error: {str(e)[:100]}]\n"
+
 
     async def bundle_orchestrator_generator():
         # Detect if the client expects Ollama Chat format or Generation format
@@ -1223,6 +1316,88 @@ async def _handle_bundle_request(db: AsyncSession, request: Request, bundle_name
             return (json.dumps(chunk) + "\n").encode()
 
         try:
+            # --- Vision Processing Step (if configured) ---
+            image_descriptions = ""
+            
+            if bundle.vision_processor:
+                # Extract images from the request
+                images = body.get("images", [])
+                
+                if not images and "messages" in body:
+                    # Check messages for image content
+                    for msg in reversed(body["messages"]):
+                        if isinstance(msg, dict):
+                            content = msg.get("content", [])
+                            if isinstance(content, list):
+                                for part in content:
+                                    if part.get("type") == "image_url":
+                                        # Handle both direct URL and base64
+                                        img_url = part.get("image_url", {})
+                                        if isinstance(img_url, dict):
+                                            url = img_url.get("url", "")
+                                        else:
+                                            url = str(img_url)
+                                            
+                                        if url.startswith("data:"):
+                                            # Extract base64 data
+                                            import base64
+                                            header, b64_data = url.split(",", 1)
+                                            images.append(b64_data)
+                                        elif url.startswith("http"):
+                                            # Download and encode remote images
+                                            try:
+                                                img_response = await http_client.get(url, timeout=30.0)
+                                                if img_response.status_code == 200:
+                                                    import base64
+                                                    b64_data = base64.b64encode(img_response.content).decode()
+                                                    images.append(b64_data)
+                                            except Exception as e:
+                                                logger.warning(f"Failed to fetch image from {url}: {e}")
+                
+                if images:
+                    # Send images to vision processor
+                    event_manager.emit(ProxyEvent(
+                        event_type="assigned",
+                        request_id=f"{request_id}_vision",
+                        model=bundle.vision_processor,
+                        sender="orchestrator",
+                        request_type="VISION"
+                    ))
+                    
+                    vision_result = await extract_image_descriptions(
+                        bundle.vision_processor,
+                        images[:10],  # Limit to 10 images
+                        body.get("messages", []),
+                        http_client
+                    )
+                    image_descriptions = vision_result
+                    
+                    # If chat mode, prepend descriptions to the last user message
+                    if is_chat_mode:
+                        modified_messages = body["messages"].copy()
+                        for i in range(len(modified_messages) - 1, -1, -1):
+                            msg = modified_messages[i]
+                            if isinstance(msg, dict) and msg.get("role") == "user":
+                                original_content = msg.get("content", "")
+                                if isinstance(original_content, str):
+                                    msg["content"] = f"{image_descriptions}\n\nUser Query:\n{original_content}"
+                                elif isinstance(original_content, list):
+                                    # Prepend to text parts, keep images
+                                    new_content = [
+                                        {"type": "text", "text": f"{image_descriptions}\n\nUser Query:\n"}
+                                    ]
+                                    for part in original_content:
+                                        if isinstance(part, dict) and part.get("type") == "text":
+                                            new_content.append(part)
+                                    msg["content"] = new_content
+                                modified_messages = modified_messages[:i+1]  # Truncate history for cleaner context
+                                body["messages"] = modified_messages
+                                break
+                    else:
+                        # For generate mode, prepend to prompt
+                        original_prompt = body.get("prompt", "")
+                        body["prompt"] = f"{image_descriptions}\n\nUser Query:\n{original_prompt}"
+            
             # Define the helper FIRST to avoid NameError
             async def get_sub_response(p_name):
                 # Assign a unique ID for this specific agent to visualize it in the Live Flow
