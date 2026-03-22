@@ -1176,20 +1176,22 @@ async def _select_from_pool(db: AsyncSession, pool_name: str, body: Dict[str, An
                 return group['target']
 
     # 3. Fallback Strategy
+    valid_targets = pool.targets
+    
     if pool.strategy == 'random':
-        return secrets.choice(valid_models)
+        return secrets.choice(valid_targets)
     
     if pool.strategy == 'least_loaded':
         # Strategy to maximize TPS: find server with fewest active connections
         # For simplicity, we prioritize models that are currently 'running' (cached in memory)
         active_models = [m['name'] for m in await server_crud.get_active_models_all_servers(db, httpx.AsyncClient())]
-        running_in_pool = [m for m in valid_models if m in active_models]
+        running_in_pool = [m for m in valid_targets if m in active_models]
         if running_in_pool:
             return secrets.choice(running_in_pool)
-        return valid_models[0]
+        return valid_targets[0]
 
     # Default to priority (first in list)
-    return valid_models[0]
+    return valid_targets[0]
 
 async def _handle_bundle_request(db: AsyncSession, request: Request, bundle_name: str, body: Dict[str, Any], api_key: APIKey, request_id: str):
     """Orchestrates parallel model execution and synthesis (Ensemble)."""
@@ -1459,32 +1461,165 @@ async def _handle_bundle_request(db: AsyncSession, request: Request, bundle_name
                         event_manager.emit(ProxyEvent("error", sub_req_id, p_name, "none", "orchestrator", error_message=str(e)))
                         return p_name, f"Error from {p_name}: {str(e)}"
 
-            # 1. Immediate Status Update
+            # 1. Master Decision: Should we activate the herd?
+            user_query = body.get("prompt") or (body.get("messages", [{}])[-1].get("content") if body.get("messages") else "N/A")
+            if isinstance(user_query, list):
+                user_query = " ".join([p.get("text", "") for p in user_query if p.get("type") == "text"])
+
+            force_ensemble = body.get("force_ensemble", False)
+            use_ensemble = force_ensemble
+
+            if not use_ensemble:
+                classifier_prompt = (
+                    f"User query: '{user_query}'\n\n"
+                    "Analyze the complexity of this query. Determine if this task requires multiple AI experts to solve, or if it can be handled by a single model.\n"
+                    "You MUST respond 'YES' if the task involves:\n"
+                    " - Writing, debugging, or building code/games/software (ESPECIALLY 'build a snake game').\n"
+                    " - Complex reasoning, multi-step planning, or brainstorming.\n"
+                    " - Legal, medical, or highly technical multi-disciplinary analysis.\n\n"
+                    "You may respond 'NO' only if the task is:\n"
+                    " - A trivial greeting (e.g., 'Hello', 'Hi').\n"
+                    " - A very simple factual query (e.g., 'What time is it?', 'What is 2+2?').\n\n"
+                    "If you are even slightly unsure, answer 'YES'.\n"
+                    "Respond ONLY with 'YES' or 'NO'."
+                )
+                
+                # Internal non-streaming request to the Master Model for classification
+                master_body = body.copy()
+                master_body["model"] = bundle.master_model
+                master_body["stream"] = False
+                if "prompt" in master_body: master_body["prompt"] = classifier_prompt
+                else: master_body["messages"] = [{"role": "user", "content": classifier_prompt}]
+                
+                async with AsyncSessionLocal() as local_db:
+                    servers = await server_crud.get_servers_with_model(local_db, bundle.master_model)
+                
+                if servers:
+                    resp, _ = await _reverse_proxy(request, "chat" if "messages" in master_body else "generate", servers, json.dumps(master_body).encode(), is_subrequest=True)
+                    if hasattr(resp, 'body'):
+                        data = json.loads(resp.body.decode())
+                        decision = (data.get("message", {}).get("content", "") or data.get("response", "")).strip().upper()
+                        if "YES" in decision:
+                            use_ensemble = True
+                            logger.info(f"[Ensemble:{bundle_name}] Master decided: CHALLENGING. Activating ensemble.")
+                        else:
+                            logger.info(f"[Ensemble:{bundle_name}] Master decided: SIMPLE. Bypassing ensemble.")
+
+            # 2. Conditional Orchestration
+            if not use_ensemble:
+                # Bypass ensemble and stream directly from Master
+                logger.info(f"[Ensemble:{bundle_name}] Routing directly to Master Model: {bundle.master_model}")
+                
+                # CRITICAL: Update the model name in the payload to the physical master model
+                body["model"] = bundle.master_model
+                
+                master_path = "chat" if "messages" in body else "generate"
+                async with AsyncSessionLocal() as local_db:
+                    servers = await server_crud.get_servers_with_model(local_db, bundle.master_model)
+                
+                if not servers:
+                    yield format_proxy_chunk("⚠️ [Master model not available]", is_done=True)
+                    return
+
+                # Ensure we use server_crud._get_auth_headers directly
+                try:
+                    async with request.app.state.http_client.stream(
+                        "POST", 
+                        f"{servers[0].url.rstrip('/')}/api/{master_path}", 
+                        json=body, 
+                        headers=server_crud._get_auth_headers(servers[0]), 
+                        timeout=600.0
+                    ) as resp:
+                        # CRITICAL: Check status before streaming
+                        if resp.status_code != 200:
+                            err_body = await resp.aread()
+                            error_msg = f"Backend Error {resp.status_code}: {err_body.decode()[:50]}"
+                            logger.error(f"[Ensemble:{bundle_name}] Direct master route failed: {error_msg}")
+                            yield format_proxy_chunk(f"⚠️ **{error_msg}**", is_done=True)
+                            return
+                        
+                        # TRACK if we received anything
+                        received_anything = False
+                        async for line in resp.aiter_lines():
+                            if not line: continue
+                            received_anything = True
+                            logger.debug(f"[Ensemble:{bundle_name}] Master stream chunk: {line[:100]}...")
+                            yield (line + "\n").encode()
+                        
+                        if not received_anything:
+                            logger.error(f"[Ensemble:{bundle_name}] Backend returned empty stream for master model {bundle.master_model}")
+                            yield format_proxy_chunk(f"⚠️ **[Error: Backend returned empty response from {bundle.master_model}]**", is_done=True)
+                except Exception as e:
+                    logger.error(f"[Ensemble:{bundle_name}] Direct master route failed: {e}")
+                    yield format_proxy_chunk(f"⚠️ **[Error: {str(e)[:50]}]**", is_done=True)
+                return
+
+            # (If ensemble is activated, proceed with original execution flow)
             if bundle.send_status_update:
                 status_msg = f"✨ Orchestrating ensemble via: {', '.join(bundle.parallel_participants)}... gathering perspectives.\n\n"
                 yield format_proxy_chunk(status_msg)
+            else:
+                yield format_proxy_chunk("⏳ _Gathering experts..._")
 
             # 2. Parallel Participant Execution
+            logger.info(f"[Ensemble:{bundle_name}] Request ID: {request_id} - Activating {len(bundle.parallel_participants)} agents: {bundle.parallel_participants}")
+            
+            # Check if any agents are actually configured
+            if not bundle.parallel_participants:
+                logger.error(f"[Ensemble:{bundle_name}] No parallel participants configured!")
+                yield format_proxy_chunk("⚠️ **[Error: No parallel participants defined in Ensemble]**", is_done=True)
+                return
+
             event_manager.emit(ProxyEvent("assigned", request_id, bundle_name, "orchestrator", api_key.user.username))
             tasks = [asyncio.create_task(get_sub_response(m)) for m in bundle.parallel_participants]
             
             if bundle.show_monologue:
-                # Open the collapsible thinking block immediately
                 yield format_proxy_chunk("\n\n")
 
-            # Await all parallel agents
-            task_results = await asyncio.gather(*tasks)
-            results_dict = {m: res for m, res in task_results}
+            # Await all parallel agents (No explicit timeout, relying on global HTTP client)
+            logger.info(f"[Ensemble:{bundle_name}] Awaiting parallel agent responses...")
+            task_results = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            success_agents = []
+            failed_agents = []
+            results_dict = {}
+
+            for i, res in enumerate(task_results):
+                p_name = bundle.parallel_participants[i]
+                if isinstance(res, Exception):
+                    logger.error(f"[Ensemble:{bundle_name}] Agent '{p_name}' crashed: {res}")
+                    failed_agents.append(p_name)
+                    results_dict[p_name] = f"Error: Agent execution failed."
+                elif isinstance(res, tuple) and res[1].startswith("Error:"):
+                    logger.warning(f"[Ensemble:{bundle_name}] Agent '{p_name}' returned error: {res[1]}")
+                    failed_agents.append(p_name)
+                    results_dict[p_name] = res[1]
+                else:
+                    success_agents.append(p_name)
+                    results_dict[p_name] = res[1]
+
+            # Optional Status Report
+            if bundle.report_success_failure:
+                report = f"\n\n--- 📊 Ensemble Status ---\n✅ OK: {', '.join(success_agents) if success_agents else 'None'}\n❌ Fail: {', '.join(failed_agents) if failed_agents else 'None'}\n-------------------------\n\n"
+                yield format_proxy_chunk(report)
+
+            # Fix Monologue: Yield intermediate thoughts if enabled
+            if bundle.show_monologue:
+                logger.info(f"[Ensemble:{bundle_name}] Streaming intermediate thoughts (Monologue mode)...")
+                for p_name in bundle.parallel_participants:
+                    content = results_dict.get(p_name, "No data")
+                    monologue_chunk = f"\n\n### AGENT: {p_name}\n{content}"
+                    yield format_proxy_chunk(monologue_chunk)
 
             # Re-assemble results in original order for the Master Synthesis
-            results = [results_dict.get(m, "Error: No response") for m in bundle.parallel_participants]
-            agent_outputs = "\n\n".join([f"### AGENT: {bundle.parallel_participants[i]}\n{res}" for i, res in enumerate(results)])
+            agent_outputs = "\n\n".join([f"### AGENT: {p}\n{results_dict.get(p, 'Error')}" for p in bundle.parallel_participants])
 
-            # Failure Check
-            if all(r.startswith("Error") or r.startswith("Model") for r in results):
-                err_msg = "All bundle agents failed to respond. Check backend server logs."
+            # Resilience check: Proceed as long as at least ONE agent worked
+            if not success_agents:
+                err_msg = f"Critical Failure: All {len(bundle.parallel_participants)} agents failed. Summary: {', '.join(failed_agents)}"
+                logger.error(f"[Ensemble:{bundle_name}] {err_msg}")
                 event_manager.emit(ProxyEvent("error", request_id, bundle_name, "orchestrator", api_key.user.username, error_message=err_msg))
-                yield format_proxy_chunk(f"Error: {err_msg}", is_done=True)
+                yield format_proxy_chunk(f"\n\n⚠️ **{err_msg}**", is_done=True)
                 return
 
             # 4. Master Synthesis
@@ -1529,13 +1664,16 @@ async def _handle_bundle_request(db: AsyncSession, request: Request, bundle_name
                 headers = _get_auth_headers(target_server)
                 
                 master_url = f"{target_server.url.rstrip('/')}/api/{master_path}"
+                logger.info(f"[Ensemble:{bundle_name}] Synthesis requested via model '{bundle.master_model}' on server '{target_server.name}'")
                 event_manager.emit(ProxyEvent("assigned", request_id, bundle_name, target_server.name, api_key.user.username))
 
+                # Increased timeout to 1 hour (3600s) for complex synthesis
                 async with request.app.state.http_client.stream(
-                    "POST", master_url, json=master_body, headers=headers, timeout=600.0
+                    "POST", master_url, json=master_body, headers=headers, timeout=3600.0
                 ) as backend_resp:
                     if backend_resp.status_code != 200:
                         err_text = await backend_resp.aread()
+                        logger.error(f"[Ensemble:{bundle_name}] Master synthesis failed ({backend_resp.status_code}): {err_text.decode()}")
                         yield (json.dumps({"error": f"Master backend error: {err_text.decode()}"}) + "\n").encode()
                         return
 
@@ -1650,8 +1788,17 @@ async def proxy_ollama(
         except (json.JSONDecodeError, Exception):
             pass
 
-    # Handle 'think' parameter
-    if model_name and isinstance(body, dict) and "think" in body:
+    # Logic to handle 'think' parameter and auto-activation for reasoning models
+    if model_name and isinstance(body, dict):
+        model_name_lower = model_name.lower()
+        
+        # Load capability data (simplified for this edit)
+        is_reasoning_model = any(kw in model_name_lower for kw in ["r1", "qwq", "think", "phi-4", "gemma-3"])
+        
+        if "think" not in body and is_reasoning_model:
+            # Auto-activate thinking for known reasoning models if not specified
+            body["think"] = True
+
         model_name_lower = model_name.lower()
         supported_think_models = ["qwen", "gpt-oss", "deepseek"]
         

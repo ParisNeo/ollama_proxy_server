@@ -1,0 +1,60 @@
+{
+  "last_updated": "2026-03-22",
+  "models": [
+    {
+      "name": "deepseek-r1",
+      "family": "deepseek",
+      "context_length": 128000,
+      "capabilities": ["reasoning", "coding", "math"],
+      "supports_thinking": true,
+      "think_tag": "<think>",
+      "is_moe": true
+    },
+    {
+      "name": "deepseek-v3",
+      "family": "deepseek",
+      "context_length": 128000,
+      "capabilities": ["general", "coding", "multimodal"],
+      "supports_thinking": false,
+      "is_moe": true
+    },
+    {
+      "name": "llama-3.3-70b",
+      "family": "llama",
+      "context_length": 128000,
+      "capabilities": ["general", "reasoning", "multilingual"],
+      "supports_thinking": false
+    },
+    {
+      "name": "llama-4-scout",
+      "family": "llama",
+      "context_length": 10000000,
+      "capabilities": ["ultra-long-context", "general"],
+      "supports_thinking": false,
+      "is_moe": true
+    },
+    {
+      "name": "gemma-3-27b",
+      "family": "gemma",
+      "context_length": 128000,
+      "capabilities": ["multimodal", "reasoning", "on-device"],
+      "supports_thinking": true,
+      "think_tag": "<thought>"
+    },
+    {
+      "name": "qwen-3-235b",
+      "family": "qwen",
+      "context_length": 342000,
+      "capabilities": ["general", "multilingual", "reasoning"],
+      "supports_thinking": true,
+      "think_tag": "<thought>"
+    },
+    {
+      "name": "phi-4",
+      "family": "phi",
+      "context_length": 32000,
+      "capabilities": ["reasoning", "small-scale"],
+      "supports_thinking": true
+    }
+  ]
+}

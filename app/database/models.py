@@ -139,6 +139,7 @@ class EnsembleOrchestrator(Base):
     vision_processor = Column(String, nullable=True) # Model used to extract image descriptions (for multimodal bundles)
     show_monologue = Column(Boolean, default=False)
     send_status_update = Column(Boolean, default=False)
+    report_success_failure = Column(Boolean, default=False) # NEW: Reports which agents worked
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
 

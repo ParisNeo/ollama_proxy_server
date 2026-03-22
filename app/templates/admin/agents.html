@@ -43,9 +43,11 @@
             <div class="md:col-span-2 space-y-4">
                 <div class="flex justify-between items-center">
                     <label class="block text-xs text-gray-400 uppercase font-bold">MCP Servers (Capabilities)</label>
-                    <div class="relative">
+                    <!-- Added 'overflow-visible' here to ensure the dropdown isn't clipped -->
+                    <div class="relative overflow-visible">
                         <button type="button" id="add-mcp-btn" class="text-[10px] bg-purple-600/20 text-purple-400 border border-purple-500/30 px-3 py-1 rounded hover:bg-purple-600/30">+ Add MCP</button>
-                        <div id="mcp-presets" class="hidden absolute right-0 mt-2 w-64 bg-[#0a0a0f] border border-white/20 rounded-lg shadow-[0_0_50px_rgba(0,0,0,0.8)] z-[100] p-2 space-y-1 ring-1 ring-white/10">
+                        <!-- Increased z-index and forced absolute positioning -->
+                        <div id="mcp-presets" class="hidden absolute right-0 mt-2 w-64 bg-[#0a0a0f] border border-white/20 rounded-lg shadow-[0_0_50px_rgba(0,0,0,0.8)] z-[200] p-2 space-y-1 ring-1 ring-white/10">
                             <button type="button" onclick="openCustomMCP()" class="w-full text-left px-3 py-2 text-xs hover:bg-white/5 rounded text-indigo-400 font-bold border-t border-white/5 mt-1">Custom MCP Server...</button>
                         </div>
                     </div>

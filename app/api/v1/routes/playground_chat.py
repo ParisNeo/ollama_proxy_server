@@ -51,16 +51,71 @@ async def admin_playground_stream(
         if not model_name or not messages:
             return JSONResponse({"error": "Model and messages are required."}, status_code=400)
 
-        # --- NEW: Handle 'auto' model routing ---
+        from app.database.models import SmartRouter, EnsembleOrchestrator, APIKey
+        from sqlalchemy import select
+        from app.core.events import event_manager, ProxyEvent
+        from app.api.v1.routes.proxy import (
+            _select_auto_model, 
+            _select_from_pool, 
+            _handle_bundle_request, 
+            _resolve_target,
+            _reverse_proxy,
+            _async_log_usage
+        )
+        import secrets
+        
+        req_id = f"pg_{secrets.token_hex(4)}"
+        sender = admin_user.username
+
+        # --- INITIAL TELEMETRY ---
+        # Emit 'received' event so a particle appears immediately in Live Flow
+        event_manager.emit(ProxyEvent(
+            event_type="received", 
+            request_id=req_id, 
+            model=model_name,
+            sender=sender,
+            request_type="PLAYGROUND"
+        ))
+
+        # --- ORCHESTRATION LOGIC ---
+        
+        # 1. Handle 'auto' model
         if model_name == "auto":
             resolved_model = await _select_auto_model(db, data)
             if not resolved_model:
-                error_payload = {"error": "Auto-routing could not find a suitable model."}
-                return Response(json.dumps(error_payload), media_type="application/x-ndjson", status_code=503)
-            
-            logger.info(f"Playground 'auto' model resolved to -> '{resolved_model}'")
+                event_manager.emit(ProxyEvent("error", req_id, model_name, "none", sender, error_message="Auto-routing failed"))
+                return Response(json.dumps({"error": "Auto-routing could not find a suitable model."}), 
+                                media_type="application/x-ndjson", status_code=503)
             model_name = resolved_model
-        # --- END NEW ---
+            data["model"] = model_name
+
+        # 2. Handle Smart Routers (Pools)
+        pool_check = await db.execute(select(SmartRouter).filter(SmartRouter.name == model_name))
+        if pool_check.scalars().first():
+            resolved_model = await _select_from_pool(db, model_name, data, request, sender=sender)
+            if resolved_model:
+                model_name = resolved_model
+                data["model"] = model_name
+            else:
+                event_manager.emit(ProxyEvent("error", req_id, model_name, "none", sender, error_message="Pool has no targets"))
+                return Response(json.dumps({"error": f"Model Pool '{model_name}' has no targets."}), 
+                                media_type="application/x-ndjson", status_code=503)
+
+        # 3. Handle Ensemble Orchestrators (Bundles)
+        bundle_check = await db.execute(select(EnsembleOrchestrator).filter(EnsembleOrchestrator.name == model_name))
+        if bundle_check.scalars().first():
+            # Create a detached APIKey object to satisfy orchestrator logging
+            dummy_key = APIKey(user=admin_user, key_prefix="admin_playground")
+            return await _handle_bundle_request(db, request, model_name, data, dummy_key, req_id)
+
+        # 4. Resolve Virtual Agents (Recursively)
+        resolved_name, updated_messages = await _resolve_target(db, model_name, messages)
+        model_name = resolved_name
+        messages = updated_messages
+        data["model"] = model_name
+        data["messages"] = messages
+
+        # --- END ORCHESTRATION ---
 
         # Handle base64 images, converting them to the format Ollama expects
         for msg in messages:

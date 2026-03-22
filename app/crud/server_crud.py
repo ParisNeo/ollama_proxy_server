@@ -106,10 +106,10 @@ async def update_server(db: AsyncSession, server_id: int, server_update: ServerU
 
     update_data = server_update.model_dump(exclude_unset=True)
     
+    # If api_key is provided, update it. If not, don't touch existing encrypted_api_key.
+    # We check if api_key is present in update_data, and if it's not None (the empty string check handles clear)
     if "api_key" in update_data:
         api_key = update_data.pop("api_key")
-        # A non-None value in api_key means we are intentionally setting/updating/clearing it.
-        # An empty string will clear it.
         if api_key is not None:
             db_server.encrypted_api_key = encrypt_data(api_key) if api_key else None
         
@@ -125,8 +125,8 @@ async def update_server(db: AsyncSession, server_id: int, server_update: ServerU
                     raise ValueError("Server name must be 1-128 characters")
                 setattr(db_server, key, value)
             elif key == 'server_type':
-                if value not in ('ollama', 'vllm'):
-                    raise ValueError("Server type must be 'ollama' or 'vllm'")
+                if value not in ('ollama', 'vllm', 'cloud'):
+                    raise ValueError("Server type must be 'ollama', 'vllm' or 'cloud'")
                 setattr(db_server, key, value)
             else:
                 setattr(db_server, key, value)
@@ -176,39 +176,7 @@ async def fetch_and_update_models(db: AsyncSession, server_id: int) -> dict:
                 endpoint_url = f"{server.url.rstrip('/')}/v1/models"
                 response = await client.get(endpoint_url)
                 response.raise_for_status()
-                data = response.json()
-                models_data = data.get("data", [])
-                
-                # Validate model data structure to prevent injection
-                for model in models_data:
-                    if not isinstance(model, dict):
-                        continue
-                    model_id = model.get("id")
-                    if not model_id or not isinstance(model_id, str):
-                        continue
-                    # Sanitize model_id
-                    model_id = re.sub(r'[^\w\.\-:/]', '', model_id)[:256]
-                    
-                    family = model_id.split(':')[0].split('-')[0] if ':' in model_id else model_id.split('-')[0]
-                    family = re.sub(r'[^\w\.\-]', '', family)[:64]
-
-                    models.append({
-                        "name": model_id,
-                        "size": 0,  # Not available from vLLM API
-                        "modified_at": datetime.datetime.fromtimestamp(
-                            model.get("created", 0), tz=datetime.timezone.utc
-                        ).isoformat(),
-                        "digest": model_id, # Use ID as a stand-in for digest
-                        "details": {
-                            "parent_model": "",
-                            "format": "vllm",
-                            "family": family,
-                            "families": [family] if family else None,
-                            "parameter_size": "N/A",
-                            "quantization_level": "N/A"
-                        }
-                    })
-            else:  # Default to "ollama"
+            else:  # Default to "ollama" or "cloud"
                 endpoint_url = f"{server.url.rstrip('/')}/api/tags"
                 response = await client.get(endpoint_url)
                 response.raise_for_status()
@@ -632,10 +600,14 @@ async def get_all_models_grouped_by_server(db: AsyncSession, filter_type: Option
     if filter_type == 'chat' or filter_type is None:
         proxy_features = ["auto"]
         
-        # Dynamically add Pools and Bundles to the selector
+        # Dynamically add Agents, Pools and Bundles to the selector
         try:
-            from app.database.models import SmartRouter, EnsembleOrchestrator
+            from app.database.models import SmartRouter, EnsembleOrchestrator, VirtualAgent
             from sqlalchemy import select
+            
+            # Fetch Agents
+            res_a = await db.execute(select(VirtualAgent.name).filter(VirtualAgent.is_active == True))
+            proxy_features.extend(res_a.scalars().all())
             
             # Fetch Pools
             res_p = await db.execute(select(SmartRouter.name).filter(SmartRouter.is_active == True))

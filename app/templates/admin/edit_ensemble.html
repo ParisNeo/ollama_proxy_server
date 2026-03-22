@@ -24,29 +24,23 @@
                         <input type="checkbox" name="send_status_update" value="true" class="h-5 w-5 rounded text-indigo-600" {% if ensemble.send_status_update %}checked{% endif %}>
                         <span class="text-xs text-gray-400 uppercase font-bold group-hover:text-white transition-colors">Send "Processing..." Feedback</span>
                     </label>
+                    <label class="flex items-center gap-2 cursor-pointer group">
+                        <input type="checkbox" name="report_success_failure" value="true" class="h-5 w-5 rounded text-indigo-600" {% if ensemble.report_success_failure %}checked{% endif %}>
+                        <span class="text-xs text-gray-400 uppercase font-bold group-hover:text-white transition-colors">Report Agent Status</span>
+                    </label>
                 </div>
             </div>
 
             <div>
-                <label class="block text-xs text-gray-400 uppercase font-bold">Master Model (Final Synthesis)</label>
-                <select name="master_model" class="w-full p-2 rounded bg-black/20 border border-white/10">
-                    {% for m in available_models %}
-                    <option value="{{ m }}" {% if m == ensemble.master_model %}selected{% endif %}>{{ m }}</option>
-                    {% endfor %}
+                <label class="block text-xs text-gray-400 uppercase font-bold">Master Model (Synthesizer)</label>
+                <select name="master_model" class="w-full p-2 rounded bg-black/20 border border-white/10 text-indigo-400 font-bold">
+                    <optgroup label="🎭 Virtual Agents" class="bg-[#0a0a0f] text-indigo-400">
+                        {% for m in agents %}<option value="{{ m }}" {% if m == ensemble.master_model %}selected{% endif %}>{{ m }}</option>{% endfor %}
+                    </optgroup>
+                    <optgroup label="📦 Raw Backend Models" class="bg-[#0a0a0f] text-gray-400">
+                        {% for m in raw_models %}<option value="{{ m }}" {% if m == ensemble.master_model %}selected{% endif %}>{{ m }}</option>{% endfor %}
+                    </optgroup>
                 </select>
-            </div>
-
-                <div>
-                    <label class="block text-xs text-gray-400 uppercase font-bold">Master Model (Synthesizer)</label>
-                    <select name="master_model" class="w-full p-2 rounded bg-black/20 border border-white/10 text-indigo-400 font-bold">
-                        <optgroup label="🎭 Virtual Agents" class="bg-[#0a0a0f] text-indigo-400">
-                            {% for m in agents %}<option value="{{ m }}" {% if m == ensemble.master_model %}selected{% endif %}>{{ m }}</option>{% endfor %}
-                        </optgroup>
-                        <optgroup label="📦 Raw Backend Models" class="bg-[#0a0a0f] text-gray-400">
-                            {% for m in raw_models %}<option value="{{ m }}" {% if m == ensemble.master_model %}selected{% endif %}>{{ m }}</option>{% endfor %}
-                        </optgroup>
-                    </select>
-                </div>
             </div>
 
             <div>

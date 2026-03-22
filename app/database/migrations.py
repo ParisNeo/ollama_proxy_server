@@ -551,6 +551,7 @@ async def run_all_migrations(engine: AsyncEngine) -> None:
                 "vision_processor": "VARCHAR",  # NEW: For vision-enabled bundles
                 "show_monologue": "BOOLEAN DEFAULT 0 NOT NULL",
                 "send_status_update": "BOOLEAN DEFAULT 0 NOT NULL",
+                "report_success_failure": "BOOLEAN DEFAULT 0 NOT NULL",
                 "is_active": "BOOLEAN DEFAULT 1 NOT NULL",
                 "created_at": "DATETIME",
             },

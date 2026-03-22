@@ -7,6 +7,7 @@ import shutil
 import httpx
 import asyncio
 import secrets
+import json
 from pathlib import Path
 import os
 import re
@@ -1517,16 +1518,33 @@ async def admin_add_agent(
     from app.database.models import VirtualAgent
     import json
     
-    mcp_data = json.loads(mcp_servers_json)
-    new_agent = VirtualAgent(
-        name=name, 
-        base_model=base_model, 
-        system_prompt=system_prompt,
-        mcp_servers=mcp_data
-    )
-    db.add(new_agent)
-    await db.commit()
-    flash(request, f"Agent '{name}' is alive.", "success")
+    # 1. Basic validation
+    if not name or len(name) < 1:
+        flash(request, "Agent name is required.", "error")
+        return RedirectResponse(url=request.url_for("admin_agents"), status_code=303)
+
+    # 2. Check for duplicates manually to avoid IntegrityError
+    existing = await db.execute(select(VirtualAgent).filter(VirtualAgent.name == name))
+    if existing.scalars().first():
+        flash(request, f"An agent with the name '{name}' already exists.", "error")
+        return RedirectResponse(url=request.url_for("admin_agents"), status_code=303)
+    
+    try:
+        mcp_data = json.loads(mcp_servers_json)
+        new_agent = VirtualAgent(
+            name=name, 
+            base_model=base_model, 
+            system_prompt=system_prompt,
+            mcp_servers=mcp_data
+        )
+        db.add(new_agent)
+        await db.commit()
+        flash(request, f"Agent '{name}' is alive.", "success")
+    except Exception as e:
+        logger.error(f"Failed to add agent: {e}")
+        flash(request, f"Error creating agent: {str(e)}", "error")
+        await db.rollback()
+        
     return RedirectResponse(url=request.url_for("admin_agents"), status_code=303)
 
 @router.post("/agents/{agent_id}/delete", name="admin_delete_agent", dependencies=[Depends(validate_csrf_token)])
