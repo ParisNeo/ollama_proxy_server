@@ -1,77 +1,59 @@
-# lollms hub: Your Personal AI Command Center 🧠👑
+## 🧠 Advanced AI Orchestration: Routers & Ensembles
 
-[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-![Python Version](https://img.shields.io/badge/python-3.11+-blue.svg)
-![Built with](https://img.shields.io/badge/Built%20with-FastAPI-brightgreen)
-![Release](https://img.shields.io/badge/release-v9.0.0-blue)
-[![GitHub stars](https://img.shields.io/github/stars/ParisNeo/lollms_hub.svg?style=social&label=Star)](https://github.com/ParisNeo/lollms_hub/stargazers/)
+### Smart Routers: Hierarchical Model Routing
 
-> **lollms** = **L**ord **O**f **L**arge **L**anguage **M**odel**s** — because every AI deserves a ruler.
+Create virtual "traffic controllers" that intelligently route requests to the best model for the job:
 
-Stop exposing your local AI to the world. **lollms hub** is the ultimate security and management layer for your Ollama and vLLM instances, designed to be set up in **60 seconds** by anyone, on any operating system.
+**Routing Strategies:**
+- **Priority:** Always try the first model, fall back to second if unavailable
+- **Random:** Even distribution for large clusters  
+- **Least Loaded:** Route to the backend with lowest active request count (best for high-TPS apps)
 
-Whether you're a developer, a researcher, or just an AI enthusiast, this tool transforms your vulnerable open port into a managed, secure, and **deeply customizable** AI command center.
+**Decision Rules (Evaluated Top-to-Bottom):**
+- **Fast Rules:** Keywords, regex patterns, message length, image detection, specific users
+- **Semantic Rules:** Use a small LLM to classify intent when pattern matching isn't enough
 
----
+**Example - Vision-Enabled Router:**
+```
+User Request: "What's in this image?" [attached photo]
+↓
+Rule: has_images = true → Route to gemma3:27b (VLM)
+↓
+VLM analyzes image → "A golden retriever playing fetch"
+↓
+Description + original prompt → Sent to llama3.1:70b (powerful text model)
+```
 
-## The Threat: Why Your PC Could Be at Risk
+### Ensemble Orchestrators (MoE)
 
-A critical vulnerability named **"Probllama" (CVE-2024-37032)** was discovered in Ollama, allowing Remote Code Execution (RCE). In plain English, an attacker could have sent a malicious request to your Ollama server and **taken full control of your computer**—stealing files, installing ransomware, or using your machine for malicious activities.
+Combine multiple models in parallel to create superior reasoning:
 
-While the core team patched this, the incident highlighted a crucial need for a dedicated security layer. Running an AI model should not mean opening a backdoor to your digital life.
+**Flow:**
+```
+User Query: "Analyze this contract for risks"
+↓
+Parallel Execution:
+├─ Contract-Law-Agent → "Clause 3 is non-standard"
+├─ Case-Law-Agent → "Similar to Smith v. Jones (2019)"
+└─ Compliance-Agent → "GDPR Article 17 may apply"
+↓
+Master Model Synthesizes:
+"Based on expert analysis: The non-standard clause (3) resembles 
+Smith v. Jones where it was upheld. However, GDPR compliance 
+requires additional safeguards. Recommendation:..."
+```
 
-### So, Why Do You Still Need lollms hub?
+### Quick Vision Enabler
 
-lollms hub is **more than just a patch**. It's your central **hub** for all things AI—unleashing a suite of powerful, enterprise-grade features that core Ollama doesn't provide:
+The fastest way to give your text-only models vision capabilities:
 
-*   ✨ **Centralized Model Management:** Pull, update, and delete models on any of your connected Ollama servers directly from the hub's web UI. No more terminal commands or switching between machines.
+**Before:** Your powerful 70B text model can't see images 😢
+**After:** Create a vision router in 10 seconds ✅
 
-*   🛡️ **Rock-Solid Security:**
-    *   **Endpoint Blocking:** Prevent API key holders from accessing sensitive endpoints like `pull`, `delete`, and `create` to protect your servers from abuse.
-    *   **API Key Authentication:** Eliminate anonymous access entirely.
-    *   **One-Click HTTPS/SSL:** Encrypt all traffic with easy certificate uploads or path-based configuration.
-    *   **IP Filtering:** Create granular allow/deny lists to control exactly which machines can connect.
-    *   **Rate Limiting & Brute-Force Protection:** Prevent abuse and secure your admin login (powered by Redis).
-
-*   🚀 **High-Performance Engine:**
-    *   **Intelligent Load Balancing:** Distribute requests across multiple Ollama servers for maximum speed and high availability.
-    *   **Smart Model Routing:** Automatically sends requests only to servers that have the specific model available, preventing failed requests and saving compute resources.
-    *   **Automatic Retries:** The hub resiliently handles temporary server hiccups with an exponential backoff strategy, making your AI services more reliable.
-
-*   🧪 **Model Playgrounds & Benchmarking:**
-    *   **Interactive Chat Playground:** Go beyond simple API calls. Chat with any model in a familiar interface that supports streaming, multi-modal inputs (paste images directly!), and full conversation history management (import/export).
-    *   **Advanced Embedding Playground:** A powerful tool for data scientists and developers. Visualize how different embedding models "understand" language by plotting concepts in a 2D space. Use pre-built benchmarks or create your own to compare model performance side-by-side.
-
-*   📊 **Mission Control Dashboard:**
-    *   Go beyond `ollama ps`. Get a real-time, auto-updating view of your hub's health (CPU, Memory, Disk), see all active models across all servers, monitor the **live health of your load balancer**, and watch API rate-limit queues fill and reset in real-time.
-
-*   📈 **Comprehensive Analytics Suite:**
-    *   Don't just guess your usage—know it. Dive into beautiful, interactive charts for daily and hourly requests, model popularity, and server load.
-    *   With a single click, drill down into **per-user analytics** to understand individual usage patterns. All data is exportable to CSV or PNG.
-
-*   🎨 **Radical Theming Engine:**
-    *   Why should your tools be boring? Choose from over a dozen stunning UI themes to match your personal aesthetic. Whether you prefer a sleek **Material Design**, a futuristic **Cyberpunk** neon glow, a retro **CRT Terminal**, or a stark **Brutalist** look, you can make the interface truly yours.
-
-*   👤 **Granular User & API Key Management:**
-    *   Effortlessly create and manage users. The sortable user table gives you at-a-glance stats on key counts, total requests, and last activity.
-    *   From there, manage individual API keys with per-key rate limits, and temporarily disable or re-enable keys on the fly.
-
-*   🌐 **Multi-Server Management & Federation:**
-    *   Centrally manage all your Ollama and vLLM backend servers from one hub. Load-balance requests and get a unified, federated view of all available models from all your instances combined.
-
-*   ✨ **Effortless 1-Click Setup:**
-    *   No Docker, no `pip install`, no command-line wizardry required. Just download and run a single script.
-
----
-
-## 🛡️ Harden Your Defenses: Endpoint Blocking
-
-Giving every user an API key shouldn't mean giving them the keys to the kingdom. By default, **lollms hub blocks access to dangerous and resource-intensive API endpoints** for all API key holders.
-
--   **Prevent Denial-of-Service:** Stop users from triggering massive model downloads (`/api/pull`) that can saturate your network and fill your disk.
--   **Protect Your Models:** Prevent API users from deleting (`/api/delete`), copying (`/api/copy`), or creating (`/api/create`) models on your backend servers.
--   **Full Admin Control:** As an administrator, you can still perform all these actions securely through the web UI's **Model Management** page.
--   **Customizable:** You have full control to change which endpoints are blocked via the **Settings -> Endpoint Security** menu.
+1. Select your text model (e.g., `nemotron-3-super`)
+2. Select a vision model (e.g., `gemma3:27b`)
+3. Name it (e.g., `smart-vision-assistant`)
+4. Done! Use `smart-vision-assistant` as any model name
 
 ---
 
@@ -147,11 +129,23 @@ The User Management page gives you a sortable, high-level overview. From here, c
 
 ![User edit](assets/user_edit.gif)
 
-### Step 6: Test & Benchmark in the Playgrounds
+### Step 6: Create Intelligent Model Orchestration
+
+Navigate to **Smart Routers** to build hierarchical routing logic. Create a vision enabler in seconds: select a text model + VLM, name it, and instantly give your text-only AI image understanding.
+
+Or go to **Ensembles** to build Mixture-of-Experts pipelines. Define multiple parallel agents and a master synthesizer for complex reasoning tasks.
+
+### Step 6: Create Intelligent Model Orchestration
+
+Navigate to **Smart Routers** to build hierarchical routing logic. Create a vision enabler in seconds: select a text model + VLM, name it, and instantly give your text-only AI image understanding.
+
+Or go to **Ensembles** to build Mixture-of-Experts pipelines. Define multiple parallel agents and a master synthesizer for complex reasoning tasks.
+
+### Step 7: Test & Benchmark in the Playgrounds
 
 Use the built-in playgrounds to evaluate your models. The **Chat Playground** provides a familiar UI to test conversational models with streaming and image support. The **Embedding Playground** lets you visualize and benchmark how different models understand semantic relationships using powerful 2D plots.
 
-### Step 7: Master Your Analytics
+### Step 8: Master Your Analytics
 
 The main "Usage Stats" page and the per-user pages give you a beautiful, exportable overview of exactly how your models are being used.
 
