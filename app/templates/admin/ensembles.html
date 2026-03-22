@@ -4,6 +4,21 @@
 
 {% block content %}
 <div class="space-y-8">
+
+    <!-- Help Card -->
+    <div class="card-style bg-amber-500/10 border border-amber-500/30">
+        <div class="flex items-start gap-3">
+            <svg class="w-6 h-6 text-amber-400 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"></path></svg>
+            <div class="text-sm text-gray-300">
+                <p class="font-semibold text-amber-300 mb-1">What are Ensembles (MoE)?</p>
+                <p class="mb-2">Ensembles use a "Mixture of Experts" pattern. Your query is sent to <strong>multiple models in parallel</strong>, then a "Master" model synthesizes all responses into one cohesive answer.</p>
+                <div class="bg-black/30 rounded p-2 text-xs text-gray-400">
+                    <strong>Flow:</strong> User Query → [Agent A, Agent B, Agent C] <em>(parallel)</em> → Master Model → Final Answer
+                </div>
+            </div>
+        </div>
+    </div>
+
     <div class="card-style">
         <h2 class="card-header text-xl font-bold mb-4">Create New Ensemble</h2>
         <form action="{{ url_for('admin_add_ensemble') }}" method="post" class="space-y-4">
@@ -36,9 +51,9 @@
                     </select>
                 </div>
                 <div>
-                    <label class="block text-xs text-gray-400 uppercase font-bold">Vision Processor (Optional)</label>
+                    <label class="block text-xs text-gray-400 uppercase font-bold">Vision Processor <span class="text-[10px] font-normal text-gray-500">(Optional)</span></label>
                     <select name="vision_processor" class="w-full p-2 rounded bg-black/20 border border-white/10">
-                        <option value="">None (Images not supported)</option>
+                        <option value="">None - Participants handle images directly</option>
                         <optgroup label="🎭 Virtual Agents" class="bg-[#0a0a0f] text-indigo-400">
                             {% for m in agents %}<option value="{{ m }}">{{ m }}</option>{% endfor %}
                         </optgroup>
@@ -46,7 +61,18 @@
                             {% for m in raw_models %}<option value="{{ m }}">{{ m }}</option>{% endfor %}
                         </optgroup>
                     </select>
+                    <p class="text-[10px] text-gray-500 mt-1">Pre-processes images before sending descriptions to all participants</p>
                 </div>
+            </div>
+
+            <!-- Example -->
+            <div class="bg-amber-500/5 border border-amber-500/20 rounded p-3 mt-4">
+                <p class="text-[10px] font-bold text-amber-400 uppercase mb-1">💡 Example: Legal Research Ensemble</p>
+                <ul class="text-xs text-gray-400 space-y-1 list-disc ml-4">
+                    <li><strong>Participants:</strong> Contract-Law-Agent, Case-Law-Agent, Compliance-Agent</li>
+                    <li><strong>Master:</strong> Senior-Partner-Agent synthesizes: "Agent A found X, Agent B found Y, Agent C warns about Z. Recommendation: ..."</li>
+                    <li><strong>Vision:</strong> If processing scanned contracts, use a VLM to OCR first</li>
+                </ul>
             </div>
 
             <div class="space-y-4">

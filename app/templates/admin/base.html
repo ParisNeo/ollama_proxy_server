@@ -151,6 +151,26 @@
         </div>
     </div>
 
+    <!-- Help Tooltip Component -->
+    <style>
+        .help-tooltip { position: relative; display: inline-block; cursor: help; }
+        .help-tooltip:hover .help-text { opacity: 1; visibility: visible; transform: translateY(0); }
+        .help-text {
+            position: absolute; bottom: 125%; left: 50%; transform: translateX(-50%) translateY(10px);
+            width: 280px; padding: 12px; background: rgba(0,0,0,0.95); border: 1px solid var(--color-primary-600);
+            border-radius: 8px; font-size: 12px; line-height: 1.4; color: #e5e5e5;
+            opacity: 0; visibility: hidden; transition: all 0.2s ease; z-index: 100;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+        }
+        .help-text::after {
+            content: ''; position: absolute; top: 100%; left: 50%; margin-left: -5px;
+            border-width: 5px; border-style: solid; border-color: var(--color-primary-600) transparent transparent transparent;
+        }
+        .help-icon { width: 16px; height: 16px; border-radius: 50%; background: var(--color-primary-600); 
+                     color: white; font-size: 11px; display: inline-flex; align-items: center; justify-content: center; 
+                     font-weight: bold; margin-left: 6px; }
+    </style>
+
     <!-- Modal Structure -->
     <div id="modal-backdrop" class="fixed inset-0 bg-black bg-opacity-70 z-50 hidden"></div>
     <div id="modal" class="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50 card-style w-11/12 max-w-2xl hidden">

@@ -4,29 +4,59 @@
 
 {% block content %}
 <div class="space-y-8">
+
+    <!-- Help Card -->
+    <div class="card-style bg-indigo-500/10 border border-indigo-500/30">
+        <div class="flex items-start gap-3">
+            <svg class="w-6 h-6 text-indigo-400 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+            <div class="text-sm text-gray-300">
+                <p class="font-semibold text-indigo-300 mb-1">What are Smart Routers?</p>
+                <p class="mb-2">Routers act as intelligent traffic controllers. They examine each request and route it to the appropriate model based on rules you define.</p>
+                <ul class="list-disc list-inside space-y-1 text-xs text-gray-400 ml-2">
+                    <li><strong>Priority:</strong> Always tries the first model, falls back to second if unavailable</li>
+                    <li><strong>Random:</strong> Distributes load evenly across all targets</li>
+                    <li><strong>Least Loaded:</strong> Routes to the server with fewest active requests (best for high throughput)</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
     <!-- Quick Vision Enabler Shortcut -->
     <div class="card-style border-l-4 border-purple-500">
         <h2 class="card-header text-xl font-bold mb-2">⚡ Quick Vision Enabler</h2>
-        <p class="text-xs text-gray-400 mb-4">Instantly create a vision-capable bundle from a text-only model + vision model. No complex rules needed.</p>
+        <p class="text-xs text-gray-400 mb-2">Instantly create a vision-capable router from a text-only model + vision model.</p>
+        
+        <!-- Example -->
+        <div class="bg-purple-500/5 border border-purple-500/20 rounded p-3 mb-4">
+            <p class="text-[10px] font-bold text-purple-400 uppercase mb-1">💡 Example Use Case</p>
+            <p class="text-xs text-gray-400">You have <code>llama3.1:70b</code> (text only) and <code>gemma3:27b</code> (vision-capable). Create a router named <code>smart-llama</code>:</p>
+            <ul class="text-xs text-gray-500 mt-1 ml-4 list-disc">
+                <li>Text prompts → go directly to Llama</li>
+                <li>Images included → first analyzed by Gemma, description + original prompt sent to Llama</li>
+            </ul>
+        </div>
+
         <form action="{{ url_for('admin_add_vision_enabler') }}" method="post" class="space-y-4">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
-                    <label class="block text-xs text-gray-400 uppercase font-bold">Bundle Name</label>
+                    <label class="block text-xs text-gray-400 uppercase font-bold">Router Name</label>
                     <input type="text" name="name" placeholder="e.g. smart-llama-vision" required class="w-full p-2 rounded bg-black/20 border border-white/10">
+                    <p class="text-[10px] text-gray-500 mt-1">Users will call this as: <code>model: "smart-llama-vision"</code></p>
                 </div>
                 <div>
-                    <label class="block text-xs text-gray-400 uppercase font-bold">Text Model (Target)</label>
-                    <select name="vision_text_model" class="w-full p-2 rounded bg-black/20 border border-white/10">
+                    <label class="block text-xs text-gray-400 uppercase font-bold">Text Model (Fallback)</label>
+                    <select name="vision_text_model" required class="w-full p-2 rounded bg-black/20 border border-white/10">
                         <option value="">-- Select text model --</option>
                         {% for m in raw_models %}
                         <option value="{{ m }}">{{ m }}</option>
                         {% endfor %}
                     </select>
+                    <p class="text-[10px] text-gray-500 mt-1">Receives requests after image analysis (if any)</p>
                 </div>
                 <div>
                     <label class="block text-xs text-gray-400 uppercase font-bold">Vision Model (Processor)</label>
-                    <select name="vision_vlm_model" class="w-full p-2 rounded bg-black/20 border border-white/10">
+                    <select name="vision_vlm_model" required class="w-full p-2 rounded bg-black/20 border border-white/10">
                         <option value="">-- Select vision model --</option>
                         {% for m in raw_models %}
                         {% if 'vision' in m.lower() or 'llava' in m.lower() or 'gemma3' in m.lower() or 'intern' in m.lower() or 'qwen' in m.lower() and 'vl' in m.lower() %}
@@ -34,6 +64,7 @@
                         {% endif %}
                         {% endfor %}
                     </select>
+                    <p class="text-[10px] text-gray-500 mt-1">Analyzes images first, sends descriptions to text model</p>
                 </div>
             </div>
             <div class="flex justify-end">
@@ -43,36 +74,52 @@
     </div>
 
     <div class="card-style">
-        <h2 class="card-header text-xl font-bold mb-4">Create New Router</h2>
+        <h2 class="card-header text-xl font-bold mb-4">Create Advanced Router</h2>
+        
+        <!-- Help text -->
+        <div class="bg-white/5 border border-white/10 rounded p-3 mb-4">
+            <p class="text-xs text-gray-400"><strong>How Advanced Routing Works:</strong> Rules are evaluated top-to-bottom. The first matching rule's target is used. If no rules match, the strategy determines which target to use.</p>
+        </div>
+
         <form action="{{ url_for('admin_add_router') }}" method="post" class="space-y-4">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             
             <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
                     <label class="block text-xs text-gray-400 uppercase font-bold">Router Name</label>
-                    <input type="text" name="name" placeholder="e.g. smart-entry-point" required class="w-full p-2 rounded bg-black/20 border border-white/10">
+                    <input type="text" name="name" placeholder="e.g. coding-router" required class="w-full p-2 rounded bg-black/20 border border-white/10">
                 </div>
                 <div>
-                    <label class="block text-xs text-gray-400 uppercase font-bold">Strategy (Fallback)</label>
+                    <label class="block text-xs text-gray-400 uppercase font-bold">Strategy</label>
                     <select name="strategy" class="w-full p-2 rounded bg-black/20 border border-white/10">
-                        <option value="priority">Priority (First available)</option>
+                        <option value="priority">Priority (Try first, fallback to second)</option>
                         <option value="random">Random Distribution</option>
                         <option value="least_loaded">Least Loaded (TPS Optimization)</option>
                     </select>
                 </div>
                 <div>
-                    <label class="block text-xs text-gray-400 uppercase font-bold">Classifier Model (Semantic Routing)</label>
+                    <label class="block text-xs text-gray-400 uppercase font-bold">Intent Classifier <span class="text-[10px] text-gray-500 font-normal">(Optional)</span></label>
                     <select name="classifier_model" class="w-full p-2 rounded bg-black/20 border border-white/10">
-                        <option value="">None (Fast Rules Only)</option>
+                        <option value="">None - Use fast rules only</option>
                         {% for m in available_models %}
                         <option value="{{ m }}">{{ m }}</option>
                         {% endfor %}
                     </select>
+                    <p class="text-[10px] text-gray-500 mt-1">Small LLM to analyze intent when rules aren't enough</p>
                 </div>
             </div>
 
             <div>
-                <label class="block text-xs text-gray-400 uppercase font-bold mb-2">Hierarchical Decision Groups</label>
+                <label class="block text-xs text-gray-400 uppercase font-bold mb-2">
+                    Decision Rules 
+                    <span class="text-[10px] font-normal text-gray-500 ml-2">— Evaluated in order, first match wins</span>
+                </label>
+                
+                <!-- Example rule -->
+                <div class="bg-green-500/5 border border-green-500/20 rounded p-2 mb-3 text-xs text-gray-400">
+                    <strong>Example:</strong> Route coding questions to a code model, small tasks to a fast model, everything else to a large model.
+                    <br>Add rules: (1) keyword "def " → <code>codellama</code> (2) max_len 50 → <code>phi-3</code>
+                </div>
                 <div id="rule-groups-container" class="space-y-4 mb-4">
                     <!-- Groups will be added here -->
                 </div>
