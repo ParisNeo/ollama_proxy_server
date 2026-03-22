@@ -96,7 +96,7 @@ async def main():
 
 if __name__ == "__main__":
     print("\n==============================================")
-    print("    Ollama Proxy Fortress - Admin Password Reset")
+    print("    LoLLMs Hub Fortress - Admin Password Reset")
     print("==============================================")
     
     # Check for .env file

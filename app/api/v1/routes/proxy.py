@@ -220,7 +220,7 @@ async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer
                         sender: str = "anon", is_subrequest: bool = False,
                         client_wants_stream: bool = True) -> Tuple[Response, OllamaServer]:
     """
-    Core reverse proxy logic with retry support and token tracking.
+    Core lollms hub reverse proxy logic with retry support and token tracking.
     """
     http_client: httpx.AsyncClient = request.app.state.http_client
     app_settings: AppSettingsModel = request.app.state.settings

@@ -1,12 +1,14 @@
-# Ollama Proxy Fortress: Your Personal AI Security Gateway 🛡️
+# lollms hub: Your Personal AI Command Center 🧠👑
 
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 ![Python Version](https://img.shields.io/badge/python-3.11+-blue.svg)
 ![Built with](https://img.shields.io/badge/Built%20with-FastAPI-brightgreen)
 ![Release](https://img.shields.io/badge/release-v9.0.0-blue)
-[![GitHub stars](https://img.shields.io/github/stars/ParisNeo/ollama_proxy_server.svg?style=social&label=Star)](https://github.com/ParisNeo/ollama_proxy_server/stargazers/)
+[![GitHub stars](https://img.shields.io/github/stars/ParisNeo/lollms_hub.svg?style=social&label=Star)](https://github.com/ParisNeo/lollms_hub/stargazers/)
 
-Stop exposing your local AI to the world. **Ollama Proxy Fortress** is the ultimate security and management layer for your Ollama instances, designed to be set up in **60 seconds** by anyone, on any operating system.
+> **lollms** = **L**ord **O**f **L**arge **L**anguage **M**odel**s** — because every AI deserves a ruler.
+
+Stop exposing your local AI to the world. **lollms hub** is the ultimate security and management layer for your Ollama and vLLM instances, designed to be set up in **60 seconds** by anyone, on any operating system.
 
 Whether you're a developer, a researcher, or just an AI enthusiast, this tool transforms your vulnerable open port into a managed, secure, and **deeply customizable** AI command center.
 
@@ -18,11 +20,11 @@ A critical vulnerability named **"Probllama" (CVE-2024-37032)** was discovered i
 
 While the core team patched this, the incident highlighted a crucial need for a dedicated security layer. Running an AI model should not mean opening a backdoor to your digital life.
 
-### So, Why Do You Still Need This?
+### So, Why Do You Still Need lollms hub?
 
-Ollama Proxy Fortress is **more than just a patch**. It's a permanent solution that unleashes a suite of powerful, enterprise-grade features that core Ollama doesn't provide:
+lollms hub is **more than just a patch**. It's your central **hub** for all things AI—unleashing a suite of powerful, enterprise-grade features that core Ollama doesn't provide:
 
-*   ✨ **Centralized Model Management:** Pull, update, and delete models on any of your connected Ollama servers directly from the proxy's web UI. No more terminal commands or switching between machines.
+*   ✨ **Centralized Model Management:** Pull, update, and delete models on any of your connected Ollama servers directly from the hub's web UI. No more terminal commands or switching between machines.
 
 *   🛡️ **Rock-Solid Security:**
     *   **Endpoint Blocking:** Prevent API key holders from accessing sensitive endpoints like `pull`, `delete`, and `create` to protect your servers from abuse.
@@ -34,14 +36,14 @@ Ollama Proxy Fortress is **more than just a patch**. It's a permanent solution t
 *   🚀 **High-Performance Engine:**
     *   **Intelligent Load Balancing:** Distribute requests across multiple Ollama servers for maximum speed and high availability.
     *   **Smart Model Routing:** Automatically sends requests only to servers that have the specific model available, preventing failed requests and saving compute resources.
-    *   **Automatic Retries:** The proxy resiliently handles temporary server hiccups with an exponential backoff strategy, making your AI services more reliable.
+    *   **Automatic Retries:** The hub resiliently handles temporary server hiccups with an exponential backoff strategy, making your AI services more reliable.
 
 *   🧪 **Model Playgrounds & Benchmarking:**
     *   **Interactive Chat Playground:** Go beyond simple API calls. Chat with any model in a familiar interface that supports streaming, multi-modal inputs (paste images directly!), and full conversation history management (import/export).
     *   **Advanced Embedding Playground:** A powerful tool for data scientists and developers. Visualize how different embedding models "understand" language by plotting concepts in a 2D space. Use pre-built benchmarks or create your own to compare model performance side-by-side.
 
 *   📊 **Mission Control Dashboard:**
-    *   Go beyond `ollama ps`. Get a real-time, auto-updating view of your proxy's health (CPU, Memory, Disk), see all active models across all servers, monitor the **live health of your load balancer**, and watch API rate-limit queues fill and reset in real-time.
+    *   Go beyond `ollama ps`. Get a real-time, auto-updating view of your hub's health (CPU, Memory, Disk), see all active models across all servers, monitor the **live health of your load balancer**, and watch API rate-limit queues fill and reset in real-time.
 
 *   📈 **Comprehensive Analytics Suite:**
     *   Don't just guess your usage—know it. Dive into beautiful, interactive charts for daily and hourly requests, model popularity, and server load.
@@ -55,7 +57,7 @@ Ollama Proxy Fortress is **more than just a patch**. It's a permanent solution t
     *   From there, manage individual API keys with per-key rate limits, and temporarily disable or re-enable keys on the fly.
 
 *   🌐 **Multi-Server Management & Federation:**
-    *   Centrally manage all your Ollama backend servers. The proxy load-balances requests and provides a unified, federated view of all available models from all your instances combined.
+    *   Centrally manage all your Ollama and vLLM backend servers from one hub. Load-balance requests and get a unified, federated view of all available models from all your instances combined.
 
 *   ✨ **Effortless 1-Click Setup:**
     *   No Docker, no `pip install`, no command-line wizardry required. Just download and run a single script.
@@ -64,7 +66,7 @@ Ollama Proxy Fortress is **more than just a patch**. It's a permanent solution t
 
 ## 🛡️ Harden Your Defenses: Endpoint Blocking
 
-Giving every user an API key shouldn't mean giving them the keys to the kingdom. By default, **Ollama Proxy Fortress blocks access to dangerous and resource-intensive API endpoints** for all API key holders.
+Giving every user an API key shouldn't mean giving them the keys to the kingdom. By default, **lollms hub blocks access to dangerous and resource-intensive API endpoints** for all API key holders.
 
 -   **Prevent Denial-of-Service:** Stop users from triggering massive model downloads (`/api/pull`) that can saturate your network and fill your disk.
 -   **Protect Your Models:** Prevent API users from deleting (`/api/delete`), copying (`/api/copy`), or creating (`/api/create`) models on your backend servers.
@@ -77,7 +79,7 @@ Giving every user an API key shouldn't mean giving them the keys to the kingdom.
 
 Securing your AI traffic is now dead simple. In the **Settings -> HTTPS/SSL** menu, you have two easy options:
 
-1.  **Upload & Go (Easiest):** Simply upload your `key.pem` and `cert.pem` files directly through the UI. The server handles the rest.
+1.  **Upload & Go (Easiest):** Simply upload your `key.pem` and `cert.pem` files directly through the UI. The hub handles the rest.
 2.  **Path-Based:** If your certificates are already on the server (e.g., managed by Certbot), just provide the full file paths.
 
 A server restart is required to apply changes, ensuring your connection is fully encrypted and secure from eavesdropping.
@@ -91,8 +93,8 @@ A server restart is required to apply changes, ensuring your connection is fully
 Download the source code from the repository, either by using `git` or by downloading the ZIP file and extracting it.
 
 ```bash
-git clone https://github.com/ParisNeo/ollama_proxy_server.git
-cd ollama_proxy_server
+git clone https://github.com/ParisNeo/lollms_hub.git
+cd lollms_hub
 ```
 
 ### 2. Run the Installer
@@ -109,7 +111,7 @@ chmod +x run.sh
 ./run.sh
 ```
 
-**That's it!** The server is now running. To stop it, just close the terminal window or press `Ctrl+C`.
+**That's it!** The hub is now running. To stop it, just close the terminal window or press `Ctrl+C`.
 
 ---
 
@@ -129,7 +131,7 @@ Your new mission control. Instantly see system health, active models, server sta
 
 ### Step 3: Manage Your Servers & Models
 
-No more SSH or terminal juggling. Add all your Ollama instances, then pull, update, and delete models on any server with a few clicks.
+No more SSH or terminal juggling. Add all your Ollama instances to the hub, then pull, update, and delete models on any server with a few clicks.
 
 ![Server Management](assets/server_management.png)
 
@@ -169,19 +171,19 @@ If you prefer a container-based workflow, we've got you covered.
 
 **1. Build the Docker image:**
 ```bash
-docker build -t ollama-proxy-server .
+docker build -t lollms-hub .
 ```
 
 **2. Run the container:**
 Create a `.env` file on your host machine, then run:
 ```bash
-docker run -d --name ollama-proxy \
+docker run -d --name lollms-hub \
   -p 8080:8080 \
   --env-file ./.env \
-  -v ./ollama_proxy.db:/home/app/ollama_proxy.db \
+  -v ./lollms_hub.db:/home/app/lollms_hub.db \
   -v ./.ssl:/home/app/.ssl \
   -v ./app/static/uploads:/home/app/app/static/uploads \
-  ollama-proxy-server
+  lollms-hub
 ```
 *Note the extra volume mounts for the database, SSL files, and user uploads to persist data outside the container.*
 
@@ -214,7 +216,7 @@ This application was developed with passion by the open-source community. A spec
 *   All contributors who have helped find and fix bugs.
 *   The teams behind **FastAPI**, **SQLAlchemy**, **Jinja2**, **Chart.js**, and **Tailwind CSS**.
 
-Visit the project on [GitHub](https://github.com/ParisNeo/ollama_proxy_server) to contribute, report issues, or star the repository!
+Visit the project on [GitHub](https://github.com/ParisNeo/lollms_hub) to contribute, report issues, or star the repository!
 
 ---
 

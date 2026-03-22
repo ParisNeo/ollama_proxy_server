@@ -2,7 +2,7 @@
 
 # ====================================================================
 #
-#   Ollama Proxy Fortress - FULL RESET SCRIPT
+#   LoLLMs Hub Fortress - FULL RESET SCRIPT
 #   For: macOS & Linux
 #
 # ====================================================================
@@ -25,7 +25,7 @@ echo
 echo "  - The Python virtual environment ('venv') will be deleted."
 echo "  - The configuration file ('.env') will be deleted."
 echo "  - The setup state file ('.setup_state') will be deleted."
-echo "  - The database ('ollama_proxy.db') will be deleted."
+echo "  - The database ('lollms_hub.db') will be deleted."
 echo "  - All generated Python cache files ('__pycache__') will be removed."
 echo
 echo -e "${COLOR_ERROR}This operation is IRREVERSIBLE and all your users, API keys,"
@@ -59,8 +59,8 @@ echo "3. Deleting setup state file ('.setup_state')..."
 rm -f .setup_state
 echo "   - Done."
 
-echo "4. Deleting database file ('ollama_proxy.db')..."
-rm -f ollama_proxy.db ollama_proxy.db-journal
+echo "4. Deleting database file ('lollms_hub.db')..."
+rm -f lollms_hub.db lollms_hub.db-journal
 echo "   - Done."
 
 echo "5. Deleting Alembic versions (optional, for clean migration history)..."

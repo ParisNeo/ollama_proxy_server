@@ -1,6 +1,6 @@
 # app/main.py
 """
-Main entry point for the Ollama Proxy Server.
+Main entry point for the LoLLMs Hub.
 This version removes Alembic and uses SQLAlchemy's create_all
 to initialize the database on startup.
 """
@@ -131,7 +131,7 @@ async def periodic_model_refresh(app: FastAPI) -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # ---------- Startup ----------
-    logger.info("Starting up Ollama Proxy Server…")
+    logger.info("Starting up lollms hub…")
     
     # Ensure directories exist
     uploads_dir = Path("app/static/uploads")
@@ -212,7 +212,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title=settings.APP_NAME,
     version=settings.APP_VERSION,
-    description="A secure, high‑performance proxy and load balancer for Ollama.",
+    description="A secure, high‑performance AI hub and load balancer for Ollama and vLLM.",
     redoc_url=None,
     openapi_url="/api/v1/openapi.json",
     lifespan=lifespan,
@@ -241,7 +241,7 @@ async def add_security_headers(request: Request, call_next):
 
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 app.include_router(health_router, prefix="/api/v1", tags=["Health"])
-app.include_router(proxy_router, prefix="/api", tags=["Ollama Proxy"])
+app.include_router(proxy_router, prefix="/api", tags=["LoLLMs Hub"])
 app.include_router(admin_router, prefix="/admin", tags=["Admin UI"], include_in_schema=False)
 app.include_router(playground_chat_router, prefix="/admin", tags=["Admin UI"], include_in_schema=False)
 app.include_router(playground_embedding_router, prefix="/admin", tags=["Admin UI"], include_in_schema=False)
@@ -294,7 +294,7 @@ if __name__ == "__main__":
         # This function will be called after Uvicorn starts up
         def after_start():
             print("\n" + "="*60)
-            print("🚀 Ollama Proxy Fortress is running! 🚀")
+            print("🚀 lollms hub is running! 🚀")
             print("="*60)
             print(f"✅ Version: {settings.APP_VERSION}")
             print(f"✅ Mode: {'Production (HTTPS)' if protocol == 'https' else 'Development (HTTP)'}")

@@ -3,7 +3,7 @@ set -euo pipefail
 
 # ====================================================================
 #
-#   Ollama Proxy Fortress - Alembic-Free Installer & Runner
+#   lollms hub - Installer & Runner
 #
 # ====================================================================
 
@@ -28,7 +28,7 @@ print_error()   { echo -e "${COLOR_ERROR}[ERROR]${COLOR_RESET} $*" >&2; }
 print_warn()    { echo -e "${COLOR_WARN}[WARNING]${COLOR_RESET} $*"; }
 
 clear
-print_header "    Ollama Proxy Fortress Installer & Runner"
+print_header "    LoLLMs Hub Fortress Installer & Runner"
 
 print_info "Performing initial system checks..."
 if ! command -v "$PYTHON_BIN" &>/dev/null || ! "$PYTHON_BIN" -m pip --version &>/dev/null || ! "$PYTHON_BIN" -m venv -h &>/dev/null; then
@@ -85,17 +85,17 @@ if [[ "$CURRENT_STATE" -lt 3 ]]; then
 fi
 
 SERVICE_CREATED=false
-if [[ "$(uname)" == "Linux" ]] && command -v systemctl &>/dev/null && [[ ! -f "/etc/systemd/system/ollama_proxy.service" ]]; then
+if [[ "$(uname)" == "Linux" ]] && command -v systemctl &>/dev/null && [[ ! -f "/etc/systemd/system/lollms_hub.service" ]]; then
     print_header "--- Optional: Create a Systemd Service ---"
     read -p "Create and enable a systemd service to run on boot? (y/n): " CREATE_SERVICE
     if [[ "$CREATE_SERVICE" =~ ^[Yy]$ ]]; then
-        SERVICE_FILE_PATH="/etc/systemd/system/ollama_proxy.service"
+        SERVICE_FILE_PATH="/etc/systemd/system/lollms-hub.service"
         print_info "Creating systemd service file..."
         PROJECT_DIR=$(pwd)
         PORT_TO_USE=$(grep -E '^PROXY_PORT=' .env | cut -d '=' -f2 | tr -d '"' || echo "8080")
         SERVICE_FILE_CONTENT=$(cat << EOF
 [Unit]
-Description=Ollama Proxy Fortress Service
+Description=lollms hub Service
 After=network.target
 [Service]
 User=${USER}
@@ -112,17 +112,17 @@ EOF
         print_warn "Root privileges are required to install the service."
         echo "$SERVICE_FILE_CONTENT" | sudo tee "$SERVICE_FILE_PATH" > /dev/null
         sudo systemctl daemon-reload
-        sudo systemctl enable "ollama_proxy.service"
-        sudo systemctl start "ollama_proxy.service"
+        sudo systemctl enable "lollms-hub.service"
+        sudo systemctl start "lollms-hub.service"
         print_header "--- Service Management ---"
-        print_success "Service 'ollama_proxy' is now running."
-        print_info "Check status: sudo systemctl status ollama_proxy"
+        print_success "Service 'lollms-hub' is now running."
+        print_info "Check status: sudo systemctl status lollms-hub"
         SERVICE_CREATED=true
     fi
 fi
 
 if [ "$SERVICE_CREATED" = false ]; then
-    print_header "--- Starting Ollama Proxy Fortress (Foreground Mode) ---"
+    print_header "--- Starting lollms hub (Foreground Mode) ---"
     source "$VENV_DIR/bin/activate"
     export PYTHONPATH=.
     PORT_TO_USE=$(grep -E '^PROXY_PORT=' .env | cut -d '=' -f2 | tr -d '"' | tr -d "'" || echo "8080")

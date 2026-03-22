@@ -3,7 +3,7 @@ setlocal enabledelayedexpansion
 
 :: ==================================================================
 ::
-::   Ollama Proxy Fortress - FULL RESET SCRIPT
+::   LoLLMs Hub Fortress - FULL RESET SCRIPT
 ::   For: Windows
 ::
 :: ==================================================================
@@ -23,7 +23,7 @@ echo.
 echo   - The Python virtual environment ('venv') will be deleted.
 echo   - The configuration file ('.env') will be deleted.
 echo   - The setup state file ('.setup_state') will be deleted.
-echo   - The database ('ollama_proxy.db') will be deleted.
+echo   - The database ('lollms_hub.db') will be deleted.
 echo   - All generated Python cache files ('__pycache__') will be removed.
 echo.
 echo THIS OPERATION IS IRREVERSIBLE.
@@ -71,10 +71,10 @@ if exist ".setup_state" (
     echo    - Not found.
 )
 
-echo 4. Deleting database file ('ollama_proxy.db')...
-if exist "ollama_proxy.db" (
-    del "ollama_proxy.db"
-    del "ollama_proxy.db-journal" 2>nul
+echo 4. Deleting database file ('lollms_hub.db')...
+if exist "lollms_hub.db" (
+    del "lollms_hub.db"
+    del "lollms_hub.db-journal" 2>nul
     echo    - Done.
 ) else (
     echo    - Not found.

@@ -1,11 +1,11 @@
 [tool.poetry]
-name = "ollama-proxy-server"
+name = "lollms-hub"
 version = "9.0.0"
-description = "A secure, high-performance FastAPI-based proxy and load balancer for Ollama."
+description = "A secure, high-performance AI hub and load balancer for Ollama and vLLM."
 authors = ["ParisNeo <parisneo_ai@gmail.com>"]
 license = "Apache-2.0"
 readme = "README.md"
-repository = "https://github.com/ParisNeo/ollama_proxy_server"
+repository = "https://github.com/ParisNeo/lollms_hub"
 packages = [{include = "app"}]
 
 [tool.poetry.dependencies]

@@ -94,7 +94,7 @@ venv.bak
 docker-compose.yml
 
 # Database
-ollama_proxy.db
+lollms_hub.db
 *.db-journal
 
 # setup state
@@ -111,3 +111,4 @@ app/static/uploads/
 
 # Lollms vscoder files
 .lollms
+*.db

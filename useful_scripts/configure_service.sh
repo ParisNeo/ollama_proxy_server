@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # --------------------------------------------------------------------
-# Ollama Proxy Server - Standalone Systemd Service Creator
+# LoLLMs Hub - Standalone Systemd Service Creator
 # --------------------------------------------------------------------
 
 COLOR_RESET='\e[0m'; COLOR_INFO='\e[1;34m'; COLOR_SUCCESS='\e[1;32m'
@@ -14,7 +14,7 @@ print_success() { echo -e "${COLOR_SUCCESS}[SUCCESS]${COLOR_RESET} $*"; }
 print_warn()    { echo -e "${COLOR_WARN}[WARNING]${COLOR_RESET} $*"; }
 print_error()   { echo -e "${COLOR_ERROR}[ERROR]${COLOR_RESET} $*" >&2; }
 
-SERVICE_FILE_PATH="/etc/systemd/system/ollama_proxy.service"
+SERVICE_FILE_PATH="/etc/systemd/system/lollms-hub.service"
 
 # Check for root
 if [[ $EUID -ne 0 ]]; then
@@ -36,11 +36,11 @@ else
     print_warn ".env file not found, using default port 8080"
 fi
 
-print_header "--- Creating Ollama Proxy Server Systemd Service ---"
+print_header "--- Creating LoLLMs Hub Systemd Service ---"
 
 SERVICE_CONTENT=$(cat << EOF
 [Unit]
-Description=Ollama Proxy Fortress Service
+Description=LoLLMs Hub Fortress Service
 After=network.target
 
 [Service]
@@ -64,11 +64,11 @@ print_info "Reloading systemd daemon..."
 systemctl daemon-reload
 
 print_info "Enabling service to start at boot..."
-systemctl enable ollama_proxy.service
+systemctl enable lollms_hub.service
 
-print_info "Starting Ollama Proxy Server service..."
-systemctl start ollama_proxy.service
+print_info "Starting LoLLMs Hub service..."
+systemctl start lollms_hub.service
 
-print_success "✅ Ollama Proxy Server systemd service created and running!"
-print_info "Check status with: sudo systemctl status ollama_proxy"
+print_success "✅ LoLLMs Hub systemd service created and running!"
+print_info "Check status with: sudo systemctl status lollms_hub"
 print_info "Access the UI on http://<server-ip>:${PORT_TO_USE}"

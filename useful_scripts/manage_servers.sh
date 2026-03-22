@@ -23,7 +23,7 @@ if [[ $EUID -ne 0 ]]; then
 fi
 
 OLLAMA_INSTANCES=$(systemctl list-unit-files | grep "ollama@.*service" | awk '{print $1}')
-PROXY_SERVICE="ollama_proxy.service"
+PROXY_SERVICE="lollms_hub.service"
 
 start_servers() {
 
@@ -35,7 +35,7 @@ start_servers() {
     done
 
     if systemctl list-unit-files | grep -q "$PROXY_SERVICE"; then
-        print_info "Starting Ollama Proxy"
+        print_info "Starting LoLLMs Hub"
         systemctl start "$PROXY_SERVICE"
     fi
 
@@ -47,7 +47,7 @@ stop_servers() {
     print_header "Stopping Ollama Instances"
 
     if systemctl list-unit-files | grep -q "$PROXY_SERVICE"; then
-        print_info "Stopping Ollama Proxy"
+        print_info "Stopping LoLLMs Hub"
         systemctl stop "$PROXY_SERVICE"
     fi
 
@@ -64,7 +64,7 @@ restart_servers() {
     print_header "Restarting Ollama Servers"
 
     if systemctl list-unit-files | grep -q "$PROXY_SERVICE"; then
-        print_info "Restarting Ollama Proxy"
+        print_info "Restarting LoLLMs Hub"
         systemctl restart "$PROXY_SERVICE"
     fi
 

@@ -55,12 +55,12 @@ def create_env_file():
     print_info("Generating .env configuration file...")
     try:
         with open(".env", "w", encoding="utf-8") as f:
-            f.write('APP_NAME="Ollama Proxy Server"\n')
+            f.write('APP_NAME="lollms hub"\n')
             f.write('APP_VERSION="9.0.0"\n')
             f.write('LOG_LEVEL="info"\n')
             f.write(f'PROXY_PORT="{config["PROXY_PORT"]}"\n')
             f.write(f'OLLAMA_SERVERS="{config["OLLAMA_SERVERS"]}"\n')
-            f.write('DATABASE_URL="sqlite+aiosqlite:///./ollama_proxy.db"\n')
+            f.write('DATABASE_URL="sqlite+aiosqlite:///./lollms_hub.db"\n')
             f.write(f'ADMIN_USER="{config["ADMIN_USER"]}"\n')
             f.write(f'ADMIN_PASSWORD="{config["ADMIN_PASSWORD"]}"\n')
             f.write(f'SECRET_KEY="{config["SECRET_KEY"]}"\n')

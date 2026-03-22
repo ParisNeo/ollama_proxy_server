@@ -1,4 +1,4 @@
-# Contributing to Ollama Proxy Fortress
+# Contributing to lollms hub
 
 Thank you for your interest in contributing! To maintain high code quality and ensure a smooth CI/CD process, please follow these guidelines.
 
@@ -6,8 +6,8 @@ Thank you for your interest in contributing! To maintain high code quality and e
 
 1. **Clone the repository:**
    ```bash
-   git clone https://github.com/ParisNeo/ollama_proxy_server.git
-   cd ollama_proxy_server
+   git clone https://github.com/ParisNeo/lollms_hub.git
+   cd lollms_hub
    ```
 
 2. **Install dependencies using Poetry:**

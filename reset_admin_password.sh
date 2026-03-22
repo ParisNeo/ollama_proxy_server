@@ -3,7 +3,7 @@ set -euo pipefail
 
 # ====================================================================
 #
-#   Ollama Proxy Fortress - Admin Password Reset Runner
+#   LoLLMs Hub Fortress - Admin Password Reset Runner
 #
 # ====================================================================
 

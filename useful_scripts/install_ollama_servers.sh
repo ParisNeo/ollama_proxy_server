@@ -200,7 +200,7 @@ for i in "${!GPU_INSTANCES[@]}"; do
 done
 
 echo -e "\n${CYAN}💡 Next Steps:${RESET}"
-echo -e "1. Open your Ollama Proxy Server UI (e.g., http://localhost:8080)"
+echo -e "1. Open your LoLLMs Hub UI (e.g., http://localhost:8080)"
 echo -e "2. Add each instance to the proxy using the ${YELLOW}OLLAMA_HOST${RESET} values listed above"
 echo -e "3. Test the connections and start multi-user requests"
 echo -e "4. Use colored labels in the proxy UI to track GPU allocation and instance numbers"

@@ -2,7 +2,7 @@
 setlocal enabledelayedexpansion
 
 :: ==================================================================
-:: Ollama Proxy Server - Alembic-Free Installer for Windows
+:: lollms hub - Installer for Windows
 :: ==================================================================
 :: This script now relies on the application to create the database.
 
@@ -87,7 +87,7 @@ echo [INFO] Setting Python Path...
 set PYTHONPATH=.
 
 echo.
-echo [INFO] Starting Ollama Proxy Server...
+echo [INFO] Starting LoLLMs Hub...
 echo [INFO] Note: Uvicorn uses a logger named 'uvicorn.error' for general server messages.
 echo [INFO] This does NOT necessarily indicate an error.
 echo [INFO] To stop the server, simply close this window or press Ctrl+C.

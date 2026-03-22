@@ -1,6 +1,6 @@
 # Development Guide
 
-This guide provides comprehensive information for developers working on the Ollama Proxy Server project.
+This guide provides comprehensive information for developers working on the lollms hub project.
 
 ## Table of Contents
 
@@ -34,8 +34,8 @@ pip install poetry
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/ParisNeo/ollama_proxy_server.git
-cd ollama_proxy_server
+git clone https://github.com/ParisNeo/lollms_hub.git
+cd lollms_hub
 ```
 
 ### 2. Install Dependencies
@@ -291,7 +291,7 @@ Use [Conventional Commits](https://www.conventionalcommits.org/) format:
 ## Project Structure
 
 ```
-ollama_proxy_server/
+lollms_hub/
 ├── app/                    # Main application code
 │   ├── api/               # API routes
 │   ├── core/              # Core functionality
@@ -314,7 +314,7 @@ Key environment variables for development:
 
 ```bash
 # Database
-DATABASE_URL=sqlite:///./ollama_proxy.db
+DATABASE_URL=sqlite:///./lollms_hub.db
 
 # Security
 SECRET_KEY=your-secret-key-here
@@ -347,7 +347,7 @@ poetry run alembic downgrade -1
 
 ```bash
 # Reset database (development only)
-rm ollama_proxy.db
+rm lollms_hub.db
 poetry run alembic upgrade head
 ```
 
@@ -392,7 +392,7 @@ locust -f tests/load_test.py --host=http://localhost:8080
 3. **Database Connection Issues**
    ```bash
    # Check database file permissions
-   ls -la ollama_proxy.db
+   ls -la lollms_hub.db
    
    # Reset database
    ./reset.sh
@@ -409,7 +409,7 @@ locust -f tests/load_test.py --host=http://localhost:8080
 
 ### Getting Help
 
-- Check the [GitHub Issues](https://github.com/ParisNeo/ollama_proxy_server/issues)
+- Check the [GitHub Issues](https://github.com/ParisNeo/lollms_hub/issues)
 - Review the main [README.md](README.md)
 - Join the community discussions
 

@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}Ollama Proxy Admin{% endblock %}</title>
+    <title>{% block title %}LoLLMs Hub Admin{% endblock %}</title>
     <link rel="icon" href="{{ url_for('static', path='favicon.svg') }}" type="image/svg+xml">
     <link rel="shortcut icon" href="{{ url_for('static', path='favicon.svg') }}" type="image/svg+xml">
     <script src="https://cdn.tailwindcss.com"></script>
@@ -118,7 +118,7 @@
                 <div class="p-4 border-t border-white/10">
                     <div class="pb-3 mb-3 border-b border-white/10 text-xs text-gray-400">
                         <p>{{ request.app.state.settings.branding_title }} v{{ request.app.version }}</p>
-                        <p class="truncate">Powered by ParisNeo's Ollama Proxy Fortress</p>
+                        <p class="truncate">Powered by ParisNeo's LoLLMs Hub Fortress</p>
                     </div>
                     <p class="text-sm whitespace-nowrap">Welcome, <span class="font-semibold">{{ request.state.user.username }}</span></p>
                     {% if is_redis_connected %}

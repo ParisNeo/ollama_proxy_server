@@ -7,7 +7,7 @@ class AppSettingsModel(BaseModel):
     model_config = ConfigDict(protected_namespaces=())
 
     # --- BRANDING SETTINGS ---
-    branding_title: str = "Ollama Proxy"
+    branding_title: str = "LoLLMs Hub"
     branding_logo_url: Optional[str] = Field(default=None, validate_default=True)
 
     # --- THEME SETTINGS ---

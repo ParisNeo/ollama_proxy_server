@@ -1,6 +1,6 @@
 # app/core/logging_config.py
 """
-Centralised logging configuration for the Ollama Proxy Server.
+Centralised logging configuration for the LoLLMs Hub.
 
 Features
 --------
