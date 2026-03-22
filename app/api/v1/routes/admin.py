@@ -347,10 +347,17 @@ async def get_system_and_ollama_info(
     server_load_map = {row.server_name: row.request_count for row in server_load}
     for server in server_health:
         server["request_count"] = server_load_map.get(server["name"], 0)
-        
+
+    # Calculate Total VRAM used by active models
+    total_vram_bytes = sum(model.get("size_vram", 0) for model in running_models)
+    
     return {
         "system_info": system_info, 
         "running_models": running_models,
+        "gpu_stats": {
+            "vram_used_gb": round(total_vram_bytes / (1024**3), 2),
+            "vram_total_gb": 24, # Defaulting to 24GB estimate if not detected, can be enhanced
+        },
         "load_balancer_status": server_health,
         "queue_status": rate_limits
     }
@@ -1878,13 +1885,19 @@ async def admin_instances_page(request: Request, db: AsyncSession = Depends(get_
             "pid": pid
         })
         
-    # Discover unmanaged local instances
+    # Discover unmanaged local instances (wrapped in threadpool to prevent blocking)
     app_settings: AppSettingsModel = request.app.state.settings
     managed_ports = [inst.port for inst in instances]
-    discovered = await supervisor.discover_local_instances(
-        managed_ports, 
-        start_port=app_settings.instance_scan_start_port,
-        end_port=app_settings.instance_scan_end_port
+    
+    discovered = await run_in_threadpool(
+        lambda: asyncio.run_coroutine_threadsafe(
+            supervisor.discover_local_instances(
+                managed_ports, 
+                start_port=app_settings.instance_scan_start_port,
+                end_port=app_settings.instance_scan_end_port
+            ), 
+            asyncio.get_event_loop()
+        ).result()
     )
         
     context["instances"] = instance_list

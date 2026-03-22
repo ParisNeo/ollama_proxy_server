@@ -46,6 +46,18 @@
                 </div>
                 <div id="disk-details" class="text-xs text-gray-400 mt-2">-- / -- GB</div>
             </div>
+            <!-- GPU VRAM -->
+            <div class="p-4 rounded-lg">
+                <h3 class="text-sm font-medium uppercase text-gray-400">VRAM Usage</h3>
+                 <div class="relative w-24 h-24 mx-auto mt-2">
+                     <svg class="w-full h-full" viewBox="0 0 36 36">
+                        <path class="text-gray-700/50" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke-width="3"></path>
+                        <path id="vram-progress" class="text-[var(--color-primary-500)]" stroke-width="3" fill="none" stroke-dasharray="0, 100" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" stroke-linecap="round"></path>
+                    </svg>
+                    <div id="vram-percent" class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-xl font-bold">--%</div>
+                </div>
+                <div id="vram-details" class="text-xs text-gray-400 mt-2">-- / -- GB</div>
+            </div>
         </div>
     </div>
     
@@ -130,6 +142,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function updateSystemInfo(data) {
         const sys = data.system_info;
+        const gpu = data.gpu_stats;
         document.getElementById('cpu-percent').textContent = `${sys.cpu.percent.toFixed(1)}%`;
         document.getElementById('cpu-progress').style.strokeDasharray = `${sys.cpu.percent.toFixed(1)}, 100`;
         document.getElementById('mem-percent').textContent = `${sys.memory.percent.toFixed(1)}%`;
@@ -138,6 +151,11 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('disk-percent').textContent = `${sys.disk.percent.toFixed(1)}%`;
         document.getElementById('disk-progress').style.strokeDasharray = `${sys.disk.percent.toFixed(1)}, 100`;
         document.getElementById('disk-details').textContent = `${sys.disk.used_gb} / ${sys.disk.total_gb} GB`;
+        
+        const vramPercent = (gpu.vram_used_gb / gpu.vram_total_gb) * 100;
+        document.getElementById('vram-percent').textContent = `${vramPercent.toFixed(1)}%`;
+        document.getElementById('vram-progress').style.strokeDasharray = `${vramPercent.toFixed(1)}, 100`;
+        document.getElementById('vram-details').textContent = `${gpu.vram_used_gb} / ${gpu.vram_total_gb} GB`;
     }
 
     function updateRunningModels(data) {

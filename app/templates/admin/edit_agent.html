@@ -43,7 +43,12 @@
             <div class="space-y-4">
                 <div class="flex justify-between items-center">
                     <label class="block text-xs text-gray-400 uppercase font-bold">MCP Servers</label>
-                    <button type="button" id="add-mcp-btn" class="text-[10px] bg-purple-600/20 text-purple-400 border border-purple-500/30 px-3 py-1 rounded hover:bg-purple-600/30">+ Add MCP</button>
+                    <div class="relative">
+                        <button type="button" id="add-mcp-btn" class="text-[10px] bg-purple-600/20 text-purple-400 border border-purple-500/30 px-3 py-1 rounded hover:bg-purple-600/30">+ Add MCP</button>
+                        <div id="mcp-presets" class="hidden absolute right-0 mt-2 w-64 bg-[#0a0a0f] border border-white/20 rounded-lg shadow-[0_0_50px_rgba(0,0,0,0.8)] z-[200] p-2 space-y-1 ring-1 ring-white/10">
+                            <button type="button" onclick="openCustomMCP()" class="w-full text-left px-3 py-2 text-xs hover:bg-white/5 rounded text-indigo-400 font-bold border-t border-white/5 mt-1">Custom MCP Server...</button>
+                        </div>
+                    </div>
                 </div>
                 <div id="active-mcps" class="grid grid-cols-1 gap-3"></div>
                 <input type="hidden" name="mcp_servers_json" id="mcp_servers_json" value='{{ agent.mcp_servers | tojson if agent.mcp_servers else "[]" }}'>
@@ -53,6 +58,36 @@
                 <button type="submit" class="bg-indigo-600 hover:bg-indigo-500 px-10 py-2 rounded font-bold text-sm transition-colors shadow-lg">Save Changes</button>
             </div>
             <script>
+                async function enhancePrompt() {
+                    const area = document.getElementById('main-system-prompt');
+                    const btn = document.getElementById('enhance-btn');
+                    const originalText = area.value;
+                    
+                    if (!originalText.trim()) return alert("Write a basic prompt first.");
+                    
+                    btn.disabled = true;
+                    btn.innerHTML = '<svg class="animate-spin h-3 w-3 mr-1" viewBox="0 0 24 24">...</svg> Enhancing...';
+                    
+                    try {
+                        const resp = await fetch("{{ url_for('admin_enhance_prompt') }}", {
+                            method: 'POST',
+                            headers: { 
+                                'Content-Type': 'application/json',
+                                'X-CSRF-Token': '{{ csrf_token }}'
+                            },
+                            body: JSON.stringify({ prompt: originalText })
+                        });
+                        const data = await resp.json();
+                        if (data.enhanced) area.value = data.enhanced;
+                        else alert(data.error || "Enhancement failed.");
+                    } catch (e) {
+                        alert("Connection error.");
+                    } finally {
+                        btn.disabled = false;
+                        btn.innerHTML = '✨ Enhance with AI';
+                    }
+                }
+
                 const KNOWN_MCPS = [
                     { name: "Brave Search", icon: "🌐", url: "http://localhost:3001", type: "sse" },
                     { name: "Filesystem", icon: "📁", url: "npx @modelcontextprotocol/server-filesystem", type: "stdio" },
