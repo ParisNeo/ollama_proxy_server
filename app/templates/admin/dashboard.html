@@ -10,7 +10,7 @@
     <!-- System Status -->
     <div class="card-style">
         <h2 class="card-header text-2xl font-bold mb-4 pb-2">System Status</h2>
-        <div id="system-info-container" class="grid grid-cols-1 sm:grid-cols-3 gap-6 text-center">
+        <div id="system-info-container" class="grid grid-cols-1 sm:grid-cols-4 gap-6 text-center">
             <!-- CPU -->
             <div class="p-4 rounded-lg">
                 <h3 class="text-sm font-medium uppercase text-gray-400">CPU Usage</h3>
@@ -61,6 +61,14 @@
         </div>
     </div>
     
+    <!-- GPU Cluster View -->
+    <div class="card-style">
+        <h2 class="card-header text-2xl font-bold mb-4 pb-2">GPU Cluster</h2>
+        <div id="gpu-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div class="p-6 text-center text-gray-500 italic">Scanning GPUs...</div>
+        </div>
+    </div>
+
     <!-- Active Models -->
     <div class="card-style">
         <h2 class="card-header text-2xl font-bold mb-4 pb-2">Active Models</h2>
@@ -266,19 +274,66 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function fetchData() {
         try {
-            const response = await fetch(systemInfoUrl);
-            if (!response.ok) {
-                console.error("Failed to fetch system info:", response.statusText);
-                return;
+            const [systemResp, gpuResp] = await Promise.all([
+                fetch(systemInfoUrl),
+                fetch("{{ url_for('admin_gpu_stats') }}")
+            ]);
+            
+            if (systemResp.ok) {
+                const data = await systemResp.json();
+                updateSystemInfo(data);
+                updateRunningModels(data);
+                updateLoadBalancerStatus(data);
+                updateRateLimitStatus(data);
             }
-            const data = await response.json();
-            updateSystemInfo(data);
-            updateRunningModels(data);
-            updateLoadBalancerStatus(data);
-            updateRateLimitStatus(data);
+            
+            if (gpuResp.ok) {
+                const gpuData = await gpuResp.json();
+                updateGpuGrid(gpuData);
+            }
         } catch (error) {
             console.error("Error fetching dashboard data:", error);
         }
+    }
+
+    function updateGpuGrid(data) {
+        const grid = document.getElementById('gpu-grid');
+        if (!data.success) {
+            grid.innerHTML = `<div class="p-6 text-center text-red-500">${data.error}</div>`;
+            return;
+        }
+        grid.innerHTML = '';
+        data.gpus.forEach(gpu => {
+            const memPercent = (gpu.vram_used_gb / gpu.vram_total_gb) * 100;
+            const utilColor = gpu.utilization > 80 ? 'bg-red-500' : (gpu.utilization > 50 ? 'bg-amber-500' : 'bg-green-500');
+            const memColor = memPercent > 80 ? 'bg-red-500' : (memPercent > 50 ? 'bg-amber-500' : 'bg-green-500');
+
+            grid.innerHTML += `
+                <div class="bg-black/20 p-4 rounded-xl border border-white/10 hover:border-indigo-500/50 transition-colors">
+                    <div class="text-indigo-400 font-bold mb-2 truncate" title="${gpu.name}">${gpu.name}</div>
+                    <div class="space-y-3">
+                        <div>
+                            <div class="flex justify-between text-[10px] text-gray-400 uppercase font-bold mb-1">
+                                <span>VRAM (${gpu.vram_used_gb} / ${gpu.vram_total_gb} GB)</span>
+                                <span>${Math.round(memPercent)}%</span>
+                            </div>
+                            <div class="h-2 bg-gray-700 rounded-full overflow-hidden">
+                                <div class="${memColor} h-full" style="width: ${memPercent}%"></div>
+                            </div>
+                        </div>
+                        <div>
+                            <div class="flex justify-between text-[10px] text-gray-400 uppercase font-bold mb-1">
+                                <span>Utilization</span>
+                                <span>${gpu.utilization}%</span>
+                            </div>
+                            <div class="h-2 bg-gray-700 rounded-full overflow-hidden">
+                                <div class="${utilColor} h-full" style="width: ${gpu.utilization}%"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        });
     }
 
     fetchData();

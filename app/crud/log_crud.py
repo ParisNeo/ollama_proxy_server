@@ -52,6 +52,16 @@ async def create_usage_log(
     return db_log
 
 
+# Global constant for baseline carbon intensity (gCO2e per 1k tokens)
+CARBON_PER_1K_TOKENS = 1.0 
+
+async def get_total_carbon_footprint(db: AsyncSession) -> float:
+    """Calculates total estimated gCO2e footprint for the entire system."""
+    stmt = select(func.coalesce(func.sum(UsageLog.total_tokens), 0))
+    result = await db.execute(stmt)
+    total_tokens = result.scalar() or 0
+    return (total_tokens / 1000) * CARBON_PER_1K_TOKENS
+
 async def get_usage_statistics(
     db: AsyncSession, 
     sort_by: str = "request_count", 

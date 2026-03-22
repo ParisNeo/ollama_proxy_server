@@ -8,6 +8,7 @@ import httpx
 import asyncio
 import secrets
 import json
+import subprocess
 from pathlib import Path
 import os
 import re
@@ -396,8 +397,11 @@ async def admin_stats(
     model_completion_tokens = [row.total_completion_tokens for row in model_stats]
     model_total_tokens = [row.total_tokens for row in model_stats]
     
+    total_carbon = await log_crud.get_total_carbon_footprint(db)
+    
     context.update({
         "key_usage_stats": key_usage_stats,
+        "total_carbon": total_carbon,
         "daily_labels": [
             row.date if isinstance(row.date, str) 
             else row.date.strftime('%Y-%m-%d') if hasattr(row.date, 'strftime')
@@ -422,6 +426,17 @@ async def admin_stats(
     })
     return templates.TemplateResponse("admin/statistics.html", context)
 
+@router.get("/stats/export-pdf", name="admin_stats_pdf")
+async def export_pdf_report(request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
+    from weasyprint import HTML
+    import io
+    
+    # Render stats page to HTML string
+    response = await admin_stats(request, db, admin_user)
+    html_content = response.body.decode()
+    
+    pdf = HTML(string=html_content, base_url=str(request.base_url)).write_pdf()
+    return StreamingResponse(io.BytesIO(pdf), media_type="application/pdf", headers={"Content-Disposition": "attachment; filename=usage-report.pdf"})
 
 @router.get("/help", response_class=HTMLResponse, name="admin_help")
 async def admin_help_page(request: Request, admin_user: User = Depends(require_admin_user)): 
@@ -1764,7 +1779,35 @@ async def admin_add_vision_enabler(
     flash(request, f"Vision-enabled router '{router_name}' created! Use it as a model name.", "success")
     return RedirectResponse(url=request.url_for("admin_routers_page"), status_code=303)
 
+@router.get("/gpu-stats", name="admin_gpu_stats")
+async def get_gpu_stats(admin_user: User = Depends(require_admin_user)):
+    """Fetches detailed metrics for all NVIDIA GPUs."""
+    # Common Windows path for nvidia-smi if not in system PATH
+    nvsmi_path = r"C:\Program Files\NVIDIA Corporation\NVSMI\nvidia-smi.exe"
+    cmd_base = "nvidia-smi" if os.name != 'nt' else (nvsmi_path if os.path.exists(nvsmi_path) else "nvidia-smi")
+    
+    try:
+        # Using shell=True for better executable resolution on Windows
+        cmd = f'{cmd_base} --query-gpu=name,memory.used,memory.total,utilization.gpu --format=csv,noheader,nounits'
+        result = subprocess.check_output(cmd, encoding='utf-8', shell=True)
+        
+        gpus = []
+        for line in result.strip().split('\n'):
+            parts = [x.strip() for x in line.split(',')]
+            if len(parts) < 4: continue
+            name, mem_used, mem_total, util = parts
+            gpus.append({
+                "name": name,
+                "vram_used_gb": round(int(mem_used) / 1024, 2),
+                "vram_total_gb": round(int(mem_total) / 1024, 2),
+                "utilization": int(util)
+            })
+        return {"success": True, "gpus": gpus}
+    except Exception as e:
+        logger.error(f"nvidia-smi failed: {e}")
+        return {"success": False, "gpus": [], "error": f"NVIDIA GPU not detected: {str(e)}"}
 
+        
 @router.post("/routers/add", name="admin_add_router", dependencies=[Depends(validate_csrf_token)])
 async def admin_add_router(
     request: Request, 
