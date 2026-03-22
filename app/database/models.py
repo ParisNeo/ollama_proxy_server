@@ -161,6 +161,16 @@ class SmartRouter(Base): # Keep table name for data stability
     rules = Column(JSON, nullable=True)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    
+    # LEGACY: This field is deprecated, kept for backward compatibility with old DBs
+    # New code should use 'targets' instead
+    models = Column(JSON, nullable=True)
+    
+    def __init__(self, **kwargs):
+        # Sync targets to models for backward compatibility
+        if 'targets' in kwargs and 'models' not in kwargs:
+            kwargs['models'] = kwargs['targets']
+        super().__init__(**kwargs)
 
 class VirtualAgent(Base):
     __tablename__ = "virtual_agents"

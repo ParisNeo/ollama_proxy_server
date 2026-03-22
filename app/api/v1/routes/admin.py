@@ -1704,31 +1704,40 @@ async def admin_add_vision_enabler(
     vision_text_model: str = Form(...),
     vision_vlm_model: str = Form(...)
 ):
-    """Quick shortcut to create a vision-enabled bundle."""
-    from app.database.models import EnsembleOrchestrator
+    """Quick shortcut to create a vision-enabled smart router."""
+    from app.database.models import SmartRouter
     
-    bundle_name = re.sub(r'[^a-z0-9.-]', '-', name.lower())
+    router_name = re.sub(r'[^a-z0-9.-]', '-', name.lower())
     
     # Check if name already exists
-    existing = await db.execute(select(EnsembleOrchestrator).filter(EnsembleOrchestrator.name == bundle_name))
+    existing = await db.execute(select(SmartRouter).filter(SmartRouter.name == router_name))
     if existing.scalars().first():
-        flash(request, f"A bundle with name '{bundle_name}' already exists.", "error")
+        flash(request, f"A router with name '{router_name}' already exists.", "error")
         return RedirectResponse(url=request.url_for("admin_routers_page"), status_code=303)
     
-    new_bundle = EnsembleOrchestrator(
-        name=bundle_name,
-        master_model=vision_text_model,
-        parallel_participants=[],  # No parallel participants for simple vision enabler
-        parallel_models=[],
-        vision_processor=vision_vlm_model,
-        show_monologue=False,
-        send_status_update=True,
-        description=f"Vision Enabler: {vision_vlm_model} → {vision_text_model}"
+    # Create a smart router with hierarchical rules:
+    # 1. If has_images -> route to VLM
+    # 2. Else (fallback) -> route to text model
+    new_router = SmartRouter(
+        name=router_name,
+        strategy='priority',
+        targets=[vision_vlm_model, vision_text_model],  # VLM first, text model second
+        models=[vision_vlm_model, vision_text_model],  # Legacy field sync
+        rules=[
+            {
+                "logic": "OR",
+                "target": vision_vlm_model,
+                "conditions": [{"type": "has_images", "value": ""}]
+            }
+            # If no rules match for text model, priority strategy will use it as fallback
+        ],
+        classifier_model=None,
+        description=f"Vision Router: Images→{vision_vlm_model}, Text→{vision_text_model}"
     )
-    db.add(new_bundle)
+    db.add(new_router)
     await db.commit()
-    flash(request, f"Vision-enabled bundle '{bundle_name}' created! Use it as a model name.", "success")
-    return RedirectResponse(url=request.url_for("admin_ensembles_page"), status_code=303)
+    flash(request, f"Vision-enabled router '{router_name}' created! Use it as a model name.", "success")
+    return RedirectResponse(url=request.url_for("admin_routers_page"), status_code=303)
 
 
 @router.post("/routers/add", name="admin_add_router", dependencies=[Depends(validate_csrf_token)])
@@ -1774,7 +1783,8 @@ async def admin_add_router(
         name=name, 
         strategy=strategy, 
         classifier_model=classifier_model,
-        targets=target_models, 
+        targets=target_models,
+        models=target_models,  # Legacy field sync
         rules=processed_groups
     )
     db.add(new_router)

@@ -613,47 +613,69 @@ async def fix_model_pools_legacy_schema(engine: AsyncEngine) -> None:
     """
     Fix legacy schema issues with model_pools table.
     The old table had a 'models' column that was renamed to 'targets'.
-    This ensures compatibility with old databases.
+    This ensures compatibility with old databases by keeping both columns in sync.
     """
     async with engine.begin() as conn:
-        # Check if old 'models' column exists
+        # Check current schema
         result = await conn.execute(
             text("PRAGMA table_info(model_pools)")
         )
-        columns = {row[1] for row in result.fetchall()}
+        columns_info = result.fetchall()
+        column_names = {row[1] for row in columns_info}
         
-        if "models" in columns and "targets" not in columns:
-            # Old schema detected - need to migrate
-            logger.warning("Legacy model_pools schema detected. Attempting migration...")
+        has_models = "models" in column_names
+        has_targets = "targets" in column_names
+        
+        if not has_models and not has_targets:
+            # Neither exists - table doesn't exist yet
+            logger.info("model_pools table doesn't exist yet, will be created fresh")
+            return
+            
+        if has_models and not has_targets:
+            # Old schema: has 'models' but no 'targets' - need to add targets
+            logger.warning("Legacy model_pools schema detected (models without targets). Adding targets column...")
             try:
-                # SQLite doesn't support DROP COLUMN, so we need to recreate
                 await conn.execute(text("""
-                    CREATE TABLE model_pools_new (
-                        id INTEGER PRIMARY KEY,
-                        name VARCHAR NOT NULL,
-                        description VARCHAR,
-                        targets JSON DEFAULT '[]' NOT NULL,
-                        strategy VARCHAR DEFAULT 'priority',
-                        classifier_model VARCHAR,
-                        rules JSON,
-                        is_active BOOLEAN DEFAULT 1,
-                        created_at DATETIME
-                    )
+                    ALTER TABLE model_pools ADD COLUMN targets JSON DEFAULT '[]' NOT NULL
                 """))
+                # Copy data from models to targets
                 await conn.execute(text("""
-                    INSERT INTO model_pools_new (id, name, description, targets, strategy, is_active, created_at)
-                    SELECT id, name, description, models, 'priority', is_active, created_at FROM model_pools
+                    UPDATE model_pools SET targets = models WHERE targets IS NULL OR targets = '[]'
                 """))
-                await conn.execute(text("DROP TABLE model_pools"))
-                await conn.execute(text("ALTER TABLE model_pools_new RENAME TO model_pools"))
-                logger.info("Successfully migrated model_pools schema")
+                logger.info("Successfully added targets column and migrated data")
             except Exception as e:
-                logger.error(f"Failed to migrate model_pools: {e}")
-        elif "models" in columns and "targets" in columns:
-            # Both exist - drop the old one
-            # SQLite doesn't support DROP COLUMN, so we ignore this case
-            # The code will use 'targets' which is the correct column
-            pass
+                logger.error(f"Failed to add targets column: {e}")
+                raise
+        
+        elif not has_models and has_targets:
+            # New schema: has 'targets' but no 'models' - add models for backward compat
+            logger.info("Adding legacy 'models' column for backward compatibility...")
+            try:
+                await conn.execute(text("""
+                    ALTER TABLE model_pools ADD COLUMN models JSON
+                """))
+                # Sync data from targets to models
+                await conn.execute(text("""
+                    UPDATE model_pools SET models = targets WHERE models IS NULL
+                """))
+                logger.info("Successfully added models column")
+            except Exception as e:
+                logger.warning(f"Could not add models column (may already exist): {e}")
+        
+        elif has_models and has_targets:
+            # Both exist - ensure they're in sync
+            logger.debug("Both models and targets columns exist, ensuring sync...")
+            try:
+                # Update models from targets where models is null
+                await conn.execute(text("""
+                    UPDATE model_pools SET models = targets WHERE models IS NULL AND targets IS NOT NULL
+                """))
+                # Update targets from models where targets is null (shouldn't happen but just in case)
+                await conn.execute(text("""
+                    UPDATE model_pools SET targets = models WHERE targets IS NULL OR targets = '[]' AND models IS NOT NULL
+                """))
+            except Exception as e:
+                logger.warning(f"Sync issue: {e}")
 
 
 async def create_missing_indexes(engine: AsyncEngine) -> None:
