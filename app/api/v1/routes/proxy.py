@@ -1852,7 +1852,7 @@ async def proxy_ollama(
     from app.database.models import SmartRouter
     pool_check = await db.execute(select(SmartRouter).filter(SmartRouter.name == model_name))
     if pool_check.scalars().first():
-        resolved_model = await _select_from_pool(db, model_name, body, sender=api_key.user.username)
+        resolved_model = await _select_from_pool(db, model_name, body, request, sender=api_key.user.username)
         if resolved_model:
             model_name = resolved_model
             body["model"] = model_name

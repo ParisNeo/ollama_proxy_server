@@ -428,16 +428,25 @@ async def admin_stats(
 
 @router.get("/stats/export-pdf", name="admin_stats_pdf")
 async def export_pdf_report(request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
-    from weasyprint import HTML
+    from xhtml2pdf import pisa
     import io
     
-    # Render stats page to HTML string
+    # Get context data for the page
     response = await admin_stats(request, db, admin_user)
     html_content = response.body.decode()
     
-    pdf = HTML(string=html_content, base_url=str(request.base_url)).write_pdf()
-    return StreamingResponse(io.BytesIO(pdf), media_type="application/pdf", headers={"Content-Disposition": "attachment; filename=usage-report.pdf"})
+    # Create PDF using xhtml2pdf
+    pdf_buffer = io.BytesIO()
+    pisa_status = pisa.CreatePDF(html_content, dest=pdf_buffer)
+    
+    if pisa_status.err:
+        logger.error(f"PDF export failed: {pisa_status.err}")
+        raise HTTPException(status_code=500, detail="Failed to generate PDF")
+        
+    pdf_buffer.seek(0)
+    return StreamingResponse(pdf_buffer, media_type="application/pdf", headers={"Content-Disposition": "attachment; filename=usage-report.pdf"})
 
+    
 @router.get("/help", response_class=HTMLResponse, name="admin_help")
 async def admin_help_page(request: Request, admin_user: User = Depends(require_admin_user)): 
     return templates.TemplateResponse("admin/help.html", get_template_context(request))
