@@ -1376,9 +1376,8 @@ async def _handle_bundle_request(db: AsyncSession, request: Request, bundle_name
                     
                     # If chat mode, prepend descriptions to the last user message
                     if is_chat_mode:
-                        modified_messages = body["messages"].copy()
-                        for i in range(len(modified_messages) - 1, -1, -1):
-                            msg = modified_messages[i]
+                        for i in range(len(body["messages"]) - 1, -1, -1):
+                            msg = body["messages"][i]
                             if isinstance(msg, dict) and msg.get("role") == "user":
                                 original_content = msg.get("content", "")
                                 if isinstance(original_content, str):
@@ -1392,8 +1391,7 @@ async def _handle_bundle_request(db: AsyncSession, request: Request, bundle_name
                                         if isinstance(part, dict) and part.get("type") == "text":
                                             new_content.append(part)
                                     msg["content"] = new_content
-                                modified_messages = modified_messages[:i+1]  # Truncate history for cleaner context
-                                body["messages"] = modified_messages
+                                # History is automatically preserved by modifying in place
                                 break
                     else:
                         # For generate mode, prepend to prompt
@@ -1637,7 +1635,10 @@ async def _handle_bundle_request(db: AsyncSession, request: Request, bundle_name
             if "prompt" in master_body: 
                 master_body["prompt"] = synthesis_prompt
             else: 
-                master_body["messages"] = [{"role": "user", "content": synthesis_prompt}]
+                # Append synthesis_prompt to existing messages to preserve context
+                current_messages = body.get("messages", []).copy()
+                current_messages.append({"role": "user", "content": synthesis_prompt})
+                master_body["messages"] = current_messages
 
             # Determine endpoint
             master_path = "chat" if "messages" in master_body else "generate"
