@@ -43,6 +43,10 @@ class AppSettingsModel(BaseModel):
 
     model_update_interval_minutes: int = 10
     
+    # Logging & Retention
+    log_max_size_mb: int = 10
+    log_backup_count: int = 5
+
     # Instance Management
     instance_scan_start_port: int = 11434
     instance_scan_end_port: int = 11445
@@ -50,17 +54,17 @@ class AppSettingsModel(BaseModel):
     # Administrative Hub Agent
     admin_agent_name: Optional[str] = None
 
-    # Retry configuration for backend requests - OPTIMIZED FOR SPEED
+    # Retry configuration for backend requests
     max_retries: int = Field(
-        default=2,  # REDUCED from 5 to 2
+        default=3,
         ge=0,
         le=20,
         description="Maximum number of retry attempts when a backend server request fails"
     )
     retry_total_timeout_seconds: float = Field(
-        default=1.0,  # REDUCED from 2.0 to 1.0
+        default=120.0, # Increased to allow for long LLM generations
         ge=0.1,
-        le=30.0,
+        le=600.0,
         description="Total time budget (in seconds) for all retry attempts"
     )
     retry_base_delay_ms: int = Field(

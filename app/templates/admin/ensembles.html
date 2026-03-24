@@ -156,5 +156,33 @@
             </tbody>
         </table>
     </div>
+
+    <!-- Chains Section -->
+    <div class="card-style">
+        <h2 class="card-header text-xl font-bold mb-4">Create Model Chain (Swarm)</h2>
+        <form action="{{ url_for('admin_add_chain') }}" method="post" class="space-y-4">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <input type="text" name="name" placeholder="Chain Name" required class="w-full p-2 rounded bg-black/20 border border-white/10">
+                <div id="chain-steps" class="flex flex-col gap-2">
+                    <select name="steps" class="w-full p-2 rounded bg-black/20 border border-white/10">
+                        {% for m in raw_models %}<option value="{{ m }}">{{ m }}</option>{% endfor %}
+                    </select>
+                </div>
+            </div>
+            <button type="button" onclick="addStep()" class="text-xs text-indigo-400">+ Add Step</button>
+            <div class="flex justify-end">
+                <button type="submit" class="bg-emerald-600 px-6 py-2 rounded font-bold text-sm">Deploy Chain</button>
+            </div>
+        </form>
+    </div>
 </div>
+
+<script>
+    function addStep() {
+        const container = document.getElementById('chain-steps');
+        const select = container.children[0].cloneNode(true);
+        container.appendChild(select);
+    }
+</script>
 {% endblock %}

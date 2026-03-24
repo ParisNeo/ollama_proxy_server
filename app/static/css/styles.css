@@ -344,6 +344,14 @@ select { cursor: pointer; transition: all 0.2s ease; }
     background-color: #ef4444; /* red-500 */
 }
 
+/* Utility for Archive Snippets */
+.line-clamp-2 {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;  
+    overflow: hidden;
+}
+
 /* --- Image Annotation Styles --- */
 .annotated-image-container {
     position: relative;

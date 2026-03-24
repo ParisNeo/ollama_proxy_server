@@ -296,28 +296,34 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    let cachedGpuData = [];
+
     function updateGpuGrid(data) {
         const grid = document.getElementById('gpu-grid');
         if (!data.success) {
             grid.innerHTML = `<div class="p-6 text-center text-red-500">${data.error}</div>`;
             return;
         }
+        cachedGpuData = data.gpus;
         grid.innerHTML = '';
-        data.gpus.forEach(gpu => {
+        data.gpus.forEach((gpu, idx) => {
             const memPercent = (gpu.vram_used_gb / gpu.vram_total_gb) * 100;
             const utilColor = gpu.utilization > 80 ? 'bg-red-500' : (gpu.utilization > 50 ? 'bg-amber-500' : 'bg-green-500');
             const memColor = memPercent > 80 ? 'bg-red-500' : (memPercent > 50 ? 'bg-amber-500' : 'bg-green-500');
 
             grid.innerHTML += `
-                <div class="bg-black/20 p-4 rounded-xl border border-white/10 hover:border-indigo-500/50 transition-colors">
-                    <div class="text-indigo-400 font-bold mb-2 truncate" title="${gpu.name}">${gpu.name}</div>
+                <div onclick="showGpuDetails(${idx})" class="bg-black/20 p-4 rounded-xl border border-white/10 hover:border-indigo-500/50 hover:bg-white/5 cursor-pointer transition-all transform hover:scale-[1.01] group">
+                    <div class="flex justify-between items-start mb-2">
+                        <div class="text-indigo-400 font-bold truncate pr-2 group-hover:text-indigo-300" title="${gpu.name}">${gpu.name}</div>
+                        <span class="text-[10px] font-mono bg-white/5 px-1.5 py-0.5 rounded text-gray-500">#${gpu.index}</span>
+                    </div>
                     <div class="space-y-3">
                         <div>
                             <div class="flex justify-between text-[10px] text-gray-400 uppercase font-bold mb-1">
                                 <span>VRAM (${gpu.vram_used_gb} / ${gpu.vram_total_gb} GB)</span>
                                 <span>${Math.round(memPercent)}%</span>
                             </div>
-                            <div class="h-2 bg-gray-700 rounded-full overflow-hidden">
+                            <div class="h-1.5 bg-gray-700 rounded-full overflow-hidden">
                                 <div class="${memColor} h-full" style="width: ${memPercent}%"></div>
                             </div>
                         </div>
@@ -326,15 +332,91 @@ document.addEventListener('DOMContentLoaded', () => {
                                 <span>Utilization</span>
                                 <span>${gpu.utilization}%</span>
                             </div>
-                            <div class="h-2 bg-gray-700 rounded-full overflow-hidden">
+                            <div class="h-1.5 bg-gray-700 rounded-full overflow-hidden">
                                 <div class="${utilColor} h-full" style="width: ${gpu.utilization}%"></div>
                             </div>
                         </div>
                     </div>
+                    <div class="mt-4 text-[9px] text-indigo-500/50 uppercase font-black text-center tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">Click for Diagnostics</div>
                 </div>
             `;
         });
     }
+
+    window.showGpuDetails = function(cacheIdx) {
+        const gpu = cachedGpuData[cacheIdx];
+        if (!gpu) return;
+
+        const memPercent = (gpu.vram_used_gb / gpu.vram_total_gb) * 100;
+        const utilColor = gpu.utilization > 80 ? 'text-red-500' : (gpu.utilization > 50 ? 'text-amber-500' : 'text-green-500');
+
+        let processList = gpu.processes && gpu.processes.length > 0 ? gpu.processes.map(p => `
+            <div class="flex items-center justify-between p-3 rounded-lg ${p.is_system ? 'bg-indigo-500/5 border border-indigo-500/10' : 'bg-white/5'}">
+                <div class="flex flex-col">
+                    <span class="text-sm font-bold ${p.is_system ? 'text-indigo-300' : 'text-white'}">${p.name}</span>
+                    <span class="text-[10px] text-gray-500 font-mono">
+                        ${p.pid !== 0 ? `PID ${p.pid} • ` : ''}${p.vram_mb} MB Allocated ${p.type ? `• ${p.type}` : ''}
+                    </span>
+                </div>
+                ${!p.is_system ? `
+                <button onclick="killProcess(${p.pid})" class="bg-red-600 hover:bg-red-500 text-white px-3 py-1 rounded text-xs font-bold transition-colors">
+                    Terminate
+                </button>` : `<span class="text-[10px] text-indigo-500/50 font-black uppercase tracking-tighter">System Protected</span>`}
+            </div>
+        `).join('') : '<div class="p-6 text-center text-gray-500 italic">No active compute or graphics processes detected.</div>';
+
+        const modalBody = `
+            <div class="space-y-6">
+                <div class="grid grid-cols-2 gap-4">
+                    <div class="bg-black/40 p-4 rounded-xl border border-white/5">
+                        <div class="text-[10px] text-gray-500 font-bold uppercase mb-1">VRAM Occupancy</div>
+                        <div class="text-2xl font-black text-white">${gpu.vram_used_gb} <span class="text-sm text-gray-500">/ ${gpu.vram_total_gb} GB</span></div>
+                        <div class="mt-2 w-full bg-gray-800 h-2 rounded-full overflow-hidden">
+                            <div class="bg-indigo-500 h-full" style="width: ${memPercent}%"></div>
+                        </div>
+                    </div>
+                    <div class="bg-black/40 p-4 rounded-xl border border-white/5">
+                        <div class="text-[10px] text-gray-500 font-bold uppercase mb-1">Active Utilization</div>
+                        <div class="text-2xl font-black ${utilColor}">${gpu.utilization}%</div>
+                        <div class="mt-2 w-full bg-gray-800 h-2 rounded-full overflow-hidden">
+                            <div class="bg-current h-full" style="width: ${gpu.utilization}%"></div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div>
+                    <h4 class="text-xs font-black text-gray-400 uppercase tracking-widest mb-3 px-1">Resource Allocation Table</h4>
+                    <div class="space-y-2 max-h-[40vh] overflow-y-auto pr-2 custom-scrollbar">
+                        ${processList}
+                    </div>
+                </div>
+            </div>
+        `;
+
+        window.showModal(`Hardware Diagnostics: ${gpu.name} (#${gpu.index})`, modalBody);
+    };
+
+    window.killProcess = async function(pid) {
+        if (!confirm(`Are you sure you want to terminate process ${pid}? Any unsaved AI generation logic in that app will be lost.`)) return;
+        
+        try {
+            const formData = new FormData();
+            formData.append('csrf_token', "{{ csrf_token }}");
+            
+            const resp = await fetch(`/admin/gpu-stats/kill/${pid}`, {
+                method: 'POST',
+                body: formData
+            });
+            const data = await resp.json();
+            if (data.success) {
+                fetchData(); // Refresh immediately
+            } else {
+                alert("Error: " + (data.error || "Could not terminate process. Check server logs."));
+            }
+        } catch(e) {
+            alert("Connection error: " + e.message);
+        }
+    };
 
     fetchData();
     setInterval(fetchData, 5000);

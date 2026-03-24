@@ -191,6 +191,22 @@
             </div>
         </div>
 
+        <!-- Log Management -->
+        <div>
+            <h2 class="card-header text-xl font-bold mb-4 pb-2">Diagnostic Logs & Retention</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                    <label for="log_max_size_mb" class="block text-sm font-medium text-current">Max Log Size (MB)</label>
+                    <input type="number" name="log_max_size_mb" id="log_max_size_mb" value="{{ settings.log_max_size_mb }}" class="mt-1 block w-full px-3 py-2 rounded-md shadow-sm">
+                </div>
+                <div>
+                    <label for="log_backup_count" class="block text-sm font-medium text-current">Rotary History (Files)</label>
+                    <input type="number" name="log_backup_count" id="log_backup_count" value="{{ settings.log_backup_count }}" class="mt-1 block w-full px-3 py-2 rounded-md shadow-sm">
+                </div>
+            </div>
+            <p class="mt-2 text-xs text-gray-400">Controls the automatic cleanup of application logs. Current file: <code class="text-indigo-400">lollms_hub.log</code></p>
+        </div>
+
         <!-- Hub Orchestration -->
         <div>
             <h2 class="card-header text-xl font-bold mb-4 pb-2">Hub Orchestration</h2>

@@ -15,6 +15,7 @@ import logging
 import logging.config
 import os
 import sys
+from logging.handlers import RotatingFileHandler
 from pythonjsonlogger import jsonlogger
 
 # ----------------------------------------------------------------------
@@ -84,13 +85,21 @@ def _build_logging_config(log_level: str = "INFO") -> dict:
                 "formatter": formatter_name,
                 "stream": "ext://sys.stdout",
             },
+            "file": {
+                "class": "logging.handlers.RotatingFileHandler",
+                "formatter": formatter_name,
+                "filename": "lollms_hub.log",
+                "maxBytes": 10 * 1024 * 1024, # 10MB Default
+                "backupCount": 5,
+                "encoding": "utf8",
+            },
         },
         # ------------------------------------------------------------------
         # ROOT LOGGER (required – this was missing before)
         # ------------------------------------------------------------------
         "root": {
             "level": level,
-            "handlers": ["default"],
+            "handlers": ["default", "file"],
         },
         # ------------------------------------------------------------------
         # SPECIFIC LIBRARY LOGGERS (prevent duplicate handlers)

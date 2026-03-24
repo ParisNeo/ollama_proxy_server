@@ -1,0 +1,277 @@
+{% extends "admin/base.html" %}
+{% block title %}System Logs{% endblock %}
+{% block header_title %}System Diagnostic Logs{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+    <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-black/20 p-4 rounded-xl border border-white/10">
+        <div class="flex gap-2">
+            <button id="refresh-logs" class="bg-indigo-600 hover:bg-indigo-500 px-4 py-2 rounded font-bold text-xs uppercase transition-colors">Refresh</button>
+            <button id="copy-logs" class="bg-white/10 hover:bg-white/20 px-4 py-2 rounded font-bold text-xs uppercase transition-colors">Copy Logs</button>
+            <a href="{{ url_for('admin_export_logs') }}" class="bg-white/10 hover:bg-white/20 px-4 py-2 rounded font-bold text-xs uppercase transition-colors">Download .log</a>
+        </div>
+        <div class="flex items-center gap-4">
+            <label class="flex items-center gap-2 text-xs text-gray-400">
+                Auto-refresh
+                <input type="checkbox" id="auto-refresh" class="rounded text-indigo-600">
+            </label>
+            <button id="analyze-logs" class="bg-purple-600 hover:bg-purple-500 px-6 py-2 rounded font-black text-xs uppercase tracking-widest shadow-[0_0_15px_rgba(168,85,247,0.4)]">✨ Analyze with AI Agent</button>
+        </div>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-4 gap-6">
+        <!-- Sidebar: Archive -->
+        <div class="lg:col-span-1 space-y-4">
+            <div class="card-style bg-black/40 border-white/5 h-full flex flex-col">
+                <div class="flex justify-between items-center mb-4">
+                    <h3 class="text-[10px] font-black text-gray-500 uppercase tracking-widest flex items-center gap-2">
+                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                        Analysis Archive
+                    </h3>
+                    <button onclick="loadHistory()" class="text-[9px] text-indigo-400 hover:text-white uppercase font-bold">Refresh</button>
+                </div>
+                <div id="analysis-history" class="space-y-1 overflow-y-auto max-h-[70vh] custom-scrollbar flex-grow">
+                    <p class="text-[10px] text-gray-600 italic">No previous reports.</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Analysis View -->
+        <div class="lg:col-span-3">
+            <div id="analysis-container" class="hidden card-style border-purple-500/50 bg-purple-500/5 min-h-[400px]">
+                <div class="flex justify-between items-center mb-4 border-b border-purple-500/20 pb-2">
+                    <div class="flex items-center gap-3">
+                        <h3 class="text-purple-400 font-bold uppercase text-xs tracking-tighter flex items-center gap-2">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"></path></svg>
+                            Insight <span id="current-analysis-ts" class="text-gray-500 font-mono normal-case ml-2"></span>
+                        </h3>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <button id="export-analysis" class="text-[10px] font-bold bg-white/5 hover:bg-white/10 px-2 py-1 rounded text-gray-400 uppercase">Export .md</button>
+                        <button id="delete-analysis" class="text-[10px] font-bold bg-red-900/20 hover:bg-red-900/40 px-2 py-1 rounded text-red-400 uppercase">Delete</button>
+                        <button onclick="document.getElementById('analysis-container').classList.add('hidden')" class="text-gray-500 hover:text-white ml-2">×</button>
+                    </div>
+                </div>
+                <div id="analysis-text" class="prose prose-invert prose-indigo max-w-none text-gray-300 max-h-[50vh] overflow-y-auto pr-4 custom-scrollbar">
+                    <p class="italic">Ready to analyze...</p>
+                </div>
+            </div>
+            
+            <div id="log-display-section" class="mt-6">
+                <!-- Log Window -->
+                <div class="card-style p-0 bg-black overflow-hidden border border-white/5 shadow-2xl">
+                    <div id="log-window" class="h-[60vh] overflow-y-auto p-4 font-mono text-xs leading-relaxed whitespace-pre-wrap selection:bg-indigo-500/50">
+                        <div class="text-gray-600 italic">Initializing log stream...</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Log Window -->
+    <div class="card-style p-0 bg-black overflow-hidden border border-white/5 shadow-2xl">
+        <div id="log-window" class="h-[60vh] overflow-y-auto p-4 font-mono text-xs leading-relaxed whitespace-pre-wrap selection:bg-indigo-500/50">
+            <div class="text-gray-600 italic">Initializing log stream...</div>
+        </div>
+    </div>
+</div>
+
+<!-- Markdown Parser -->
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    // Configure marked options for better security and formatting
+    marked.setOptions({
+        gfm: true,
+        breaks: true,
+        headerIds: false,
+        mangle: false
+    });
+
+    const logWindow = document.getElementById('log-window');
+    const refreshBtn = document.getElementById('refresh-logs');
+    const copyBtn = document.getElementById('copy-logs');
+    const autoCheck = document.getElementById('auto-refresh');
+    const analyzeBtn = document.getElementById('analyze-logs');
+    const analysisContainer = document.getElementById('analysis-container');
+    const analysisText = document.getElementById('analysis-text');
+    const historyList = document.getElementById('analysis-history');
+    const tsLabel = document.getElementById('current-analysis-ts');
+    
+    let currentAnalysisId = null;
+
+    async function fetchLogs() {
+        try {
+            const resp = await fetch("{{ url_for('admin_get_logs_raw') }}");
+            const data = await resp.json();
+            const isAtBottom = logWindow.scrollHeight - logWindow.clientHeight <= logWindow.scrollTop + 50;
+            
+            // Colorize levels
+            const colored = data.logs
+                .replace(/\[INFO\]/g, '<span class="text-blue-400">[INFO]</span>')
+                .replace(/\[WARNING\]/g, '<span class="text-yellow-400">[WARNING]</span>')
+                .replace(/\[ERROR\]/g, '<span class="text-red-500 font-bold">[ERROR]</span>')
+                .replace(/\[CRITICAL\]/g, '<span class="bg-red-600 text-white font-black px-1">[CRITICAL]</span>');
+            
+            logWindow.innerHTML = colored;
+            if (isAtBottom) logWindow.scrollTop = logWindow.scrollHeight;
+        } catch(e) { logWindow.innerHTML = '<span class="text-red-500">Failed to connect to log server.</span>'; }
+    }
+
+    async function loadHistory() {
+        console.log("Fetching history from:", "{{ url_for('admin_analysis_history') }}");
+        historyList.innerHTML = '<div class="p-4 text-center"><div class="w-4 h-4 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin mx-auto"></div></div>';
+        
+        try {
+            const resp = await fetch("{{ url_for('admin_analysis_history') }}");
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            
+            const data = await resp.json();
+            console.log("History records found:", data.length);
+
+            if (data.length === 0) {
+                historyList.innerHTML = `
+                    <div class="px-2 py-8 text-center">
+                        <p class="text-[10px] text-gray-600 italic mb-2">No reports archived yet.</p>
+                        <p class="text-[9px] text-gray-700">Click "Analyze with AI Agent" to create one.</p>
+                    </div>
+                `;
+                return;
+            }
+
+            historyList.innerHTML = data.map((a, index) => `
+                <button onclick="viewAnalysis(${a.id})" 
+                        class="w-full text-left p-3 rounded-lg hover:bg-indigo-500/10 group border-b border-white/5 transition-all mb-1 ${index === 0 ? 'bg-indigo-500/5 border-l-2 border-l-indigo-500' : ''}">
+                    <div class="flex justify-between items-center mb-1">
+                        <div class="text-[10px] font-black text-gray-400 group-hover:text-indigo-400 font-mono">${a.ts}</div>
+                        ${index === 0 ? '<span class="text-[8px] bg-indigo-500 text-white px-1 rounded animate-pulse">LATEST</span>' : ''}
+                    </div>
+                    <div class="text-[10px] text-gray-500 group-hover:text-gray-300 line-clamp-2 leading-tight font-sans">${a.snippet}</div>
+                </button>
+            `).join('');
+            
+        } catch(e) {
+            console.error("History Load Error:", e);
+            historyList.innerHTML = `<p class="text-red-500 text-[9px] p-4 text-center">Failed to load archive: ${e.message}</p>`;
+        }
+    }
+
+    window.viewAnalysis = async (id) => {
+        analysisContainer.classList.remove('hidden');
+        analysisText.innerHTML = '<p class="italic">Loading archived report...</p>';
+        try {
+            const resp = await fetch(`/admin/logs/analysis/${id}`);
+            const data = await resp.json();
+            currentAnalysisId = id;
+            // Fix mapping: data.ts -> data.timestamp
+            tsLabel.innerText = `(${data.timestamp})`;
+            // Fix mapping: data.content -> data.analysis
+            analysisText.innerHTML = marked.parse(data.analysis);
+            analysisContainer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        } catch(e) {
+            console.error("Archive fetch error:", e);
+        }
+    };
+
+    document.getElementById('export-analysis').onclick = () => {
+        const content = analysisText.innerText;
+        const blob = new Blob([content], { type: 'text/markdown' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `lollms-hub-analysis-${tsLabel.innerText.replace(/[()]/g, '').replace(/ /g, '_')}.md`;
+        a.click();
+    };
+
+    document.getElementById('delete-analysis').onclick = async () => {
+        if(!confirm("Delete this archive entry?")) return;
+        try {
+            const formData = new FormData();
+            formData.append('csrf_token', "{{ csrf_token }}");
+            await fetch(`/admin/logs/analysis/${currentAnalysisId}`, { 
+                method: 'DELETE',
+                headers: { 'X-CSRF-Token': '{{ csrf_token }}' }
+            });
+            analysisContainer.classList.add('hidden');
+            loadHistory();
+        } catch(e) {}
+    };
+
+    analyzeBtn.onclick = async () => {
+        analysisContainer.classList.remove('hidden');
+        analysisText.innerHTML = `
+            <div class="flex items-center gap-3 py-4">
+                <div class="relative">
+                    <div class="w-8 h-8 border-4 border-purple-500/20 border-t-purple-500 rounded-full animate-spin"></div>
+                    <div class="absolute inset-0 flex items-center justify-center">
+                        <div class="w-2 h-2 bg-purple-500 rounded-full animate-pulse"></div>
+                    </div>
+                </div>
+                <div class="flex flex-col">
+                    <span class="text-sm font-bold text-purple-400">Agent Analysis in Progress...</span>
+                    <span class="text-[10px] text-gray-500 uppercase tracking-widest">Parsing 150 lines of telemetry</span>
+                </div>
+            </div>
+        `;
+        
+        try {
+            const resp = await fetch("{{ url_for('admin_analyze_logs') }}", { 
+                method: 'POST',
+                headers: { 'X-CSRF-Token': '{{ csrf_token }}' }
+            });
+            
+            const data = await resp.json();
+            
+            if (resp.ok && data.analysis) {
+                currentAnalysisId = data.id;
+                tsLabel.innerText = `(${data.timestamp})`;
+                analysisText.innerHTML = marked.parse(data.analysis);
+                loadHistory();
+                analysisContainer.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            } else {
+                // Show the specific error (e.g., "No Agent set")
+                analysisText.innerHTML = `
+                    <div class="p-4 bg-red-900/20 border border-red-500/50 rounded-lg text-red-400">
+                        <div class="font-bold uppercase text-xs mb-1">Analysis Failed</div>
+                        ${data.error || "The server returned an empty response."}
+                        <div class="mt-4 pt-3 border-t border-red-500/20">
+                            <p class="text-xs text-gray-400 italic">Check <b>Settings > Hub Orchestration</b> and ensure a Management Agent is selected.</p>
+                        </div>
+                    </div>
+                `;
+            }
+        } catch(e) { 
+            analysisText.innerHTML = `
+                <div class="p-4 bg-amber-900/20 border border-amber-500/50 rounded-lg text-amber-400 text-sm">
+                    <b>Connection Interrupted:</b> The request timed out, but the Agent may still be processing in the background. 
+                    Checking archive for late arrivals...
+                </div>
+            `;
+            // Attempt to load history anyway after a delay
+            setTimeout(loadHistory, 5000);
+        }
+    };
+
+    copyBtn.onclick = () => {
+        const text = logWindow.innerText;
+        navigator.clipboard.writeText(text).then(() => {
+            const originalText = copyBtn.innerText;
+            copyBtn.innerText = "COPIED!";
+            copyBtn.classList.add('text-green-400');
+            setTimeout(() => {
+                copyBtn.innerText = originalText;
+                copyBtn.classList.remove('text-green-400');
+            }, 2000);
+        }).catch(err => {
+            console.error("Clipboard error:", err);
+        });
+    };
+
+    refreshBtn.onclick = fetchLogs;
+    setInterval(() => { if(autoCheck.checked) fetchLogs(); }, 3000);
+    fetchLogs();
+    loadHistory();
+});
+</script>
+{% endblock %}

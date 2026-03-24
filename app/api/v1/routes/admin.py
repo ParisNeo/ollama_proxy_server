@@ -25,7 +25,7 @@ from sqlalchemy.exc import IntegrityError
 from app.core.config import settings
 from app.core.security import verify_password
 from app.database.session import get_db
-from app.database.models import User
+from app.database.models import User, LogAnalysis
 from app.crud import user_crud, apikey_crud, log_crud, server_crud, settings_crud, model_metadata_crud
 from app.core.events import event_manager
 from app.core.instance_manager import supervisor
@@ -1673,6 +1673,28 @@ async def admin_add_ensemble(
     flash(request, f"Bundle '{name}' created successfully.", "success")
     return RedirectResponse(url=request.url_for("admin_ensembles_page"), status_code=303)
 
+@router.get("/chains", response_class=HTMLResponse, name="admin_chains_page")
+async def admin_chains_page(request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
+    from app.database.models import ChainOrchestrator
+    context = get_template_context(request)
+    result = await db.execute(select(ChainOrchestrator))
+    context["chains"] = result.scalars().all()
+    context["raw_models"] = await server_crud.get_all_available_model_names(db)
+    context["csrf_token"] = await get_csrf_token(request)
+    return templates.TemplateResponse("admin/chains.html", context)
+
+@router.post("/chains/add", name="admin_add_chain", dependencies=[Depends(validate_csrf_token)])
+async def admin_add_chain(
+    request: Request, db: AsyncSession = Depends(get_db), 
+    name: str = Form(...), steps: List[str] = Form(...)
+):
+    from app.database.models import ChainOrchestrator
+    new_chain = ChainOrchestrator(name=name, steps=steps)
+    db.add(new_chain)
+    await db.commit()
+    flash(request, "Chain deployed.", "success")
+    return RedirectResponse(url=request.url_for("admin_chains_page"), status_code=303)
+
 @router.post("/ensembles/{ensemble_id}/delete", name="admin_delete_ensemble", dependencies=[Depends(validate_csrf_token)])
 async def admin_delete_ensemble(ensemble_id: int, request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
     from app.database.models import EnsembleOrchestrator
@@ -1790,31 +1812,128 @@ async def admin_add_vision_enabler(
 
 @router.get("/gpu-stats", name="admin_gpu_stats")
 async def get_gpu_stats(admin_user: User = Depends(require_admin_user)):
-    """Fetches detailed metrics for all NVIDIA GPUs."""
-    # Common Windows path for nvidia-smi if not in system PATH
+    """Cross-platform GPU monitoring for Windows, Linux, and macOS."""
+    import platform
+    sys_type = platform.system()
+    
+    # --- MacOS (Apple Silicon) Support ---
+    if sys_type == "Darwin":
+        try:
+            # Use system_profiler to get unified memory stats
+            cmd = "system_profiler SPDisplaysDataType -json"
+            res = subprocess.check_output(cmd, shell=True, encoding='utf-8')
+            data = json.loads(res)
+            gpu_info = data.get("SPDisplaysDataType", [{}])[0]
+            
+            # MacOS uses unified memory; we'll treat it as GPU VRAM for UI consistency
+            mem = psutil.virtual_memory()
+            return {
+                "success": True,
+                "gpus": [{
+                    "index": "0",
+                    "name": gpu_info.get("sppci_model", "Apple M-Series"),
+                    "vram_used_gb": round(mem.used / (1024**3), 2),
+                    "vram_total_gb": round(mem.total / (1024**3), 2),
+                    "utilization": 0, # Difficult to get raw % via CLI on Mac
+                    "processes": [{"pid": p.pid, "name": p.name(), "vram_mb": 0} for p in psutil.process_iter(['pid', 'name']) if 'ollama' in p.info['name'].lower()][:5]
+                }]
+            }
+        except Exception as e:
+            return {"success": False, "gpus": [], "error": f"Mac Telemetry Error: {str(e)}"}
+
+    # --- Windows / Linux (NVIDIA) Support ---
     nvsmi_path = r"C:\Program Files\NVIDIA Corporation\NVSMI\nvidia-smi.exe"
     cmd_base = "nvidia-smi" if os.name != 'nt' else (nvsmi_path if os.path.exists(nvsmi_path) else "nvidia-smi")
     
     try:
-        # Using shell=True for better executable resolution on Windows
-        cmd = f'{cmd_base} --query-gpu=name,memory.used,memory.total,utilization.gpu --format=csv,noheader,nounits'
-        result = subprocess.check_output(cmd, encoding='utf-8', shell=True)
+        # 1. Hardware Metrics
+        cmd_hw = f'{cmd_base} --query-gpu=index,name,memory.used,memory.total,utilization.gpu --format=csv,noheader,nounits'
+        res_hw = subprocess.check_output(cmd_hw, encoding='utf-8', shell=True)
         
-        gpus = []
-        for line in result.strip().split('\n'):
+        # 2. Comprehensive Process List (Compute + Graphics)
+        # Note: --query-compute-apps is standard, but doesn't show Graphics usage.
+        # We try to get PIDs from the general query first.
+        cmd_apps = f'{cmd_base} --query-compute-apps=gpu_index,pid,used_gpu_memory --format=csv,noheader,nounits'
+        try:
+            res_apps = subprocess.check_output(cmd_apps, encoding='utf-8', shell=True)
+        except subprocess.CalledProcessError:
+            res_apps = ""
+
+        proc_map = {}
+        for line in res_apps.strip().split('\n'):
+            if not line.strip(): continue
             parts = [x.strip() for x in line.split(',')]
-            if len(parts) < 4: continue
-            name, mem_used, mem_total, util = parts
+            if len(parts) < 3: continue
+            idx, pid, vram = parts
+            
+            proc_name = "Unknown"
+            try:
+                p = psutil.Process(int(pid))
+                proc_name = p.name()
+            except (psutil.NoSuchProcess, psutil.AccessDenied): pass
+
+            if idx not in proc_map: proc_map[idx] = []
+            proc_map[idx].append({"pid": int(pid), "name": proc_name, "vram_mb": int(vram), "type": "Compute"})
+
+        gpus = []
+        for line in res_hw.strip().split('\n'):
+            parts = [x.strip() for x in line.split(',')]
+            if len(parts) < 5: continue
+            idx, name, mem_used, mem_total, util = parts
+            
+            current_procs = proc_map.get(idx, [])
+            # Calculate "Ghost" usage (Graphics/DWM/System)
+            vram_accounted_mb = sum(p['vram_mb'] for p in current_procs)
+            vram_total_used_mb = int(mem_used)
+            ghost_vram = vram_total_used_mb - vram_accounted_mb
+            
+            # If there is significant ghost usage, add a system entry
+            if ghost_vram > 50:
+                current_procs.append({
+                    "pid": 0,
+                    "name": "System / Desktop / Browser",
+                    "vram_mb": ghost_vram,
+                    "type": "Graphics",
+                    "is_system": True
+                })
+
             gpus.append({
+                "index": idx,
                 "name": name,
-                "vram_used_gb": round(int(mem_used) / 1024, 2),
+                "vram_used_gb": round(vram_total_used_mb / 1024, 2),
                 "vram_total_gb": round(int(mem_total) / 1024, 2),
-                "utilization": int(util)
+                "utilization": int(util),
+                "processes": current_procs
             })
         return {"success": True, "gpus": gpus}
     except Exception as e:
-        logger.error(f"nvidia-smi failed: {e}")
-        return {"success": False, "gpus": [], "error": f"NVIDIA GPU not detected: {str(e)}"}
+        return {"success": False, "gpus": [], "error": f"GPU Error: {str(e)}"}
+
+@router.post("/gpu-stats/kill/{pid}", name="admin_kill_gpu_process", dependencies=[Depends(validate_csrf_token)])
+async def kill_gpu_process(pid: int, admin_user: User = Depends(require_admin_user)):
+    """Terminates a specific process using platform-appropriate elevation."""
+    if pid <= 0:
+        raise HTTPException(status_code=400, detail="Invalid PID")
+
+    try:
+        if os.name == 'nt':
+            # Windows: Force kill by PID
+            cmd = ["taskkill", "/F", "/PID", str(pid)]
+            subprocess.run(cmd, check=True, capture_output=True)
+        else:
+            # Linux/macOS: requires sudo for processes owned by other users
+            # User must configure sudoers to allow this securely
+            cmd = ["sudo", "kill", "-9", str(pid)]
+            subprocess.run(cmd, check=True, capture_output=True)
+            
+        logger.warning(f"Admin {admin_user.username} terminated GPU process {pid}")
+        return {"success": True, "message": f"Process {pid} terminated."}
+    except subprocess.CalledProcessError as e:
+        err_msg = e.stderr.decode() if e.stderr else str(e)
+        logger.error(f"Failed to kill process {pid}: {err_msg}")
+        return {"success": False, "error": f"Termination failed: {err_msg}"}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
 
         
 @router.post("/routers/add", name="admin_add_router", dependencies=[Depends(validate_csrf_token)])
@@ -2077,6 +2196,217 @@ async def delete_instance(instance_id: int, request: Request, db: AsyncSession =
     await db.commit()
     flash(request, f"Instance '{inst.name}' removed from manager.")
     return RedirectResponse(url=request.url_for("admin_instances"), status_code=303)
+
+# Add this new route for prompt enhancement
+@router.get("/logs", response_class=HTMLResponse, name="admin_logs")
+async def admin_logs_page(request: Request, admin_user: User = Depends(require_admin_user)):
+    context = get_template_context(request)
+    context["csrf_token"] = await get_csrf_token(request)
+    return templates.TemplateResponse("admin/logs.html", context)
+
+@router.get("/logs/raw", name="admin_get_logs_raw")
+async def get_raw_logs(admin_user: User = Depends(require_admin_user), lines: int = Query(200)):
+    log_file = Path("lollms_hub.log")
+    if not log_file.exists():
+        return {"logs": "Log file not found."}
+    
+    try:
+        # Use tail-like logic for performance
+        with open(log_file, "r", encoding="utf-8", errors="ignore") as f:
+            content = f.readlines()
+            return {"logs": "".join(content[-lines:])}
+    except Exception as e:
+        return {"logs": f"Error reading logs: {str(e)}"}
+
+@router.get("/logs/export", name="admin_export_logs")
+async def export_logs(admin_user: User = Depends(require_admin_user)):
+    from fastapi.responses import FileResponse
+    log_file = Path("lollms_hub.log")
+    if not log_file.exists():
+        raise HTTPException(status_code=404, detail="Log file empty")
+    return FileResponse(log_file, filename="lollms_hub_diagnostic.log")
+
+@router.post("/logs/analyze", name="admin_analyze_logs")
+async def analyze_logs_ai(request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
+    from app.api.v1.routes.proxy import _resolve_target, _reverse_proxy
+    
+    app_settings: AppSettingsModel = request.app.state.settings
+    target_agent = app_settings.admin_agent_name
+    
+    if not target_agent:
+        return JSONResponse({"error": "No Management Agent set in Settings to perform analysis."}, status_code=400)
+
+    log_file = Path("lollms_hub.log")
+    if not log_file.exists():
+        return {"analysis": "No logs available to analyze."}
+
+    with open(log_file, "r", encoding="utf-8", errors="ignore") as f:
+        recent_logs = "".join(f.readlines()[-150:]) # Send last 150 lines
+
+    analysis_prompt = (
+        "You are the System Architect for LoLLMs Hub. Review the following application logs. "
+        "Identify actual errors, performance bottlenecks, or critical security issues.\n\n"
+        "IMPORTANT ARCHITECTURAL CONTEXT:\n"
+        "- Redis is OPTIONAL. If logs show it is not connected, treat this as a configuration status, "
+        "NOT a bug or critical error. Only mention it as a suggestion if the user needs rate limiting.\n"
+        "- Focus on backend connectivity to Ollama/vLLM and database integrity.\n\n"
+        f"RECENT LOG DATA:\n{recent_logs}"
+    )
+
+    payload = {
+        "model": target_agent,
+        "messages": [{"role": "user", "content": analysis_prompt}],
+        "stream": False
+    }
+
+    try:
+        real_model, final_msgs = await _resolve_target(db, target_agent, payload["messages"])
+        servers = await server_crud.get_servers_with_model(db, real_model)
+        if not servers: return JSONResponse({"error": "Compute node for agent offline."}, status_code=503)
+
+        resp, _ = await _reverse_proxy(request, "chat", servers, json.dumps({"model": real_model, "messages": final_msgs, "stream": False}).encode(), is_subrequest=True)
+        if hasattr(resp, 'body'):
+            data = json.loads(resp.body.decode())
+            return {"analysis": data.get("message", {}).get("content", "Analysis failed.")}
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+@router.get("/logs", response_class=HTMLResponse, name="admin_logs")
+async def admin_logs_page(request: Request, admin_user: User = Depends(require_admin_user)):
+    context = get_template_context(request)
+    context["csrf_token"] = await get_csrf_token(request)
+    return templates.TemplateResponse("admin/logs.html", context)
+
+@router.get("/logs/raw", name="admin_get_logs_raw")
+async def get_raw_logs(admin_user: User = Depends(require_admin_user), lines: int = Query(200)):
+    log_file = Path("lollms_hub.log")
+    if not log_file.exists():
+        return {"logs": "Log file not found. Check if file logging is enabled in logging_config.py"}
+    
+    try:
+        with open(log_file, "r", encoding="utf-8", errors="ignore") as f:
+            content = f.readlines()
+            return {"logs": "".join(content[-lines:])}
+    except Exception as e:
+        return {"logs": f"Error reading logs: {str(e)}"}
+
+@router.get("/logs/export", name="admin_export_logs")
+async def export_logs(admin_user: User = Depends(require_admin_user)):
+    from fastapi.responses import FileResponse
+    log_file = Path("lollms_hub.log")
+    if not log_file.exists():
+        raise HTTPException(status_code=404, detail="Log file empty")
+    return FileResponse(log_file, filename="lollms_hub_diagnostic.log")
+
+@router.post("/logs/analyze", name="admin_analyze_logs")
+async def analyze_logs_ai(request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
+    from app.api.v1.routes.proxy import _resolve_target, _reverse_proxy
+    
+    app_settings: AppSettingsModel = request.app.state.settings
+    target_agent = app_settings.admin_agent_name
+    
+    if not target_agent:
+        return JSONResponse({"error": "No Management Agent set in Settings to perform analysis."}, status_code=400)
+
+    log_file = Path("lollms_hub.log")
+    if not log_file.exists():
+        return {"analysis": "No logs available to analyze."}
+
+    with open(log_file, "r", encoding="utf-8", errors="ignore") as f:
+        recent_logs = "".join(f.readlines()[-150:])
+
+    analysis_prompt = (
+        "You are the System Architect for LoLLMs Hub. Review the following application logs. "
+        "Identify actual errors, performance bottlenecks, or critical security issues.\n\n"
+        "IMPORTANT ARCHITECTURAL CONTEXT:\n"
+        "- Redis is OPTIONAL. If logs show it is not connected, treat this as a configuration status, "
+        "NOT a bug or critical error. Only mention it as a suggestion if the user needs rate limiting.\n"
+        "- Focus on backend connectivity to Ollama/vLLM and database integrity.\n\n"
+        f"RECENT LOG DATA:\n{recent_logs}"
+    )
+
+    payload = {
+        "model": target_agent,
+        "messages": [{"role": "user", "content": analysis_prompt}],
+        "stream": False
+    }
+
+    try:
+        logger.info(f"AI Log Analysis started using agent: {target_agent}")
+        real_model, final_msgs = await _resolve_target(db, target_agent, payload["messages"])
+        servers = await server_crud.get_servers_with_model(db, real_model)
+        
+        if not servers: 
+            logger.error(f"Analysis failed: No servers found for model {real_model}")
+            return JSONResponse({"error": f"Compute node for model '{real_model}' is offline or not found."}, status_code=503)
+
+        # Surgical Fix: Explicitly pass a long timeout for the analysis sub-request
+        resp, _ = await _reverse_proxy(
+            request, "chat", servers, 
+            json.dumps({"model": real_model, "messages": final_msgs, "stream": False}).encode(), 
+            is_subrequest=True
+        )
+        
+        if hasattr(resp, 'status_code') and resp.status_code != 200:
+             error_data = json.loads(resp.body.decode()) if hasattr(resp, 'body') else {"error": "Unknown backend error"}
+             return JSONResponse({"error": f"AI Backend Error: {error_data.get('error', 'Unknown')}"}, status_code=resp.status_code)
+
+        if hasattr(resp, 'body'):
+            data = json.loads(resp.body.decode())
+            analysis_text = data.get("message", {}).get("content", "Analysis failed.")
+            
+            # --- ARCHIVE LOGIC ---
+            new_analysis = LogAnalysis(content=analysis_text)
+            db.add(new_analysis)
+            await db.commit()
+            await db.refresh(new_analysis)
+            
+            return {
+                "id": new_analysis.id,
+                "timestamp": new_analysis.timestamp.strftime("%Y-%m-%d %H:%M"),
+                "analysis": analysis_text
+            }
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+@router.get("/logs/analysis/history", name="admin_analysis_history")
+async def get_analysis_history(db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
+    """Returns the list of archived AI reports with a clean preview snippet."""
+    try:
+        result = await db.execute(select(LogAnalysis).order_by(LogAnalysis.timestamp.desc()).limit(50))
+        history = result.scalars().all()
+        
+        def clean_snippet(text):
+            if not text: return "Empty report."
+            # Remove markdown structural characters and code block markers
+            clean = re.sub(r'[*#_>`\-]', '', text)
+            clean = re.sub(r'\[.*?\]', '', clean) # Remove brackets
+            # Collapse multiple spaces/newlines
+            clean = " ".join(clean.split())
+            return clean[:85] + "..."
+
+        return [{"id": a.id, "ts": a.timestamp.strftime("%Y-%m-%d %H:%M"), "snippet": clean_snippet(a.content)} for a in history]
+    except Exception as e:
+        logger.error(f"Failed to fetch analysis history: {e}")
+        return [] # Return empty list so frontend doesn't crash
+
+@router.get("/logs/analysis/{aid}", name="admin_get_analysis")
+async def get_analysis_detail(aid: int, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
+    analysis = await db.get(LogAnalysis, aid)
+    if not analysis: raise HTTPException(status_code=404)
+    return {
+        "id": analysis.id, 
+        "timestamp": analysis.timestamp.strftime("%Y-%m-%d %H:%M"), 
+        "analysis": analysis.content
+    }
+
+@router.delete("/logs/analysis/{aid}", name="admin_delete_analysis", dependencies=[Depends(validate_csrf_token)])
+async def delete_analysis(aid: int, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
+    analysis = await db.get(LogAnalysis, aid)
+    if analysis:
+        await db.delete(analysis)
+        await db.commit()
+    return {"success": True}
 
 # Add this new route for prompt enhancement
 @router.post("/enhance-prompt", name="admin_enhance_prompt")

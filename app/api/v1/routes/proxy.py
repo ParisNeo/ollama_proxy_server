@@ -272,6 +272,58 @@ async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer
 
         servers_tried.append(chosen_server.name)
 
+        # --- RE-ENCODING FOR OLLAMA ---
+        # If hitting Ollama, ensure payload isn't using OpenAI-style list content
+        local_body_bytes = body_bytes
+        if chosen_server.server_type == 'ollama' and body_bytes:
+            try:
+                temp_body = json.loads(body_bytes)
+                if "messages" in temp_body:
+                    modified = False
+                    for msg in temp_body["messages"]:
+                        if isinstance(msg, dict) and isinstance(msg.get("content"), list):
+                            text_parts = []
+                            images = []
+                            
+                            for part in msg["content"]:
+                                if isinstance(part, dict):
+                                    if part.get("type") == "text":
+                                        text_parts.append(part.get("text", ""))
+                                    elif part.get("type") == "image_url":
+                                        url = part.get("image_url", {}).get("url", "")
+                                        if url and url.startswith("data:"):
+                                            try:
+                                                # Extract base64 data after the comma
+                                                base64_data = url.split(",", 1)[1]
+                                                if base64_data:  # Only add if not empty
+                                                    images.append(base64_data)
+                                            except (IndexError, AttributeError):
+                                                logger.warning(f"Failed to parse data URL in message")
+                            
+                            # Set the content to the text parts
+                            msg["content"] = "\n".join(text_parts)
+                            # Only add images key if we actually have images
+                            if images:
+                                msg["images"] = images
+                                logger.debug(f"Added {len(images)} image(s) to Ollama message")
+                            elif "images" in msg:
+                                # Remove empty images array if present
+                                del msg["images"]
+                            modified = True
+                    
+                    if modified:
+                        # Final cleanup: ensure no empty image arrays remain
+                        for msg in temp_body["messages"]:
+                            if "images" in msg and (not msg["images"] or len(msg["images"]) == 0):
+                                del msg["images"]
+                        
+                        local_body_bytes = json.dumps(temp_body).encode('utf-8')
+                        # Log final payload structure for debugging
+                        logger.info(f"Normalized multi-modal payload for Ollama server '{chosen_server.name}'")
+                        logger.debug(f"Final payload messages: {[{'role': m.get('role'), 'has_images': 'images' in m, 'content_type': type(m.get('content')).__name__} for m in temp_body.get('messages', [])]}")
+            except Exception as e:
+                logger.warning(f"Payload normalization error: {e}")
+
         if chosen_server.server_type == 'vllm':
             logger.info(f"Using vLLM branch for server '{chosen_server.name}'")
             try:
@@ -293,6 +345,24 @@ async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer
 
         logger.info(f"Using Ollama branch with retry logic for server '{chosen_server.name}'")
         
+        # DEBUG: Log the actual payload being sent
+        try:
+            debug_body = json.loads(local_body_bytes)
+            has_images = any(isinstance(m.get("content"), list) and 
+                           any(p.get("type") == "image_url" for p in m.get("content", []))
+                           for m in debug_body.get("messages", []))
+            logger.info(f"DEBUG: Payload has images in original format: {has_images}")
+            for i, m in enumerate(debug_body.get("messages", [])):
+                if isinstance(m.get("content"), list):
+                    logger.info(f"DEBUG: Message {i} has list content with {len(m['content'])} parts")
+                    for j, part in enumerate(m["content"]):
+                        logger.info(f"  Part {j}: type={part.get('type')}, has_image_url={bool(part.get('image_url', {}).get('url', '')[:50])}")
+                elif isinstance(m.get("content"), str):
+                    logger.info(f"DEBUG: Message {i} has string content: {m.get('content', '')[:100]}...")
+                logger.info(f"  Message {i} has images key: {'images' in m}, images length: {len(m.get('images', []))}")
+        except Exception as e:
+            logger.warning(f"DEBUG: Could not parse body for debug: {e}")
+        
         first_attempt_start = asyncio.get_event_loop().time()
         
         try:
@@ -303,7 +373,7 @@ async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer
                 method=request.method,
                 headers=headers,
                 query_params=request.query_params,
-                body_bytes=body_bytes,
+                body_bytes=local_body_bytes,
                 request_id=request_id,
                 model=model
             )
@@ -391,7 +461,7 @@ async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer
                 method=request.method,
                 headers=headers,
                 query_params=request.query_params,
-                body_bytes=body_bytes,
+                body_bytes=local_body_bytes,
                 config=retry_config,
                 retry_on_exceptions=(Exception,),
                 operation_name=f"Request to {chosen_server.name}"
@@ -1127,16 +1197,30 @@ async def _select_from_pool(db: AsyncSession, pool_name: str, body: Dict[str, An
 
     # 1. Extract context features (Fast)
     prompt_text = body.get("prompt") or ""
-    if not prompt_text and "messages" in body:
+    has_images_in_msgs = False
+
+    if "messages" in body:
         # Get LAST user message for intent classification
         for msg in reversed(body["messages"]):
-            if msg.get("role") == "user":
-                content = msg.get("content", "")
-                prompt_text = " ".join([p.get("text", "") for p in content if p.get("type") == "text"]) if isinstance(content, list) else content
-                break
+            if not isinstance(msg, dict): continue
+            
+            # Detect images in OpenAI-style or Ollama-style messages
+            if msg.get("images"):
+                has_images_in_msgs = True
+            
+            content = msg.get("content", "")
+            if isinstance(content, list):
+                for part in content:
+                    if not isinstance(part, dict): continue
+                    if part.get("type") == "image_url":
+                        has_images_in_msgs = True
+                    if part.get("type") == "text" and not prompt_text:
+                        prompt_text = part.get("text", "")
+            elif not prompt_text:
+                prompt_text = content
 
     features = {
-        "has_images": bool(body.get("images") or any(m.get("images") for m in body.get("messages", []) if isinstance(m, dict))),
+        "has_images": bool(body.get("images") or has_images_in_msgs),
         "len": len(prompt_text),
         "sender": sender,
         "text": prompt_text.lower()
@@ -1192,6 +1276,61 @@ async def _select_from_pool(db: AsyncSession, pool_name: str, body: Dict[str, An
 
     # Default to priority (first in list)
     return valid_targets[0]
+
+async def _handle_chain_request(db: AsyncSession, request: Request, chain_name: str, body: Dict[str, Any], api_key: APIKey, request_id: str):
+    """Orchestrates sequential model execution (Swarm/Chain)."""
+    from app.database.models import ChainOrchestrator
+    
+    result = await db.execute(select(ChainOrchestrator).filter(ChainOrchestrator.name == chain_name))
+    chain = result.scalars().first()
+    if not chain:
+        raise HTTPException(status_code=404, detail="Chain not found")
+
+    async def chain_generator():
+        current_messages = body.get("messages", []).copy()
+        final_content = ""
+
+        for i, step_model in enumerate(chain.steps):
+            is_last = (i == len(chain.steps) - 1)
+            
+            # Resolve the step model
+            real_model, updated_messages = await _resolve_target(db, step_model, current_messages)
+            
+            sub_body = body.copy()
+            sub_body["model"] = real_model
+            sub_body["messages"] = updated_messages
+            sub_body["stream"] = False # Intermediates must be synchronous
+            
+            try:
+                servers = await server_crud.get_servers_with_model(db, real_model)
+                if not servers:
+                    yield (json.dumps({"error": f"Model {real_model} not found"}) + "\n").encode()
+                    return
+
+                resp, _ = await _reverse_proxy(
+                    request, "chat", servers, 
+                    json.dumps(sub_body).encode(), 
+                    is_subrequest=True
+                )
+                
+                data = json.loads(resp.body.decode())
+                content = data.get("message", {}).get("content", "")
+                
+                # Append output to history for next step
+                current_messages.append({"role": "assistant", "content": content})
+                final_content = content
+                
+                if not is_last:
+                    yield (json.dumps({"model": chain_name, "message": {"role": "assistant", "content": f"Step {i+1} completed...\n"}, "done": False}) + "\n").encode()
+                
+            except Exception as e:
+                yield (json.dumps({"error": f"Chain error at step {i}: {str(e)}"}) + "\n").encode()
+                return
+
+        # Stream final result
+        yield (json.dumps({"model": chain_name, "message": {"role": "assistant", "content": final_content}, "done": True}) + "\n").encode()
+
+    return StreamingResponse(chain_generator(), media_type="application/x-ndjson")
 
 async def _handle_bundle_request(db: AsyncSession, request: Request, bundle_name: str, body: Dict[str, Any], api_key: APIKey, request_id: str):
     """Orchestrates parallel model execution and synthesis (Ensemble)."""
@@ -1633,7 +1772,8 @@ async def _handle_bundle_request(db: AsyncSession, request: Request, bundle_name
             master_body["stream"] = body.get("stream", True)
 
             if "prompt" in master_body: 
-                master_body["prompt"] = synthesis_prompt
+                # Prepend/append to existing prompt to preserve conditioning
+                master_body["prompt"] = f"{master_body['prompt']}\n\n{synthesis_prompt}"
             else: 
                 # Append synthesis_prompt to existing messages to preserve context
                 current_messages = body.get("messages", []).copy()
@@ -1862,12 +2002,16 @@ async def proxy_ollama(
             event_manager.emit(ProxyEvent("error", req_id, model_name, "none", api_key.user.username, error_message="Pool empty"))
             raise HTTPException(status_code=503, detail=f"Model Pool '{model_name}' has no available models.")
 
-    # Detect Bundle
-    from app.database.models import EnsembleOrchestrator
+    # Detect Bundle (Ensemble) or Chain (Swarm)
+    from app.database.models import EnsembleOrchestrator, ChainOrchestrator
+    
     bundle_check = await db.execute(select(EnsembleOrchestrator).filter(EnsembleOrchestrator.name == model_name))
     if bundle_check.scalars().first():
-        # Pass the req_id to the handler so it can update the existing particle
         return await _handle_bundle_request(db, request, model_name, body, api_key, req_id)
+
+    chain_check = await db.execute(select(ChainOrchestrator).filter(ChainOrchestrator.name == model_name))
+    if chain_check.scalars().first():
+        return await _handle_chain_request(db, request, model_name, body, api_key, req_id)
 
     logger.info(f"proxy_ollama: Received {len(servers)} server(s) from get_active_servers dependency: {[s.name for s in servers]}")
     

@@ -179,9 +179,9 @@ async def lifespan(app: FastAPI):
 
         app.state.redis = redis.from_url(redis_url, encoding="utf-8", decode_responses=True)
         await app.state.redis.ping()
-        logger.info("Successfully connected to Redis.")
+        logger.info("Redis connected: Advanced rate limiting enabled.")
     except Exception as exc:
-        logger.warning(f"Redis not available – rate limiting disabled. Reason: {exc}")
+        logger.info(f"Redis not detected. System is running in Essential Mode (Rate limiting disabled).")
         app.state.redis = None
 
     import asyncio

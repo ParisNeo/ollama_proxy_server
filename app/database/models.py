@@ -131,6 +131,15 @@ class EnsembleOrchestrator(Base):
     __tablename__ = "model_bundles" # Keep table name for data stability
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, unique=True, index=True, nullable=False)
+
+class ChainOrchestrator(Base):
+    __tablename__ = "model_chains"
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, unique=True, index=True, nullable=False)
+    description = Column(String, nullable=True)
+    steps = Column(JSON, nullable=False) # List of model names: ["vision-model", "text-model"]
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
     description = Column(String, nullable=True)
     parallel_participants = Column(JSON, nullable=False) # Names of models or agents
     # Legacy support: matching the physical NOT NULL constraint in older DBs
@@ -173,6 +182,12 @@ class SmartRouter(Base): # Keep table name for data stability
             kwargs['models'] = kwargs['targets']
         super().__init__(**kwargs)
 
+class LogAnalysis(Base):
+    __tablename__ = "log_analyses"
+    id = Column(Integer, primary_key=True, index=True)
+    timestamp = Column(DateTime, default=datetime.datetime.utcnow, index=True)
+    content = Column(String, nullable=False)
+    
 class VirtualAgent(Base):
     __tablename__ = "virtual_agents"
     id = Column(Integer, primary_key=True, index=True)
