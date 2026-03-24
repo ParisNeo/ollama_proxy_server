@@ -109,7 +109,10 @@ async def admin_playground_stream(
             return await _handle_bundle_request(db, request, model_name, data, dummy_key, req_id)
 
         # 4. Resolve Virtual Agents (Recursively)
-        resolved_name, updated_messages = await _resolve_target(db, model_name, messages)
+        # CRITICAL FIX: Deep copy messages before resolution to prevent mutation leakage
+        import copy
+        messages_copy = copy.deepcopy(messages)
+        resolved_name, updated_messages = await _resolve_target(db, model_name, messages_copy)
         model_name = resolved_name
         messages = updated_messages
         data["model"] = model_name

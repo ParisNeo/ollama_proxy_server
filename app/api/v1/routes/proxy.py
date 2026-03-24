@@ -1132,12 +1132,25 @@ async def _resolve_target(db: AsyncSession, name: str, messages: List[Dict[str, 
     agent = agent_res.scalars().first()
     if agent:
         logger.info(f"Hydrating Agent '{name}' -> Base: {agent.base_model}")
-        
+
         # Soul Injection: Prepend system prompt
-        updated_messages = [{"role": "system", "content": agent.system_prompt}] + messages
-        
+        # CRITICAL FIX: Create deep copy of messages to avoid modifying the original
+        import copy
+        updated_messages = [{"role": "system", "content": agent.system_prompt}]
+
+        # Deep copy user messages to prevent reference sharing
+        for msg in messages:
+            if isinstance(msg, dict):
+                msg_copy = copy.deepcopy(msg)
+                # Ensure images from previous processing don't leak
+                if "images" in msg_copy and msg_copy.get("role") != "user":
+                    del msg_copy["images"]
+                updated_messages.append(msg_copy)
+            else:
+                updated_messages.append(msg)
+
         # Note: RAG/MCP injection point
-        
+
         return await _resolve_target(db, agent.base_model, updated_messages, depth + 1)
 
     # 2. Resolve Smart Router (formerly Pool)
@@ -1190,10 +1203,15 @@ async def _call_classifier(request: Request, db: AsyncSession, classifier_model:
 async def _select_from_pool(db: AsyncSession, pool_name: str, body: Dict[str, Any], request: Request, sender: str = "anon") -> Optional[str]:
     """Selects a model using Multi-Tiered Hierarchical Rules (Fast + LLM)."""
     from app.database.models import SmartRouter
+    import copy
+    
     res = await db.execute(select(SmartRouter).filter(SmartRouter.name == pool_name))
     pool = res.scalars().first()
     if not pool or not pool.targets:
         return None
+
+    # CRITICAL FIX: Work on a deep copy to prevent polluting the original body
+    body = copy.deepcopy(body)
 
     # 1. Extract context features (Fast)
     prompt_text = body.get("prompt") or ""
@@ -1214,8 +1232,6 @@ async def _select_from_pool(db: AsyncSession, pool_name: str, body: Dict[str, An
                     if not isinstance(part, dict): continue
                     if part.get("type") == "image_url":
                         has_images_in_msgs = True
-                    if part.get("type") == "text" and not prompt_text:
-                        prompt_text = part.get("text", "")
             elif not prompt_text:
                 prompt_text = content
 
