@@ -56,7 +56,7 @@ async def openai_chat(request: Request, db: AsyncSession = Depends(get_db), api_
     body = await request.json()
     model_name = body.get("model")
     
-    # OpenAI -> Ollama Format Translation
+    # 1. Translate OpenAI format to our internal "Hub/Ollama" format
     hub_payload = {
         "model": model_name,
         "messages": body.get("messages"),
@@ -72,8 +72,7 @@ async def openai_chat(request: Request, db: AsyncSession = Depends(get_db), api_
     }
 
     try:
-        # Re-inject translated payload into main orchestration logic
-        # We simulate the call to proxy_ollama
+        # 2. Re-route through the main orchestration logic
         response = await proxy_ollama(
             request=request,
             path="chat",
@@ -83,7 +82,7 @@ async def openai_chat(request: Request, db: AsyncSession = Depends(get_db), api_
             servers=await get_active_servers(db)
         )
 
-        # Response Translation: Ollama -> OpenAI
+        # 3. Translate Hub (Ollama) Response back to OpenAI format
         if isinstance(response, StreamingResponse):
             async def openai_stream_wrapper():
                 req_id = f"chatcmpl-{secrets.token_hex(12)}"
