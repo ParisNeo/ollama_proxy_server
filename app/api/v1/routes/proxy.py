@@ -140,6 +140,16 @@ async def _send_backend_request(
         # send() uses the client's default timeout settings.
         backend_response = await http_client.send(backend_request, stream=True)
 
+        # 503 (Service Unavailable) usually means Ollama is overloaded/queue is full.
+        # 429 (Too Many Requests) is returned by some OpenAI-compatible backends.
+        if backend_response.status_code in (429, 503):
+            await backend_response.aclose()
+            raise httpx.HTTPStatusError(
+                f"Backend Busy ({backend_response.status_code})",
+                request=backend_request,
+                response=backend_response
+            )
+
         if backend_response.status_code >= 500:
             await backend_response.aclose()
             raise Exception(
@@ -449,9 +459,25 @@ async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer
                     logger.error(f"Failed to process backend response: {e}")
                     raise
             
-        except Exception as first_error:
-            _update_health_cache(chosen_server.id, False)
-            logger.debug(f"Direct attempt failed for '{chosen_server.name}', using retry logic: {first_error}")
+        except (Exception, httpx.HTTPStatusError) as first_error:
+            is_busy = hasattr(first_error, 'response') and first_error.response.status_code in (429, 503)
+            
+            if is_busy:
+                # PATIENT LOGIC: If busy, emit a 'queued' event to the UI
+                if request_id:
+                    event_manager.emit(ProxyEvent(
+                        event_type="received", 
+                        request_id=request_id, 
+                        model=model, 
+                        server=chosen_server.name,
+                        error_message="Server Busy - Waiting for slot..."
+                    ))
+                # Add a small physical delay before retrying the same busy server
+                await asyncio.sleep(2)
+            else:
+                _update_health_cache(chosen_server.id, False)
+            
+            logger.warning(f"Attempt failed for '{chosen_server.name}' (Busy: {is_busy}). Error: {first_error}")
             
             retry_result = await retry_with_backoff(
                 _send_backend_request,
@@ -1947,6 +1973,9 @@ async def proxy_ollama(
 
     # Logic to handle 'think' parameter and auto-activation for reasoning models
     if model_name and isinstance(body, dict):
+        # Pass tools through
+        if "tools" in body:
+            logger.info(f"Forwarding {len(body['tools'])} tools to backend.")
         model_name_lower = model_name.lower()
         
         # Load capability data (simplified for this edit)
@@ -1956,18 +1985,20 @@ async def proxy_ollama(
             # Auto-activate thinking for known reasoning models if not specified
             body["think"] = True
 
-        model_name_lower = model_name.lower()
-        supported_think_models = ["qwen", "gpt-oss", "deepseek"]
+        # Fetch metadata to check if 'think' parameter is supported
+        meta = await model_metadata_crud.get_metadata_by_model_name(db, model_name)
         
-        is_supported = any(keyword in model_name_lower for keyword in supported_think_models)
+        # Fallback to string check only if meta doesn't exist
+        is_supported = meta.supports_thinking if meta else any(kw in model_name.lower() for kw in ["qwen", "gpt-oss", "deepseek", "r1"])
 
         if is_supported:
-            if "gpt-oss" in model_name_lower and body.get("think") is True:
+            # Special case for gpt-oss which uses strings instead of booleans
+            if "gpt-oss" in model_name.lower() and body.get("think") is True:
                 logger.info(f"Translating 'think: true' to 'think: \"medium\"' for GPT-OSS model '{model_name}'")
                 body["think"] = "medium"
                 body_bytes = json.dumps(body).encode('utf-8')
-        else:
-            logger.warning(f"Model '{model_name}' is not in the known list for 'think' support. Removing 'think' parameter.")
+        elif "think" in body:
+            logger.warning(f"Model '{model_name}' is not configured for 'think' support in Models Manager. Removing parameter.")
             del body["think"]
             body_bytes = json.dumps(body).encode('utf-8')
             

@@ -104,6 +104,7 @@
                 <ul class="list-disc list-inside space-y-3 pl-4">
                     <li><strong>Adding Servers:</strong> You can add both standard <code class="inline-code">Ollama</code> servers and <code class="inline-code">vLLM</code> (or any OpenAI-compatible) servers. The proxy handles the translation automatically. You can also add an optional API key if your backend server requires one.</li>
                     <li><strong>Refreshing Models:</strong> Clicking "Refresh" fetches the latest list of available models from a server and stores it in the proxy's database. This is crucial for the "Smart Model Routing" feature. Model lists are also refreshed automatically in the background.</li>
+                    <li><strong>Model Whitelisting:</strong> In the "Edit Server" page, you can select specific models from the server's catalog. If you set a whitelist, the proxy will <b>only</b> route requests to that server if the requested model is on the allowed list. This is useful for pinning specific hardware to specific tasks.</li>
                     <li><strong>Managing Models:</strong> Clicking "Manage Models" takes you to a detailed view for that server. For Ollama servers, you can pull new models, update existing ones, delete models from disk, and trigger a model to be loaded into or unloaded from memory. These actions are not applicable to vLLM servers.</li>
                 </ul>
             </div>
@@ -226,6 +227,32 @@
                         <li><strong>Logic:</strong> If a prompt looks like code, it goes to a "Code" model. If it contains images, it goes to an "Image" model.</li>
                     </ul>
                 </div>
+
+                <div class="mt-8 pt-6 border-t border-white/5">
+                    <h3 class="text-xl font-semibold mb-4">Configuring Model Capabilities</h3>
+                    <p>In the <a href="{{ url_for('admin_models_manager') }}" class="font-semibold underline">Models Manager</a>, you define the "DNA" of your models. These settings are critical for correct request handling:</p>
+                    
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+                        <div class="p-4 bg-white/5 rounded-lg border border-white/10">
+                            <h4 class="font-bold text-indigo-400 mb-2">👁️ Image Compatibility</h4>
+                            <p class="text-sm text-gray-400">Enable this for <b>Vision Models</b> (LLaVA, Moondream, etc.). When a request arrives with image data, the proxy filters out any model that does <i>not</i> have this checked to prevent backend crashes.</p>
+                        </div>
+                        <div class="p-4 bg-white/5 rounded-lg border border-white/10">
+                            <h4 class="font-bold text-amber-400 mb-2">🧠 Think (CoT) Mode</h4>
+                            <p class="text-sm text-gray-400">Some models support a <code class="inline-code">think: true</code> parameter to show internal reasoning. 
+                            <br><br>• If <b>unchecked</b>: The proxy strips the "think" parameter before forwarding to protect incompatible models.
+                            <br>• If <b>checked</b>: The parameter is preserved. For <b>gpt-oss</b> models, the proxy automatically translates <code class="inline-code">true</code> to <code class="inline-code">"medium"</code> for compatibility.</p>
+                        </div>
+                        <div class="p-4 bg-white/5 rounded-lg border border-white/10">
+                            <h4 class="font-bold text-emerald-400 mb-2">📏 Max Context Window</h4>
+                            <p class="text-sm text-gray-400">The proxy attempts to <b>auto-detect</b> this from Ollama/Llama.cpp servers. You can manually lower this value to force the <code class="inline-code">auto</code> router to pick a larger model when the user's prompt history grows too long.</p>
+                        </div>
+                        <div class="p-4 bg-white/5 rounded-lg border border-white/10">
+                            <h4 class="font-bold text-purple-400 mb-2">🔢 Priority</h4>
+                            <p class="text-sm text-gray-400">Lower numbers = Higher priority. If multiple models match the user's intent (e.g., two "Code" models), the one with the lowest priority value is chosen first.</p>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
         
@@ -265,6 +292,15 @@
                  <div>
                     <h3 class="text-xl font-semibold mb-2">IP Filtering</h3>
                     <p>In the <a href="{{ url_for('admin_settings') }}" class="font-semibold underline">Settings</a> page, you can specify comma-separated lists of IP addresses or ranges (e.g., <code class="inline-code">192.168.1.0/24</code>) for the "Allowed IPs" and "Denied IPs" fields to control access to the proxy.</p>
+                </div>
+                 <div>
+                    <h3 class="text-xl font-semibold mb-2">Dual-Protocol Gateway</h3>
+                    <p>The Fortress can act as both an <b>Ollama</b> and an <b>OpenAI</b> server. This allows you to use your Hub with any software that expects either API style.</p>
+                    <ul class="list-disc list-inside space-y-2 mt-2 pl-4">
+                        <li><b>Port Separation:</b> You can run the OpenAI API on a different port (default 8081) for specialized routing or firewall rules.</li>
+                        <li><b>Automatic Translation:</b> The Hub handles the heavy lifting of translating OpenAI's JSON schema to your backend models automatically.</li>
+                        <li><b>Agent Support (Tool Calling):</b> Full support for function calling. You can now use the Hub with <b>CrewAI</b>, <b>LangChain</b>, or <b>AutoGen</b> using either the OpenAI or Ollama protocols.</li>
+                    </ul>
                 </div>
                  <div>
                     <h3 class="text-xl font-semibold mb-2">Rate Limiting & Brute-Force Protection</h3>

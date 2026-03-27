@@ -224,9 +224,36 @@
             </div>
         </div>
 
+        <!-- Gateway Protocol Settings -->
+        <div>
+            <h2 class="card-header text-xl font-bold mb-4 pb-2">Gateway Protocols</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6 bg-white/5 p-4 rounded-lg">
+                <div class="space-y-4">
+                    <label class="flex items-center gap-3 cursor-pointer">
+                        <input type="checkbox" name="enable_ollama_api" value="true" class="h-5 w-5 rounded text-indigo-600" {% if settings.enable_ollama_api %}checked{% endif %}>
+                        <div>
+                            <span class="block font-bold">Enable Ollama API</span>
+                            <span class="text-xs text-gray-500">Exposes /api/chat, /api/generate (Port {{ settings.PROXY_PORT }})</span>
+                        </div>
+                    </label>
+                    <label class="flex items-center gap-3 cursor-pointer">
+                        <input type="checkbox" name="enable_openai_api" value="true" class="h-5 w-5 rounded text-indigo-600" {% if settings.enable_openai_api %}checked{% endif %}>
+                        <div>
+                            <span class="block font-bold">Enable OpenAI API</span>
+                            <span class="text-xs text-gray-500">Exposes /v1/chat/completions</span>
+                        </div>
+                    </label>
+                </div>
+                <div>
+                    <label for="openai_port" class="block text-sm font-medium">OpenAI Dedicated Port</label>
+                    <input type="number" name="openai_port" id="openai_port" value="{{ settings.openai_port }}" class="mt-1 block w-32 px-3 py-2 rounded-md">
+                    <p class="mt-2 text-[10px] text-gray-500 italic">If set to the same as the Proxy Port ({{ settings.PROXY_PORT }}), both APIs will share the same listener.</p>
+                </div>
+            </div>
+        </div>
+
         <!-- Endpoint Security -->
         <div>
-            <h2 class="card-header text-xl font-bold mb-4 pb-2">Endpoint Security</h2>
             <div>
                 <label for="blocked_ollama_endpoints" class="block text-sm font-medium text-current">Blocked Ollama Endpoints</label>
                 <textarea name="blocked_ollama_endpoints" id="blocked_ollama_endpoints" rows="3" class="mt-1 block w-full px-3 py-2 rounded-md shadow-sm focus:outline-none focus:ring-[var(--color-primary-500)] focus:border-[var(--color-primary-500)]" placeholder="e.g., pull, delete, create">{{ settings.blocked_ollama_endpoints }}</textarea>

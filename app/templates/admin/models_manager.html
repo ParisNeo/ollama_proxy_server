@@ -12,9 +12,32 @@
             The Models Manager allows you to configure rules for a virtual model named <code class="inline-code">auto</code>.
             When a user makes a request to the model "auto", the proxy will analyze their prompt and intelligently route it to the best-suited model based on the capabilities and priorities you define below.
         </p>
-        <p class="mt-2 text-sm text-gray-400">
-            For example, if a prompt contains an image, it will only be routed to models you've marked as "Supports Images". Among the eligible models, the one with the lowest priority number will be chosen first.
-        </p>
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mt-6">
+            <div class="p-3 bg-white/5 rounded border border-white/10">
+                <span class="block text-indigo-400 font-bold text-xs uppercase mb-1">👁️ Supports Images</span>
+                <p class="text-[11px] text-gray-400 leading-relaxed">Required for vision tasks. If a user attaches an image, the 'auto' router filters for these models only.</p>
+            </div>
+            <div class="p-3 bg-white/5 rounded border border-white/10">
+                <span class="block text-amber-400 font-bold text-xs uppercase mb-1">🧠 Think (CoT)</span>
+                <p class="text-[11px] text-gray-400 leading-relaxed">Enable for models supporting internal reasoning (DeepSeek R1, etc). Prevents 'think' parameter stripping.</p>
+            </div>
+            <div class="p-3 bg-white/5 rounded border border-white/10">
+                <span class="block text-emerald-400 font-bold text-xs uppercase mb-1">💻 Code</span>
+                <p class="text-[11px] text-gray-400 leading-relaxed">Tagged as programming experts. Used when the router detects code keywords (e.g. 'def', 'class', 'import').</p>
+            </div>
+            <div class="p-3 bg-white/5 rounded border border-white/10">
+                <span class="block text-sky-400 font-bold text-xs uppercase mb-1">⚡ Fast</span>
+                <p class="text-[11px] text-gray-400 leading-relaxed">Small, optimized models. Used when 'fast_model' option is set in the request for low-latency tasks.</p>
+            </div>
+            <div class="p-3 bg-white/5 rounded border border-white/10">
+                <span class="block text-purple-400 font-bold text-xs uppercase mb-1">🧩 Reasoning</span>
+                <p class="text-[11px] text-gray-400 leading-relaxed">Complex logic models. Triggered by keywords like 'solve', 'math', 'why', or 'step by step'.</p>
+            </div>
+            <div class="p-3 bg-white/5 rounded border border-white/10">
+                <span class="block text-rose-400 font-bold text-xs uppercase mb-1">📏 Max Context</span>
+                <p class="text-[11px] text-gray-400 leading-relaxed">Token limit. The router checks if the current chat history fits before selecting the model.</p>
+            </div>
+        </div>
     </div>
 
     <form action="{{ url_for('admin_update_model_metadata') }}" method="post" class="card-style">
@@ -33,6 +56,14 @@
                                 <button type="button" onclick="toggleColumn('supports_images_', true)" class="text-indigo-400 hover:text-white uppercase">All</button>
                                 <span class="text-gray-600">|</span>
                                 <button type="button" onclick="toggleColumn('supports_images_', false)" class="text-gray-500 hover:text-white uppercase">None</button>
+                            </div>
+                        </th>
+                        <th class="px-4 py-3 text-center text-xs font-medium text-gray-400 uppercase tracking-wider">
+                            <div class="mb-1">Think (CoT)</div>
+                            <div class="flex justify-center gap-2 text-[9px] font-bold">
+                                <button type="button" onclick="toggleColumn('supports_thinking_', true)" class="text-indigo-400 hover:text-white uppercase">All</button>
+                                <span class="text-gray-600">|</span>
+                                <button type="button" onclick="toggleColumn('supports_thinking_', false)" class="text-gray-500 hover:text-white uppercase">None</button>
                             </div>
                         </th>
                         <th class="px-4 py-3 text-center text-xs font-medium text-gray-400 uppercase tracking-wider">
@@ -74,6 +105,9 @@
                             <input type="checkbox" name="supports_images_{{ meta.id }}" value="true" class="h-5 w-5 rounded text-[var(--color-primary-600)]" {% if meta.supports_images %}checked{% endif %}>
                         </td>
                         <td class="px-4 py-4 whitespace-nowrap text-center">
+                            <input type="checkbox" name="supports_thinking_{{ meta.id }}" value="true" class="h-5 w-5 rounded text-[var(--color-primary-600)]" {% if meta.supports_thinking %}checked{% endif %}>
+                        </td>
+                        <td class="px-4 py-4 whitespace-nowrap text-center">
                             <input type="checkbox" name="is_code_model_{{ meta.id }}" value="true" class="h-5 w-5 rounded text-[var(--color-primary-600)]" {% if meta.is_code_model %}checked{% endif %}>
                         </td>
                         <td class="px-4 py-4 whitespace-nowrap text-center">
@@ -83,7 +117,12 @@
                             <input type="checkbox" name="is_reasoning_model_{{ meta.id }}" value="true" class="h-5 w-5 rounded text-[var(--color-primary-600)]" {% if meta.is_reasoning_model %}checked{% endif %}>
                         </td>
                         <td class="px-4 py-4 whitespace-nowrap text-center">
-                             <input type="number" name="max_context_{{ meta.id }}" value="{{ meta.max_context }}" step="1024" class="w-24 px-2 py-1 rounded-md shadow-sm sm:text-sm text-center">
+                             <div class="flex items-center justify-center gap-1">
+                                <input type="number" id="ctx_input_{{ meta.id }}" name="max_context_{{ meta.id }}" value="{{ meta.max_context }}" step="1024" class="w-24 px-2 py-1 rounded-md shadow-sm sm:text-sm text-center">
+                                <button type="button" onclick="refreshContext('{{ meta.model_name }}', 'ctx_input_{{ meta.id }}')" class="p-1.5 hover:bg-white/10 rounded-md text-gray-500 hover:text-indigo-400 transition-colors" title="Sync from server">
+                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+                                </button>
+                             </div>
                         </td>
                         <td class="px-4 py-4 whitespace-nowrap text-center">
                              <input type="number" name="priority_{{ meta.id }}" value="{{ meta.priority }}" class="w-16 px-2 py-1 rounded-md shadow-sm sm:text-sm text-center">
@@ -109,6 +148,34 @@
 </div>
 
 <script>
+    /**
+     * Calls the backend to fetch current context length for a model.
+     */
+    async function refreshContext(modelName, inputId) {
+        const input = document.getElementById(inputId);
+        const btn = input.nextElementSibling;
+        
+        // Visual feedback
+        btn.classList.add('animate-spin', 'text-indigo-400');
+        
+        try {
+            const response = await fetch(`{{ url_for('admin_refresh_model_context') }}?model_name=${encodeURIComponent(modelName)}`);
+            const data = await response.json();
+            
+            if (data.success && data.context_length) {
+                input.value = data.context_length;
+                input.classList.add('ring-2', 'ring-green-500');
+                setTimeout(() => input.classList.remove('ring-2', 'ring-green-500'), 2000);
+            } else {
+                alert("Error: " + (data.error || "Failed to retrieve context."));
+            }
+        } catch (e) {
+            alert("Connection error: " + e.message);
+        } finally {
+            btn.classList.remove('animate-spin', 'text-indigo-400');
+        }
+    }
+
     /**
      * Toggles all checkboxes in a column based on the name prefix.
      * @param {string} prefix - The start of the input name (e.g. 'is_fast_model_')

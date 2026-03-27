@@ -7,6 +7,19 @@
 #sidebar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 4px; }
 #sidebar.collapsed { width: 0; min-width: 0; padding: 0; overflow: hidden; }
 #sidebar-open-btn { display: none; }
+
+/* Sidebar Group Headers */
+.sidebar-group-label {
+    padding: 1.25rem 1rem 0.5rem 1rem;
+    font-size: 10px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: rgba(255, 255, 255, 0.3);
+}
+.ui-light-glass .sidebar-group-label, .ui-light-flat .sidebar-group-label, .ui-white .sidebar-group-label {
+    color: rgba(0, 0, 0, 0.4);
+}
 body.sidebar-collapsed #sidebar-open-btn { display: block; }
 
 /* --- UI Style Engine --- */

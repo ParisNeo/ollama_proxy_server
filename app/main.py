@@ -39,6 +39,7 @@ from app.api.v1.routes.proxy import router as proxy_router
 from app.api.v1.routes.admin import router as admin_router
 from app.api.v1.routes.playground_chat import router as playground_chat_router
 from app.api.v1.routes.playground_embedding import router as playground_embedding_router
+from app.api.v1.routes.openai_proxy import router as openai_router
 from app.database.session import AsyncSessionLocal, engine
 from app.database.base import Base
 from app.database.migrations import run_all_migrations
@@ -160,11 +161,16 @@ async def lifespan(app: FastAPI):
 
     await create_initial_admin_user()
 
-    # Configure HTTP client (timeouts are now hardcoded for simplicity)
-    # TTFT MITIGATION: Lower connect timeout globally to avoid stalling on slow/dead servers
-    timeout = httpx.Timeout(read=600.0, write=600.0, connect=3.0, pool=60.0)
-    # INCREASED LIMITS: Ensembles multiply the number of connections needed.
-    limits = httpx.Limits(max_keepalive_connections=100, max_connections=500, keepalive_expiry=60.0)
+    # Patient HTTP client: Connect fast, but read/write can take forever
+    # None for read/write means we wait infinitely for the model to finish.
+    timeout = httpx.Timeout(read=None, write=None, connect=5.0, pool=60.0)
+    # AGGRESSIVE LIMITS: Support high-frequency loops and agentic tool-calling.
+    # We increase max_connections and decrease keepalive_expiry to prevent stale socket accumulation.
+    limits = httpx.Limits(
+        max_keepalive_connections=200, 
+        max_connections=1000, 
+        keepalive_expiry=10.0 # Faster rotation for high-frequency loops
+    )
     app.state.http_client = httpx.AsyncClient(timeout=timeout, limits=limits)
 
     try:
@@ -240,8 +246,24 @@ async def add_security_headers(request: Request, call_next):
     return response
 
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
+
+# Standard Routes
 app.include_router(health_router, prefix="/api/v1", tags=["Health"])
-app.include_router(proxy_router, prefix="/api", tags=["LoLLMs Hub"])
+
+# Conditional API Mounting
+@app.on_event("startup")
+async def mount_apis():
+    # settings are loaded from DB in lifespan, so state.settings is available here
+    if hasattr(app.state, 'settings'):
+        if app.state.settings.enable_ollama_api:
+            logger.info("Mounting Ollama-compatible API at /api")
+            app.include_router(proxy_router, prefix="/api", tags=["Ollama Protocol"])
+        if app.state.settings.enable_openai_api:
+            logger.info("Mounting OpenAI-compatible API at /v1")
+            app.include_router(openai_router, prefix="/v1", tags=["OpenAI Protocol"])
+    else:
+        # Fallback to defaults if settings object failed to load
+        app.include_router(proxy_router, prefix="/api", tags=["Ollama Protocol"])
 app.include_router(admin_router, prefix="/admin", tags=["Admin UI"], include_in_schema=False)
 app.include_router(playground_chat_router, prefix="/admin", tags=["Admin UI"], include_in_schema=False)
 app.include_router(playground_embedding_router, prefix="/admin", tags=["Admin UI"], include_in_schema=False)
@@ -307,24 +329,35 @@ if __name__ == "__main__":
             print("Note: Log messages from 'uvicorn.error' are for general server events and do not necessarily indicate an error.\n")
 
 
-        # Correct way to run uvicorn programmatically
-        config = uvicorn.Config(
-            "app.main:app",
-            host="0.0.0.0",
-            port=port,
-            ssl_keyfile=ssl_keyfile,
-            ssl_certfile=ssl_certfile,
-            log_config=None, # Let our custom logging handle it
-        )
-        server = uvicorn.Server(config)
-        
-        # A bit of a workaround to print banner after Uvicorn's own startup messages
-        original_startup = server.startup
+        # Determine port separation
+        app_settings = None
+        async with AsyncSessionLocal() as db:
+            db_settings_obj = await settings_crud.get_app_settings(db)
+            if db_settings_obj:
+                app_settings = AppSettingsModel.model_validate(db_settings_obj.settings_data)
+
+        configs = []
+        # Primary Port (Dashboard + Configured APIs)
+        configs.append(uvicorn.Config("app.main:app", host="0.0.0.0", port=port, 
+                                     ssl_keyfile=ssl_keyfile, ssl_certfile=ssl_certfile, log_config=None))
+
+        # Secondary OpenAI Port (If different and enabled)
+        if app_settings and app_settings.enable_openai_api and app_settings.openai_port != port:
+            logger.info(f"Exposing dedicated OpenAI-compatible listener on port {app_settings.openai_port}")
+            configs.append(uvicorn.Config("app.main:app", host="0.0.0.0", port=app_settings.openai_port, 
+                                         ssl_keyfile=ssl_keyfile, ssl_certfile=ssl_certfile, log_config=None))
+
+        servers = [uvicorn.Server(cfg) for cfg in configs]
+
+        # Patch first server for banner
+        original_startup = servers[0].startup
         async def new_startup(*args, **kwargs):
             await original_startup(*args, **kwargs)
             after_start()
-        server.startup = new_startup
+            if app_settings and app_settings.enable_openai_api:
+                print(f"✅ OpenAI API:  {protocol}://localhost:{app_settings.openai_port}/v1")
+        servers[0].startup = new_startup
 
-        await server.serve()
+        await asyncio.gather(*[s.serve() for s in servers])
 
     asyncio.run(run_server())

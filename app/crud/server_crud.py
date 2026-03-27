@@ -105,6 +105,9 @@ async def update_server(db: AsyncSession, server_id: int, server_update: ServerU
         return None
 
     update_data = server_update.model_dump(exclude_unset=True)
+
+    if "allowed_models" in update_data:
+        db_server.allowed_models = update_data.pop("allowed_models")
     
     # If api_key is provided, update it. If not, don't touch existing encrypted_api_key.
     # We check if api_key is present in update_data, and if it's not None (the empty string check handles clear)
@@ -429,13 +432,12 @@ async def unload_model_on_server(http_client: httpx.AsyncClient, server: OllamaS
 
 async def get_servers_with_model(db: AsyncSession, model_name: str) -> list[OllamaServer]:
     """
-    Get all active servers that have the specified model available, using flexible matching.
+    Get all active servers that have the specified model available, 
+    respecting the admin whitelist (allowed_models).
     """
-    # Validate model name
     if not model_name or len(model_name) > 256:
         return []
         
-    # Sanitize model name for safety
     model_name = re.sub(r'[^\w\.\-:@]', '', model_name)[:256]
 
     servers = await get_servers(db)
@@ -443,28 +445,31 @@ async def get_servers_with_model(db: AsyncSession, model_name: str) -> list[Olla
 
     servers_with_model = []
     for server in active_servers:
+        # 1. Check Whitelist First
+        if server.allowed_models:
+            # Match against whitelist (Exact or Prefix for Ollama tags)
+            is_ollama = server.server_type == 'ollama'
+            whitelisted = any(
+                m == model_name or (is_ollama and m.startswith(f"{model_name}:"))
+                for m in server.allowed_models
+            )
+            if not whitelisted:
+                continue
+
+        # 2. Verify Physical Availability
         if server.available_models:
-            # Validate available_models is a list
             models_list = server.available_models
             if isinstance(models_list, str):
-                try:
-                    models_list = json.loads(models_list)
-                except json.JSONDecodeError:
-                    continue
+                try: models_list = json.loads(models_list)
+                except json.JSONDecodeError: continue
             
-            if not isinstance(models_list, list):
-                continue
+            if not isinstance(models_list, list): continue
                 
             for model_data in models_list:
                 if isinstance(model_data, dict) and "name" in model_data:
                     available_model_name = model_data["name"]
-                    if not isinstance(available_model_name, str):
-                        continue
+                    if not isinstance(available_model_name, str): continue
                         
-                    # Matching logic:
-                    # 1. Exact match for Ollama (e.g., "llama3:8b" == "llama3:8b")
-                    # 2. Prefix match for Ollama (e.g., "llama3" matches "llama3:8b")
-                    # 3. Substring match ONLY for vLLM (e.g., "Llama-2-7b" matches "models--meta-llama--Llama-2-7b-chat-hf")
                     is_ollama = server.server_type == 'ollama'
                     is_match = (
                         available_model_name == model_name or
@@ -474,7 +479,7 @@ async def get_servers_with_model(db: AsyncSession, model_name: str) -> list[Olla
                     
                     if is_match:
                         servers_with_model.append(server)
-                        break  # Found on this server, move to the next
+                        break
     return servers_with_model
 
 
@@ -786,3 +791,31 @@ async def check_all_servers_health(db: AsyncSession, http_client: httpx.AsyncCli
     tasks = [check_server_health(http_client, server) for server in servers]
     results = await asyncio.gather(*tasks)
     return results
+
+
+async def get_model_details_from_server(http_client: httpx.AsyncClient, server: OllamaServer, model_name: str) -> Dict[str, Any]:
+    """
+    Queries a server for specific model metadata (context window, etc).
+    """
+    headers = _get_auth_headers(server)
+    try:
+        if server.server_type == 'ollama':
+            url = f"{server.url.rstrip('/')}/api/show"
+            resp = await http_client.post(url, json={"name": model_name}, timeout=10.0, headers=headers)
+            if resp.status_code == 200:
+                data = resp.json()
+                # Newer Ollama versions provide context_length in details
+                ctx = data.get("model_info", {}).get("llama.context_length") or \
+                      data.get("model_info", {}).get("phi3.context_length") or \
+                      data.get("details", {}).get("context_length")
+                
+                return {
+                    "context_length": int(ctx) if ctx else None,
+                    "families": data.get("details", {}).get("families", [])
+                }
+        # vLLM/OpenAI doesn't have a standard 'show' endpoint for context, 
+        # but we might infer from model name or return None to fallback
+        return {"context_length": None}
+    except Exception as e:
+        logger.debug(f"Could not fetch model details for {model_name} on {server.name}: {e}")
+        return {"context_length": None}

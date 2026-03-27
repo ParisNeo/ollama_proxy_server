@@ -526,6 +526,7 @@ async def run_all_migrations(engine: AsyncEngine) -> None:
         table_schemas = {
             "ollama_servers": {
                 "available_models": "JSON",
+                "allowed_models": "JSON",
                 "models_last_updated": "DATETIME",
                 "last_error": "VARCHAR",
                 "server_type": "VARCHAR DEFAULT 'ollama' NOT NULL",
@@ -562,9 +563,15 @@ async def run_all_migrations(engine: AsyncEngine) -> None:
             },
             "model_metadata": {
                 "model_name": "VARCHAR NOT NULL",
-                "supports_images": "BOOLEAN NOT NULL DEFAULT 0",
-                "is_reasoning_model": "BOOLEAN NOT NULL DEFAULT 0",
-                "priority": "INTEGER NOT NULL DEFAULT 10",
+                "description": "VARCHAR",
+                "supports_images": "BOOLEAN DEFAULT 0 NOT NULL",
+                "supports_thinking": "BOOLEAN DEFAULT 0 NOT NULL",
+                "is_code_model": "BOOLEAN DEFAULT 0 NOT NULL",
+                "is_chat_model": "BOOLEAN DEFAULT 1 NOT NULL",
+                "is_fast_model": "BOOLEAN DEFAULT 0 NOT NULL",
+                "is_reasoning_model": "BOOLEAN DEFAULT 0 NOT NULL",
+                "max_context": "INTEGER DEFAULT 4096 NOT NULL",
+                "priority": "INTEGER DEFAULT 10 NOT NULL",
             },
             "managed_instances": {
                 "backend_type": "VARCHAR DEFAULT 'ollama'",

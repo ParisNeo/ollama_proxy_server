@@ -56,15 +56,15 @@ class AppSettingsModel(BaseModel):
 
     # Retry configuration for backend requests
     max_retries: int = Field(
-        default=3,
+        default=10, # Increased retries for busy queues
         ge=0,
-        le=20,
+        le=100,
         description="Maximum number of retry attempts when a backend server request fails"
     )
     retry_total_timeout_seconds: float = Field(
-        default=120.0, # Increased to allow for long LLM generations
+        default=600.0, # Wait up to 10 minutes total for a slot
         ge=0.1,
-        le=600.0,
+        le=3600.0,
         description="Total time budget (in seconds) for all retry attempts"
     )
     retry_base_delay_ms: int = Field(
@@ -79,6 +79,11 @@ class AppSettingsModel(BaseModel):
     ssl_certfile: Optional[str] = Field(default=None, description="Path to the SSL certificate file (e.g., cert.pem). Requires a restart.")
     ssl_keyfile_content: Optional[str] = Field(default=None, description="Content of the uploaded SSL key file.", exclude=True) # Exclude from API responses
     ssl_certfile_content: Optional[str] = Field(default=None, description="Content of the uploaded SSL cert file.", exclude=True) # Exclude from API responses
+
+    # --- GATEWAY SETTINGS ---
+    enable_ollama_api: bool = True
+    enable_openai_api: bool = True
+    openai_port: int = 8081 # Default secondary port
 
     # --- SECURITY ---
     blocked_ollama_endpoints: str = Field(

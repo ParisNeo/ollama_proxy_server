@@ -579,7 +579,8 @@ async def admin_edit_server_post(
     url: str = Form(...),
     server_type: str = Form(...),
     api_key: Optional[str] = Form(None),
-    remove_api_key: Optional[bool] = Form(False)
+    remove_api_key: Optional[bool] = Form(False),
+    allowed_models: List[str] = Form(default=None)
 ):
     # Validate server_id
     try:
@@ -609,7 +610,12 @@ async def admin_edit_server_post(
         flash(request, "Invalid server URL format", "error")
         return RedirectResponse(url=request.url_for("admin_edit_server_form", server_id=server_id), status_code=status.HTTP_303_SEE_OTHER)
 
-    update_data = {"name": name, "url": url, "server_type": server_type}
+    update_data = {
+        "name": name, 
+        "url": url, 
+        "server_type": server_type,
+        "allowed_models": allowed_models # This will be [] if nothing is selected
+    }
 
     if remove_api_key:
         update_data["api_key"] = ""
@@ -853,17 +859,59 @@ async def admin_models_manager_page(
     admin_user: User = Depends(require_admin_user)
 ):
     context = get_template_context(request)
+    http_client: httpx.AsyncClient = request.app.state.http_client
     
-    # Ensure metadata exists for all discovered models
+    # 1. Get all unique model names available across all servers
     all_model_names = await server_crud.get_all_available_model_names(db)
+    
+    # 2. Deep scan: Create metadata and try to fetch context window for defaults
     for model_name in all_model_names:
-        # Validate model name before processing
-        if model_name and len(model_name) <= 256 and re.match(r'^[\w\.\-:@]+$', model_name):
-            await model_metadata_crud.get_or_create_metadata(db, model_name=model_name)
+        if not model_name or len(model_name) > 256 or not re.match(r'^[\w\.\-:@]+$', model_name):
+            continue
+            
+        existing_meta = await model_metadata_crud.get_metadata_by_model_name(db, model_name)
+        
+        # If metadata is missing OR exists but has the default 4096 context, try to fetch real info
+        if not existing_meta or existing_meta.max_context == 4096:
+            servers = await server_crud.get_servers_with_model(db, model_name)
+            suggested_ctx = None
+            if servers:
+                # Try the first server that has this model
+                details = await server_crud.get_model_details_from_server(http_client, servers[0], model_name)
+                suggested_ctx = details.get("context_length")
+            
+            if not existing_meta:
+                await model_metadata_crud.get_or_create_metadata(db, model_name=model_name, suggested_ctx=suggested_ctx)
+            elif suggested_ctx and suggested_ctx != 4096:
+                # Autocorrect existing default if we found better info
+                await model_metadata_crud.update_metadata(db, model_name=model_name, max_context=suggested_ctx)
         
     context["metadata_list"] = await model_metadata_crud.get_all_metadata(db)
     context["csrf_token"] = await get_csrf_token(request)
     return templates.TemplateResponse("admin/models_manager.html", context)
+
+@router.get("/models-manager/refresh-context", name="admin_refresh_model_context")
+async def admin_refresh_model_context(
+    request: Request,
+    model_name: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    admin_user: User = Depends(require_admin_user)
+):
+    """API endpoint to re-query a model's context length from the backend servers."""
+    http_client: httpx.AsyncClient = request.app.state.http_client
+    
+    servers = await server_crud.get_servers_with_model(db, model_name)
+    if not servers:
+        return JSONResponse({"success": False, "error": "Model not found on any active server."}, status_code=404)
+
+    # Try to get details from the first available server
+    details = await server_crud.get_model_details_from_server(http_client, servers[0], model_name)
+    ctx = details.get("context_length")
+
+    if ctx:
+        return {"success": True, "context_length": ctx}
+    return JSONResponse({"success": False, "error": "Server did not provide context metadata for this model."}, status_code=500)
+
 
 @router.post("/models-manager/update", name="admin_update_model_metadata", dependencies=[Depends(validate_csrf_token)])
 async def admin_update_model_metadata(
@@ -901,6 +949,7 @@ async def admin_update_model_metadata(
             update_data = {
                 "description": description,
                 "supports_images": f"supports_images_{meta_id}" in form_data,
+                "supports_thinking": f"supports_thinking_{meta_id}" in form_data,
                 "is_code_model": f"is_code_model_{meta_id}" in form_data,
                 "is_fast_model": f"is_fast_model_{meta_id}" in form_data,
                 "is_reasoning_model": f"is_reasoning_model_{meta_id}" in form_data,
@@ -1215,6 +1264,9 @@ async def admin_settings_post(
         "blocked_ollama_endpoints": form_data.get("blocked_ollama_endpoints", "")[:1024],
         "instance_scan_start_port": int(form_data.get("instance_scan_start_port", 11434)),
         "instance_scan_end_port": int(form_data.get("instance_scan_end_port", 11445)),
+        "enable_ollama_api": form_data.get("enable_ollama_api") == "true",
+        "enable_openai_api": form_data.get("enable_openai_api") == "true",
+        "openai_port": int(form_data.get("openai_port", 8081)),
     })
     
     if new_redis_password:
@@ -2049,26 +2101,22 @@ async def admin_instances_page(request: Request, db: AsyncSession = Depends(get_
     
     instance_list = []
     for inst in instances:
-        state, pid = supervisor.get_instance_state(inst)
+        state, pid = await supervisor.get_instance_state(inst)
         instance_list.append({
             "config": inst,
             "state": state,
             "pid": pid
         })
         
-    # Discover unmanaged local instances (wrapped in threadpool to prevent blocking)
+    # Discover unmanaged local instances
     app_settings: AppSettingsModel = request.app.state.settings
     managed_ports = [inst.port for inst in instances]
     
-    discovered = await run_in_threadpool(
-        lambda: asyncio.run_coroutine_threadsafe(
-            supervisor.discover_local_instances(
-                managed_ports, 
-                start_port=app_settings.instance_scan_start_port,
-                end_port=app_settings.instance_scan_end_port
-            ), 
-            asyncio.get_event_loop()
-        ).result()
+    # Directly await the async discovery method
+    discovered = await supervisor.discover_local_instances(
+        managed_ports, 
+        start_port=app_settings.instance_scan_start_port,
+        end_port=app_settings.instance_scan_end_port
     )
         
     context["instances"] = instance_list

@@ -33,7 +33,12 @@ def translate_ollama_to_vllm_chat(ollama_payload: Dict[str, Any]) -> Dict[str, A
     vllm_payload = {
         "model": ollama_payload.get("model"),
         "stream": ollama_payload.get("stream", False),
+        "tools": ollama_payload.get("tools"),
+        "tool_choice": ollama_payload.get("tool_choice")
     }
+    
+    # Remove None values to avoid backend errors
+    vllm_payload = {k: v for k, v in vllm_payload.items() if v is not None}
     
     messages = ollama_payload.get("messages", [])
     
@@ -180,6 +185,15 @@ async def vllm_stream_to_ollama_stream(vllm_stream: AsyncGenerator[str, None], m
                     in_tool_call = False
                     if "content" not in delta or not delta.get("content"):
                         continue
+
+                # --- Handle Tool Calls ---
+                if "tool_calls" in delta:
+                    ollama_chunk = {
+                        "model": model_name, "created_at": get_iso_timestamp(created_ts),
+                        "message": {"role": "assistant", "tool_calls": delta["tool_calls"]}, 
+                        "done": False,
+                    }
+                    yield (json.dumps(ollama_chunk) + '\n').encode('utf-8')
 
                 # --- Handle regular content ---
                 if content := delta.get("content"):

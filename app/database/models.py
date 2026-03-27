@@ -79,6 +79,7 @@ class OllamaServer(Base):
     encrypted_api_key = Column(String, nullable=True)
     is_active = Column(Boolean, default=True)
     available_models = Column(JSON, nullable=True)
+    allowed_models = Column(JSON, nullable=True) # Whitelist of model names
     models_last_updated = Column(DateTime, nullable=True)
     last_error = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
@@ -119,6 +120,7 @@ class ModelMetadata(Base):
     description = Column(String, nullable=True)
     supports_images = Column(Boolean, default=False, nullable=False)
     is_code_model = Column(Boolean, default=False, nullable=False)
+    supports_thinking = Column(Boolean, default=False, nullable=False)
     is_chat_model = Column(Boolean, default=True, nullable=False)
     is_fast_model = Column(Boolean, default=False, nullable=False)
     is_reasoning_model = Column(Boolean, default=False, nullable=False)

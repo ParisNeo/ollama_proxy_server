@@ -1,6 +1,6 @@
 from pydantic import BaseModel, AnyHttpUrl, Field, ConfigDict
 import datetime
-from typing import Literal, Optional
+from typing import Literal, Optional, List
 
 class ServerBase(BaseModel):
     name: str
@@ -15,6 +15,7 @@ class ServerUpdate(BaseModel):
     url: Optional[AnyHttpUrl] = None
     server_type: Optional[Literal["ollama", "vllm", "cloud"]] = None
     api_key: Optional[str] = Field(None, description="Provide a new key to update, or an empty string to remove.")
+    allowed_models: Optional[List[str]] = None
 
 
 class Server(ServerBase):

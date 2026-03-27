@@ -17,7 +17,7 @@ class InstanceSupervisor:
     def __init__(self):
         self.processes: Dict[int, subprocess.Popen] = {}
 
-    def get_instance_state(self, instance) -> Tuple[str, Optional[int]]:
+    async def get_instance_state(self, instance) -> Tuple[str, Optional[int]]:
         """
         Determines the true state of an instance.
         Returns: (state, pid)
@@ -32,7 +32,7 @@ class InstanceSupervisor:
         pid_on_port = self._get_pid_on_port(instance.port)
         if pid_on_port:
             # 3. Verify if it's actually an Ollama instance
-            if self._is_ollama_responding(instance.port):
+            if await self._is_ollama_responding(instance.port):
                 return "SYSTEM", pid_on_port
             return "CONFLICT", pid_on_port
 
@@ -49,14 +49,18 @@ class InstanceSupervisor:
             return None
         return None
 
-    def _is_ollama_responding(self, port: int) -> bool:
-        """Probes the port to see if an Ollama API is active."""
-        try:
-            # Short timeout to prevent UI lag
-            with socket.create_connection(('127.0.0.1', port), timeout=0.2):
-                return True
-        except (socket.timeout, ConnectionRefusedError, OSError):
-            return False
+    async def _is_ollama_responding(self, port: int) -> bool:
+        """Probes the port to see if an Ollama API is active without blocking the loop."""
+        def probe():
+            try:
+                # Short timeout to prevent UI lag
+                with socket.create_connection(('127.0.0.1', port), timeout=0.2):
+                    return True
+            except (socket.timeout, ConnectionRefusedError, OSError):
+                return False
+        
+        from fastapi.concurrency import run_in_threadpool
+        return await run_in_threadpool(probe)
 
     async def start_instance(self, instance):
         state, _ = self.get_instance_state(instance)
