@@ -1946,6 +1946,19 @@ async def proxy_ollama(
     """
     A catch-all route that proxies all other requests to the backend with token tracking.
     """
+    # FEATURE GATE: Check if Ollama API is enabled
+    if not settings.enable_ollama_api:
+        raise HTTPException(status_code=404, detail="Ollama API is disabled in Hub settings.")
+
+    req_id = secrets.token_hex(4)
+    api_key: APIKey = Depends(get_valid_api_key),
+    db: AsyncSession = Depends(get_db),
+    settings: AppSettingsModel = Depends(get_settings),
+    servers: List[OllamaServer] = Depends(get_active_servers),
+):
+    """
+    A catch-all route that proxies all other requests to the backend with token tracking.
+    """
     req_id = secrets.token_hex(4)
     blocked_paths = {p.strip().lstrip('/') for p in settings.blocked_ollama_endpoints.split(',') if p.strip()}
     request_path = path.strip().lstrip('/')

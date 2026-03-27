@@ -8,30 +8,37 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.session import get_db
 from app.api.v1.dependencies import get_valid_api_key, rate_limiter, ip_filter
-from app.crud import server_crud
+from app.database.models import APIKey
 
 logger = logging.getLogger(__name__)
 
-# This is the variable the main.py is looking for
 router = APIRouter(dependencies=[Depends(ip_filter), Depends(rate_limiter)])
 
 @router.get("/models")
-async def list_models(request: Request, db: AsyncSession = Depends(get_db), api_key=Depends(get_valid_api_key)):
-    """
-    OpenAI-compatible model listing. 
-    Aggregates Ollama models, virtual agents, and ensembles.
-    """
+async def list_models(request: Request, db: AsyncSession = Depends(get_db), api_key: APIKey = Depends(get_valid_api_key)):
+    if not request.app.state.settings.enable_openai_api:
+        raise HTTPException(status_code=404, detail="OpenAI API is disabled in Hub settings.")
+        
     from app.api.v1.routes.proxy import federate_models
+    from app.crud.model_metadata_crud import get_all_metadata
+    
     try:
         ollama_models = await federate_models(request, api_key, db)
+        all_meta = await get_all_metadata(db)
+        meta_map = {m.model_name: m for m in all_meta}
         
         data = []
         for m in ollama_models.get("models", []):
+            m_name = m["name"]
+            meta = meta_map.get(m_name)
+            
             data.append({
-                "id": m["name"],
+                "id": m_name,
                 "object": "model",
                 "created": 1686935002,
-                "owned_by": "lollms-hub"
+                "owned_by": "lollms-hub",
+                "context_window": meta.max_context if meta else 4096,
+                "description": meta.description if meta else "Auto-discovered model."
             })
         return {"object": "list", "data": data}
     except Exception as e:
@@ -39,17 +46,17 @@ async def list_models(request: Request, db: AsyncSession = Depends(get_db), api_
         return {"object": "list", "data": []}
 
 @router.post("/chat/completions")
-async def openai_chat(request: Request, db: AsyncSession = Depends(get_db), api_key=Depends(get_valid_api_key)):
-    """
-    Translates OpenAI Chat request -> Hub Orchestration -> OpenAI Response.
-    Supports Tools, Streaming, and Vision.
-    """
-    from app.api.v1.routes.proxy import proxy_ollama
+async def openai_chat(request: Request, db: AsyncSession = Depends(get_db), api_key: APIKey = Depends(get_valid_api_key)):
+    if not request.app.state.settings.enable_openai_api:
+        raise HTTPException(status_code=404, detail="OpenAI API is disabled in Hub settings.")
+        
+    from app.api.v1.routes.proxy import proxy_ollama, get_active_servers
+    from app.api.v1.dependencies import get_settings
     
     body = await request.json()
     model_name = body.get("model")
     
-    # 1. Translate OpenAI format to our internal "Hub/Ollama" format
+    # OpenAI -> Ollama Format Translation
     hub_payload = {
         "model": model_name,
         "messages": body.get("messages"),
@@ -64,19 +71,9 @@ async def openai_chat(request: Request, db: AsyncSession = Depends(get_db), api_
         }
     }
 
-    # 2. Re-route the request through our existing proxy logic
-    # This allows the OpenAI client to benefit from Ensembles, Routers, and Agents.
-    # We pass the translated body to the standard proxy_ollama handler.
     try:
-        # We need to simulate the path "chat" for the proxy logic
-        from app.api.v1.routes.proxy import get_active_servers
-        from app.api.v1.dependencies import get_settings
-        
-        # Override the request body internally for the proxy call
-        # Note: In a production refactor, logic would be moved to a shared Service layer.
-        # For now, we reuse the existing endpoint logic.
-        
-        # Manually invoke the proxy logic
+        # Re-inject translated payload into main orchestration logic
+        # We simulate the call to proxy_ollama
         response = await proxy_ollama(
             request=request,
             path="chat",
@@ -86,7 +83,7 @@ async def openai_chat(request: Request, db: AsyncSession = Depends(get_db), api_
             servers=await get_active_servers(db)
         )
 
-        # 3. Translate Hub (Ollama) Response back to OpenAI format
+        # Response Translation: Ollama -> OpenAI
         if isinstance(response, StreamingResponse):
             async def openai_stream_wrapper():
                 req_id = f"chatcmpl-{secrets.token_hex(12)}"
@@ -102,50 +99,30 @@ async def openai_chat(request: Request, db: AsyncSession = Depends(get_db), api_
 
                         delta = {}
                         msg = hub_data.get("message", {})
-                        if "content" in msg:
-                            delta["content"] = msg["content"]
-                        if "tool_calls" in msg:
-                            delta["tool_calls"] = msg["tool_calls"]
-                        if "role" in msg:
-                            delta["role"] = msg["role"]
+                        if "content" in msg: delta["content"] = msg["content"]
+                        if "tool_calls" in msg: delta["tool_calls"] = msg["tool_calls"]
+                        if "role" in msg: delta["role"] = msg["role"]
 
                         oa_chunk = {
-                            "id": req_id,
-                            "object": "chat.completion.chunk",
-                            "created": 123456789,
+                            "id": req_id, "object": "chat.completion.chunk", "created": 123456789,
                             "model": model_name,
-                            "choices": [{
-                                "index": 0,
-                                "delta": delta,
-                                "finish_reason": None
-                            }]
+                            "choices": [{"index": 0, "delta": delta, "finish_reason": None}]
                         }
                         yield f"data: {json.dumps(oa_chunk)}\n\n"
-                    except Exception as e:
-                        logger.debug(f"Stream translation skip: {e}")
-                        continue
+                    except: continue
             return StreamingResponse(openai_stream_wrapper(), media_type="text/event-stream")
         
-        # Handle non-streaming JSON Response
         if hasattr(response, 'body'):
             hub_data = json.loads(response.body.decode())
             msg = hub_data.get("message", {})
-            
-            openai_msg = {
-                "role": "assistant",
-                "content": msg.get("content")
-            }
-            if "tool_calls" in msg:
-                openai_msg["tool_calls"] = msg["tool_calls"]
+            openai_msg = {"role": "assistant", "content": msg.get("content")}
+            if "tool_calls" in msg: openai_msg["tool_calls"] = msg["tool_calls"]
 
             return {
-                "id": f"chatcmpl-{secrets.token_hex(12)}",
-                "object": "chat.completion",
-                "created": 123456789,
+                "id": f"chatcmpl-{secrets.token_hex(12)}", "object": "chat.completion", "created": 123456789,
                 "model": model_name,
                 "choices": [{
-                    "index": 0,
-                    "message": openai_msg,
+                    "index": 0, "message": openai_msg,
                     "finish_reason": "tool_calls" if "tool_calls" in openai_msg else "stop"
                 }],
                 "usage": {
@@ -155,7 +132,6 @@ async def openai_chat(request: Request, db: AsyncSession = Depends(get_db), api_
                 }
             }
         return response
-
     except Exception as e:
         logger.error(f"OpenAI Proxy Error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
