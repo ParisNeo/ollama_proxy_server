@@ -16,9 +16,9 @@ T = TypeVar('T')
 @dataclass
 class RetryConfig:
     """Configuration for retry behavior."""
-    max_retries: int = 2  # REDUCED from 5 to 2 for faster failover
-    total_timeout_seconds: float = 1.0  # REDUCED from 2.0 to 1.0
-    base_delay_ms: int = 10  # REDUCED from 50 to 10 for faster retries
+    max_retries: int = 10 
+    total_timeout_seconds: float = 600.0  # 10 minutes
+    base_delay_ms: int = 100 
 
     def __post_init__(self):
         """Validate configuration."""

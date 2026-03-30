@@ -43,21 +43,7 @@
                 </select>
             </div>
 
-            <div>
-                <label class="block text-xs text-gray-400 uppercase font-bold">Vision Processor (Optional)</label>
-                <select name="vision_processor" class="w-full p-2 rounded bg-black/20 border border-white/10">
-                    <option value="">None (Images not supported)</option>
-                    <optgroup label="🎭 Virtual Agents" class="bg-[#0a0a0f] text-indigo-400">
-                        {% for m in agents %}<option value="{{ m }}" {% if m == ensemble.vision_processor %}selected{% endif %}>{{ m }}</option>{% endfor %}
-                    </optgroup>
-                    <optgroup label="📦 Raw Backend Models" class="bg-[#0a0a0f] text-gray-400">
-                        {% for m in raw_models %}<option value="{{ m }}" {% if m == ensemble.vision_processor %}selected{% endif %}>{{ m }}</option>{% endfor %}
-                    </optgroup>
-                </select>
-                <p class="mt-1 text-xs text-gray-500">Vision models (like LLaVA) will extract image descriptions before routing to the master model.</p>
-            </div>
-
-            <div class="space-y-4">
+            <div class="space-y-4 mt-4">
                 <label class="block text-xs text-gray-400 uppercase font-bold">Parallel Participants</label>
                 
                 <!-- Section 1: Agents -->

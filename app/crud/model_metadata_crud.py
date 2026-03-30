@@ -16,13 +16,13 @@ async def get_or_create_metadata(db: AsyncSession, model_name: str, suggested_ct
         # Basic heuristic for auto-discovery
         m_lower = model_name.lower()
         supports_images_default = any(kw in m_lower for kw in ["llava", "bakllava", "vision", "vl"])
-        supports_thinking_default = any(kw in m_lower for kw in ["qwen", "deepseek", "r1", "thought", "think", "gemma3"])
+        supports_thinking_default = any(kw in m_lower for kw in ["qwen", "deepseek", "r1", "thought", "think", "gemma3", "phi-4"])
         
         metadata = ModelMetadata(
             model_name=model_name,
             supports_images=supports_images_default,
             supports_thinking=supports_thinking_default,
-            max_context=suggested_ctx if suggested_ctx else 4096,
+            max_context=suggested_ctx if suggested_ctx else 32768,
             description="Auto-discovered model."
         )
         db.add(metadata)

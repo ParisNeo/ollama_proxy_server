@@ -49,6 +49,7 @@
                 <thead>
                     <tr>
                         <th class="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Model Name</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Servers</th>
                         <th class="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Description</th>
                         <th class="px-4 py-3 text-center text-xs font-medium text-gray-400 uppercase tracking-wider">
                             <div class="mb-1">Supports Images</div>
@@ -94,10 +95,17 @@
                         <th class="px-4 py-3 text-center text-xs font-medium text-gray-400 uppercase tracking-wider">Priority</th>
                     </tr>
                 </thead>
-                <tbody class="divide-y divide-white/10">
+                <tbody class="divide-y divide-white/10" id="metadata-tbody">
                     {% for meta in metadata_list %}
-                    <tr class="align-top">
+                    <tr class="align-top metadata-row">
                         <td class="px-4 py-4 whitespace-nowrap text-sm font-medium text-current font-mono">{{ meta.model_name }}</td>
+                        <td class="px-4 py-4 whitespace-nowrap text-xs">
+                            <div class="flex flex-wrap gap-1">
+                                {% for srv in meta.origin_servers %}
+                                <span class="px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/20">{{ srv }}</span>
+                                {% endfor %}
+                            </div>
+                        </td>
                         <td class="px-4 py-4 whitespace-nowrap">
                             <input type="text" name="description_{{ meta.id }}" value="{{ meta.description or '' }}" placeholder="A short description..." class="w-full min-w-48 px-2 py-1 rounded-md shadow-sm sm:text-sm">
                         </td>
@@ -162,12 +170,13 @@
             const response = await fetch(`{{ url_for('admin_refresh_model_context') }}?model_name=${encodeURIComponent(modelName)}`);
             const data = await response.json();
             
-            if (data.success && data.context_length) {
+            if (data.success) {
                 input.value = data.context_length;
                 input.classList.add('ring-2', 'ring-green-500');
                 setTimeout(() => input.classList.remove('ring-2', 'ring-green-500'), 2000);
             } else {
-                alert("Error: " + (data.error || "Failed to retrieve context."));
+                // Show the specific reason why it failed (e.g. key not found)
+                alert(data.error);
             }
         } catch (e) {
             alert("Connection error: " + e.message);
@@ -177,9 +186,20 @@
     }
 
     /**
+     * Handle Row Selection/Highlighting
+     */
+    document.getElementById('metadata-tbody').addEventListener('click', (e) => {
+        const row = e.target.closest('.metadata-row');
+        if (!row) return;
+
+        // Optional: Clear other highlights if you want "Single Selection" mode
+        // document.querySelectorAll('.metadata-row').forEach(r => r.classList.remove('active-row'));
+
+        row.classList.toggle('active-row');
+    });
+
+    /**
      * Toggles all checkboxes in a column based on the name prefix.
-     * @param {string} prefix - The start of the input name (e.g. 'is_fast_model_')
-     * @param {boolean} value - True to check all, False to uncheck all
      */
     function toggleColumn(prefix, value) {
         const checkboxes = document.querySelectorAll(`input[name^="${prefix}"]`);

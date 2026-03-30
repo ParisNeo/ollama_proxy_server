@@ -36,16 +36,16 @@
             </ul>
         </div>
 
-        <form action="{{ url_for('admin_add_vision_enabler') }}" method="post" class="space-y-4">
+        <form action="{{ url_for('admin_add_vision_augmenter') }}" method="post" class="space-y-4">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
-                    <label class="block text-xs text-gray-400 uppercase font-bold">Router Name</label>
+                    <label class="block text-xs text-gray-400 uppercase font-bold">Ensemble Name</label>
                     <input type="text" name="name" placeholder="e.g. smart-llama-vision" required class="w-full p-2 rounded bg-black/20 border border-white/10">
                     <p class="text-[10px] text-gray-500 mt-1">Users will call this as: <code>model: "smart-llama-vision"</code></p>
                 </div>
                 <div>
-                    <label class="block text-xs text-gray-400 uppercase font-bold">Text Model (Fallback)</label>
+                    <label class="block text-xs text-gray-400 uppercase font-bold">Text Model (Synthesizer)</label>
                     <select name="vision_text_model" required class="w-full p-2 rounded bg-black/20 border border-white/10">
                         <option value="">-- Select text model --</option>
                         {% for m in raw_models %}
@@ -68,7 +68,7 @@
                 </div>
             </div>
             <div class="flex justify-end">
-                <button type="submit" class="bg-purple-600 hover:bg-purple-500 px-6 py-2 rounded font-bold text-sm">Create Vision Router</button>
+                <button type="submit" class="bg-purple-600 hover:bg-purple-500 px-6 py-2 rounded font-bold text-sm">Create Vision Enabler</button>
             </div>
         </form>
     </div>

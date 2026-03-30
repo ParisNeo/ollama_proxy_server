@@ -52,6 +52,54 @@ def _update_health_cache(server_id: int, healthy: bool):
     }
 
 
+async def _extract_image_descriptions(request: Request, db: AsyncSession, vision_model: str, images: list, prompt_text: str, http_client: httpx.AsyncClient) -> str:
+    """Helper to offload images to a VLM and get a text description back."""
+    user_query = prompt_text
+    vision_prompt = (
+        "Analyze the provided images and describe their contents in detail. "
+        f"Pay special attention to elements relevant to this user query:\n\"{user_query}\"\n\n"
+        "Be thorough but concise."
+    )
+    
+    vlm_payload = {
+        "model": vision_model,
+        "messages":[
+            {
+                "role": "user",
+                "content": vision_prompt,
+                "images": images
+            }
+        ],
+        "stream": False,
+        "options": {"temperature": 0.3}
+    }
+    
+    image_descriptions = "[Image Analysis Failed]"
+    from app.database.session import AsyncSessionLocal
+    
+    async with AsyncSessionLocal() as v_db:
+        v_servers = await server_crud.get_servers_with_model(v_db, vision_model)
+        
+    if v_servers:
+        try:
+            # We briefly disable strict context for the internal VLM request
+            old_strict = getattr(request.state, 'enforce_strict_context', False)
+            request.state.enforce_strict_context = False
+            
+            resp, _ = await _reverse_proxy(request, "chat", v_servers, json.dumps(vlm_payload).encode(), is_subrequest=True)
+            
+            if hasattr(resp, 'body'):
+                v_data = json.loads(resp.body.decode())
+                image_descriptions = v_data.get("message", {}).get("content", "").strip()
+            
+            request.state.enforce_strict_context = old_strict
+        except Exception as e:
+            logger.error(f"Vision processor subrequest failed: {e}")
+    else:
+        image_descriptions = "[Vision processor model is offline or unavailable]"
+        
+    return image_descriptions
+
 async def get_active_servers(db: AsyncSession = Depends(get_db)) -> List[OllamaServer]:
     servers = await server_crud.get_servers(db)
     active_servers = [s for s in servers if s.is_active]
@@ -126,42 +174,154 @@ async def _send_backend_request(
     )
 
     try:
-        # Emit event: assigned to specific server
         if request_id:
             event_manager.emit(ProxyEvent(
-                event_type="assigned", 
-                request_id=request_id, 
-                model=model, 
-                server=server.name, 
-                sender=sender
+                event_type="assigned", request_id=request_id, 
+                model=model, server=server.name, sender=sender
             ))
 
-        # TTFT MITIGATION: The global client in main.py is configured with a 3s connect timeout.
-        # send() uses the client's default timeout settings.
         backend_response = await http_client.send(backend_request, stream=True)
 
-        # 503 (Service Unavailable) usually means Ollama is overloaded/queue is full.
-        # 429 (Too Many Requests) is returned by some OpenAI-compatible backends.
-        if backend_response.status_code in (429, 503):
-            await backend_response.aclose()
-            raise httpx.HTTPStatusError(
-                f"Backend Busy ({backend_response.status_code})",
-                request=backend_request,
-                response=backend_response
-            )
+        if backend_response.status_code >= 400:
+            # ERROR DIAGNOSTICS: Read the body to see WHY it failed
+            error_body = await backend_response.aread()
+            error_text = error_body.decode('utf-8', errors='replace')
+            
+            # Log the deep details
+            logger.error(f"--- BACKEND FAILURE DIAGNOSTICS ---")
+            logger.error(f"Server: {server.name} ({server.url})")
+            logger.error(f"Status: {backend_response.status_code}")
+            logger.error(f"Error Body: {error_text[:500]}")
+            try:
+                sent_body = json.loads(body_bytes)
+                if "model" in sent_body: logger.error(f"Target Model: {sent_body['model']}")
+                
+                # --- ENHANCED LOGGING (Requested) ---
+                if "options" in sent_body:
+                    logger.error(f"Sent Options Content: {json.dumps(sent_body['options'])}")
+                if "tools" in sent_body:
+                    logger.error(f"Sent Tools Content: {json.dumps(sent_body['tools'])}")
+                if "messages" in sent_body:
+                    logger.error(f"Message Count: {len(sent_body['messages'])}")
+            except: pass
+            logger.error(f"----------------------------------")
 
-        if backend_response.status_code >= 500:
-            await backend_response.aclose()
-            raise Exception(
-                f"Backend server returned {backend_response.status_code}: "
-                f"{backend_response.reason_phrase}"
-            )
+            if backend_response.status_code in (429, 503):
+                raise httpx.HTTPStatusError(f"Backend Busy", request=backend_request, response=backend_response)
+            
+            raise httpx.HTTPStatusError(f"Backend Error: {error_text[:100]}", request=backend_request, response=backend_response)
 
         return backend_response
 
     except Exception as e:
-        logger.debug(f"Request to {server.url} failed: {type(e).__name__}: {str(e)[:200]}")
+        if not isinstance(e, httpx.HTTPStatusError):
+            logger.error(f"Network/Connection Error to {server.name}: {str(e)}")
         raise
+
+
+def _normalize_payload_for_ollama(body_bytes: bytes, max_context_limit: int = 32768, enforce_strict: bool = False) -> bytes:
+    """
+    Ensures payload is compatible with Ollama backends.
+    1. Converts OpenAI-style multi-part messages to Ollama string+images format.
+    2. Handles context size: preserves user's choice for raw models, enforces metadata for bundles.
+    
+    Args:
+        body_bytes: The raw JSON payload
+        max_context_limit: The maximum context window from model metadata
+        enforce_strict: If True, always use max_context_limit (for bundles/orchestrators).
+                       If False, only clamp if user exceeded limit (for raw models).
+    """
+    if not body_bytes:
+        return body_bytes
+    try:
+        temp_body = json.loads(body_bytes)
+        modified = False
+        
+        # Initialize options dict if missing
+        if "options" not in temp_body:
+            temp_body["options"] = {}
+            
+        requested_ctx = temp_body["options"].get("num_ctx")
+        
+        try:
+            req_ctx_int = int(requested_ctx) if requested_ctx is not None else None
+        except ValueError:
+            req_ctx_int = None
+            
+        if enforce_strict:
+            # For bundles/ensembles/orchestrators: enforce the declared context size
+            # This ensures consistency across all models in the bundle
+            if req_ctx_int != max_context_limit:
+                temp_body["options"]["num_ctx"] = max_context_limit
+                modified = True
+                logger.info(f"Strict context: set to {max_context_limit} (was {requested_ctx})")
+        else:
+            # For raw models: respect user's choice, only clamp if excessive
+            if req_ctx_int is not None:
+                if req_ctx_int > max_context_limit:
+                    logger.info(f"Clamping num_ctx from {req_ctx_int} to {max_context_limit}")
+                    temp_body["options"]["num_ctx"] = max_context_limit
+                    modified = True
+            else:
+                # Default to model's max if not specified
+                if max_context_limit:
+                    temp_body["options"]["num_ctx"] = max_context_limit
+                    modified = True
+
+        # --- 2. Message Format Normalization ---
+        if "messages" in temp_body:
+            for msg in temp_body["messages"]:
+                    if isinstance(msg.get("content"), list):
+                        text_parts = []
+                        images = []
+                        for part in msg["content"]:
+                            if isinstance(part, dict):
+                                if part.get("type") == "text":
+                                    text_parts.append(part.get("text", ""))
+                                elif part.get("type") == "image_url":
+                                    url = part.get("image_url", {}).get("url", "")
+                                    if url.startswith("data:"):
+                                        try:
+                                            base64_data = url.split(",", 1)[1]
+                                            if base64_data:
+                                                images.append(base64_data)
+                                        except (IndexError, AttributeError):
+                                            pass
+                                    else:
+                                        images.append(url)
+                        msg["content"] = "\n".join(text_parts)
+                        if images:
+                            msg["images"] = images
+                        elif "images" in msg:
+                            del msg["images"]
+                        modified = True
+
+                    # 2. Clean 'data:image' prefix from base64 strings
+                    if "images" in msg and isinstance(msg["images"], list):
+                        cleaned_images = []
+                        for img in msg["images"]:
+                            if isinstance(img, str) and img.startswith("data:"):
+                                try:
+                                    img = img.split(",", 1)[1]
+                                    modified = True
+                                except IndexError:
+                                    pass
+                            if img:
+                                cleaned_images.append(img)
+                        
+                        msg["images"] = cleaned_images
+                        if not msg["images"]:
+                            del msg["images"]
+                            modified = True
+
+        # Always return the modified payload if we touched options/context/images
+        if modified:
+            return json.dumps(temp_body).encode('utf-8')
+            
+    except Exception as e:
+        logger.warning(f"Payload normalization failed: {e}", exc_info=True)
+        
+    return body_bytes
 
 
 def _extract_tokens_from_chunk(chunk_data: Dict[str, Any]) -> Dict[str, Optional[int]]:
@@ -272,67 +432,37 @@ async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer
     
     logger.info(f"Round-robin: current_index={current_index}, next_index will be {request.app.state.backend_server_index}, candidate_count={len(candidate_servers)}")
 
+    # Retrieve model metadata to determine physical context limit for clamping
+    from app.crud.model_metadata_crud import get_metadata_by_model_name
+    from app.database.session import AsyncSessionLocal
+    
+    model_limit = 32768
+    async with AsyncSessionLocal() as meta_db:
+        # Check metadata for the resolved physical model
+        meta = await get_metadata_by_model_name(meta_db, model)
+        if meta:
+            model_limit = meta.max_context
+
     servers_tried = []
 
     for server_attempt in range(len(candidate_servers)):
         safe_index = (current_index + server_attempt) % len(candidate_servers)
         chosen_server = candidate_servers[safe_index]
         
-        logger.info(f"Server attempt {server_attempt + 1}/{len(candidate_servers)}: selected '{chosen_server.name}' at index {safe_index}")
+        logger.info(f"Server attempt {server_attempt + 1}/{len(candidate_servers)}: selected '{chosen_server.name}' at index {safe_index} (Limit: {model_limit})")
 
         servers_tried.append(chosen_server.name)
 
         # --- RE-ENCODING FOR OLLAMA ---
-        # If hitting Ollama, ensure payload isn't using OpenAI-style list content
         local_body_bytes = body_bytes
-        if chosen_server.server_type == 'ollama' and body_bytes:
-            try:
-                temp_body = json.loads(body_bytes)
-                if "messages" in temp_body:
-                    modified = False
-                    for msg in temp_body["messages"]:
-                        if isinstance(msg, dict) and isinstance(msg.get("content"), list):
-                            text_parts = []
-                            images = []
-                            
-                            for part in msg["content"]:
-                                if isinstance(part, dict):
-                                    if part.get("type") == "text":
-                                        text_parts.append(part.get("text", ""))
-                                    elif part.get("type") == "image_url":
-                                        url = part.get("image_url", {}).get("url", "")
-                                        if url and url.startswith("data:"):
-                                            try:
-                                                # Extract base64 data after the comma
-                                                base64_data = url.split(",", 1)[1]
-                                                if base64_data:  # Only add if not empty
-                                                    images.append(base64_data)
-                                            except (IndexError, AttributeError):
-                                                logger.warning(f"Failed to parse data URL in message")
-                            
-                            # Set the content to the text parts
-                            msg["content"] = "\n".join(text_parts)
-                            # Only add images key if we actually have images
-                            if images:
-                                msg["images"] = images
-                                logger.debug(f"Added {len(images)} image(s) to Ollama message")
-                            elif "images" in msg:
-                                # Remove empty images array if present
-                                del msg["images"]
-                            modified = True
-                    
-                    if modified:
-                        # Final cleanup: ensure no empty image arrays remain
-                        for msg in temp_body["messages"]:
-                            if "images" in msg and (not msg["images"] or len(msg["images"]) == 0):
-                                del msg["images"]
-                        
-                        local_body_bytes = json.dumps(temp_body).encode('utf-8')
-                        # Log final payload structure for debugging
-                        logger.info(f"Normalized multi-modal payload for Ollama server '{chosen_server.name}'")
-                        logger.debug(f"Final payload messages: {[{'role': m.get('role'), 'has_images': 'images' in m, 'content_type': type(m.get('content')).__name__} for m in temp_body.get('messages', [])]}")
-            except Exception as e:
-                logger.warning(f"Payload normalization error: {e}")
+        if chosen_server.server_type == 'ollama':
+            # Use strict context enforcement for bundles/orchestrators, lenient for raw models
+            is_strict = getattr(request.state, 'enforce_strict_context', False)
+            local_body_bytes = _normalize_payload_for_ollama(
+                body_bytes, 
+                max_context_limit=model_limit,
+                enforce_strict=is_strict
+            )
 
         if chosen_server.server_type == 'vllm':
             logger.info(f"Using vLLM branch for server '{chosen_server.name}'")
@@ -460,24 +590,31 @@ async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer
                     raise
             
         except (Exception, httpx.HTTPStatusError) as first_error:
-            is_busy = hasattr(first_error, 'response') and first_error.response.status_code in (429, 503)
+            resp = getattr(first_error, 'response', None)
+            status_code = resp.status_code if resp else None
+            
+            is_busy = status_code in (429, 503)
+            is_server_error = status_code == 500 # Strict check for internal logic crashes
             
             if is_busy:
-                # PATIENT LOGIC: If busy, emit a 'queued' event to the UI
+                # FOR BUSY (503): High patience, wait and retry.
                 if request_id:
                     event_manager.emit(ProxyEvent(
-                        event_type="received", 
-                        request_id=request_id, 
-                        model=model, 
-                        server=chosen_server.name,
+                        event_type="received", request_id=request_id, 
+                        model=model, server=chosen_server.name,
                         error_message="Server Busy - Waiting for slot..."
                     ))
-                # Add a small physical delay before retrying the same busy server
                 await asyncio.sleep(2)
+            elif is_server_error:
+                # FOR SERVER ERROR (500): Low patience. Fail fast so user sees the error.
+                logger.error(f"Fatal Backend Error from {chosen_server.name}. Logic error or malformed request. Skipping retries.")
+                # We don't mark it 'False' (Dead) because the server is alive, it just didn't like THIS request.
+                break 
             else:
+                # For network timeouts/connection refused: Mark as DEAD.
                 _update_health_cache(chosen_server.id, False)
             
-            logger.warning(f"Attempt failed for '{chosen_server.name}' (Busy: {is_busy}). Error: {first_error}")
+            logger.warning(f"Attempt failed for '{chosen_server.name}' (Busy: {is_busy}, SrvErr: {is_server_error}). Error: {first_error}")
             
             retry_result = await retry_with_backoff(
                 _send_backend_request,
@@ -964,9 +1101,9 @@ async def federate_models(
 
     logger.info(f"/tags: Total unique models before adding 'auto': {len(all_models)}")
 
-    # Add Pools & Bundles to the list
+    # Add Pools, Bundles, and Vision Augmenters to the list
     try:
-        from app.database.models import EnsembleOrchestrator, SmartRouter
+        from app.database.models import EnsembleOrchestrator, SmartRouter, VisionAugmenter
         
         # Add Pools
         res_p = await db.execute(select(SmartRouter).filter(SmartRouter.is_active == True))
@@ -977,8 +1114,11 @@ async def federate_models(
             }
 
         # Add Bundles
-        result = await db.execute(select(EnsembleOrchestrator).filter(EnsembleOrchestrator.is_active == True))
-        bundles = result.scalars().all()
+        try:
+            result = await db.execute(select(EnsembleOrchestrator))
+            bundles =[b for b in result.scalars().all() if getattr(b, 'is_active', True)]
+        except Exception:
+            bundles =[]
         for b in bundles:
             all_models[b.name] = {
                 "name": b.name,
@@ -995,8 +1135,20 @@ async def federate_models(
                     "quantization_level": "N/A"
                 }
             }
+            
+        # Add Vision Augmenters
+        try:
+            result_v = await db.execute(select(VisionAugmenter).filter(VisionAugmenter.is_active == True))
+            for v in result_v.scalars().all():
+                all_models[v.name] = {
+                    "name": v.name, "model": v.name, "size": 0, "digest": f"vision-{v.id}",
+                    "details": {"format": "augmenter", "family": "vision", "parameter_size": "pipeline"}
+                }
+        except Exception:
+            pass
+
     except Exception as e:
-        logger.error(f"Failed to load bundles for /tags: {e}")
+        logger.error(f"Failed to load virtual proxy models for /tags: {e}")
 
     all_models["auto"] = {
         "name": "auto",
@@ -1105,8 +1257,15 @@ async def _select_auto_model(db: AsyncSession, body: Dict[str, Any]) -> Optional
 
     # Tier 1: Capability Matching
     if has_images:
+        # Strict filter: ONLY models that support images
         candidate_models = [m for m in candidate_models if m.supports_images]
-    
+    else:
+        # Soft filter: If it's a text task, prioritize text-only models 
+        # (models that don't support images) to save the vision experts for vision tasks.
+        text_only = [m for m in candidate_models if not m.supports_images]
+        if text_only:
+            candidate_models = text_only
+
     if is_reasoning_task:
         reasoning_models = [m for m in candidate_models if m.is_reasoning_model]
         if reasoning_models:
@@ -1147,11 +1306,15 @@ async def _select_auto_model(db: AsyncSession, body: Dict[str, Any]) -> Optional
     return best_model.model_name
 
 
-async def _resolve_target(db: AsyncSession, name: str, messages: List[Dict[str, Any]], depth: int = 0) -> Tuple[str, List[Dict[str, Any]]]:
+async def _resolve_target(db: AsyncSession, name: str, messages: List[Dict[str, Any]], depth: int = 0, request: Request = None) -> Tuple[str, List[Dict[str, Any]]]:
     """Recursively resolves a name into a physical model + final message list (for Virtual Agents)."""
     if depth > 10: return name, messages # Circular protection
 
     from app.database.models import VirtualAgent, SmartRouter
+    
+    # Mark virtual agent resolution for strict context enforcement
+    if request is not None:
+        request.state.enforce_strict_context = True
     
     # 1. Resolve Virtual Agent (Persona + RAG + MCP)
     agent_res = await db.execute(select(VirtualAgent).filter(VirtualAgent.name == name, VirtualAgent.is_active == True))
@@ -1177,17 +1340,21 @@ async def _resolve_target(db: AsyncSession, name: str, messages: List[Dict[str, 
 
         # Note: RAG/MCP injection point
 
-        return await _resolve_target(db, agent.base_model, updated_messages, depth + 1)
+        return await _resolve_target(db, agent.base_model, updated_messages, depth + 1, request=request)
 
     # 2. Resolve Smart Router (formerly Pool)
     router_res = await db.execute(select(SmartRouter).filter(SmartRouter.name == name, SmartRouter.is_active == True))
     router = router_res.scalars().first()
     if router:
+        # Mark router resolution for strict context enforcement
+        if request is not None:
+            request.state.enforce_strict_context = True
         # Fallback to the first target in the router for recursive resolution
         chosen_target = router.targets[0] if router.targets else name
-        return await _resolve_target(db, chosen_target, messages, depth + 1)
+        return await _resolve_target(db, chosen_target, messages, depth + 1, request=request)
 
     # 3. Fallback: It's a raw model name
+    # For raw models, don't enforce strict context (preserve user's num_ctx if set)
     return name, messages
 
 async def _call_classifier(request: Request, db: AsyncSession, classifier_model: str, last_message: str, intent_description: str) -> bool:
@@ -1228,6 +1395,10 @@ async def _call_classifier(request: Request, db: AsyncSession, classifier_model:
 
 async def _select_from_pool(db: AsyncSession, pool_name: str, body: Dict[str, Any], request: Request, sender: str = "anon") -> Optional[str]:
     """Selects a model using Multi-Tiered Hierarchical Rules (Fast + LLM)."""
+    # Mark router calls for strict context enforcement
+    request.state.enforce_strict_context = True
+    # Mark as router call - context will be enforced when the resolved model is called
+    request.state.enforce_strict_context = True
     from app.database.models import SmartRouter
     import copy
     
@@ -1323,10 +1494,16 @@ async def _handle_chain_request(db: AsyncSession, request: Request, chain_name: 
     """Orchestrates sequential model execution (Swarm/Chain)."""
     from app.database.models import ChainOrchestrator
     
+    # Mark chain calls for strict context enforcement
+    request.state.enforce_strict_context = True
+    
     result = await db.execute(select(ChainOrchestrator).filter(ChainOrchestrator.name == chain_name))
     chain = result.scalars().first()
     if not chain:
         raise HTTPException(status_code=404, detail="Chain not found")
+
+    # Mark this as a chain call for strict context enforcement
+    request.state.enforce_strict_context = True
 
     async def chain_generator():
         current_messages = body.get("messages", []).copy()
@@ -1379,23 +1556,41 @@ async def _handle_bundle_request(db: AsyncSession, request: Request, bundle_name
     from app.database.models import EnsembleOrchestrator
     from app.database.session import AsyncSessionLocal
     
+    # Mark ensemble calls for strict context enforcement across all participant models
+    request.state.enforce_strict_context = True
+    
     result = await db.execute(select(EnsembleOrchestrator).filter(EnsembleOrchestrator.name == bundle_name))
     bundle = result.scalars().first()
     if not bundle:
         event_manager.emit(ProxyEvent("error", request_id, bundle_name, "none", api_key.user.username, error_message="Bundle not found"))
         raise HTTPException(status_code=404, detail="Bundle not found")
 
+    # Mark this as a bundle call for strict context enforcement
+    request.state.enforce_strict_context = True
+
     # --- Vision Processing Helper ---
-    async def extract_image_descriptions(vision_model: str, images: List, messages: List[Dict], http_client: httpx.AsyncClient) -> str:
+    async def extract_image_descriptions(vision_model: str, images: List, messages: List[Dict], prompt_text: str, http_client: httpx.AsyncClient) -> str:
         """
         Sends images to a vision model to get descriptions.
         Returns a formatted string with image descriptions to prepend to the user's message.
         """
-        # Create a vision-only prompt
+        # Find the last user prompt text to give context to the vision model
+        user_query = prompt_text
+        if not user_query and messages:
+            for msg in reversed(messages):
+                if msg.get("role") == "user":
+                    content = msg.get("content")
+                    if isinstance(content, str):
+                        user_query = content
+                    elif isinstance(content, list):
+                        user_query = " ".join([p.get("text", "") for p in content if p.get("type") == "text"])
+                    break
+        
         vision_prompt = (
-            "You are a precise image analyzer. For each image provided, "
-            "describe its contents in detail. Be thorough but concise.\n\n"
-            "Format your response as:\n"
+            "You are a precise image analyzer. Analyze the provided images "
+            "and describe their contents in detail. Pay special attention to elements relevant to this user query:\n"
+            f"\"{user_query}\"\n\n"
+            "Be thorough but concise. Format your response as:\n"
             "【Image 1 Description】: <detailed description>\n"
             "【Image 2 Description】: <detailed description>\n"
             "...\n\n"
@@ -1403,16 +1598,13 @@ async def _handle_bundle_request(db: AsyncSession, request: Request, bundle_name
         )
         
         # Build vision message with images
-        vision_messages = [
-            {
-                "role": "system",
-                "content": vision_prompt
-            },
+        # Placing instruction in 'user' role is safer for vision models like LLaVA
+        vision_messages =[
             {
                 "role": "user",
                 "content": [
                     *[{"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img}"}} for img in images],
-                    {"type": "text", "text": "Please analyze these images."}
+                    {"type": "text", "text": vision_prompt}
                 ]
             }
         ]
@@ -1482,6 +1674,7 @@ async def _handle_bundle_request(db: AsyncSession, request: Request, bundle_name
     async def bundle_orchestrator_generator():
         # Detect if the client expects Ollama Chat format or Generation format
         is_chat_mode = "messages" in body
+        http_client: httpx.AsyncClient = request.app.state.http_client
         
         def format_proxy_chunk(content: str, is_done: bool = False):
             """Helper to ensure chunks match the expected format of the calling client."""
@@ -1499,86 +1692,6 @@ async def _handle_bundle_request(db: AsyncSession, request: Request, bundle_name
             return (json.dumps(chunk) + "\n").encode()
 
         try:
-            # --- Vision Processing Step (if configured) ---
-            image_descriptions = ""
-            
-            if bundle.vision_processor:
-                # Extract images from the request
-                images = body.get("images", [])
-                
-                if not images and "messages" in body:
-                    # Check messages for image content
-                    for msg in reversed(body["messages"]):
-                        if isinstance(msg, dict):
-                            content = msg.get("content", [])
-                            if isinstance(content, list):
-                                for part in content:
-                                    if part.get("type") == "image_url":
-                                        # Handle both direct URL and base64
-                                        img_url = part.get("image_url", {})
-                                        if isinstance(img_url, dict):
-                                            url = img_url.get("url", "")
-                                        else:
-                                            url = str(img_url)
-                                            
-                                        if url.startswith("data:"):
-                                            # Extract base64 data
-                                            import base64
-                                            header, b64_data = url.split(",", 1)
-                                            images.append(b64_data)
-                                        elif url.startswith("http"):
-                                            # Download and encode remote images
-                                            try:
-                                                img_response = await http_client.get(url, timeout=30.0)
-                                                if img_response.status_code == 200:
-                                                    import base64
-                                                    b64_data = base64.b64encode(img_response.content).decode()
-                                                    images.append(b64_data)
-                                            except Exception as e:
-                                                logger.warning(f"Failed to fetch image from {url}: {e}")
-                
-                if images:
-                    # Send images to vision processor
-                    event_manager.emit(ProxyEvent(
-                        event_type="assigned",
-                        request_id=f"{request_id}_vision",
-                        model=bundle.vision_processor,
-                        sender="orchestrator",
-                        request_type="VISION"
-                    ))
-                    
-                    vision_result = await extract_image_descriptions(
-                        bundle.vision_processor,
-                        images[:10],  # Limit to 10 images
-                        body.get("messages", []),
-                        http_client
-                    )
-                    image_descriptions = vision_result
-                    
-                    # If chat mode, prepend descriptions to the last user message
-                    if is_chat_mode:
-                        for i in range(len(body["messages"]) - 1, -1, -1):
-                            msg = body["messages"][i]
-                            if isinstance(msg, dict) and msg.get("role") == "user":
-                                original_content = msg.get("content", "")
-                                if isinstance(original_content, str):
-                                    msg["content"] = f"{image_descriptions}\n\nUser Query:\n{original_content}"
-                                elif isinstance(original_content, list):
-                                    # Prepend to text parts, keep images
-                                    new_content = [
-                                        {"type": "text", "text": f"{image_descriptions}\n\nUser Query:\n"}
-                                    ]
-                                    for part in original_content:
-                                        if isinstance(part, dict) and part.get("type") == "text":
-                                            new_content.append(part)
-                                    msg["content"] = new_content
-                                # History is automatically preserved by modifying in place
-                                break
-                    else:
-                        # For generate mode, prepend to prompt
-                        original_prompt = body.get("prompt", "")
-                        body["prompt"] = f"{image_descriptions}\n\nUser Query:\n{original_prompt}"
-            
             # Define the helper FIRST to avoid NameError
             async def get_sub_response(p_name):
                 # Assign a unique ID for this specific agent to visualize it in the Live Flow
@@ -1594,7 +1707,7 @@ async def _handle_bundle_request(db: AsyncSession, request: Request, bundle_name
                 # Use a fresh session for the generator logic to avoid closed-session errors
                 async with AsyncSessionLocal() as local_db:
                     sub_messages = body.get("messages", [])
-                    real_model, final_messages = await _resolve_target(local_db, p_name, sub_messages)
+                    real_model, final_messages = await _resolve_target(local_db, p_name, sub_messages, request=request)
                     
                     sub_body = body.copy()
                     sub_body["model"] = real_model
@@ -1648,7 +1761,9 @@ async def _handle_bundle_request(db: AsyncSession, request: Request, bundle_name
             force_ensemble = body.get("force_ensemble", False)
             use_ensemble = force_ensemble
 
-            if not use_ensemble:
+            if not bundle.parallel_participants:
+                use_ensemble = False
+            elif not use_ensemble:
                 classifier_prompt = (
                     f"User query: '{user_query}'\n\n"
                     "Analyze the complexity of this query. Determine if this task requires multiple AI experts to solve, or if it can be handled by a single model.\n"
@@ -1700,13 +1815,25 @@ async def _handle_bundle_request(db: AsyncSession, request: Request, bundle_name
                     yield format_proxy_chunk("⚠️ [Master model not available]", is_done=True)
                     return
 
+                target_server = servers[0]
+                master_payload = body
+                
+                # Retrieve master model metadata for clamping
+                async with AsyncSessionLocal() as meta_db:
+                    m_meta = await get_metadata_by_model_name(meta_db, bundle.master_model)
+                    m_limit = m_meta.max_context if m_meta else 32768
+
+                if target_server.server_type == 'ollama':
+                    normalized_bytes = _normalize_payload_for_ollama(json.dumps(body).encode('utf-8'), max_context_limit=m_limit)
+                    master_payload = json.loads(normalized_bytes)
+
                 # Ensure we use server_crud._get_auth_headers directly
                 try:
                     async with request.app.state.http_client.stream(
                         "POST", 
-                        f"{servers[0].url.rstrip('/')}/api/{master_path}", 
-                        json=body, 
-                        headers=server_crud._get_auth_headers(servers[0]), 
+                        f"{target_server.url.rstrip('/')}/api/{master_path}", 
+                        json=master_payload, 
+                        headers=server_crud._get_auth_headers(target_server), 
                         timeout=600.0
                     ) as resp:
                         # CRITICAL: Check status before streaming
@@ -1742,12 +1869,6 @@ async def _handle_bundle_request(db: AsyncSession, request: Request, bundle_name
 
             # 2. Parallel Participant Execution
             logger.info(f"[Ensemble:{bundle_name}] Request ID: {request_id} - Activating {len(bundle.parallel_participants)} agents: {bundle.parallel_participants}")
-            
-            # Check if any agents are actually configured
-            if not bundle.parallel_participants:
-                logger.error(f"[Ensemble:{bundle_name}] No parallel participants configured!")
-                yield format_proxy_chunk("⚠️ **[Error: No parallel participants defined in Ensemble]**", is_done=True)
-                return
 
             event_manager.emit(ProxyEvent("assigned", request_id, bundle_name, "orchestrator", api_key.user.username))
             tasks = [asyncio.create_task(get_sub_response(m)) for m in bundle.parallel_participants]
@@ -1846,13 +1967,19 @@ async def _handle_bundle_request(db: AsyncSession, request: Request, bundle_name
                 from app.crud.server_crud import _get_auth_headers
                 headers = _get_auth_headers(target_server)
                 
+                # Apply normalization if necessary
+                final_master_body = master_body
+                if target_server.server_type == 'ollama':
+                    normalized_bytes = _normalize_payload_for_ollama(json.dumps(master_body).encode('utf-8'))
+                    final_master_body = json.loads(normalized_bytes)
+
                 master_url = f"{target_server.url.rstrip('/')}/api/{master_path}"
                 logger.info(f"[Ensemble:{bundle_name}] Synthesis requested via model '{bundle.master_model}' on server '{target_server.name}'")
                 event_manager.emit(ProxyEvent("assigned", request_id, bundle_name, target_server.name, api_key.user.username))
 
                 # Increased timeout to 1 hour (3600s) for complex synthesis
                 async with request.app.state.http_client.stream(
-                    "POST", master_url, json=master_body, headers=headers, timeout=3600.0
+                    "POST", master_url, json=final_master_body, headers=headers, timeout=3600.0
                 ) as backend_resp:
                     if backend_resp.status_code != 200:
                         err_text = await backend_resp.aread()
@@ -1946,6 +2073,9 @@ async def proxy_ollama(
     """
     A catch-all route that proxies all other requests to the backend with token tracking.
     """
+    # Initialize context enforcement flag (bundles/orchestrators will set to True)
+    request.state.enforce_strict_context = False
+    
     req_id = secrets.token_hex(4)
     blocked_paths = {p.strip().lstrip('/') for p in settings.blocked_ollama_endpoints.split(',') if p.strip()}
     request_path = path.strip().lstrip('/')
@@ -1971,50 +2101,154 @@ async def proxy_ollama(
         except (json.JSONDecodeError, Exception):
             pass
 
-    # Logic to handle 'think' parameter and auto-activation for reasoning models
-    if model_name and isinstance(body, dict):
-        # Pass tools through
-        if "tools" in body:
-            logger.info(f"Forwarding {len(body['tools'])} tools to backend.")
-        model_name_lower = model_name.lower()
-        
-        # Load capability data (simplified for this edit)
-        is_reasoning_model = any(kw in model_name_lower for kw in ["r1", "qwq", "think", "phi-4", "gemma-3"])
-        
-        if "think" not in body and is_reasoning_model:
-            # Auto-activate thinking for known reasoning models if not specified
-            body["think"] = True
-
-        # Fetch metadata to check if 'think' parameter is supported
-        meta = await model_metadata_crud.get_metadata_by_model_name(db, model_name)
-        
-        # Fallback to string check only if meta doesn't exist
-        is_supported = meta.supports_thinking if meta else any(kw in model_name.lower() for kw in ["qwen", "gpt-oss", "deepseek", "r1"])
-
-        if is_supported:
-            # Special case for gpt-oss which uses strings instead of booleans
-            if "gpt-oss" in model_name.lower() and body.get("think") is True:
-                logger.info(f"Translating 'think: true' to 'think: \"medium\"' for GPT-OSS model '{model_name}'")
-                body["think"] = "medium"
-                body_bytes = json.dumps(body).encode('utf-8')
-        elif "think" in body:
-            logger.warning(f"Model '{model_name}' is not configured for 'think' support in Models Manager. Removing parameter.")
-            del body["think"]
-            body_bytes = json.dumps(body).encode('utf-8')
-            
-    # Handle 'auto' model routing
+    # 1. Handle 'auto' model routing FIRST            
     if model_name == "auto":
         chosen_model_name = await _select_auto_model(db, body)
         if not chosen_model_name:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Auto-routing could not find an available and suitable model."
-            )
+            raise HTTPException(status_code=503, detail="Auto-routing failed.")
         model_name = chosen_model_name
         body["model"] = model_name
+
+    # 2. Handle Smart Router (Pool) Resolution
+    from app.database.models import SmartRouter
+    pool_check = await db.execute(select(SmartRouter).filter(SmartRouter.name == model_name))
+    router_obj = pool_check.scalars().first()
+    if router_obj:
+        model_name = await _select_from_pool(db, model_name, body, request, sender=api_key.user.username)
+        if not model_name:
+            raise HTTPException(status_code=503, detail="Router has no available targets.")
+        body["model"] = model_name
+
+    requested_model_name = model_name
+
+    # 3. Handle Vision Augmenter Pipeline
+    try:
+        from app.database.models import VisionAugmenter
+        aug_check = await db.execute(select(VisionAugmenter).filter(VisionAugmenter.name == model_name))
+        augmenter = aug_check.scalars().first()
+        if augmenter:
+            logger.info(f"[VisionAugmenter] Pipeline triggered for '{model_name}'. Analyzing payload for images...")
+            is_chat_mode = "messages" in body
+            has_images = "images" in body and body["images"]
+            
+            if not has_images and is_chat_mode:
+                for msg in body.get("messages",[]):
+                    if msg.get("images"):
+                        has_images = True
+                        break
+                    content = msg.get("content")
+                    if isinstance(content, list):
+                        for part in content:
+                            if part.get("type") == "image_url":
+                                has_images = True
+                                break
+
+            if has_images:
+                logger.info(f"[VisionAugmenter] Images detected. Offloading to VLM: '{augmenter.vision_model}'")
+                event_manager.emit(ProxyEvent("assigned", req_id + "_v", augmenter.vision_model, "vision-augmenter", api_key.user.username, request_type="VISION"))
+                
+                extracted_images =[]
+                if body.get("images"):
+                    extracted_images.extend(body["images"])
+                    del body["images"]
+                
+                user_query = body.get("prompt", "")
+                if is_chat_mode:
+                    for msg in body.get("messages", []):
+                        if msg.get("images"):
+                            extracted_images.extend(msg["images"])
+                            del msg["images"]
+                        
+                        content = msg.get("content")
+                        if isinstance(content, list):
+                            text_parts =[]
+                            for part in content:
+                                if part.get("type") == "image_url":
+                                    url = part.get("image_url", {}).get("url", "")
+                                    if url.startswith("data:"):
+                                        extracted_images.append(url.split(",", 1)[1])
+                                    else:
+                                        extracted_images.append(url)
+                                elif part.get("type") == "text":
+                                    text_parts.append(part.get("text", ""))
+                            msg["content"] = " ".join(text_parts)
+                            
+                        if msg.get("role") == "user":
+                            user_query = msg.get("content", "")
+
+                # Get description
+                image_descriptions = await _extract_image_descriptions(
+                    request, db, augmenter.vision_model, extracted_images[:10], user_query, request.app.state.http_client
+                )
+                
+                # Replace the images with the descriptions
+                if is_chat_mode:
+                    for i in range(len(body["messages"]) - 1, -1, -1):
+                        msg = body["messages"][i]
+                        if msg.get("role") == "user":
+                            msg["content"] = f"### CONTEXTUAL IMAGE ANALYSIS:\n{image_descriptions}\n\n### USER QUERY:\n{msg.get('content', '')}"
+                            break
+                else:
+                    body["prompt"] = f"### CONTEXTUAL IMAGE ANALYSIS:\n{image_descriptions}\n\n### USER QUERY:\n{body.get('prompt', '')}"
+
+                logger.info(f"[VisionAugmenter] VLM analysis complete. Routing cleaned prompt to: '{augmenter.text_model}'")
+            
+            # Continue pipeline with the text model
+            model_name = augmenter.text_model
+            body["model"] = model_name
+    except Exception as e:
+        logger.error(f"VisionAugmenter error: {e}", exc_info=True)
+
+
+    # 4. Handle Capabilities Gatekeeper (Tools & Thinking)
+    if model_name and isinstance(body, dict):
+        # --- TOOL SANITIZATION ---
+        # Only forward 'tools' if the list actually has items to prevent 500 errors
+        if "tools" in body:
+            if isinstance(body["tools"], list) and len(body["tools"]) > 0:
+                logger.info(f"Forwarding {len(body['tools'])} tools to backend.")
+            else:
+                # Remove empty tool definitions that crash some cloud providers
+                del body["tools"]
+                if "tool_choice" in body:
+                    del body["tool_choice"]
+
+        # --- REFINED THINKING LOGIC ---
+        # 1. Fetch exact UI configuration for this model
+        meta = await model_metadata_crud.get_metadata_by_model_name(db, model_name)
+        ui_allows_thinking = meta.supports_thinking if meta else False
+        
+        # 2. Only act if the client EXPLICITLY requested thinking
+        if "think" in body:
+            if ui_allows_thinking:
+                # Normal path: Translation for special models like gpt-oss
+                if "gpt-oss" in model_name.lower() and body.get("think") is True:
+                    body["think"] = "medium"
+            else:
+                # Warning path: Client asked, but Hub UI is configured to block it
+                warning_msg = (
+                    f"⚠️ Client requested 'think: true' for {model_name}, but 'Think (CoT)' "
+                    f"is DISABLED in Models Manager. Parameter stripped to prevent error."
+                )
+                logger.warning(warning_msg)
+                
+                # Notify the Admin via the Live Flow Telemetry
+                if req_id:
+                    event_manager.emit(ProxyEvent(
+                        event_type="received", # Yellow pulse
+                        request_id=req_id,
+                        model=model_name,
+                        sender=api_key.user.username,
+                        error_message=f"NOTICE: 'think' parameter ignored. To enable reasoning, go to 'Intelligence Layer > Models Manager' and check 'Think (CoT)' for {model_name}."
+                    ))
+                
+                # Strip the parameter to protect standard backends
+                del body["think"]
+        
+        # 4. Re-encode the optimized body
         body_bytes = json.dumps(body).encode('utf-8')
 
-    # (Functionality moved to the top of proxy_ollama for visibility)
+    # 4. Telemetry
 
     # Determine Request Type
     req_type = path.upper()
@@ -2030,7 +2264,7 @@ async def proxy_ollama(
     event_manager.emit(ProxyEvent(
         event_type="received", 
         request_id=req_id, 
-        model=model_name or "unknown",
+        model=requested_model_name or model_name or "unknown",
         sender=api_key.user.username,
         request_type=req_type,
         prompt_tokens=p_tokens
@@ -2041,6 +2275,7 @@ async def proxy_ollama(
     pool_check = await db.execute(select(SmartRouter).filter(SmartRouter.name == model_name))
     if pool_check.scalars().first():
         resolved_model = await _select_from_pool(db, model_name, body, request, sender=api_key.user.username)
+        # Pool already sets enforce_strict_context
         if resolved_model:
             model_name = resolved_model
             body["model"] = model_name

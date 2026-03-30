@@ -133,15 +133,6 @@ class EnsembleOrchestrator(Base):
     __tablename__ = "model_bundles" # Keep table name for data stability
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, unique=True, index=True, nullable=False)
-
-class ChainOrchestrator(Base):
-    __tablename__ = "model_chains"
-    id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, unique=True, index=True, nullable=False)
-    description = Column(String, nullable=True)
-    steps = Column(JSON, nullable=False) # List of model names: ["vision-model", "text-model"]
-    is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
     description = Column(String, nullable=True)
     parallel_participants = Column(JSON, nullable=False) # Names of models or agents
     # Legacy support: matching the physical NOT NULL constraint in older DBs
@@ -159,6 +150,15 @@ class ChainOrchestrator(Base):
         if 'parallel_participants' in kwargs and 'parallel_models' not in kwargs:
             kwargs['parallel_models'] = kwargs['parallel_participants']
         super().__init__(**kwargs)
+
+class ChainOrchestrator(Base):
+    __tablename__ = "model_chains"
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, unique=True, index=True, nullable=False)
+    description = Column(String, nullable=True)
+    steps = Column(JSON, nullable=False) # List of model names:["vision-model", "text-model"]
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
 class SmartRouter(Base): # Keep table name for data stability
     __tablename__ = "model_pools"
@@ -190,6 +190,15 @@ class LogAnalysis(Base):
     timestamp = Column(DateTime, default=datetime.datetime.utcnow, index=True)
     content = Column(String, nullable=False)
     
+class VisionAugmenter(Base):
+    __tablename__ = "vision_augmenters"
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, unique=True, index=True, nullable=False)
+    text_model = Column(String, nullable=False)
+    vision_model = Column(String, nullable=False)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
 class VirtualAgent(Base):
     __tablename__ = "virtual_agents"
     id = Column(Integer, primary_key=True, index=True)

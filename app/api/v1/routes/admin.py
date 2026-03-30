@@ -861,10 +861,28 @@ async def admin_models_manager_page(
     context = get_template_context(request)
     http_client: httpx.AsyncClient = request.app.state.http_client
     
-    # 1. Get all unique model names available across all servers
-    all_model_names = await server_crud.get_all_available_model_names(db)
+    # 1. Get a map of which servers host which models
+    # This allows us to show the "Servers" column and filter out "ghost" models
+    servers = await server_crud.get_servers(db)
+    model_to_servers = {}
     
-    # 2. Deep scan: Create metadata and try to fetch context window for defaults
+    for s in servers:
+        if s.is_active and s.available_models:
+            models_list = s.available_models
+            if isinstance(models_list, str):
+                try: models_list = json.loads(models_list)
+                except: continue
+            
+            for m_info in models_list:
+                m_name = m_info.get("name")
+                if m_name:
+                    if m_name not in model_to_servers:
+                        model_to_servers[m_name] = []
+                    model_to_servers[m_name].append(s.name)
+
+    all_model_names = list(model_to_servers.keys())
+    
+    # 2. Deep scan: Ensure metadata exists for all CURRENT models
     for model_name in all_model_names:
         if not model_name or len(model_name) > 256 or not re.match(r'^[\w\.\-:@]+$', model_name):
             continue
@@ -886,7 +904,16 @@ async def admin_models_manager_page(
                 # Autocorrect existing default if we found better info
                 await model_metadata_crud.update_metadata(db, model_name=model_name, max_context=suggested_ctx)
         
-    context["metadata_list"] = await model_metadata_crud.get_all_metadata(db)
+    # 3. Only fetch metadata for models that actually exist on a server
+    full_metadata_list = await model_metadata_crud.get_all_metadata(db)
+    filtered_metadata = []
+    for meta in full_metadata_list:
+        if meta.model_name in model_to_servers:
+            # Inject the server list into the object for the template
+            meta.origin_servers = model_to_servers[meta.model_name]
+            filtered_metadata.append(meta)
+
+    context["metadata_list"] = filtered_metadata
     context["csrf_token"] = await get_csrf_token(request)
     return templates.TemplateResponse("admin/models_manager.html", context)
 
@@ -908,9 +935,16 @@ async def admin_refresh_model_context(
     details = await server_crud.get_model_details_from_server(http_client, servers[0], model_name)
     ctx = details.get("context_length")
 
-    if ctx:
+    if ctx is not None:
+        # Update the database permanently when refreshed manually
+        await model_metadata_crud.update_metadata(db, model_name=model_name, max_context=ctx)
         return {"success": True, "context_length": ctx}
-    return JSONResponse({"success": False, "error": "Server did not provide context metadata for this model."}, status_code=500)
+    
+    # Return 200 with success: false so the UI shows the message without a console crash
+    return {
+        "success": False, 
+        "error": "The backend server is connected, but it does not expose a 'context_length' field for this specific model architecture."
+    }
 
 
 @router.post("/models-manager/update", name="admin_update_model_metadata", dependencies=[Depends(validate_csrf_token)])
@@ -1675,6 +1709,51 @@ async def admin_edit_agent_post(
     flash(request, f"Agent '{agent.name}' updated successfully.", "success")
     return RedirectResponse(url=request.url_for("admin_agents"), status_code=303)
 
+# --- VISION AUGMENTER ROUTES ---
+@router.get("/vision-augmenters", response_class=HTMLResponse, name="admin_vision_augmenters")
+async def admin_vision_augmenters_page(request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
+    from app.database.models import VisionAugmenter, VirtualAgent
+    context = get_template_context(request)
+    result = await db.execute(select(VisionAugmenter))
+    context["augmenters"] = result.scalars().all()
+    
+    all_models = await server_crud.get_all_available_model_names(db)
+    agent_res = await db.execute(select(VirtualAgent.name))
+    context["agents"] = agent_res.scalars().all()
+    context["raw_models"] = [m for m in all_models if m not in context["agents"] and m != "auto"]
+    
+    context["csrf_token"] = await get_csrf_token(request)
+    return templates.TemplateResponse("admin/vision_augmenters.html", context)
+
+@router.post("/vision-augmenters/add", name="admin_add_vision_augmenter", dependencies=[Depends(validate_csrf_token)])
+async def admin_add_vision_augmenter(
+    request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user),
+    name: str = Form(...), vision_text_model: str = Form(...), vision_vlm_model: str = Form(...)
+):
+    from app.database.models import VisionAugmenter
+    name = re.sub(r'[^a-z0-9.-]', '-', name.lower())
+    
+    existing = await db.execute(select(VisionAugmenter).filter(VisionAugmenter.name == name))
+    if existing.scalars().first():
+        flash(request, f"A vision augmenter with name '{name}' already exists.", "error")
+        return RedirectResponse(url=request.url_for("admin_vision_augmenters"), status_code=303)
+        
+    new_aug = VisionAugmenter(name=name, text_model=vision_text_model, vision_model=vision_vlm_model)
+    db.add(new_aug)
+    await db.commit()
+    flash(request, f"Vision Augmenter '{name}' created successfully.", "success")
+    return RedirectResponse(url=request.url_for("admin_vision_augmenters"), status_code=303)
+
+@router.post("/vision-augmenters/{aug_id}/delete", name="admin_delete_vision_augmenter", dependencies=[Depends(validate_csrf_token)])
+async def admin_delete_vision_augmenter(aug_id: int, request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
+    from app.database.models import VisionAugmenter
+    aug = await db.get(VisionAugmenter, aug_id)
+    if aug:
+        await db.delete(aug)
+        await db.commit()
+        flash(request, "Vision Augmenter deleted.")
+    return RedirectResponse(url=request.url_for("admin_vision_augmenters"), status_code=303)
+
 # --- ENSEMBLE ORCHESTRATOR ROUTES ---
 @router.get("/ensembles", response_class=HTMLResponse, name="admin_ensembles_page")
 async def admin_ensembles_page(request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
@@ -1705,8 +1784,7 @@ async def admin_add_ensemble(
     master_model: str = Form(...),
     parallel_models: List[str] = Form(...),
     show_monologue: bool = Form(False),
-    send_status_update: bool = Form(False),
-    vision_processor: Optional[str] = Form(None)
+    send_status_update: bool = Form(False)
 ):
     from app.database.models import EnsembleOrchestrator
     name = re.sub(r'[^a-z0-9.-]', '-', name.lower())
@@ -1716,13 +1794,14 @@ async def admin_add_ensemble(
         master_model=master_model,
         parallel_participants=parallel_models,
         parallel_models=parallel_models, # Legacy field sync
-        vision_processor=vision_processor if vision_processor else None,
+        vision_processor=None,
         show_monologue=show_monologue,
+        send_status_update=send_status_update,
         description=f"Ensemble: {', '.join(parallel_models)} -> {master_model}"
     )
     db.add(new_bundle)
     await db.commit()
-    flash(request, f"Bundle '{name}' created successfully.", "success")
+    flash(request, f"Ensemble '{name}' created successfully.", "success")
     return RedirectResponse(url=request.url_for("admin_ensembles_page"), status_code=303)
 
 @router.get("/chains", response_class=HTMLResponse, name="admin_chains_page")
@@ -1779,8 +1858,7 @@ async def admin_edit_ensemble_form(ensemble_id: int, request: Request, db: Async
 async def admin_edit_ensemble_post(
     ensemble_id: int, request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user),
     name: str = Form(...), master_model: str = Form(...), parallel_models: List[str] = Form(...),
-    show_monologue: bool = Form(False), send_status_update: bool = Form(False),
-    vision_processor: Optional[str] = Form(None)
+    show_monologue: bool = Form(False), send_status_update: bool = Form(False)
 ):
     from app.database.models import EnsembleOrchestrator
     bundle = await db.get(EnsembleOrchestrator, ensemble_id)
@@ -1790,7 +1868,7 @@ async def admin_edit_ensemble_post(
     bundle.master_model = master_model
     bundle.parallel_participants = parallel_models
     bundle.parallel_models = parallel_models # Legacy field sync
-    bundle.vision_processor = vision_processor if vision_processor else None
+    bundle.vision_processor = None
     bundle.show_monologue = show_monologue
     bundle.send_status_update = send_status_update
     bundle.description = f"Ensemble: {', '.join(parallel_models)} -> {master_model}"
@@ -1818,49 +1896,6 @@ async def admin_routers_page(request: Request, db: AsyncSession = Depends(get_db
     context["csrf_token"] = await get_csrf_token(request)
     return templates.TemplateResponse("admin/routers.html", context)
 
-@router.post("/routers/vision-enabler", name="admin_add_vision_enabler", dependencies=[Depends(validate_csrf_token)])
-async def admin_add_vision_enabler(
-    request: Request, 
-    db: AsyncSession = Depends(get_db), 
-    admin_user: User = Depends(require_admin_user),
-    name: str = Form(...),
-    vision_text_model: str = Form(...),
-    vision_vlm_model: str = Form(...)
-):
-    """Quick shortcut to create a vision-enabled smart router."""
-    from app.database.models import SmartRouter
-    
-    router_name = re.sub(r'[^a-z0-9.-]', '-', name.lower())
-    
-    # Check if name already exists
-    existing = await db.execute(select(SmartRouter).filter(SmartRouter.name == router_name))
-    if existing.scalars().first():
-        flash(request, f"A router with name '{router_name}' already exists.", "error")
-        return RedirectResponse(url=request.url_for("admin_routers_page"), status_code=303)
-    
-    # Create a smart router with hierarchical rules:
-    # 1. If has_images -> route to VLM
-    # 2. Else (fallback) -> route to text model
-    new_router = SmartRouter(
-        name=router_name,
-        strategy='priority',
-        targets=[vision_vlm_model, vision_text_model],  # VLM first, text model second
-        models=[vision_vlm_model, vision_text_model],  # Legacy field sync
-        rules=[
-            {
-                "logic": "OR",
-                "target": vision_vlm_model,
-                "conditions": [{"type": "has_images", "value": ""}]
-            }
-            # If no rules match for text model, priority strategy will use it as fallback
-        ],
-        classifier_model=None,
-        description=f"Vision Router: Images→{vision_vlm_model}, Text→{vision_text_model}"
-    )
-    db.add(new_router)
-    await db.commit()
-    flash(request, f"Vision-enabled router '{router_name}' created! Use it as a model name.", "success")
-    return RedirectResponse(url=request.url_for("admin_routers_page"), status_code=303)
 
 @router.get("/gpu-stats", name="admin_gpu_stats")
 async def get_gpu_stats(admin_user: User = Depends(require_admin_user)):

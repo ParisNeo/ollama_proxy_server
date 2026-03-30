@@ -17,29 +17,38 @@ logger = logging.getLogger(__name__)
 
 
 def _get_auth_headers(server: OllamaServer) -> Dict[str, str]:
+    """
+    Generates appropriate headers for backend servers.
+    Ensures 'Authorization' is set for Cloud and vLLM providers.
+    """
     headers = {}
     if server.encrypted_api_key:
         api_key = decrypt_data(server.encrypted_api_key)
         if api_key:
+            # Most cloud providers (including Ollama Cloud) expect Bearer format
             headers["Authorization"] = f"Bearer {api_key}"
+            # Some specific local Ollama setups might expect X-Token; Bearer is safer as a default
     return headers
 
 
 def _is_safe_url(url: str) -> bool:
     """
-    Validates that the provided URL is well-formed and uses a supported scheme.
-    SSRF protection relies on the fact that only authenticated admins can add servers.
-    Localhost and private IPs are explicitly allowed for local infrastructure.
+    Validates the backend URL. Now specifically tuned for local servers
+    and the new Ollama Cloud (ollama.com/api).
     """
     try:
-        parsed = urlparse(str(url))
-        # Ensure only http/https schemes are used
+        url_str = str(url).lower()
+        parsed = urlparse(url_str)
+        
         if parsed.scheme not in ('http', 'https'):
             return False
             
-        # Ensure there is a valid hostname/netloc
         if not parsed.netloc:
             return False
+            
+        # Explicitly allow the new Ollama Cloud domain
+        if "ollama.com" in parsed.netloc:
+            return True
             
         return True
         
@@ -795,26 +804,69 @@ async def check_all_servers_health(db: AsyncSession, http_client: httpx.AsyncCli
 
 async def get_model_details_from_server(http_client: httpx.AsyncClient, server: OllamaServer, model_name: str) -> Dict[str, Any]:
     """
-    Queries a server for specific model metadata (context window, etc).
+    Retrieves model metadata (context window, etc) using service-specific endpoints.
     """
     headers = _get_auth_headers(server)
+    url_base = server.url.rstrip('/')
+    
     try:
-        if server.server_type == 'ollama':
-            url = f"{server.url.rstrip('/')}/api/show"
+        # 1. OLLAMA Protocol
+        if server.server_type in ('ollama', 'cloud'):
+            url = f"{url_base}/api/show"
             resp = await http_client.post(url, json={"name": model_name}, timeout=10.0, headers=headers)
             if resp.status_code == 200:
                 data = resp.json()
-                # Newer Ollama versions provide context_length in details
-                ctx = data.get("model_info", {}).get("llama.context_length") or \
-                      data.get("model_info", {}).get("phi3.context_length") or \
-                      data.get("details", {}).get("context_length")
+                # AGNOSTIC SEARCH: Look for context length across different architectures
+                info = data.get("model_info", {})
+                details = data.get("details", {})
                 
+                # List of known keys used by different Ollama versions and architectures
+                possible_keys = [
+                    "context_length",
+                    "max_position_embeddings",
+                    "llama.context_length",
+                    "phi3.context_length",
+                    "gemma.context_length",
+                    "qwen2.context_length",
+                    "bert.max_position_embeddings"
+                ]
+                
+                ctx = None
+                # Check the model_info flat map first
+                for key in possible_keys:
+                    if key in info:
+                        ctx = info[key]
+                        break
+                
+                # Check top-level details if still not found
+                if not ctx:
+                    ctx = details.get("context_length")
+
                 return {
-                    "context_length": int(ctx) if ctx else None,
-                    "families": data.get("details", {}).get("families", [])
+                    "context_length": int(ctx) if ctx is not None else None,
+                    "families": details.get("families", [])
                 }
-        # vLLM/OpenAI doesn't have a standard 'show' endpoint for context, 
-        # but we might infer from model name or return None to fallback
+
+        # 2. VLLM / LLAMA.CPP (Props Endpoint)
+        # llama.cpp server uses /props to expose n_ctx
+        elif server.server_type == 'vllm':
+            # Check for llama.cpp style props first
+            try:
+                props_resp = await http_client.get(f"{url_base}/props", timeout=5.0)
+                if props_resp.status_code == 200:
+                    p_data = props_resp.json()
+                    # llama.cpp specific
+                    n_ctx = p_data.get("default_generation_settings", {}).get("n_ctx")
+                    if n_ctx: return {"context_length": int(n_ctx)}
+            except: pass
+
+            # Standard vLLM/OpenAI doesn't expose context window easily. 
+            # We check the model ID for common suffixes (e.g., -128k)
+            import re
+            match = re.search(r'-(\d+)[kK]', model_name)
+            if match:
+                return {"context_length": int(match.group(1)) * 1024}
+        
         return {"context_length": None}
     except Exception as e:
         logger.debug(f"Could not fetch model details for {model_name} on {server.name}: {e}")

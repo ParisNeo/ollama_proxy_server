@@ -112,7 +112,7 @@ async def admin_playground_stream(
         # CRITICAL FIX: Deep copy messages before resolution to prevent mutation leakage
         import copy
         messages_copy = copy.deepcopy(messages)
-        resolved_name, updated_messages = await _resolve_target(db, model_name, messages_copy)
+        resolved_name, updated_messages = await _resolve_target(db, model_name, messages_copy, request=request)
         model_name = resolved_name
         messages = updated_messages
         data["model"] = model_name

@@ -157,7 +157,20 @@ async def lifespan(app: FastAPI):
     # --- NEW: Load settings from DB ---
     async with AsyncSessionLocal() as db:
         db_settings_obj = await settings_crud.create_initial_settings(db)
-        app.state.settings = AppSettingsModel.model_validate(db_settings_obj.settings_data)
+        current_data = db_settings_obj.settings_data
+        
+        # AUTO-BUMP: If user has old very low timeouts, upgrade them to the new gateway defaults
+        needs_update = False
+        if current_data.get("retry_total_timeout_seconds", 0) < 60.0:
+            current_data["retry_total_timeout_seconds"] = 600.0
+            current_data["max_retries"] = 10
+            needs_update = True
+        
+        if needs_update:
+            logger.info("Migrating settings to high-resilience gateway defaults...")
+            await settings_crud.update_app_settings(db, AppSettingsModel.model_validate(current_data))
+
+        app.state.settings = AppSettingsModel.model_validate(current_data)
 
     await create_initial_admin_user()
 
