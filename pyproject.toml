@@ -32,6 +32,7 @@ scikit-learn = "^1.5.0"
 cryptography = "^46.0.5"
 ascii_colors=">=0.11.21"
 xhtml2pdf=">=0.2.17"
+pipmaster=">=0.6.1"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.2.2"

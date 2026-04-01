@@ -7,6 +7,8 @@ import asyncio
 import socket
 import httpx
 import psutil
+import shutil
+import pipmaster as pm
 from typing import Dict, Optional, List, Tuple
 from pathlib import Path
 from app.core.binary_manager import LLAMACPP_DIR
@@ -142,6 +144,59 @@ class InstanceSupervisor:
         if instance_id in self.processes:
             del self.processes[instance_id]
         return True
+
+    def is_ollama_installed(self) -> bool:
+        """Checks if the ollama binary is reachable in the system PATH."""
+        binary = "ollama.exe" if platform.system() == "Windows" else "ollama"
+        return shutil.which(binary) is not None
+
+    def is_vllm_installed(self) -> bool:
+        """Checks if vLLM is installed in the current Python environment."""
+        return pm.is_installed("vllm")
+
+    async def install_vllm(self) -> Tuple[bool, str]:
+        """Attempts to install vLLM using pipmaster."""
+        try:
+            # We use ensure_packages to handle dependencies properly
+            success = await pm.async_install("vllm")
+            if success:
+                return True, "vLLM installed successfully."
+            return False, "pipmaster failed to install vllm."
+        except Exception as e:
+            return False, str(e)
+
+    async def install_ollama(self) -> Tuple[bool, str]:
+        """Attempts to install Ollama based on the operating system."""
+        sys_name = platform.system()
+        try:
+            if sys_name == "Linux" or sys_name == "Darwin":
+                # Standard one-liner for Linux/macOS
+                cmd = "curl -fsSL https://ollama.com/install.sh | sh"
+                process = await asyncio.create_subprocess_shell(
+                    cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+                )
+                stdout, stderr = await process.communicate()
+                if process.returncode == 0:
+                    return True, "Ollama installed successfully via shell script."
+                return False, stderr.decode()
+            
+            elif sys_name == "Windows":
+                # Download and launch the installer
+                installer_url = "https://ollama.com/download/OllamaSetup.exe"
+                target_path = Path(os.environ.get("TEMP", ".")) / "OllamaSetup.exe"
+                
+                async with httpx.AsyncClient(follow_redirects=True) as client:
+                    resp = await client.get(installer_url)
+                    with open(target_path, "wb") as f:
+                        f.write(resp.content)
+                
+                # Run the installer
+                subprocess.Popen([str(target_path)], shell=True)
+                return True, "Installer downloaded and launched. Please complete the setup in the window that appeared."
+            
+            return False, f"Automatic installation not supported on {sys_name}."
+        except Exception as e:
+            return False, str(e)
 
     async def discover_local_instances(self, managed_ports: List[int], start_port: int, end_port: int) -> List[dict]:
         discovered = []

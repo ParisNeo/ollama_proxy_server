@@ -2156,8 +2156,29 @@ async def admin_instances_page(request: Request, db: AsyncSession = Depends(get_
         
     context["instances"] = instance_list
     context["discovered"] = discovered
+    context["is_installed"] = supervisor.is_ollama_installed()
+    context["is_vllm_installed"] = supervisor.is_vllm_installed()
     context["csrf_token"] = await get_csrf_token(request)
     return templates.TemplateResponse("admin/instances.html", context)
+
+@router.post("/instances/install", name="admin_install_ollama", dependencies=[Depends(validate_csrf_token)])
+async def install_ollama_endpoint(request: Request, admin_user: User = Depends(require_admin_user)):
+    success, message = await supervisor.install_ollama()
+    if success:
+        flash(request, message, "success")
+    else:
+        flash(request, f"Installation failed: {message}", "error")
+    return RedirectResponse(url=request.url_for("admin_instances"), status_code=303)
+
+@router.post("/instances/install-vllm", name="admin_install_vllm", dependencies=[Depends(validate_csrf_token)])
+async def install_vllm_endpoint(request: Request, admin_user: User = Depends(require_admin_user)):
+    flash(request, "vLLM installation started in background. This may take several minutes.", "info")
+    success, message = await supervisor.install_vllm()
+    if success:
+        flash(request, message, "success")
+    else:
+        flash(request, f"vLLM Installation failed: {message}", "error")
+    return RedirectResponse(url=request.url_for("admin_instances"), status_code=303)
 
 @router.post("/instances/adopt", name="admin_adopt_instance", dependencies=[Depends(validate_csrf_token)])
 async def adopt_instance(

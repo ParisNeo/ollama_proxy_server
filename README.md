@@ -1,3 +1,35 @@
+## 🏢 Hierarchical Architecture (The Master Hub Pattern)
+
+LoLLMs Hub is designed for extreme scale. Because its API is 100% compatible with Ollama and OpenAI, you can chain multiple Hubs together.
+
+### Multi-Node Cluster Flow
+
+```mermaid
+graph TD
+    Client[AI Client / App] -->|Auth & Load Balance| Master[Master Node: LoLLMs Hub]
+    
+    subgraph Machine_A [Worker 1: Windows Gamer PC]
+        Master --> SlaveA[Local Slave Hub]
+        SlaveA --> InstA1[Ollama Instance 1: GPU 0]
+        SlaveA --> InstA2[Ollama Instance 2: GPU 1]
+    end
+    
+    subgraph Machine_B [Worker 2: Linux Server]
+        Master --> SlaveB[Ollama Service]
+    end
+    
+    subgraph Machine_C [Worker 3: Cloud]
+        Master --> SlaveC[vLLM / OpenAI API]
+    end
+```
+
+**Why use a Slave Hub?** 
+1. **Local Management:** The Slave Hub handles spawning local processes on the worker machine.
+2. **Simplified Master:** The Master Hub only sees one "Remote Server" entry instead of dozens of raw instances.
+3. **Security:** Only the Master needs public access; Slaves can stay on a private VPN/VLAN.
+
+---
+
 ## 🧠 Advanced AI Orchestration: Routers & Ensembles
 
 ### Smart Routers: Hierarchical Model Routing
