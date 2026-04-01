@@ -64,8 +64,16 @@
         </div>
     </div>
     
-    <div class="flex-grow relative cursor-crosshair" id="canvas-container">
-        <canvas id="flowCanvas" class="w-full h-full"></canvas>
+    <div class="flex-grow flex relative cursor-crosshair" id="canvas-container">
+        <!-- Sidebar Activity List -->
+        <div id="live-activity-sidebar" class="w-64 bg-black/60 border-r border-white/10 z-10 p-4 overflow-y-auto hidden md:block">
+            <h3 class="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-4">Active Sessions</h3>
+            <div id="active-list" class="space-y-3">
+                <p class="text-[10px] text-gray-700 italic">No active traffic.</p>
+            </div>
+        </div>
+
+        <canvas id="flowCanvas" class="flex-grow h-full"></canvas>
         
         <!-- Trash Bin -->
         <div id="trash-bin" class="absolute bottom-6 right-6 p-4 rounded-xl bg-white/5 border border-white/10 flex flex-col items-center opacity-40">
@@ -624,10 +632,32 @@ document.addEventListener('DOMContentLoaded', () => {
             ctx.restore();
         });
 
-        // 4. Update Load Stat
-        document.getElementById('stat-load').innerText = Array.from(particles.values()).filter(p => p.state === 'active').length;
+        // 4. Update Load Stat & Sidebar
+        const activeParticles = Array.from(particles.values()).filter(p => p.state !== 'completed');
+        document.getElementById('stat-load').innerText = activeParticles.length;
+        
+        updateSidebarList(activeParticles);
 
         requestAnimationFrame(draw);
+    }
+
+    function updateSidebarList(active) {
+        const listEl = document.getElementById('active-list');
+        if (active.length === 0) {
+            listEl.innerHTML = '<p class="text-[10px] text-gray-700 italic">No active traffic.</p>';
+            return;
+        }
+
+        listEl.innerHTML = active.map(p => `
+            <div class="p-2 rounded bg-white/5 border border-white/5">
+                <div class="flex justify-between items-start mb-1">
+                    <span class="text-[10px] font-black text-white truncate w-24">${p.sender}</span>
+                    <span class="text-[8px] px-1 rounded bg-indigo-500/20 text-indigo-400 font-bold uppercase">${p.state}</span>
+                </div>
+                <div class="text-[9px] text-gray-400 font-mono truncate">${p.model}</div>
+                ${p.ttft ? `<div class="mt-1 text-[8px] text-amber-500 font-bold">${p.ttft}ms TTFT</div>` : ''}
+            </div>
+        `).join('');
     }
 
     function updateTooltip(p) {

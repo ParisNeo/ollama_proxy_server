@@ -6,6 +6,20 @@
 <div class="space-y-8">
     <!-- Creation Form -->
     <!-- Binary Hub Status -->
+    <!-- System Task Console (Hidden by default) -->
+    <div id="system-task-panel" class="hidden card-style border-l-4 border-indigo-500 bg-indigo-500/5 mb-8">
+        <div class="flex justify-between items-center mb-4">
+            <div class="flex items-center gap-3">
+                <div class="w-2 h-2 bg-indigo-500 rounded-full animate-ping"></div>
+                <h2 class="text-sm font-black uppercase tracking-widest text-indigo-400">System Task in Progress</h2>
+            </div>
+            <button onclick="this.closest('#system-task-panel').classList.add('hidden')" class="text-gray-500 hover:text-white">×</button>
+        </div>
+        <div id="system-console" class="h-48 overflow-y-auto bg-black/60 rounded-lg p-4 font-mono text-[11px] text-indigo-200 space-y-1">
+            <div class="text-gray-500 italic">Awaiting telemetry...</div>
+        </div>
+    </div>
+
     <!-- Environment Status -->
     <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
         <!-- Ollama Status -->
@@ -14,15 +28,18 @@
                 <div>
                     <h2 class="text-lg font-bold">Ollama</h2>
                     <p class="text-[10px] text-gray-400 uppercase font-black">
-                        {% if is_installed %}<span class="text-green-400">Detected</span>{% else %}<span class="text-red-400">Not Found</span>{% endif %}
+                        {% if is_installed %}
+                            <span class="text-green-400">Detected</span>
+                        {% else %}
+                            <span class="text-red-400">Not Found</span>
+                        {% endif %}
                     </p>
                 </div>
-                {% if not is_installed %}
-                <form action="{{ url_for('admin_install_ollama') }}" method="post">
-                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                    <button type="submit" class="bg-indigo-600 hover:bg-indigo-500 px-3 py-1 rounded text-[10px] font-black uppercase">Install</button>
-                </form>
-                {% endif %}
+                <div class="flex gap-2">
+                    <button onclick="triggerSystemTask('{{ url_for('admin_install_ollama') }}')" class="bg-indigo-600 hover:bg-indigo-500 px-3 py-1.5 rounded text-[10px] font-black uppercase">
+                        {{ 'Update' if is_installed else 'Install' }}
+                    </button>
+                </div>
             </div>
         </div>
 
@@ -35,12 +52,13 @@
                         {% if is_vllm_installed %}<span class="text-green-400">Detected</span>{% else %}<span class="text-amber-400">Optional</span>{% endif %}
                     </p>
                 </div>
-                {% if not is_vllm_installed %}
-                <form action="{{ url_for('admin_install_vllm') }}" method="post">
-                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                    <button type="submit" class="bg-amber-600 hover:bg-amber-500 px-3 py-1 rounded text-[10px] font-black uppercase">Install (pip)</button>
-                </form>
-                {% endif %}
+                <div class="flex gap-2">
+                    {% if is_vllm_installed %}
+                    <button onclick="triggerSystemTask('{{ url_for('admin_update_vllm') }}')" class="bg-indigo-600/20 text-indigo-400 border border-indigo-500/30 hover:bg-indigo-500/30 px-3 py-1.5 rounded text-[10px] font-black uppercase">Update</button>
+                    {% else %}
+                    <button onclick="triggerSystemTask('{{ url_for('admin_install_vllm') }}')" class="bg-amber-600 hover:bg-amber-500 px-3 py-1.5 rounded text-[10px] font-black uppercase">Install</button>
+                    {% endif %}
+                </div>
             </div>
         </div>
 
@@ -50,7 +68,7 @@
                     <h2 class="text-lg font-bold">Binary Hub</h2>
                     <p class="text-xs text-gray-400">Internal llama.cpp/vLLM engines.</p>
                 </div>
-                <button class="bg-purple-600/20 text-purple-400 border border-purple-500/30 px-4 py-2 rounded text-xs font-bold">Check for Updates</button>
+                <button onclick="triggerSystemTask('{{ url_for('admin_update_binaries') }}')" class="bg-purple-600/20 text-purple-400 border border-purple-500/30 px-4 py-2 rounded text-xs font-bold hover:bg-purple-600/30 transition-all">Check for Updates</button>
             </div>
         </div>
     </div>
@@ -169,4 +187,65 @@
         </table>
     </div>
 </div>
+
+<script>
+    const systemConsole = document.getElementById('system-console');
+    const taskPanel = document.getElementById('system-task-panel');
+
+    function logToConsole(text, color = 'text-indigo-200') {
+        const entry = document.createElement('div');
+        entry.className = color;
+        entry.innerText = `[${new Date().toLocaleTimeString()}] ${text}`;
+        systemConsole.appendChild(entry);
+        systemConsole.scrollTop = systemConsole.scrollHeight;
+    }
+
+    async function triggerSystemTask(url) {
+        taskPanel.classList.remove('hidden');
+        systemConsole.innerHTML = '';
+        logToConsole("Initializing background task...", "text-indigo-400 font-bold");
+        
+        try {
+            const resp = await fetch(url, {
+                method: 'POST',
+                headers: { 'X-CSRF-Token': '{{ csrf_token }}' }
+            });
+            const data = await resp.json();
+            if (resp.ok && data.success) {
+                logToConsole(data.message, "text-amber-400");
+            } else {
+                const errMsg = data.detail || data.message || `Server error ${resp.status}`;
+                logToConsole("Failed to start task: " + errMsg, "text-red-500");
+            }
+        } catch (e) {
+            logToConsole("Connection error: " + e.message, "text-red-500");
+        }
+    }
+
+    // Connect to SSE for real-time logs
+    const sysEvtSource = new EventSource("{{ url_for('sse_events') }}");
+    sysEvtSource.onmessage = (e) => {
+        const msg = JSON.parse(e.data);
+        // We filter for "sys_" request IDs used in our updated instance_manager.py
+        if (msg.id && msg.id.startsWith('sys_')) {
+            taskPanel.classList.remove('hidden');
+            
+            let color = 'text-indigo-200';
+            if (msg.type === 'error') color = 'text-red-400';
+            if (msg.type === 'completed') color = 'text-green-400 font-bold';
+            if (msg.type === 'received') color = 'text-indigo-400 font-bold';
+
+            if (msg.error) {
+                logToConsole(msg.error, color);
+            }
+            
+            if (msg.type === 'completed') {
+                setTimeout(() => {
+                    logToConsole("Task finished. Reloading environment status...", "text-gray-500 italic");
+                    setTimeout(() => window.location.reload(), 2000);
+                }, 1000);
+            }
+        }
+    };
+</script>
 {% endblock %}

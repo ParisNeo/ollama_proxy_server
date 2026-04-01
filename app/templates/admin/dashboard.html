@@ -58,6 +58,18 @@
                 </div>
                 <div id="vram-details" class="text-xs text-gray-400 mt-2">-- / -- GB</div>
             </div>
+            <!-- Sustainability -->
+            <div class="p-4 rounded-lg border-l border-white/5">
+                <h3 class="text-sm font-medium uppercase text-green-500">Eco Impact</h3>
+                <div class="mt-4">
+                    <div id="session-co2" class="text-2xl font-black text-white">0.000<span class="text-[10px] ml-1 text-gray-500">g</span></div>
+                    <div class="text-[10px] font-bold text-gray-500 uppercase tracking-tighter mt-1">Current Session CO₂e</div>
+                </div>
+                <div class="mt-3 pt-3 border-t border-white/5">
+                    <div id="total-co2" class="text-sm font-bold text-green-400">0.00 <span class="text-[9px]">g</span></div>
+                    <div class="text-[9px] text-gray-500 uppercase">Lifetime Total</div>
+                </div>
+            </div>
         </div>
     </div>
     
@@ -93,6 +105,32 @@
                             <span class="mt-2 block">Loading active models...</span>
                         </td>
                     </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Live User Activity -->
+    <div id="live-activity-container" class="hidden card-style border-l-4 border-indigo-500 bg-indigo-500/5 transition-all">
+        <h2 class="card-header text-2xl font-bold mb-4 pb-2 flex items-center gap-3">
+            <span class="relative flex h-3 w-3">
+                <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
+                <span class="relative inline-flex rounded-full h-3 w-3 bg-indigo-500"></span>
+            </span>
+            Live User Activity
+        </h2>
+        <div class="overflow-x-auto">
+            <table class="min-w-full">
+                <thead>
+                    <tr>
+                        <th class="px-6 py-3 text-left text-xs font-bold text-gray-400 uppercase">User</th>
+                        <th class="px-6 py-3 text-left text-xs font-bold text-gray-400 uppercase">Model</th>
+                        <th class="px-6 py-3 text-left text-xs font-bold text-gray-400 uppercase">Server</th>
+                        <th class="px-6 py-3 text-left text-xs font-bold text-gray-400 uppercase">Status</th>
+                        <th class="px-6 py-3 text-right text-xs font-bold text-gray-400 uppercase">Latency/Speed</th>
+                    </tr>
+                </thead>
+                <tbody id="live-sessions-tbody" class="divide-y divide-white/10">
                 </tbody>
             </table>
         </div>
@@ -272,6 +310,55 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    function updateLiveSessions(data) {
+        const sessions = data.live_sessions || [];
+        const userSummary = data.active_users_summary || {};
+        const sustain = data.sustainability;
+        
+        const container = document.getElementById('live-activity-container');
+        const tbody = document.getElementById('live-sessions-tbody');
+        
+        // Update Sustainability Gauges
+        document.getElementById('session-co2').innerHTML = `${sustain.session_co2_g.toFixed(3)}<span class="text-[10px] ml-1 text-gray-500">g</span>`;
+        document.getElementById('total-co2').innerHTML = `${sustain.total_co2_g.toLocaleString()} <span class="text-[9px]">g CO₂e</span>`;
+
+        if (sessions.length === 0) {
+            container.classList.add('hidden');
+            return;
+        }
+        
+        container.classList.remove('hidden');
+        tbody.innerHTML = '';
+        
+        // Render detailed session lines
+        sessions.forEach(s => {
+            const statusColors = {'received': 'text-indigo-400', 'assigned': 'text-amber-400', 'active': 'text-emerald-400 animate-pulse'};
+            const colorClass = statusColors[s.type] || 'text-gray-400';
+            
+            // Look up how many requests THIS user has in total
+            const userStats = userSummary[s.sender] || {count: 1, state: 'unknown'};
+
+            const row = `
+                <tr class="bg-white/5 border-b border-white/5 last:border-0">
+                    <td class="px-6 py-3 whitespace-nowrap">
+                        <div class="text-sm font-black text-white">${s.sender}</div>
+                        <div class="text-[9px] text-indigo-400 uppercase font-bold">${userStats.count} concurrent reqs</div>
+                    </td>
+                    <td class="px-6 py-3 whitespace-nowrap text-sm font-mono text-indigo-300">${s.model}</td>
+                    <td class="px-6 py-3 whitespace-nowrap text-sm text-gray-400">${s.server || '---'}</td>
+                    <td class="px-6 py-3 whitespace-nowrap">
+                        <span class="text-xs font-bold uppercase ${colorClass}">${s.type}</span>
+                    </td>
+                    <td class="px-6 py-3 whitespace-nowrap text-right text-xs font-mono">
+                        ${s.ttft ? `<span class="text-amber-400">${s.ttft}ms</span>` : ''} 
+                        ${s.tps ? `<span class="text-emerald-400 ml-2">${s.tps} t/s</span>` : ''}
+                    </td>
+                </tr>
+            `;
+            tbody.innerHTML += row;
+        });
+    }
+
     async function fetchData() {
         try {
             const [systemResp, gpuResp] = await Promise.all([
@@ -285,6 +372,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 updateRunningModels(data);
                 updateLoadBalancerStatus(data);
                 updateRateLimitStatus(data);
+                updateLiveSessions(data);
             }
             
             if (gpuResp.ok) {

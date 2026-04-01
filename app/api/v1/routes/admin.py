@@ -14,7 +14,7 @@ import os
 import re
 from pydantic import AnyHttpUrl, ValidationError
 
-from fastapi import APIRouter, Depends, Request, Form, HTTPException, status, Query, UploadFile, File
+from fastapi import APIRouter, Depends, Request, Form, HTTPException, status, Query, UploadFile, File, BackgroundTasks
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.concurrency import run_in_threadpool
@@ -33,7 +33,7 @@ from app.database.models import ManagedInstance
 from app.schema.user import UserCreate
 from app.schema.server import ServerCreate, ServerUpdate
 from app.schema.settings import AppSettingsModel
-from app.api.v1.dependencies import get_csrf_token, validate_csrf_token, login_rate_limiter
+from app.api.v1.dependencies import get_csrf_token, validate_csrf_token, validate_csrf_token_header, login_rate_limiter
 
 
 logger = logging.getLogger(__name__)
@@ -352,15 +352,46 @@ async def get_system_and_ollama_info(
     # Calculate Total VRAM used by active models
     total_vram_bytes = sum(model.get("size_vram", 0) for model in running_models)
     
+    # --- USER SUMMARY & CO2 LOGIC ---
+    live_sessions = list(event_manager.active_requests.values())
+    user_summary = {}
+    session_tokens = 0
+    
+    for s in live_sessions:
+        uname = s.get('sender', 'anon')
+        if uname not in user_summary:
+            user_summary[uname] = {"count": 0, "state": "queued", "tokens": 0}
+        
+        user_summary[uname]["count"] += 1
+        # Priority: active > assigned > received
+        if s['type'] == 'active' or user_summary[uname]['state'] == 'active':
+            user_summary[uname]['state'] = 'active'
+        elif s['type'] == 'assigned' and user_summary[uname]['state'] != 'active':
+            user_summary[uname]['state'] = 'assigned'
+            
+    # Calculate Session CO2 (Simplified estimate: 1g per 1k tokens)
+    # We use tokens from the event history for session total
+    session_tokens = sum(r.get('tokens', 0) for r in event_manager.recent_completions)
+    session_co2 = (session_tokens / 1000.0) * 1.0 
+    
+    # Get total carbon from DB
+    total_co2 = await log_crud.get_total_carbon_footprint(db)
+
     return {
         "system_info": system_info, 
         "running_models": running_models,
         "gpu_stats": {
             "vram_used_gb": round(total_vram_bytes / (1024**3), 2),
-            "vram_total_gb": 24, # Defaulting to 24GB estimate if not detected, can be enhanced
+            "vram_total_gb": 24, 
         },
         "load_balancer_status": server_health,
-        "queue_status": rate_limits
+        "queue_status": rate_limits,
+        "live_sessions": live_sessions,
+        "active_users_summary": user_summary,
+        "sustainability": {
+            "session_co2_g": round(session_co2, 3),
+            "total_co2_g": round(total_co2, 2)
+        }
     }
     
 
@@ -2161,24 +2192,36 @@ async def admin_instances_page(request: Request, db: AsyncSession = Depends(get_
     context["csrf_token"] = await get_csrf_token(request)
     return templates.TemplateResponse("admin/instances.html", context)
 
-@router.post("/instances/install", name="admin_install_ollama", dependencies=[Depends(validate_csrf_token)])
-async def install_ollama_endpoint(request: Request, admin_user: User = Depends(require_admin_user)):
-    success, message = await supervisor.install_ollama()
-    if success:
-        flash(request, message, "success")
-    else:
-        flash(request, f"Installation failed: {message}", "error")
-    return RedirectResponse(url=request.url_for("admin_instances"), status_code=303)
+@router.post("/instances/install", name="admin_install_ollama", dependencies=[Depends(validate_csrf_token_header)])
+async def install_ollama_endpoint(request: Request, background_tasks: BackgroundTasks, admin_user: User = Depends(require_admin_user)):
+    background_tasks.add_task(supervisor.install_ollama)
+    return JSONResponse({"success": True, "message": "Ollama installation task started."})
 
-@router.post("/instances/install-vllm", name="admin_install_vllm", dependencies=[Depends(validate_csrf_token)])
-async def install_vllm_endpoint(request: Request, admin_user: User = Depends(require_admin_user)):
-    flash(request, "vLLM installation started in background. This may take several minutes.", "info")
-    success, message = await supervisor.install_vllm()
-    if success:
-        flash(request, message, "success")
-    else:
-        flash(request, f"vLLM Installation failed: {message}", "error")
-    return RedirectResponse(url=request.url_for("admin_instances"), status_code=303)
+@router.post("/instances/install-vllm", name="admin_install_vllm", dependencies=[Depends(validate_csrf_token_header)])
+async def install_vllm_endpoint(request: Request, background_tasks: BackgroundTasks, admin_user: User = Depends(require_admin_user)):
+    background_tasks.add_task(supervisor.install_vllm, False)
+    return JSONResponse({"success": True, "message": "vLLM installation task started."})
+
+@router.post("/instances/update-vllm", name="admin_update_vllm", dependencies=[Depends(validate_csrf_token_header)])
+async def update_vllm_endpoint(request: Request, background_tasks: BackgroundTasks, admin_user: User = Depends(require_admin_user)):
+    background_tasks.add_task(supervisor.install_vllm, True)
+    return JSONResponse({"success": True, "message": "vLLM update task started."})
+
+@router.post("/instances/update-binaries", name="admin_update_binaries", dependencies=[Depends(validate_csrf_token_header)])
+async def update_binaries_endpoint(request: Request, background_tasks: BackgroundTasks, admin_user: User = Depends(require_admin_user)):
+    from app.core.binary_manager import binary_manager
+    async def task_wrapper():
+        from app.core.events import event_manager, ProxyEvent
+        req_id = "sys_binaries"
+        event_manager.emit(ProxyEvent("received", req_id, "Binary Hub", "Local", "Admin", error_message="Checking for latest llama.cpp binaries..."))
+        try:
+            version = await binary_manager.download_engine("llamacpp")
+            event_manager.emit(ProxyEvent("completed", req_id, "Binary Hub", "Local", "Admin", error_message=f"Success! Updated to version {version}"))
+        except Exception as e:
+            event_manager.emit(ProxyEvent("error", req_id, "Binary Hub", "Local", "Admin", error_message=str(e)))
+            
+    background_tasks.add_task(task_wrapper)
+    return JSONResponse({"success": True, "message": "Binary Hub update check started."})
 
 @router.post("/instances/adopt", name="admin_adopt_instance", dependencies=[Depends(validate_csrf_token)])
 async def adopt_instance(

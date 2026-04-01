@@ -154,48 +154,85 @@ class InstanceSupervisor:
         """Checks if vLLM is installed in the current Python environment."""
         return pm.is_installed("vllm")
 
-    async def install_vllm(self) -> Tuple[bool, str]:
-        """Attempts to install vLLM using pipmaster."""
+    async def install_vllm(self, upgrade=False) -> Tuple[bool, str]:
+        """Attempts to install or update vLLM using pipmaster."""
+        from app.core.events import event_manager, ProxyEvent
+        task_name = "Updating" if upgrade else "Installing"
+        req_id = "sys_vllm"
+        
         try:
-            # We use ensure_packages to handle dependencies properly
-            success = await pm.async_install("vllm")
+            event_manager.emit(ProxyEvent("received", req_id, "vLLM", "Local", "Admin", error_message=f"{task_name} vLLM via pipmaster..."))
+            
+            # vLLM is heavy, we use pipmaster to handle the async installation
+            success = await pm.async_install("vllm", upgrade=upgrade)
+            
             if success:
-                return True, "vLLM installed successfully."
-            return False, "pipmaster failed to install vllm."
+                msg = f"vLLM {'updated' if upgrade else 'installed'} successfully."
+                event_manager.emit(ProxyEvent("completed", req_id, "vLLM", "Local", "Admin", error_message=msg))
+                return True, msg
+            
+            err = "pipmaster failed to install vllm."
+            event_manager.emit(ProxyEvent("error", req_id, "vLLM", "Local", "Admin", error_message=err))
+            return False, err
         except Exception as e:
+            event_manager.emit(ProxyEvent("error", req_id, "vLLM", "Local", "Admin", error_message=str(e)))
             return False, str(e)
 
     async def install_ollama(self) -> Tuple[bool, str]:
-        """Attempts to install Ollama based on the operating system."""
+        """Attempts to install/update Ollama based on the operating system."""
+        from app.core.events import event_manager, ProxyEvent
         sys_name = platform.system()
+        req_id = "sys_ollama"
+        
         try:
             if sys_name == "Linux" or sys_name == "Darwin":
-                # Standard one-liner for Linux/macOS
+                event_manager.emit(ProxyEvent("received", req_id, "Ollama", "Local", "Admin", error_message="Downloading Ollama installation script..."))
                 cmd = "curl -fsSL https://ollama.com/install.sh | sh"
+                
                 process = await asyncio.create_subprocess_shell(
-                    cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+                    cmd, 
+                    stdout=asyncio.subprocess.PIPE, 
+                    stderr=asyncio.subprocess.STDOUT
                 )
-                stdout, stderr = await process.communicate()
+                
+                # Stream logs to UI
+                while True:
+                    line = await process.stdout.readline()
+                    if not line: break
+                    event_manager.emit(ProxyEvent("active", req_id, "Ollama", "Local", "Admin", error_message=line.decode().strip()))
+                
+                await process.wait()
+                
                 if process.returncode == 0:
-                    return True, "Ollama installed successfully via shell script."
-                return False, stderr.decode()
+                    msg = "Ollama processed successfully via shell script."
+                    event_manager.emit(ProxyEvent("completed", req_id, "Ollama", "Local", "Admin", error_message=msg))
+                    return True, msg
+                return False, "Installation script failed."
             
             elif sys_name == "Windows":
-                # Download and launch the installer
+                event_manager.emit(ProxyEvent("received", req_id, "Ollama", "Local", "Admin", error_message="Downloading OllamaSetup.exe to Temp..."))
                 installer_url = "https://ollama.com/download/OllamaSetup.exe"
-                target_path = Path(os.environ.get("TEMP", ".")) / "OllamaSetup.exe"
+                temp_dir = Path(os.environ.get("TEMP", "."))
+                target_path = temp_dir / f"OllamaSetup_{secrets.token_hex(4)}.exe"
                 
-                async with httpx.AsyncClient(follow_redirects=True) as client:
-                    resp = await client.get(installer_url)
-                    with open(target_path, "wb") as f:
-                        f.write(resp.content)
+                async with httpx.AsyncClient(follow_redirects=True, timeout=300.0) as client:
+                    async with client.stream("GET", installer_url) as resp:
+                        resp.raise_for_status()
+                        with open(target_path, "wb") as f:
+                            async for chunk in resp.aiter_bytes():
+                                f.write(chunk)
                 
-                # Run the installer
-                subprocess.Popen([str(target_path)], shell=True)
-                return True, "Installer downloaded and launched. Please complete the setup in the window that appeared."
+                event_manager.emit(ProxyEvent("active", req_id, "Ollama", "Local", "Admin", error_message="Download finished. Launching UI..."))
+                # Use DETACHED_PROCESS flag on Windows to allow installer to outlive the hub
+                subprocess.Popen([str(target_path)], shell=True, creationflags=subprocess.CREATE_NEW_CONSOLE | subprocess.DETACHED_PROCESS)
+                
+                msg = "Windows Installer UI visible. Please follow the instructions on your desktop."
+                event_manager.emit(ProxyEvent("completed", req_id, "Ollama", "Local", "Admin", error_message=msg))
+                return True, msg
             
             return False, f"Automatic installation not supported on {sys_name}."
         except Exception as e:
+            event_manager.emit(ProxyEvent("error", req_id, "Ollama", "Local", "Admin", error_message=str(e)))
             return False, str(e)
 
     async def discover_local_instances(self, managed_ports: List[int], start_port: int, end_port: int) -> List[dict]:

@@ -52,7 +52,7 @@ def _update_health_cache(server_id: int, healthy: bool):
     }
 
 
-async def _extract_image_descriptions(request: Request, db: AsyncSession, vision_model: str, images: list, prompt_text: str, http_client: httpx.AsyncClient) -> str:
+async def _extract_image_descriptions(request: Request, db: AsyncSession, vision_model: str, images: list, prompt_text: str, http_client: httpx.AsyncClient, sender: str = "anon") -> str:
     """Helper to offload images to a VLM and get a text description back."""
     user_query = prompt_text
     vision_prompt = (
@@ -86,7 +86,7 @@ async def _extract_image_descriptions(request: Request, db: AsyncSession, vision
             old_strict = getattr(request.state, 'enforce_strict_context', False)
             request.state.enforce_strict_context = False
             
-            resp, _ = await _reverse_proxy(request, "chat", v_servers, json.dumps(vlm_payload).encode(), is_subrequest=True)
+            resp, _ = await _reverse_proxy(request, "chat", v_servers, json.dumps(vlm_payload).encode(), sender=sender, is_subrequest=True)
             
             if hasattr(resp, 'body'):
                 v_data = json.loads(resp.body.decode())
@@ -1357,7 +1357,7 @@ async def _resolve_target(db: AsyncSession, name: str, messages: List[Dict[str, 
     # For raw models, don't enforce strict context (preserve user's num_ctx if set)
     return name, messages
 
-async def _call_classifier(request: Request, db: AsyncSession, classifier_model: str, last_message: str, intent_description: str) -> bool:
+async def _call_classifier(request: Request, db: AsyncSession, classifier_model: str, last_message: str, intent_description: str, sender: str = "anon") -> bool:
     """Uses a small LLM to check if the current message matches a specific semantic intent."""
     classifier_prompt = (
         f"Analyze the following user message. Does it match the intent of '{intent_description}'?\n"
@@ -1380,7 +1380,7 @@ async def _call_classifier(request: Request, db: AsyncSession, classifier_model:
         resp, _ = await _reverse_proxy(
             request, "chat", servers, 
             json.dumps(payload).encode(), 
-            sender="router-classifier",
+            sender=sender,
             is_subrequest=True
         )
         
@@ -1462,7 +1462,7 @@ async def _select_from_pool(db: AsyncSession, pool_name: str, body: Dict[str, An
                 
                 # Semantic Check (Calls LLM - Last Resort)
                 elif c_type == "intent" and pool.classifier_model:
-                    c_match = await _call_classifier(request, db, pool.classifier_model, features["text"], c_val)
+                    c_match = await _call_classifier(request, db, pool.classifier_model, features["text"], c_val, sender=sender)
 
                 matches.append(c_match)
 
@@ -1700,7 +1700,7 @@ async def _handle_bundle_request(db: AsyncSession, request: Request, bundle_name
                     event_type="received", 
                     request_id=sub_req_id, 
                     model=p_name, 
-                    sender="orchestrator",
+                    sender=api_key.user.username,
                     request_type="AGENT"
                 ))
 
@@ -1727,30 +1727,30 @@ async def _handle_bundle_request(db: AsyncSession, request: Request, bundle_name
                             json.dumps(sub_body).encode(), 
                             request_id=sub_req_id,
                             model=p_name,
-                            sender="orchestrator",
+                            sender=api_key.user.username,
                             is_subrequest=True
                         )
-                        
+
                         # Sub-requests don't use the streaming wrapper, so we emit status manually
                         s_name = server_obj.name if server_obj else "unknown"
-                        event_manager.emit(ProxyEvent("active", sub_req_id, p_name, s_name, "orchestrator"))
+                        event_manager.emit(ProxyEvent("active", sub_req_id, p_name, s_name, api_key.user.username))
 
                         if hasattr(resp, 'body'):
                             try:
                                 data = json.loads(resp.body.decode())
                                 content = data.get("message", {}).get("content", "") or data.get("response", "")
                                 # Signal completion immediately so it goes to trash without lag
-                                event_manager.emit(ProxyEvent("completed", sub_req_id, p_name, s_name, "orchestrator", token_count=len(content)//4))
+                                event_manager.emit(ProxyEvent("completed", sub_req_id, p_name, s_name, api_key.user.username, token_count=len(content)//4))
                                 return p_name, content
                             except Exception as parse_err:
-                                event_manager.emit(ProxyEvent("error", sub_req_id, p_name, s_name, "orchestrator", error_message=f"JSON Parse Error: {str(parse_err)}"))
+                                event_manager.emit(ProxyEvent("error", sub_req_id, p_name, s_name, api_key.user.username, error_message=f"JSON Parse Error: {str(parse_err)}"))
                                 return p_name, f"Error parsing response from {p_name}: {parse_err}"
-                        
-                        event_manager.emit(ProxyEvent("error", sub_req_id, p_name, s_name, "orchestrator", error_message="Invalid Response Object"))
+
+                        event_manager.emit(ProxyEvent("error", sub_req_id, p_name, s_name, api_key.user.username, error_message="Invalid Response Object"))
                         return p_name, "Error: Unexpected response type from agent."
                     except Exception as e:
                         # Ensure the dot in Live Flow turns red and goes to trash
-                        event_manager.emit(ProxyEvent("error", sub_req_id, p_name, "none", "orchestrator", error_message=str(e)))
+                        event_manager.emit(ProxyEvent("error", sub_req_id, p_name, "none", api_key.user.username, error_message=str(e)))
                         return p_name, f"Error from {p_name}: {str(e)}"
 
             # 1. Master Decision: Should we activate the herd?
@@ -2178,7 +2178,7 @@ async def proxy_ollama(
 
                 # Get description
                 image_descriptions = await _extract_image_descriptions(
-                    request, db, augmenter.vision_model, extracted_images[:10], user_query, request.app.state.http_client
+                    request, db, augmenter.vision_model, extracted_images[:10], user_query, request.app.state.http_client, sender=api_key.user.username
                 )
                 
                 # Replace the images with the descriptions
