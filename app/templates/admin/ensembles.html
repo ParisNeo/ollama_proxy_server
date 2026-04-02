@@ -19,58 +19,6 @@
         </div>
     </div>
 
-    <!-- Quick Vision Enabler Shortcut -->
-    <div class="card-style border-l-4 border-purple-500">
-        <h2 class="card-header text-xl font-bold mb-2">⚡ Quick Vision Enabler</h2>
-        <p class="text-xs text-gray-400 mb-2">Instantly create a vision-capable proxy model from a text-only model + vision model.</p>
-        
-        <!-- Example -->
-        <div class="bg-purple-500/5 border border-purple-500/20 rounded p-3 mb-4">
-            <p class="text-[10px] font-bold text-purple-400 uppercase mb-1">💡 Example Use Case</p>
-            <p class="text-xs text-gray-400">You have <code>llama3.1:70b</code> (text only) and <code>gemma3:27b</code> (vision-capable). Create an enabler named <code>smart-llama</code>:</p>
-            <ul class="text-xs text-gray-500 mt-1 ml-4 list-disc">
-                <li>Text prompts → go directly to Llama</li>
-                <li>Images included → first analyzed by Gemma, description + original prompt sent to Llama</li>
-            </ul>
-        </div>
-
-        <form action="{{ url_for('admin_add_vision_augmenter') }}" method="post" class="space-y-4">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div>
-                    <label class="block text-xs text-gray-400 uppercase font-bold">Ensemble Name</label>
-                    <input type="text" name="name" placeholder="e.g. smart-llama-vision" required class="w-full p-2 rounded bg-black/20 border border-white/10">
-                    <p class="text-[10px] text-gray-500 mt-1">Users will call this as: <code>model: "smart-llama-vision"</code></p>
-                </div>
-                <div>
-                    <label class="block text-xs text-gray-400 uppercase font-bold">Text Model (Synthesizer)</label>
-                    <select name="vision_text_model" required class="w-full p-2 rounded bg-black/20 border border-white/10">
-                        <option value="">-- Select text model --</option>
-                        {% for m in raw_models %}
-                        <option value="{{ m }}">{{ m }}</option>
-                        {% endfor %}
-                    </select>
-                    <p class="text-[10px] text-gray-500 mt-1">Receives requests after image analysis (if any)</p>
-                </div>
-                <div>
-                    <label class="block text-xs text-gray-400 uppercase font-bold">Vision Model (Processor)</label>
-                    <select name="vision_vlm_model" required class="w-full p-2 rounded bg-black/20 border border-white/10">
-                        <option value="">-- Select vision model --</option>
-                        {% for m in raw_models %}
-                        {% if 'vision' in m.lower() or 'llava' in m.lower() or 'gemma3' in m.lower() or 'intern' in m.lower() or 'qwen' in m.lower() and 'vl' in m.lower() %}
-                        <option value="{{ m }}">{{ m }}</option>
-                        {% endif %}
-                        {% endfor %}
-                    </select>
-                    <p class="text-[10px] text-gray-500 mt-1">Analyzes images first, sends descriptions to text model</p>
-                </div>
-            </div>
-            <div class="flex justify-end">
-                <button type="submit" class="bg-purple-600 hover:bg-purple-500 px-6 py-2 rounded font-bold text-sm">Create Vision Enabler</button>
-            </div>
-        </form>
-    </div>
-
     <div class="card-style">
         <h2 class="card-header text-xl font-bold mb-4">Create New Ensemble</h2>
         <form action="{{ url_for('admin_add_ensemble') }}" method="post" class="space-y-4">
