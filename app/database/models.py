@@ -210,3 +210,14 @@ class VirtualAgent(Base):
     mcp_servers = Column(JSON, nullable=True)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+class Workflow(Base):
+    __tablename__ = "workflows"
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, unique=True, index=True, nullable=False)
+    description = Column(String, nullable=True)
+    graph_data = Column(JSON, nullable=False) # LiteGraph JSON state
+    # Type hints for the proxy (e.g. 'chain', 'ensemble', 'router')
+    workflow_type = Column(String, default="custom")
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)

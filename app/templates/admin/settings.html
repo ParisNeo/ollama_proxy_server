@@ -52,6 +52,39 @@
         <!-- Appearance Settings -->
         <div>
             <h2 class="card-header text-xl font-bold mb-4 pb-2">Appearance</h2>
+            
+            <!-- THEME PREVIEW ENGINE -->
+            <script>
+                const THEME_MAP = {{ themes | tojson | safe }};
+                
+                function applyLiveTheme() {
+                    const selectedStyle = document.querySelector('input[name="ui_style"]:checked').value;
+                    const selectedColor = document.querySelector('input[name="selected_theme"]:checked').value;
+                    
+                    // 1. Update Body Class (UI Style)
+                    const body = document.body;
+                    // Remove all existing ui- classes
+                    body.className = body.className.replace(/\bui-\S+/g, '');
+                    body.classList.add('ui-' + selectedStyle);
+                    
+                    // 2. Update CSS Variables (Primary Colors)
+                    const colors = THEME_MAP[selectedColor];
+                    if (colors) {
+                        const root = document.documentElement;
+                        root.style.setProperty('--color-primary-500', colors['500']);
+                        root.style.setProperty('--color-primary-600', colors['600']);
+                        root.style.setProperty('--color-primary-700', colors['700']);
+                        root.style.setProperty('--color-primary-800', colors['800']);
+                    }
+                }
+
+                document.addEventListener('DOMContentLoaded', () => {
+                    const inputs = document.querySelectorAll('input[name="ui_style"], input[name="selected_theme"]');
+                    inputs.forEach(input => {
+                        input.addEventListener('change', applyLiveTheme);
+                    });
+                });
+            </script>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
                 <div>
                     <label class="block text-sm font-medium text-current mb-2">UI Style</label>
@@ -207,6 +240,18 @@
             <p class="mt-2 text-xs text-gray-400">Controls the automatic cleanup of application logs. Current file: <code class="text-indigo-400">lollms_hub.log</code></p>
         </div>
 
+        <!-- External Integration Settings -->
+        <div>
+            <h2 class="card-header text-xl font-bold mb-4 pb-2">External Search & AI Tools</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                    <label for="google_search_api_key" class="block text-sm font-medium text-current">Google Search API Key (SerpApi)</label>
+                    <input type="password" name="google_search_api_key" id="google_search_api_key" value="{{ settings.google_search_api_key or '' }}" placeholder="Enter your SerpApi key" class="mt-1 block w-full px-3 py-2 rounded-md shadow-sm border border-white/10 bg-black/20">
+                    <p class="mt-1 text-[10px] text-gray-500">Required for the 'Google Search' source in Skill Architect.</p>
+                </div>
+            </div>
+        </div>
+
         <!-- Hub Orchestration -->
         <div>
             <h2 class="card-header text-xl font-bold mb-4 pb-2">Hub Orchestration</h2>
@@ -333,12 +378,29 @@
         </div>
 
 
-        <!-- Save Button -->
-        <div class="flex justify-end pt-4 border-t border-white/10 mt-8">
-            <button type="submit" class="w-full md:w-auto justify-center py-2 px-6 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-[var(--color-primary-600)] hover:bg-[var(--color-primary-700)] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[var(--color-primary-500)]">
+        <!-- Maintenance Section -->
+        <div class="pt-8 mt-8 border-t border-white/10">
+            <h2 class="text-xl font-bold text-red-400 mb-4">System Maintenance</h2>
+            <div class="p-4 bg-red-900/10 border border-red-500/20 rounded-lg flex items-center justify-between">
+                <div>
+                    <h3 class="font-bold text-sm">Update Static Dependencies</h3>
+                    <p class="text-xs text-gray-500">Re-downloads all local JS/CSS libraries (LiteGraph, Chart.js, etc.) from secure sources.</p>
+                </div>
+                <button type="submit" form="refresh-assets-form" class="px-4 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded text-xs font-black uppercase">Update Libraries</button>
+            </div>
+        </div>
+
+        <!-- Save Button (Properly inside the main form) -->
+        <div class="flex justify-end pt-8 border-t border-white/10 mt-8">
+            <button type="submit" class="w-full md:w-auto justify-center py-3 px-10 border border-transparent rounded-xl shadow-2xl text-sm font-black uppercase tracking-widest text-white bg-[var(--color-primary-600)] hover:bg-[var(--color-primary-500)] transition-all transform hover:scale-105 active:scale-95">
                 Save All Settings
             </button>
         </div>
+    </form>
+
+    <!-- Hidden maintenance form remains separate as it points to a different route -->
+    <form id="refresh-assets-form" action="{{ url_for('admin_refresh_vendor_assets') }}" method="post" class="hidden">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     </form>
 </div>
 {% endblock %}

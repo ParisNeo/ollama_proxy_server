@@ -80,6 +80,9 @@ class AppSettingsModel(BaseModel):
     ssl_keyfile_content: Optional[str] = Field(default=None, description="Content of the uploaded SSL key file.", exclude=True) # Exclude from API responses
     ssl_certfile_content: Optional[str] = Field(default=None, description="Content of the uploaded SSL cert file.", exclude=True) # Exclude from API responses
 
+    # --- SEARCH SETTINGS ---
+    google_search_api_key: Optional[str] = Field(default=None, description="SerpApi or Google Custom Search Key")
+
     # --- GATEWAY SETTINGS ---
     enable_ollama_api: bool = True
     enable_openai_api: bool = True
@@ -99,9 +102,10 @@ class AppSettingsModel(BaseModel):
             raise ValueError("retry_total_timeout_seconds must be positive")
         return v
     
-    @field_validator('branding_logo_url', 'ssl_keyfile', 'ssl_certfile')
+    @field_validator('branding_logo_url', 'ssl_keyfile', 'ssl_certfile', 'selected_theme', 'ui_style')
     @classmethod
     def validate_empty_string_to_none(cls, v: Optional[str]) -> Optional[str]:
-        if v == "":
+        """Ensures form 'empty' values are stored as null in DB."""
+        if v == "" or v is None:
             return None
         return v

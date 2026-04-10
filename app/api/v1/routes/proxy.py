@@ -248,25 +248,16 @@ def _normalize_payload_for_ollama(body_bytes: bytes, max_context_limit: int = 32
         except ValueError:
             req_ctx_int = None
             
-        if enforce_strict:
-            # For bundles/ensembles/orchestrators: enforce the declared context size
-            # This ensures consistency across all models in the bundle
-            if req_ctx_int != max_context_limit:
-                temp_body["options"]["num_ctx"] = max_context_limit
-                modified = True
-                logger.info(f"Strict context: set to {max_context_limit} (was {requested_ctx})")
-        else:
-            # For raw models: respect user's choice, only clamp if excessive
-            if req_ctx_int is not None:
-                if req_ctx_int > max_context_limit:
-                    logger.info(f"Clamping num_ctx from {req_ctx_int} to {max_context_limit}")
-                    temp_body["options"]["num_ctx"] = max_context_limit
-                    modified = True
-            else:
-                # Default to model's max if not specified
-                if max_context_limit:
-                    temp_body["options"]["num_ctx"] = max_context_limit
-                    modified = True
+        # KV CACHE PRE-ALLOCATION FIX:
+        # To force Ollama to allocate a maxed-out KV cache once and for all,
+        # we consistently inject the max_context_limit into every request.
+        # This causes a long TTFT on the very first prompt, but allows 
+        # lightning-fast TPS on all subsequent prompts because Ollama 
+        # reuses the pre-allocated VRAM instead of reloading the model.
+        if req_ctx_int != max_context_limit:
+            temp_body["options"]["num_ctx"] = max_context_limit
+            modified = True
+            logger.info(f"Enforcing max KV cache allocation: {max_context_limit} (was {req_ctx_int})")
 
         # --- 2. Message Format Normalization ---
         if "messages" in temp_body:
@@ -387,7 +378,7 @@ async def _update_log_with_tokens_async(
 async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer], body_bytes: bytes = "", 
                         api_key_id: Optional[int] = None, log_id: Optional[int] = None,
                         request_id: Optional[str] = None, model: str = "unknown",
-                        sender: str = "anon", is_subrequest: bool = False,
+                        sender: str = "system", is_subrequest: bool = False,
                         client_wants_stream: bool = True) -> Tuple[Response, OllamaServer]:
     """
     Core lollms hub reverse proxy logic with retry support and token tracking.
@@ -467,7 +458,7 @@ async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer
         if chosen_server.server_type == 'vllm':
             logger.info(f"Using vLLM branch for server '{chosen_server.name}'")
             try:
-                response = await _proxy_to_vllm(request, chosen_server, path, body_bytes, api_key_id, log_id, request_id, model)
+                response = await _proxy_to_vllm(request, chosen_server, path, body_bytes, api_key_id, log_id, request_id, model, sender=sender)
                 _update_health_cache(chosen_server.id, True)
                 return response, chosen_server
             except HTTPException:
@@ -891,7 +882,8 @@ async def _proxy_to_vllm(
     api_key_id: Optional[int] = None,
     log_id: Optional[int] = None,
     request_id: Optional[str] = None,
-    model: str = "unknown"
+    model: str = "unknown",
+    sender: str = "system"
 ) -> Response:
     """
     Handles proxying a request to a vLLM server with token tracking.
@@ -957,7 +949,7 @@ async def _proxy_to_vllm(
 
                         if is_first_token and request_id:
                             is_first_token = False
-                            event_manager.emit(ProxyEvent("active", request_id, model, server.name))
+                            event_manager.emit(ProxyEvent("active", request_id, model, server.name, sender=sender))
                         
                         # Process for token tracking
                         buffer += chunk_text
@@ -1135,6 +1127,17 @@ async def federate_models(
                     "quantization_level": "N/A"
                 }
             }
+
+        # Add Workflows
+        try:
+            result_w = await db.execute(select(Workflow).filter(Workflow.is_active == True))
+            for w in result_w.scalars().all():
+                all_models[w.name] = {
+                    "name": w.name, "model": w.name, "size": 0, "digest": f"flow-{w.id}",
+                    "details": {"format": "workflow", "family": "graph", "parameter_size": "multi-node"}
+                }
+        except Exception:
+            pass
             
         # Add Vision Augmenters
         try:
@@ -1212,10 +1215,11 @@ async def _async_log_usage(
         return None
 
 
-async def _select_auto_model(db: AsyncSession, body: Dict[str, Any]) -> Optional[str]:
+async def _select_auto_model(db: AsyncSession, body: Dict[str, Any], overrides: Dict[str, bool] = None) -> Optional[str]:
     """Selects the best model based on metadata, request content, and context length."""
+    if overrides is None: overrides = {}
     
-    has_images = "images" in body and body["images"]
+    has_images = overrides.get("require_vision", False) or ("images" in body and body["images"])
     
     # 1. Extract and Analyze Content
     full_history_text = ""
@@ -1234,12 +1238,12 @@ async def _select_auto_model(db: AsyncSession, body: Dict[str, Any]) -> Optional
                 last_user_prompt = content
 
     # Detect Reasoning Intent
-    reasoning_keywords = ["solve", "prove", "math", "why", "logic", "calculate", "step by step", "complex"]
-    is_reasoning_task = any(kw in last_user_prompt.lower() for kw in reasoning_keywords)
+    reasoning_keywords =["solve", "prove", "math", "why", "logic", "calculate", "step by step", "complex"]
+    is_reasoning_task = overrides.get("prefer_reasoning", False) or any(kw in last_user_prompt.lower() for kw in reasoning_keywords)
 
     # Detect Coding Intent
-    code_keywords = ["def ", "class ", "import ", "const ", "let ", "var ", "function ", "public static void", "int main("]
-    contains_code = any(kw.lower() in last_user_prompt.lower() for kw in code_keywords)
+    code_keywords =["def ", "class ", "import ", "const ", "let ", "var ", "function ", "public static void", "int main("]
+    contains_code = overrides.get("prefer_code", False) or any(kw.lower() in last_user_prompt.lower() for kw in code_keywords)
 
     # Estimate Context Length (approx 4 chars per token)
     estimated_tokens = len(full_history_text) // 4
@@ -1277,7 +1281,8 @@ async def _select_auto_model(db: AsyncSession, body: Dict[str, Any]) -> Optional
             candidate_models = code_models
 
     # Tier 2: Resource/Constraint Matching
-    if body.get("options", {}).get("fast_model"):
+    is_fast = overrides.get("prefer_fast", False) or body.get("options", {}).get("fast_model")
+    if is_fast:
         fast_models = [m for m in candidate_models if m.is_fast_model]
         if fast_models:
             candidate_models = fast_models
@@ -1307,38 +1312,483 @@ async def _select_auto_model(db: AsyncSession, body: Dict[str, Any]) -> Optional
 
 
 async def _resolve_target(db: AsyncSession, name: str, messages: List[Dict[str, Any]], depth: int = 0, request: Request = None) -> Tuple[str, List[Dict[str, Any]]]:
-    """Recursively resolves a name into a physical model + final message list (for Virtual Agents)."""
+    """Recursively resolves a name into a physical model + final message list."""
     if depth > 10: return name, messages # Circular protection
 
-    from app.database.models import VirtualAgent, SmartRouter
+    from app.database.models import VirtualAgent, SmartRouter, Workflow
     
-    # Mark virtual agent resolution for strict context enforcement
     if request is not None:
         request.state.enforce_strict_context = True
     
+    # 0. Check for Visual Workflow (Conception UI)
+    wf_res = await db.execute(select(Workflow).filter(Workflow.name == name, Workflow.is_active == True))
+    workflow = wf_res.scalars().first()
+    if workflow:
+        # GRAPH RESOLUTION ENGINE
+        nodes = workflow.graph_data.get("nodes", [])
+        
+        # Logic: Find the terminal node (Output) and trace backward to the first LLM
+        # GRAPH RESOLUTION ENGINE (DAG Crawler)
+        # Find terminal Output node
+        output_nodes = [n for n in nodes if n["type"] == "hub/output"]
+        if not output_nodes:
+            return await _resolve_target(db, "auto", messages, depth + 1, request=request)
+
+        # Tracing Logic:
+        # Find the LLM node connected to the output, then follow its inputs.
+        def find_source_node(input_id, nodes):
+            for n in nodes:
+                if "outputs" in n:
+                    for out in n["outputs"]:
+                        if out.get("links") and input_id in out["links"]:
+                            return n
+            return None
+
+        # GRAPH RESOLUTION ENGINE (DAG Crawler)
+        # Find terminal Output node
+        exit_node = next((n for n in nodes if n["type"] == "hub/output"), None)
+        if not exit_node:
+            logger.warning(f"Workflow '{name}' has no Output node.")
+            return await _resolve_target(db, "auto", messages, depth + 1, request=request)
+
+        def find_source_node_and_slot(input_link_id):
+            for n in nodes:
+                if "outputs" in n:
+                    for idx, out in enumerate(n["outputs"]):
+                        if out.get("links") and input_link_id in out["links"]:
+                            return n, idx
+            return None, 0
+
+        async def execute_cognitive_path(link_id_or_name, history):
+            """Executes a cognitive branch (Node or Sub-Workflow) and returns string response."""
+            m_target = ""
+            
+            # CASE A: Connection from another node (Link ID)
+            if isinstance(link_id_or_name, int):
+                src_node, slot_idx = find_source_node_and_slot(link_id_or_name)
+                if not src_node: return ""
+                
+                # If it's a logic node (Merger, Composer), resolve the string value
+                if src_node["type"] not in ("hub/llm_chat", "hub/llm_instruct", "hub/model"):
+                    return await resolve_node_value(src_node, slot_idx)
+                
+                # It's a cognitive node, get the model target
+                props = src_node.get("properties", {})
+                m_target = props.get("model", "auto")
+            
+            # CASE B: Literal Name (e.g. from a dropdown)
+            else:
+                m_target = str(link_id_or_name)
+
+            # --- RECURSION CHECK: Is this target another workflow? ---
+            # We look up the name in the workflow table
+            wf_check = await db.execute(select(Workflow).filter(Workflow.name == m_target, Workflow.is_active == True))
+            sub_workflow = wf_check.scalars().first()
+            
+            if sub_workflow:
+                logger.info(f"[GraphRecursion] Entering sub-workflow: {m_target}")
+                # Recursively resolve the entire sub-workflow
+                # This uses the main _resolve_target logic but for a specific branch
+                res_model, res_msgs = await _resolve_target(db, m_target, history, depth=depth+1, request=request)
+                
+                # Now execute the resulting model/messages
+                servers = await server_crud.get_servers_with_model(db, res_model)
+                if not servers: return f"[Error] Sub-workflow model '{res_model}' offline."
+                
+                resp, _ = await _reverse_proxy(request, "chat", servers, json.dumps({"model": res_model, "messages": res_msgs, "stream": False}).encode(), is_subrequest=True)
+                return json.loads(resp.body.decode()).get("message", {}).get("content", "") if hasattr(resp, 'body') else ""
+
+            # --- STANDARD EXECUTION: Physical Model ---
+            servers = await server_crud.get_servers_with_model(db, m_target)
+            if not servers: return f"[Error] Expert Model '{m_target}' offline."
+            
+            resp, _ = await _reverse_proxy(
+                request, "chat", servers,
+                json.dumps({"model": m_target, "messages": history, "stream": False}).encode(),
+                is_subrequest=True,
+                sender="graph-moe-expert"
+            )
+            return json.loads(resp.body.decode()).get("message", {}).get("content", "") if hasattr(resp, 'body') else ""
+            
+            # For non-cognitive nodes (Composers, etc), just resolve value normally
+            return await resolve_node_value(src_node, slot_idx)
+
+        async def resolve_node_value(node, output_slot_idx=0):
+            """Recursive solver for the graph data flow."""
+            if not node: return None
+            
+            # 0. Logic: MOE (Parallel Synthesis)
+            if node["type"] == "hub/moe":
+                props = node.get("properties", {})
+                
+                # A. Resolve Context
+                history = []
+                if node.get("inputs") and node["inputs"][0].get("link"):
+                    history = await resolve_node_value(*find_source_node_and_slot(node["inputs"][0]["link"]))
+                
+                # B. Expert Discovery (Identify names for status message)
+                expert_tasks = []
+                expert_names = []
+                
+                for i in range(1, len(node.get("inputs", []))):
+                    link = node["inputs"][i].get("link")
+                    if link:
+                        # Find the name for the status message
+                        src, _ = find_source_node_and_slot(link)
+                        name = src.get("properties", {}).get("model", "Expert " + str(i))
+                        expert_names.append(name)
+                        expert_tasks.append(execute_cognitive_path(link, history))
+                
+                if not expert_tasks: return "No experts connected to MoE."
+                
+                # STATUS UPDATE: Tell user what models are being engaged
+                if props.get("send_status_update"):
+                    status_text = f"Engaging Expert Panel: {', '.join(expert_names)}..."
+                    event_manager.emit(ProxyEvent("active", request_id, "MoE Block", "Gateway", sender, error_message=status_text))
+
+                # C. Execution
+                responses = await asyncio.gather(*expert_tasks, return_exceptions=True)
+                
+                # C. Assemble Panel for Orchestrator
+                panel_data = ""
+                for i, resp in enumerate(responses):
+                    val = str(resp) if not isinstance(resp, Exception) else f"Error: {str(resp)}"
+                    # Wrap in think tags if Monologue is requested
+                    if props.get("show_monologue"):
+                        val = f""
+                    panel_data += f"### EXPERT {i+1} FEEDBACK:\n{val}\n\n"
+
+                # D. Final Synthesis Call
+                orchestrator_model = props.get("orchestrator", "auto")
+                instructions = props.get("system_prompt", "")
+                
+                # PRESERVE PERSONA: Construct synthesis messages from the existing history
+                # This ensures the 'Identity' injected earlier stays in the final step's buffer
+                final_messages = list(history) if isinstance(history, list) else [{"role": "user", "content": str(history)}]
+                
+                # Append the expert panel and instructions as a meta-instruction for the orchestrator
+                final_synth_msg = (
+                    f"### EXPERT PANEL OUTPUTS\n{panel_data}\n\n"
+                    f"### SYNTHESIS MANDATE\n{instructions}"
+                )
+                final_messages.append({"role": "user", "content": final_synth_msg})
+                
+                servers = await server_crud.get_servers_with_model(db, orchestrator_model)
+                if not servers: return f"[Error] Orchestrator '{orchestrator_model}' offline."
+                
+                resp_obj, _ = await _reverse_proxy(
+                    request, "chat", servers, 
+                    json.dumps({
+                        "model": orchestrator_model, 
+                        "messages": final_messages,
+                        "stream": False
+                    }).encode(),
+                    is_subrequest=True,
+                    sender="graph-moe"
+                )
+                
+                if hasattr(resp_obj, 'body'):
+                    try:
+                        data = json.loads(resp_obj.body.decode())
+                        content = data.get("message", {}).get("content", "")
+                        if not content:
+                            logger.warning("[GraphMoE] Orchestrator returned empty string. Returning raw expert data.")
+                            return f"The orchestrator returned no text. Here is the raw expert summary:\n\n{panel_data}"
+                        return content
+                    except Exception as e:
+                        return f"JSON Error in Orchestrator: {str(e)}"
+                return "Critical Synthesis Error: No response from compute node."
+
+            # 1. Logic: Composer (Aggregates multiple text inputs)
+            if node["type"] == "hub/system_composer":
+                parts = []
+                for inp in node.get("inputs",[]):
+                    if inp.get("link") is not None:
+                        n, idx = find_source_node_and_slot(inp["link"])
+                        val = await resolve_node_value(n, idx)
+                        if val: parts.append(str(val))
+                return "\n\n".join(parts)
+
+            # 1.1 Logic: System Merger (Identity + Categorized Skills)
+            if node["type"] == "hub/system_merger":
+                identity = ""
+                skills = []
+                
+                # Input 0 is always Base Identity
+                inputs = node.get("inputs", [])
+                if inputs and inputs[0].get("link"):
+                    identity = await resolve_node_value(*find_source_node_and_slot(inputs[0]["link"]))
+                
+                # Inputs 1+ are Skills
+                for i in range(1, len(inputs)):
+                    if inputs[i].get("link"):
+                        skill_val = await resolve_node_value(*find_source_node_and_slot(inputs[i]["link"]))
+                        if skill_val: skills.append(str(skill_val))
+                
+                merged = f"## Identity\n{identity}"
+                if skills:
+                    merged += "\n\n## Capabilities & Skills\n" + "\n\n".join(skills)
+                return merged
+
+            # 2. Logic: Skill/Personality/String Provider
+            if node["type"] == "hub/skill":
+                from app.core.skills_manager import SkillsManager
+                skill_name = node.get("properties", {}).get("name")
+                skills = SkillsManager.get_all_skills()
+                skill = next((s for s in skills if s["name"] == skill_name), None)
+                return skill["raw"] if skill else ""
+                
+            if node["type"] == "hub/personality":
+                from app.core.personalities_manager import PersonalityManager
+                import re
+                p_name = node.get("properties", {}).get("name")
+                personalities = PersonalityManager.get_all_personalities()
+                p = next((x for x in personalities if x["name"] == p_name), None)
+                if not p: return ""
+                
+                # SLOT 0: System Prompt (Body ONLY)
+                if output_slot_idx == 0:
+                    raw = p["raw"]
+                    # Strip YAML Frontmatter (--- ... ---) to ensure the LLM sees a clean prompt
+                    body = re.sub(r'^---\s*\n.*?\n---\s*\n', '', raw, flags=re.DOTALL).strip()
+                    return body
+                return ""
+
+            # 3. Transformer: Extract Text from Messages
+            if node["type"] == "hub/extract_text":
+                if node.get("inputs") and len(node["inputs"]) > 0 and node["inputs"][0].get("link"):
+                    n, idx = find_source_node_and_slot(node["inputs"][0]["link"])
+                    msgs = await resolve_node_value(n, idx)
+                    if msgs and isinstance(msgs, list) and len(msgs) > 0:
+                        return msgs[-1].get("content", "")
+                return ""
+
+            # 4. Transformer: String to Message Object
+            if node["type"] == "hub/create_message":
+                if node.get("inputs") and len(node["inputs"]) > 0 and node["inputs"][0].get("link"):
+                    n, idx = find_source_node_and_slot(node["inputs"][0]["link"])
+                    text = await resolve_node_value(n, idx)
+                    role = node.get("properties", {}).get("role", "user")
+                    return {"role": role, "content": str(text)}
+                return None
+
+            # 5. Transformer: Append to Messages
+            if node["type"] == "hub/append_message":
+                history =[]
+                if node.get("inputs") and len(node["inputs"]) > 0 and node["inputs"][0].get("link"):
+                    n, idx = find_source_node_and_slot(node["inputs"][0]["link"])
+                    history = await resolve_node_value(n, idx)
+                content = ""
+                if node.get("inputs") and len(node["inputs"]) > 1 and node["inputs"][1].get("link"):
+                    n, idx = find_source_node_and_slot(node["inputs"][1]["link"])
+                    content = await resolve_node_value(n, idx)
+                    
+                role = node.get("properties", {}).get("role", "user")
+                if not isinstance(history, list): history = [history] if history else[]
+                updated = list(history)
+                if content:
+                    updated.append({"role": role, "content": str(content)})
+                return updated
+                
+            # System Modifier
+            if node["type"] == "hub/system_modifier":
+                history =[]
+                if node.get("inputs") and len(node["inputs"]) > 0 and node["inputs"][0].get("link"):
+                    n, idx = find_source_node_and_slot(node["inputs"][0]["link"])
+                    history = await resolve_node_value(n, idx)
+                sys_prompt = ""
+                if node.get("inputs") and len(node["inputs"]) > 1 and node["inputs"][1].get("link"):
+                    n, idx = find_source_node_and_slot(node["inputs"][1]["link"])
+                    sys_prompt = await resolve_node_value(n, idx)
+                
+                if not isinstance(history, list): history = [history] if history else []
+                # Force override of system prompt
+                updated = [m for m in history if m.get("role") != "system"]
+                if sys_prompt:
+                    updated.insert(0, {"role": "system", "content": str(sys_prompt)})
+                return updated
+
+            # 6. Entry Point
+            if node["type"] == "hub/input":
+                if output_slot_idx == 0: return messages
+                elif output_slot_idx == 1: return {}
+
+            # 7. Tool Definition (YAML Frontmatter)
+            if node["type"] == "hub/tool":
+                props = node.get("properties", {})
+                metadata = props.get("metadata", {})
+                return {
+                    "type": "function",
+                    "function": {
+                        "name": metadata.get("name"),
+                        "description": metadata.get("description", ""),
+                        "parameters": metadata.get("parameters", {"type": "object", "properties": {}})
+                    }
+                }
+
+            return None
+
+            # 1.8 Logic: Enhanced Auto Router
+            if node["type"] == "hub/autorouter":
+                props = node.get("properties", {})
+                
+                # A. Resolve Input Context
+                history = []
+                if node.get("inputs") and node["inputs"][0].get("link"):
+                    history = await resolve_node_value(*find_source_node_and_slot(node["inputs"][0]["link"]))
+                
+                user_text = (history[-1].get("content", "") if history else "").lower()
+                
+                # B. FAST RULES EVALUATION (Regex/Keywords)
+                selected_slot = -1
+                for rule in props.get("rules", []):
+                    kw_str = rule.get("keywords", "").strip()
+                    if not kw_str: continue
+                    
+                    keywords = [k.strip().lower() for k in kw_str.split(",")]
+                    for kw in keywords:
+                        # Regex support
+                        if kw.startswith("/") and kw.endswith("/"):
+                            try:
+                                if re.search(kw[1:-1], user_text, re.I):
+                                    selected_slot = rule["slot"]
+                                    break
+                            except: pass
+                        # Literal support
+                        elif kw in user_text:
+                            selected_slot = rule["slot"]
+                            break
+                    if selected_slot != -1: break
+
+                # C. SEMANTIC EVALUATION (Fast LLM Classifier)
+                if selected_slot == -1 and props.get("use_semantic") and props.get("rules"):
+                    classifier_model = props.get("classifier_model", "auto")
+                    
+                    # Construct panel of intents
+                    intents_map = {r["slot"]: r["intent"] for r in props["rules"] if r["intent"]}
+                    if intents_map:
+                        intent_list = "\n".join([f"- PATH {s}: {d}" for s, d in intents_map.items()])
+                        prompt = (
+                            f"Classify this user message: '{user_text}'\n\n"
+                            "Available Paths:\n" + intent_list + "\n\n"
+                            "Output ONLY the Path identifier (e.g. 'PATH 2'). If none match, output 'PATH 1'."
+                        )
+                        
+                        event_manager.emit(ProxyEvent("active", request_id, "Auto Router", classifier_model, sender, error_message="Classifying semantic intent..."))
+                        
+                        servers = await server_crud.get_servers_with_model(db, classifier_model)
+                        if servers:
+                            resp, _ = await _reverse_proxy(request, "chat", servers, json.dumps({"model": classifier_model, "messages": [{"role": "user", "content": prompt}], "stream": False}).encode(), is_subrequest=True)
+                            if hasattr(resp, 'body'):
+                                ans = json.loads(resp.body.decode()).get("message", {}).get("content", "").upper()
+                                match = re.search(r'PATH (\d+)', ans)
+                                if match: selected_slot = int(match.group(1))
+
+                # D. Fallback & Execution
+                if selected_slot == -1: selected_slot = 1 # Default to first path
+                
+                # Check if slot is within current bounds
+                if selected_slot >= len(node.get("inputs", [])): selected_slot = 1
+                
+                target_link = node["inputs"][selected_slot].get("link")
+                if not target_link: return "Router picked empty slot."
+                
+                return await execute_cognitive_path(target_link, history)
+
+            # 7. Tool Definition
+            if node["type"] == "hub/tool":
+                props = node.get("properties", {})
+                metadata = props.get("metadata", {})
+                if "type" in metadata:
+                    return metadata
+                if "name" in metadata and "description" in metadata:
+                    return {
+                        "type": "function",
+                        "function": {
+                            "name": metadata.get("name"),
+                            "description": metadata.get("description"),
+                            "parameters": metadata.get("parameters", {"type": "object", "properties": {}})
+                        }
+                    }
+                return None
+
+            return None
+
+        # Trace back from Exit to find the primary cognitive block
+        if "inputs" in exit_node and exit_node["inputs"][0].get("link") is not None:
+            active_node, _ = find_source_node_and_slot(exit_node["inputs"][0]["link"])
+            
+            if active_node and active_node["type"] in ("hub/llm_chat", "hub/llm_instruct"):
+                props = active_node.get("properties", {})
+                target_model = str(props.get("model", "auto")).strip()
+                final_temp = 0.7 # Default
+                
+                # Resolve Messages (Slot 0 for both Chat and Instruct)
+                resolved_messages = messages
+                if "inputs" in active_node and len(active_node["inputs"]) > 0 and active_node["inputs"][0].get("link") is not None:
+                    n, idx = find_source_node_and_slot(active_node["inputs"][0]["link"])
+                    res = await resolve_node_value(n, idx)
+                    if res:
+                        if isinstance(res, list):
+                            resolved_messages = res
+                        else:
+                            # Instruct passes string in slot 0
+                            resolved_messages = [{"role": "user", "content": str(res)}]
+
+                # Resolve Settings
+                if "inputs" in active_node and len(active_node["inputs"]) > 1 and active_node["inputs"][1].get("link") is not None:
+                    n, idx = find_source_node_and_slot(active_node["inputs"][1]["link"])
+                    settings = await resolve_node_value(n, idx)
+                    if isinstance(settings, dict) and "temperature" in settings:
+                        final_temp = float(settings["temperature"])
+
+                # Resolve Model Override (Slot 2)
+                model_override = None
+                if "inputs" in active_node and len(active_node["inputs"]) > 2 and active_node["inputs"][2].get("link") is not None:
+                    n, idx = find_source_node_and_slot(active_node["inputs"][2]["link"])
+                    model_override = await resolve_node_value(n, idx)
+                
+                if model_override:
+                    target_model = str(model_override).strip()
+
+                # Resolve Tools (Slot 3 and beyond)
+                final_tools =[]
+                if "inputs" in active_node:
+                    for i in range(3, len(active_node["inputs"])):
+                        inp = active_node["inputs"][i]
+                        if inp.get("link") is not None:
+                            n, idx = find_source_node_and_slot(inp["link"])
+                            tool_data = await resolve_node_value(n, idx)
+                            if tool_data:
+                                if isinstance(tool_data, list):
+                                    final_tools.extend(tool_data)
+                                else:
+                                    final_tools.append(tool_data)
+
+                if request:
+                    request.state.graph_temperature = final_temp
+                    if final_tools:
+                        request.state.graph_tools = final_tools
+
+                logger.info(f"Workflow '{name}' resolved: Node={active_node['type']}, Model={target_model}")
+                return await _resolve_target(db, target_model, resolved_messages, depth + 1, request=request)
+
+        return await _resolve_target(db, "auto", messages, depth + 1, request=request)
+
     # 1. Resolve Virtual Agent (Persona + RAG + MCP)
     agent_res = await db.execute(select(VirtualAgent).filter(VirtualAgent.name == name, VirtualAgent.is_active == True))
     agent = agent_res.scalars().first()
     if agent:
         logger.info(f"Hydrating Agent '{name}' -> Base: {agent.base_model}")
 
-        # Soul Injection: Prepend system prompt
-        # CRITICAL FIX: Create deep copy of messages to avoid modifying the original
         import copy
-        updated_messages = [{"role": "system", "content": agent.system_prompt}]
+        # Ensure deep copy of input messages
+        updated_messages = copy.deepcopy(messages)
 
-        # Deep copy user messages to prevent reference sharing
-        for msg in messages:
-            if isinstance(msg, dict):
-                msg_copy = copy.deepcopy(msg)
-                # Ensure images from previous processing don't leak
-                if "images" in msg_copy and msg_copy.get("role") != "user":
-                    del msg_copy["images"]
-                updated_messages.append(msg_copy)
-            else:
-                updated_messages.append(msg)
-
-        # Note: RAG/MCP injection point
+        # Soul Injection: Always ensure the agent system prompt is the first message
+        # We strip existing system prompts to ensure the Agent's soul takes precedence
+        updated_messages = [m for m in updated_messages if m.get("role") != "system"]
+        updated_messages.insert(0, {"role": "system", "content": agent.system_prompt})
 
         return await _resolve_target(db, agent.base_model, updated_messages, depth + 1, request=request)
 
@@ -1354,6 +1804,11 @@ async def _resolve_target(db: AsyncSession, name: str, messages: List[Dict[str, 
         return await _resolve_target(db, chosen_target, messages, depth + 1, request=request)
 
     # 3. Fallback: It's a raw model name
+    if name == "auto":
+        body = {"messages": messages}
+        best_model = await _select_auto_model(db, body)
+        return best_model or "unknown", messages
+
     # For raw models, don't enforce strict context (preserve user's num_ctx if set)
     return name, messages
 
@@ -1442,34 +1897,30 @@ async def _select_from_pool(db: AsyncSession, pool_name: str, body: Dict[str, An
     # 2. Hierarchical Rule Evaluation
     if pool.rules:
         for group in pool.rules:
-            # group = {"logic": "AND"|"OR", "conditions": [...], "target": "model_name"}
             logic = group.get("logic", "OR")
             conditions = group.get("conditions", [])
             matches = []
 
             for cond in conditions:
                 c_type = cond.get("type")
-                c_val = cond.get("value")
+                c_val = str(cond.get("value", ""))
                 c_match = False
 
-                # Fast Checks (Favored)
                 if c_type == "has_images": c_match = features["has_images"]
-                elif c_type == "min_len": c_match = features["len"] >= int(c_val)
-                elif c_type == "max_len": c_match = features["len"] <= int(c_val)
+                elif c_type == "min_len": c_match = features["len"] >= int(c_val or 0)
+                elif c_type == "max_len": c_match = features["len"] <= int(c_val or 0)
                 elif c_type == "keyword": c_match = c_val.lower() in features["text"]
-                elif c_type == "regex": c_match = bool(re.search(c_val, features["text"], re.I))
+                elif c_type == "regex": 
+                    try: c_match = bool(re.search(c_val, features["text"], re.I))
+                    except: c_match = False
                 elif c_type == "user": c_match = features["sender"] == c_val
-                
-                # Semantic Check (Calls LLM - Last Resort)
                 elif c_type == "intent" and pool.classifier_model:
                     c_match = await _call_classifier(request, db, pool.classifier_model, features["text"], c_val, sender=sender)
 
                 matches.append(c_match)
 
-            # Final group determination
-            group_matched = all(matches) if logic == "AND" else any(matches)
-            if group_matched:
-                logger.info(f"Router Match: Pool '{pool_name}' -> '{group['target']}' via {logic} logic.")
+            if matches and (all(matches) if logic == "AND" else any(matches)):
+                logger.info(f"Router Match: Pool '{pool_name}' -> '{group['target']}'")
                 return group['target']
 
     # 3. Fallback Strategy
@@ -1529,7 +1980,10 @@ async def _handle_chain_request(db: AsyncSession, request: Request, chain_name: 
                 resp, _ = await _reverse_proxy(
                     request, "chat", servers, 
                     json.dumps(sub_body).encode(), 
-                    is_subrequest=True
+                    is_subrequest=True,
+                    request_id=f"{request_id}_{i}",
+                    model=step_model,
+                    sender=api_key.user.username
                 )
                 
                 data = json.loads(resp.body.decode())
@@ -1777,19 +2231,23 @@ async def _handle_bundle_request(db: AsyncSession, request: Request, bundle_name
                     "If you are even slightly unsure, answer 'YES'.\n"
                     "Respond ONLY with 'YES' or 'NO'."
                 )
-                
+
                 # Internal non-streaming request to the Master Model for classification
                 master_body = body.copy()
                 master_body["model"] = bundle.master_model
                 master_body["stream"] = False
                 if "prompt" in master_body: master_body["prompt"] = classifier_prompt
                 else: master_body["messages"] = [{"role": "user", "content": classifier_prompt}]
-                
+
                 async with AsyncSessionLocal() as local_db:
                     servers = await server_crud.get_servers_with_model(local_db, bundle.master_model)
-                
+
                 if servers:
-                    resp, _ = await _reverse_proxy(request, "chat" if "messages" in master_body else "generate", servers, json.dumps(master_body).encode(), is_subrequest=True)
+                    resp, _ = await _reverse_proxy(
+                        request, "chat" if "messages" in master_body else "generate", servers, 
+                        json.dumps(master_body).encode(), is_subrequest=True,
+                        request_id=f"{request_id}_cls", model=bundle.master_model, sender=api_key.user.username
+                    )
                     if hasattr(resp, 'body'):
                         data = json.loads(resp.body.decode())
                         decision = (data.get("message", {}).get("content", "") or data.get("response", "")).strip().upper()
@@ -1803,21 +2261,21 @@ async def _handle_bundle_request(db: AsyncSession, request: Request, bundle_name
             if not use_ensemble:
                 # Bypass ensemble and stream directly from Master
                 logger.info(f"[Ensemble:{bundle_name}] Routing directly to Master Model: {bundle.master_model}")
-                
+
                 # CRITICAL: Update the model name in the payload to the physical master model
                 body["model"] = bundle.master_model
-                
+
                 master_path = "chat" if "messages" in body else "generate"
                 async with AsyncSessionLocal() as local_db:
                     servers = await server_crud.get_servers_with_model(local_db, bundle.master_model)
-                
+
                 if not servers:
                     yield format_proxy_chunk("⚠️ [Master model not available]", is_done=True)
                     return
 
                 target_server = servers[0]
                 master_payload = body
-                
+
                 # Retrieve master model metadata for clamping
                 async with AsyncSessionLocal() as meta_db:
                     m_meta = await get_metadata_by_model_name(meta_db, bundle.master_model)
@@ -1843,7 +2301,7 @@ async def _handle_bundle_request(db: AsyncSession, request: Request, bundle_name
                             logger.error(f"[Ensemble:{bundle_name}] Direct master route failed: {error_msg}")
                             yield format_proxy_chunk(f"⚠️ **{error_msg}**", is_done=True)
                             return
-                        
+
                         # TRACK if we received anything
                         received_anything = False
                         async for line in resp.aiter_lines():
@@ -1851,7 +2309,7 @@ async def _handle_bundle_request(db: AsyncSession, request: Request, bundle_name
                             received_anything = True
                             logger.debug(f"[Ensemble:{bundle_name}] Master stream chunk: {line[:100]}...")
                             yield (line + "\n").encode()
-                        
+
                         if not received_anything:
                             logger.error(f"[Ensemble:{bundle_name}] Backend returned empty stream for master model {bundle.master_model}")
                             yield format_proxy_chunk(f"⚠️ **[Error: Backend returned empty response from {bundle.master_model}]**", is_done=True)
@@ -1975,7 +2433,7 @@ async def _handle_bundle_request(db: AsyncSession, request: Request, bundle_name
 
                 master_url = f"{target_server.url.rstrip('/')}/api/{master_path}"
                 logger.info(f"[Ensemble:{bundle_name}] Synthesis requested via model '{bundle.master_model}' on server '{target_server.name}'")
-                event_manager.emit(ProxyEvent("assigned", request_id, bundle_name, target_server.name, api_key.user.username))
+                event_manager.emit(ProxyEvent("assigned", request_id, bundle_name, target_server.name, sender=api_key.user.username))
 
                 # Increased timeout to 1 hour (3600s) for complex synthesis
                 async with request.app.state.http_client.stream(
@@ -1988,7 +2446,7 @@ async def _handle_bundle_request(db: AsyncSession, request: Request, bundle_name
                         return
 
                     # Signal that synthesis is active to trigger the visual spinner
-                    event_manager.emit(ProxyEvent("active", request_id, bundle_name, target_server.name, api_key.user.username))
+                    event_manager.emit(ProxyEvent("active", request_id, bundle_name, target_server.name, sender=api_key.user.username))
 
                     async for line in backend_resp.aiter_lines():
                         if not line: continue
@@ -2200,8 +2658,40 @@ async def proxy_ollama(
         logger.error(f"VisionAugmenter error: {e}", exc_info=True)
 
 
-    # 4. Handle Capabilities Gatekeeper (Tools & Thinking)
+    # 3.5 Resolve Workflow / VirtualAgent / Graph Tools
     if model_name and isinstance(body, dict):
+        is_chat_mode = "messages" in body
+        input_msgs = body.get("messages",[]) if is_chat_mode else [{"role": "user", "content": body.get("prompt", "")}]
+        
+        resolved_model_name, resolved_messages = await _resolve_target(db, model_name, input_msgs, request=request)
+        
+        if resolved_model_name != model_name or resolved_messages != input_msgs:
+            model_name = resolved_model_name
+            body["model"] = model_name
+            if is_chat_mode:
+                body["messages"] = resolved_messages
+            else:
+                body["prompt"] = resolved_messages[-1]["content"] if resolved_messages else ""
+
+        if hasattr(request.state, 'graph_tools') and request.state.graph_tools:
+            if "tools" not in body or not body["tools"]:
+                body["tools"] =[]
+            for t in request.state.graph_tools:
+                if t not in body["tools"]:
+                    body["tools"].append(t)
+
+    # 4. Handle Capabilities Gatekeeper (Tools & Thinking & Graph Settings)
+    if model_name and isinstance(body, dict):
+        # Apply temperature resolved from graph (if any)
+        graph_temp = getattr(request.state, 'graph_temperature', None)
+        if graph_temp is not None:
+            if "options" not in body: body["options"] = {}
+            body["options"]["temperature"] = graph_temp
+        # Apply temperature resolved from graph (if any)
+        graph_temp = getattr(request.state, 'graph_temperature', None)
+        if graph_temp is not None:
+            if "options" not in body: body["options"] = {}
+            body["options"]["temperature"] = graph_temp
         # --- TOOL SANITIZATION ---
         # Only forward 'tools' if the list actually has items to prevent 500 errors
         if "tools" in body:
@@ -2312,12 +2802,33 @@ async def proxy_ollama(
             )
 
     if not candidate_servers:
-        logger.error(f"proxy_ollama: No candidate servers available for model '{model_name}'")
-        event_manager.emit(ProxyEvent("error", req_id, model_name, "none", api_key.user.username, error_message="No servers found"))
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"No servers available for model '{model_name}'. Please check server status and model availability."
-        )
+        # --- SECURITY CHECK: Distinguish between 'Not Found' and 'Not Allowed' ---
+        physically_exists = False
+        for s in servers:
+            if s.available_models:
+                models_list = s.available_models
+                if isinstance(models_list, str):
+                    try: models_list = json.loads(models_list)
+                    except: continue
+                
+                if any(m.get("name") == model_name or (s.server_type == 'ollama' and m.get("name", "").startswith(f"{model_name}:")) for m in models_list):
+                    physically_exists = True
+                    break
+        
+        if physically_exists:
+            logger.warning(f"Access Denied: Model '{model_name}' exists on backends but is blocked by administrative whitelists.")
+            event_manager.emit(ProxyEvent("error", req_id, model_name, "none", sender=api_key.user.username, error_message="Model Not Allowed"))
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Access to model '{model_name}' is restricted by the administrator's whitelist policy."
+            )
+        else:
+            logger.error(f"proxy_ollama: No candidate servers available for model '{model_name}'")
+            event_manager.emit(ProxyEvent("error", req_id, model_name, "none", sender=api_key.user.username, error_message="No servers found"))
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"No servers available for model '{model_name}'. Please check server status and model availability."
+            )
 
     # Create initial usage log entry (without tokens - will be updated later for streaming)
     is_token_trackable_endpoint = path in ("generate", "chat", "embeddings")

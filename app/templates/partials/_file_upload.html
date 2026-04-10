@@ -1,0 +1,9 @@
+<div class="space-y-4">
+    <div class="flex gap-2">
+        <button type="button" onclick="document.getElementById('m-img-input').click()" class="text-xs p-2 bg-white/5 rounded border border-white/10 hover:bg-white/10">📷 Attach Images</button>
+        <button type="button" onclick="document.getElementById('m-doc-input').click()" class="text-xs p-2 bg-white/5 rounded border border-white/10 hover:bg-white/10">📄 Attach Docs</button>
+    </div>
+    <input type="file" id="m-img-input" class="hidden" multiple accept="image/*">
+    <input type="file" id="m-doc-input" class="hidden" multiple accept=".txt,.md,.pdf,.csv">
+    <div id="m-previews" class="flex flex-wrap gap-2"></div>
+</div>

@@ -160,28 +160,26 @@
         const container = document.getElementById('rule-groups-container');
         const groupId = groupCounter++;
         
-        // Get the models template
         const template = document.getElementById('models-template');
         const modelsHTML = template ? template.innerHTML : '';
         
         const div = document.createElement('div');
-        div.className = "card-style bg-white/5 border-dashed p-4 relative group";
+        div.className = "card-style bg-black/20 p-4 border border-indigo-500/20";
         div.innerHTML = `
-            <button type="button" onclick="this.parentElement.remove()" class="absolute top-2 right-2 text-red-500 opacity-0 group-hover:opacity-100 transition-opacity">Remove Group</button>
-            <div class="flex flex-wrap items-center gap-4 mb-4">
-                <span class="text-[10px] font-black uppercase text-gray-500">Match Logic:</span>
-                <select name="group_logic_${groupId}" class="text-xs bg-black/40 rounded p-1 border border-white/10">
-                    <option value="OR">ANY condition matches (OR)</option>
-                    <option value="AND">ALL conditions match (AND)</option>
-                </select>
-                <span class="text-[10px] font-black uppercase text-gray-500">Target Model:</span>
-                <select name="group_target_${groupId}" class="text-xs bg-black/40 rounded p-1 border border-white/10">
-                    ${modelsHTML}
-                </select>
+            <div class="flex justify-between items-center mb-4">
+                <div class="flex items-center gap-3">
+                    <select name="group_logic_${groupId}" class="text-[10px] font-bold bg-black/40 rounded px-2 py-1 border border-white/10">
+                        <option value="OR">MATCH ANY (OR)</option>
+                        <option value="AND">MATCH ALL (AND)</option>
+                    </select>
+                    <span class="text-[10px] uppercase text-gray-500">Route to</span>
+                    <select name="group_target_${groupId}" class="text-[10px] font-bold bg-black/40 rounded px-2 py-1 border border-white/10">
+                        ${modelsHTML}
+                    </select>
+                </div>
+                <button type="button" onclick="this.parentElement.parentElement.remove()" class="text-[10px] text-red-500">Remove Group</button>
             </div>
-            <div id="cond-list-${groupId}" class="space-y-2 ml-4 border-l-2 border-white/5 pl-4">
-                <!-- Conditions added here -->
-            </div>
+            <div id="cond-list-${groupId}" class="space-y-2"></div>
             <button type="button" onclick="addCondition(${groupId})" class="mt-3 text-[10px] text-indigo-400 hover:underline">+ Add Condition</button>
             <input type="hidden" name="group_ids" value="${groupId}">
         `;

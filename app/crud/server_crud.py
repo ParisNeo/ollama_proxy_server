@@ -454,18 +454,19 @@ async def get_servers_with_model(db: AsyncSession, model_name: str) -> list[Olla
 
     servers_with_model = []
     for server in active_servers:
-        # 1. Check Whitelist First
-        if server.allowed_models:
-            # Match against whitelist (Exact or Prefix for Ollama tags)
+        # 1. Check Administrative Permission (Whitelist)
+        # If the whitelist is not empty, the model MUST be in it.
+        if server.allowed_models and len(server.allowed_models) > 0:
             is_ollama = server.server_type == 'ollama'
             whitelisted = any(
                 m == model_name or (is_ollama and m.startswith(f"{model_name}:"))
                 for m in server.allowed_models
             )
             if not whitelisted:
+                # Model exists but is restricted by this server's specific whitelist
                 continue
 
-        # 2. Verify Physical Availability
+        # 2. Verify Physical Availability in the server's discovered catalog
         if server.available_models:
             models_list = server.available_models
             if isinstance(models_list, str):
@@ -614,9 +615,9 @@ async def get_all_models_grouped_by_server(db: AsyncSession, filter_type: Option
     if filter_type == 'chat' or filter_type is None:
         proxy_features = ["auto"]
         
-        # Dynamically add Agents, Pools and Bundles to the selector
+        # Dynamically add Agents, Pools, Bundles and Workflows to the selector
         try:
-            from app.database.models import SmartRouter, EnsembleOrchestrator, VirtualAgent
+            from app.database.models import SmartRouter, EnsembleOrchestrator, VirtualAgent, Workflow
             from sqlalchemy import select
             
             # Fetch Agents
@@ -630,6 +631,10 @@ async def get_all_models_grouped_by_server(db: AsyncSession, filter_type: Option
             # Fetch Bundles
             res_b = await db.execute(select(EnsembleOrchestrator.name).filter(EnsembleOrchestrator.is_active == True))
             proxy_features.extend(res_b.scalars().all())
+
+            # Fetch Workflows (Graphs)
+            res_w = await db.execute(select(Workflow.name).filter(Workflow.is_active == True))
+            proxy_features.extend(res_w.scalars().all())
         except Exception as e:
             logger.error(f"Error fetching proxy features for selector: {e}")
             

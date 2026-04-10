@@ -1,0 +1,9 @@
+{
+  "chart.js": "4.4.1",
+  "marked.min.js": "11.1.1",
+  "highlight.min.js": "11.9.0",
+  "highlight-dark.min.css": "11.9.0",
+  "litegraph.css": "0.7.10",
+  "litegraph.js": "0.7.10",
+  "gl-matrix.js": "2.8.1"
+}

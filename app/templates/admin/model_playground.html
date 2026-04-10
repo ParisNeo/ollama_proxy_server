@@ -25,9 +25,21 @@
     }
 </style>
 
-<div class="flex flex-col h-full card-style p-0 rounded-none">
-    <!-- Header -->
-    <div class="card-header p-2 md:p-4 flex items-center justify-between flex-shrink-0">
+<div class="flex h-full w-full bg-[#0a0a0f] rounded-lg overflow-hidden border border-white/10 shadow-2xl">
+    <!-- Chat History Sidebar -->
+    <div id="chat-history-sidebar" class="w-64 border-r border-white/10 flex-col bg-black/40 hidden md:flex flex-shrink-0">
+        <div class="p-4 border-b border-white/10">
+            <button id="new-chat-btn" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg font-black tracking-widest text-xs uppercase transition-colors shadow-lg shadow-indigo-500/20">+ New Chat</button>
+        </div>
+        <div id="chat-history-list" class="flex-1 overflow-y-auto custom-scrollbar p-2 space-y-1">
+            <!-- History items injected here -->
+        </div>
+    </div>
+    
+    <!-- Main Chat Area -->
+    <div class="flex-1 flex flex-col h-full relative min-w-0">
+        <!-- Header -->
+        <div class="card-header p-2 md:p-4 flex items-center justify-between flex-shrink-0 border-b border-white/10 bg-black/20">
         <div class="flex items-center gap-2 md:gap-4">
             <h2 class="text-xl font-bold">Chat</h2>
             <div id="system-prompt-indicator" class="hidden items-center gap-1 text-xs px-2 py-1 bg-sky-500/20 text-sky-300 rounded-full cursor-pointer" title="A system prompt is active. Click to edit.">
@@ -119,16 +131,23 @@
             <button type="button" id="attach-doc-btn" class="p-2 rounded-md hover:bg-white/10 flex-shrink-0" title="Attach Document">
                 <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
             </button>
+            <button type="button" id="global-import-btn" class="p-2 rounded-md hover:bg-indigo-600/20 text-indigo-400 flex-shrink-0" title="Search & Import External Knowledge">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+            </button>
             <input type="file" id="doc-input" class="hidden" multiple accept=".txt,.md,.json,.csv,.py,.js,.html,.css,.xml,.yaml,.yml,.log,.ini,.toml,.sh,.bat">
             <textarea id="message-input" placeholder="Type your message here, or paste an image..." rows="1" class="flex-grow block w-full px-3 py-2 rounded-md shadow-sm focus:outline-none focus:ring-[var(--color-primary-500)] focus:border-[var(--color-primary-500)] sm:text-sm resize-none"></textarea>
             <button type="submit" id="send-btn" class="justify-center py-2 px-6 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-[var(--color-primary-600)] hover:bg-[var(--color-primary-700)] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[var(--color-primary-500)] self-end">Send</button>
         </form>
     </div>
+    </div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script src="{{ url_for('static', path='vendor/marked.min.js') }}"></script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
 <script>
 document.addEventListener('DOMContentLoaded', () => {
+    mermaid.initialize({ startOnLoad: false, theme: 'dark' });
+    
     // --- Marked.js & Renderer Setup ---
     const renderer = new marked.Renderer();
     const originalCodeRenderer = renderer.code;
@@ -192,6 +211,100 @@ document.addEventListener('DOMContentLoaded', () => {
     const addUserMsgBtn = document.getElementById('add-user-msg-btn');
     const addAiMsgBtn = document.getElementById('add-ai-msg-btn');
 
+
+    // --- Chat History Management ---
+    const HISTORY_STORAGE_KEY = 'lollms_playground_chats';
+    let chatHistory = JSON.parse(localStorage.getItem(HISTORY_STORAGE_KEY) || '[]');
+    let currentChatId = null;
+
+    function saveHistory() {
+        localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(chatHistory));
+        renderHistoryList();
+    }
+
+    window.createNewChat = () => {
+        currentChatId = Date.now().toString();
+        messages = [];
+        attachedImages = [];
+        attachedDocs = [];
+        lastSentImageURL = null;
+        chatHistory.unshift({
+            id: currentChatId,
+            title: 'New Chat',
+            updatedAt: Date.now(),
+            messages: [],
+            systemPrompt: userSystemPrompt,
+            model: modelSelector.value
+        });
+        saveHistory();
+        renderChat();
+        renderImagePreviews();
+        renderDocPreviews();
+        updateGlobalStats();
+    };
+
+    window.updateCurrentChat = () => {
+        if (!currentChatId) createNewChat();
+        const chat = chatHistory.find(c => c.id === currentChatId);
+        if (chat) {
+            chat.messages = messages;
+            chat.systemPrompt = userSystemPrompt;
+            chat.model = modelSelector.value;
+            chat.updatedAt = Date.now();
+            
+            if (chat.title === 'New Chat' && messages.length > 0) {
+                const firstUserMsg = messages.find(m => m.role === 'user');
+                if (firstUserMsg) {
+                    let text = typeof firstUserMsg.content === 'string' ? firstUserMsg.content : (firstUserMsg.content.find(c => c.type === 'text')?.text || 'Image Chat');
+                    chat.title = text.substring(0, 30).replace(/\n/g, ' ') + (text.length > 30 ? '...' : '');
+                }
+            }
+        }
+        saveHistory();
+    };
+
+    window.loadChat = (id) => {
+        const chat = chatHistory.find(c => c.id === id);
+        if (!chat) return;
+        currentChatId = id;
+        messages = chat.messages || [];
+        userSystemPrompt = chat.systemPrompt || '';
+        if (chat.model && modelSelector.querySelector(`option[value="${chat.model}"]`)) {
+            modelSelector.value = chat.model;
+        }
+        updateSystemPromptIndicator();
+        renderChat();
+        updateGlobalStats();
+        renderHistoryList(); // Highlight active
+    };
+
+    window.deleteChat = (id, e) => {
+        e.stopPropagation();
+        if(!confirm('Delete this chat?')) return;
+        chatHistory = chatHistory.filter(c => c.id !== id);
+        if (currentChatId === id) {
+            if (chatHistory.length > 0) {
+                loadChat(chatHistory[0].id);
+            } else {
+                createNewChat();
+            }
+        } else {
+            saveHistory();
+        }
+    };
+
+    function renderHistoryList() {
+        const list = document.getElementById('chat-history-list');
+        if (!list) return;
+        list.innerHTML = chatHistory.map(chat => `
+            <div class="group flex items-center justify-between p-2 rounded-lg cursor-pointer transition-colors ${chat.id === currentChatId ? 'bg-indigo-500/20 text-white border border-indigo-500/30' : 'text-gray-400 hover:bg-white/5 border border-transparent'}" onclick="loadChat('${chat.id}')">
+                <div class="truncate text-xs font-medium flex-1 mr-2">${chat.title}</div>
+                <button class="opacity-0 group-hover:opacity-100 text-gray-500 hover:text-red-400 p-1" onclick="deleteChat('${chat.id}', event)">
+                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                </button>
+            </div>
+        `).join('');
+    }
 
     // --- Constants & State ---
     const ANNOTATION_PROMPT = `You are an advanced AI assistant for image analysis and annotation. Your primary function is to process images and return structured data for various tasks like object detection, text translation, and redaction.
@@ -558,6 +671,19 @@ SUPPORTED ANNOTATION SCHEMAS:
     }
 
     // --- Core Chat Functions ---
+    function renderMermaid(container) {
+        container.querySelectorAll('pre code.language-mermaid').forEach(async (block) => {
+            const wrapper = block.parentElement.parentElement;
+            const id = 'mm-' + Math.random().toString(36).substr(2, 9);
+            const div = document.createElement('div');
+            div.id = id;
+            div.className = 'mermaid';
+            div.textContent = block.innerText;
+            wrapper.parentNode.replaceChild(div, wrapper);
+            try { await mermaid.run({ nodes: [div] }); } catch (e) { console.error("Mermaid error", e); }
+        });
+    }
+
     async function fetchStreamedResponse() {
         if (isLoading) return;
         abortController = new AbortController();
@@ -580,11 +706,24 @@ SUPPORTED ANNOTATION SCHEMAS:
         let currentTPS = null;
         let buffer = '';
 
-        const messagesForApi = messages.map(msg => Array.isArray(msg.content) && !msg.content.some(item => item.type === 'image_url') ? { ...msg, content: msg.content.find(item => item.type === 'text')?.text || '' } : msg);
+        // Create a CLEAN deep copy of messages to send to the API
+        let messagesForApi = JSON.parse(JSON.stringify(messages));
         
+        // Handle image formatting for Ollama compatibility
+        messagesForApi = messagesForApi.map(msg => 
+            Array.isArray(msg.content) && !msg.content.some(item => item.type === 'image_url') 
+            ? { ...msg, content: msg.content.find(item => item.type === 'text')?.text || '' } 
+            : msg
+        );
+        
+        // PREPEND UNIVERSAL SYSTEM PROMPT
         const finalSystemPrompt = getFinalSystemPrompt();
-        if (finalSystemPrompt && messages.length === 1 && messages[0].role === 'user') {
-            messagesForApi.unshift({ role: "system", content: finalSystemPrompt });
+        if (finalSystemPrompt && finalSystemPrompt.trim().length > 0) {
+            // Check if there is already a system prompt in history (e.g. from an imported chat)
+            const hasExistingSystem = messagesForApi.some(m => m.role === 'system');
+            if (!hasExistingSystem) {
+                messagesForApi.unshift({ role: "system", content: finalSystemPrompt });
+            }
         }
 
         const body = { 
@@ -697,6 +836,7 @@ SUPPORTED ANNOTATION SCHEMAS:
                 }
                 messages.push(newMessage);
                 updateGlobalStats();
+                updateCurrentChat();
             }
             renderChat(); 
             chatContainer.scrollTop = chatContainer.scrollHeight;
@@ -724,6 +864,7 @@ SUPPORTED ANNOTATION SCHEMAS:
         }
         
         messages.push({ role: 'user', content: content });
+        updateCurrentChat();
         
         messageInput.value = '';
         messageInput.style.height = 'auto';
@@ -816,6 +957,20 @@ SUPPORTED ANNOTATION SCHEMAS:
         const contentDiv = document.createElement('div');
         contentDiv.className = 'message-content prose prose-invert max-w-none prose-p:my-2 prose-pre:my-2 prose-code:font-sans';
 
+        // Detect HTML
+        const isHtml = typeof content === 'string' && /<[a-z][\s\S]*>/i.test(content);
+        if (isHtml) {
+            const viewBtn = document.createElement('button');
+            viewBtn.className = 'view-html-btn p-1 rounded-full bg-indigo-600 hover:bg-indigo-500 text-white';
+            viewBtn.title = 'View in New Tab';
+            viewBtn.innerHTML = '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path></svg>';
+            viewBtn.onclick = () => {
+                const blob = new Blob([content], {type: 'text/html'});
+                window.open(URL.createObjectURL(blob), '_blank');
+            };
+            actionsDiv.appendChild(viewBtn);
+        }
+
         const statsDiv = document.createElement('div');
         statsDiv.className = 'message-stats text-xs text-gray-400 mt-2 space-x-2 hidden';
 
@@ -823,16 +978,32 @@ SUPPORTED ANNOTATION SCHEMAS:
             contentDiv.innerHTML = `<div class="flex items-center gap-2 text-gray-400"><svg class="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg><span>Waiting for response...</span></div>`;
         } else {
             let actionsHTML = `
-                <button class="copy-btn p-1 rounded-full bg-gray-800 hover:bg-gray-700" title="Copy"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg></button>
-                <button class="edit-btn p-1 rounded-full bg-gray-800 hover:bg-gray-700" title="Edit"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.5L15.232 5.232z"></path></svg></button>
-                <button class="delete-btn p-1 rounded-full bg-gray-800 hover:bg-gray-700" title="Delete"><svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"></path></svg></button>`;
+                <button class="copy-btn p-1 rounded-full bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-white" title="Copy"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg></button>
+                <button class="edit-btn p-1 rounded-full bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-white" title="Edit"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.5L15.232 5.232z"></path></svg></button>
+                <button class="delete-btn p-1 rounded-full bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-white" title="Delete"><svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"></path></svg></button>`;
+            
             if (role === 'assistant') {
-                actionsHTML += `<button class="regenerate-btn p-1 rounded-full bg-gray-800 hover:bg-gray-700" title="Regenerate"><svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"></path></svg></button>`;
+                actionsHTML += `<button class="regenerate-btn p-1 rounded-full bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-white" title="Regenerate"><svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"></path></svg></button>`;
+                
+                let rating = msg.rating || 0;
+                let thumbUpClass = rating === 1 ? 'text-green-400 bg-green-500/20' : 'text-gray-400 bg-gray-800 hover:bg-gray-700';
+                let thumbDownClass = rating === -1 ? 'text-red-400 bg-red-500/20' : 'text-gray-400 bg-gray-800 hover:bg-gray-700';
+                
+                actionsHTML += `
+                    <div class="w-px h-4 bg-white/20 mx-1"></div>
+                    <button class="thumb-up-btn p-1 rounded-full transition-colors ${thumbUpClass}" title="Good Response"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 10h4.764a2 2 0 011.789 2.894l-3.5 7A2 2 0 0115.263 21h-4.017c-.163 0-.326-.02-.485-.06L7 20m7-10V5a2 2 0 00-2-2h-.095c-.5 0-.905.405-.905.905 0 .714-.211 1.412-.608 2.006L7 11v9m7-10h-2M7 20H5a2 2 0 01-2-2v-6a2 2 0 012-2h2.514"></path></svg></button>
+                    <button class="thumb-down-btn p-1 rounded-full transition-colors ${thumbDownClass}" title="Bad Response"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14H5.236a2 2 0 01-1.789-2.894l3.5-7A2 2 0 018.736 3h4.018a2 2 0 01.485.06l3.76.94m-7 10v5a2 2 0 002 2h.096c.5 0 .905-.405.905-.904 0-.715.211-1.413.608-2.008L17 13V4m-7 10h2m5-10h2a2 2 0 012 2v6a2 2 0 01-2 2h-2.514"></path></svg></button>
+                `;
             }
             actionsDiv.innerHTML = actionsHTML;
 
             if (role === 'assistant') {
-                renderBotMessage(contentDiv, content, msg.annotated_image_url);
+                // Auto-wrap detected HTML to prevent rendering break
+                let displayContent = content;
+                if (typeof content === 'string' && /<[a-z][\s\S]*>/i.test(content)) {
+                    displayContent = "```html\n" + content + "\n```";
+                }
+                renderBotMessage(contentDiv, displayContent, msg.annotated_image_url);
                 if (stats && stats.ttft !== null && stats.tps !== null) {
                     statsDiv.innerHTML = `<span>TTFT: ${stats.ttft}ms</span> | <span>Speed: ${stats.tps.toFixed(2)} t/s</span>`;
                     statsDiv.classList.remove('hidden');
@@ -863,6 +1034,9 @@ SUPPORTED ANNOTATION SCHEMAS:
                 const btnContainer = document.createElement('div');
                 btnContainer.className = 'playground-code-actions';
 
+                const codeEl = wrapper.querySelector('code');
+                const lang = [...codeEl.classList].find(c => c.startsWith('language-'))?.replace('language-', '') || '';
+
                 const copyBtn = document.createElement('button');
                 copyBtn.className = 'playground-code-btn copy-code-btn';
                 copyBtn.title = 'Copy code';
@@ -875,8 +1049,17 @@ SUPPORTED ANNOTATION SCHEMAS:
 
                 btnContainer.appendChild(copyBtn);
                 btnContainer.appendChild(saveBtn);
+
+                if (['html', 'svg', 'mermaid'].includes(lang)) {
+                    const viewBtn = document.createElement('button');
+                    viewBtn.className = 'playground-code-btn view-code-btn';
+                    viewBtn.title = 'View rendered';
+                    viewBtn.innerHTML = `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>`;
+                    btnContainer.appendChild(viewBtn);
+                }
                 wrapper.appendChild(btnContainer);
             });
+            renderMermaid(contentDiv);
         }
 
         contentWrapper.appendChild(actionsDiv);
@@ -1156,37 +1339,46 @@ SUPPORTED ANNOTATION SCHEMAS:
     }
     
     function enterEditMode(messageWrapper, messageIndex) {
-        const contentWrapper = messageWrapper.querySelector('.rounded-lg');
+        const contentWrapper = messageWrapper.querySelector('.rounded-2xl');
         const contentDiv = contentWrapper.querySelector('.message-content');
         contentDiv.style.display = 'none';
-        contentWrapper.querySelector('.message-actions').style.display = 'none';
+        
+        const actionsDiv = contentWrapper.querySelector('.message-actions');
+        if (actionsDiv) actionsDiv.style.display = 'none';
+        
+        const statsDiv = contentWrapper.querySelector('.message-stats');
+        if(statsDiv) statsDiv.style.display = 'none';
 
         const editContainer = document.createElement('div');
-        editContainer.className = 'edit-container';
+        editContainer.className = 'edit-container mt-2 w-full';
         const textarea = document.createElement('textarea');
-        textarea.className = 'block w-full px-3 py-2 rounded-md shadow-sm sm:text-sm resize-y bg-gray-900 text-white';
-        textarea.value = contentDiv.dataset.rawContent;
-        textarea.rows = Math.max(5, (textarea.value.match(/\n/g) || []).length + 1);
+        textarea.className = 'block w-full px-4 py-3 rounded-xl shadow-sm sm:text-sm bg-black/40 border border-white/20 text-white focus:ring-indigo-500 focus:border-indigo-500 custom-scrollbar outline-none';
+        
+        let rawTxt = contentDiv.dataset.rawContent || '';
+        textarea.value = rawTxt;
+        textarea.rows = Math.min(20, Math.max(3, (rawTxt.match(/\n/g) || []).length + 2));
+        
         const buttonGroup = document.createElement('div');
-        buttonGroup.className = 'flex justify-end gap-2 mt-2';
+        buttonGroup.className = 'flex justify-end gap-3 mt-3';
         
         const saveAndSubmitBtn = document.createElement('button');
         saveAndSubmitBtn.textContent = 'Save & Submit';
-        saveAndSubmitBtn.className = 'py-1 px-3 bg-green-600 text-white rounded hover:bg-green-700 text-sm';
+        saveAndSubmitBtn.className = 'py-1.5 px-4 bg-indigo-600 text-white rounded-lg hover:bg-indigo-500 font-bold text-xs uppercase tracking-wider shadow-lg';
         saveAndSubmitBtn.onclick = () => saveAndSubmitEdit(messageIndex, textarea.value);
         
         const saveBtn = document.createElement('button');
-        saveBtn.textContent = 'Save';
-        saveBtn.className = 'py-1 px-3 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm';
+        saveBtn.textContent = 'Save Only';
+        saveBtn.className = 'py-1.5 px-4 bg-white/10 text-white rounded-lg hover:bg-white/20 font-bold text-xs uppercase tracking-wider';
         saveBtn.onclick = () => saveEdit(messageIndex, textarea.value);
         
         const cancelBtn = document.createElement('button');
         cancelBtn.textContent = 'Cancel';
-        cancelBtn.className = 'py-1 px-3 bg-gray-600 text-white rounded hover:bg-gray-700 text-sm';
+        cancelBtn.className = 'py-1.5 px-4 bg-transparent text-gray-400 hover:text-white rounded-lg font-bold text-xs uppercase tracking-wider';
         cancelBtn.onclick = () => {
             editContainer.remove();
             contentDiv.style.display = 'block';
-            contentWrapper.querySelector('.message-actions').style.display = 'flex';
+            if (actionsDiv) actionsDiv.style.display = 'flex';
+            if (statsDiv && statsDiv.innerHTML.trim() !== '') statsDiv.style.display = 'block';
         };
 
         buttonGroup.appendChild(cancelBtn);
@@ -1206,12 +1398,15 @@ SUPPORTED ANNOTATION SCHEMAS:
         } else {
             oldMessage.content = newContent;
         }
+        updateCurrentChat();
         renderChat();
     }
     
     function saveAndSubmitEdit(messageIndex, newContent) {
-        messages.splice(messageIndex + 1); // Remove all subsequent messages
         saveEdit(messageIndex, newContent);
+        messages.splice(messageIndex + 1); // Remove all subsequent messages
+        updateCurrentChat();
+        renderChat();
         fetchStreamedResponse();
     }
     
@@ -1249,7 +1444,10 @@ SUPPORTED ANNOTATION SCHEMAS:
     messageInput.addEventListener('input', () => { messageInput.style.height = 'auto'; messageInput.style.height = `${Math.min(messageInput.scrollHeight, 200)}px`; });
     messageInput.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); chatForm.dispatchEvent(new Event('submit', { cancelable: true })); } });
     messageInput.addEventListener('paste', handlePaste);
-    clearChatBtn.addEventListener('click', () => { messages = []; attachedImages = []; attachedDocs = []; renderChat(); renderImagePreviews(); renderDocPreviews(); updateGlobalStats(); chatContainer.innerHTML = '<div class="text-center text-gray-400">Chat cleared.</div>'; });
+    clearChatBtn.addEventListener('click', () => { 
+        createNewChat();
+    });
+    document.getElementById('new-chat-btn').addEventListener('click', createNewChat);
     exportChatBtn.addEventListener('click', exportChat);
     importChatBtn.addEventListener('click', () => importChatInput.click());
     importChatInput.addEventListener('change', importChat);
@@ -1260,6 +1458,12 @@ SUPPORTED ANNOTATION SCHEMAS:
     attachImgBtn.addEventListener('click', () => imageInput.click());
     imageInput.addEventListener('change', (e) => handleImageFiles(e.target.files));
     attachDocBtn.addEventListener('click', () => docInput.click());
+    document.getElementById('global-import-btn').addEventListener('click', () => {
+        window.openKnowledgeImporter((title, content) => {
+            attachedDocs.push({ name: title, content: content });
+            renderDocPreviews();
+        });
+    });
     docInput.addEventListener('change', (e) => handleDocFiles(e.target.files));
     addMessageBtn.addEventListener('click', (e) => { e.stopPropagation(); addMessageDropdown.classList.toggle('hidden'); });
     addUserMsgBtn.addEventListener('click', (e) => { e.preventDefault(); insertEditableMessage('user'); addMessageDropdown.classList.add('hidden'); });
@@ -1305,21 +1509,33 @@ SUPPORTED ANNOTATION SCHEMAS:
         }
         
         const saveBtn = e.target.closest('.save-code-btn');
-        if (saveBtn) {
-            const codeEl = saveBtn.closest('.code-block-wrapper').querySelector('code');
+        const viewBtn = e.target.closest('.view-code-btn');
+        if (saveBtn || viewBtn) {
+            const wrapper = (saveBtn || viewBtn).closest('.code-block-wrapper');
+            const codeEl = wrapper.querySelector('code');
             const codeContent = codeEl.innerText;
             const lang = [...codeEl.classList].find(c => c.startsWith('language-'))?.replace('language-', '') || 'txt';
-            const extension = langExtMap[lang.toLowerCase()] || lang || 'txt';
             
-            const blob = new Blob([codeContent], { type: 'text/plain;charset=utf-8' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `snippet.${extension}`;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
+            if (saveBtn) {
+                const extension = langExtMap[lang.toLowerCase()] || lang || 'txt';
+                const blob = new Blob([codeContent], { type: 'text/plain;charset=utf-8' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `snippet.${extension}`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            } else if (viewBtn) {
+                if (lang === 'html' || lang === 'svg') {
+                    const blob = new Blob([codeContent], { type: lang === 'html' ? 'text/html' : 'image/svg+xml' });
+                    window.open(URL.createObjectURL(blob), '_blank');
+                } else if (lang === 'mermaid') {
+                    window.showModal("Rendered Diagram", `<div class="mermaid">${codeContent}</div>`);
+                    mermaid.run();
+                }
+            }
             return;
         }
 
@@ -1334,7 +1550,10 @@ SUPPORTED ANNOTATION SCHEMAS:
             const messageWrapper = deleteBtn.closest('.message-wrapper');
             const messageIndex = parseInt(messageWrapper.dataset.messageIndex, 10);
             if (!isNaN(messageIndex) && confirm('Are you sure you want to delete this message and all subsequent messages?')) {
-                messages.splice(messageIndex); renderChat(); updateGlobalStats();
+                messages.splice(messageIndex); 
+                updateCurrentChat();
+                renderChat(); 
+                updateGlobalStats();
             } return;
         }
         const regenerateBtn = e.target.closest('.regenerate-btn');
@@ -1343,8 +1562,30 @@ SUPPORTED ANNOTATION SCHEMAS:
             const messageWrapper = regenerateBtn.closest('.message-wrapper');
             const messageIndex = parseInt(messageWrapper.dataset.messageIndex, 10);
             if (!isNaN(messageIndex)) {
-                messages.splice(messageIndex); fetchStreamedResponse();
+                messages.splice(messageIndex); 
+                updateCurrentChat();
+                fetchStreamedResponse();
             } return;
+        }
+        
+        const thumbUpBtn = e.target.closest('.thumb-up-btn');
+        if (thumbUpBtn) {
+            const messageWrapper = thumbUpBtn.closest('.message-wrapper');
+            const idx = parseInt(messageWrapper.dataset.messageIndex, 10);
+            messages[idx].rating = messages[idx].rating === 1 ? 0 : 1;
+            updateCurrentChat();
+            renderChat();
+            return;
+        }
+
+        const thumbDownBtn = e.target.closest('.thumb-down-btn');
+        if (thumbDownBtn) {
+            const messageWrapper = thumbDownBtn.closest('.message-wrapper');
+            const idx = parseInt(messageWrapper.dataset.messageIndex, 10);
+            messages[idx].rating = messages[idx].rating === -1 ? 0 : -1;
+            updateCurrentChat();
+            renderChat();
+            return;
         }
         const saveAnnotationBtn = e.target.closest('.save-annotation-btn');
         if (saveAnnotationBtn) {
@@ -1428,15 +1669,37 @@ SUPPORTED ANNOTATION SCHEMAS:
     });
 
     // --- Init ---
-    const lastModel = localStorage.getItem(LAST_MODEL_KEY);
-    if (lastModel && modelSelector.querySelector(`option[value="${lastModel}"]`)) {
-        modelSelector.value = lastModel;
+    // PRIORITY: 1. URL Param, 2. LocalStorage, 3. Default
+    // --- Mermaid & Syntax Init ---
+    mermaid.initialize({ startOnLoad: false, theme: 'dark' });
+
+    // --- Init ---
+    const urlParams = new URLSearchParams(window.location.search);
+    const modelFromUrl = urlParams.get('model');
+    
+    if (modelFromUrl && modelSelector.querySelector(`option[value="${modelFromUrl}"]`)) {
+        modelSelector.value = modelFromUrl;
+        localStorage.setItem(LAST_MODEL_KEY, modelFromUrl);
+    } else {
+        const lastModel = localStorage.getItem(LAST_MODEL_KEY);
+        if (lastModel && modelSelector.querySelector(`option[value="${lastModel}"]`)) {
+            modelSelector.value = lastModel;
+        }
     }
+
     userSystemPrompt = localStorage.getItem(LAST_SYSTEM_PROMPT_KEY) || '';
     isAnnotationMode = localStorage.getItem(ANNOTATION_MODE_KEY) === 'true';
     isThinkingMode = localStorage.getItem(THINKING_MODE_KEY) === 'true';
     updateAnnotationToggleUI();
     updateThinkingToggleUI();
+    
+    renderHistoryList();
+    if (chatHistory.length > 0) {
+        loadChat(chatHistory[0].id);
+    } else {
+        createNewChat();
+    }
+    
     updateSystemPromptIndicator();
     updateGlobalStats();
     updateThinkingControls(); // Initial check for think controls

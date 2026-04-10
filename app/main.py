@@ -40,9 +40,15 @@ from app.api.v1.routes.admin import router as admin_router
 from app.api.v1.routes.playground_chat import router as playground_chat_router
 from app.api.v1.routes.playground_embedding import router as playground_embedding_router
 from app.api.v1.routes.openai_proxy import router as openai_router
+from app.api.v1.routes.personalities import router as personalities_router
+from app.api.v1.routes.conception import router as conception_router
+from app.api.v1.routes.importer import router as importer_router
+from app.api.v1.routes.skills import router as skills_router
+from app.api.v1.routes.personalities import router as personalities_router
 from app.database.session import AsyncSessionLocal, engine
 from app.database.base import Base
 from app.database.migrations import run_all_migrations
+from app.core.assets import ensure_local_assets
 from app.crud import user_crud, server_crud, settings_crud
 from app.schema.user import UserCreate
 from app.schema.server import ServerCreate
@@ -133,6 +139,10 @@ async def periodic_model_refresh(app: FastAPI) -> None:
 async def lifespan(app: FastAPI):
     # ---------- Startup ----------
     logger.info("Starting up lollms hub…")
+    await ensure_local_assets()
+    
+    # Ensure all JS/CSS dependencies are local
+    await ensure_local_assets()
     
     # Ensure directories exist
     uploads_dir = Path("app/static/uploads")
@@ -246,11 +256,11 @@ async def add_security_headers(request: Request, call_next):
     response.headers["X-Frame-Options"] = "DENY"
     csp_policy = (
         "default-src 'self'; "
-        "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdn.tailwindcss.com https://cdnjs.cloudflare.com; "
-        "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; "
-        "font-src 'self' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; "
+        "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.tailwindcss.com https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; "
+        "style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdn.jsdelivr.net; "
+        "font-src 'self' data:; "
         "img-src 'self' https: data:; "
-        "connect-src 'self' https://cdn.jsdelivr.net; "
+        "connect-src 'self'; "
         "object-src 'none'; "
         "base-uri 'self'; "
         "form-action 'self';"
@@ -270,6 +280,12 @@ app.include_router(proxy_router, prefix="/api", tags=["Ollama Protocol"])
 app.include_router(admin_router, prefix="/admin", tags=["Admin UI"], include_in_schema=False)
 app.include_router(playground_chat_router, prefix="/admin", tags=["Admin UI"], include_in_schema=False)
 app.include_router(playground_embedding_router, prefix="/admin", tags=["Admin UI"], include_in_schema=False)
+app.include_router(skills_router, prefix="/admin", tags=["Admin UI"], include_in_schema=False)
+app.include_router(skills_router, prefix="/api/v1", tags=["Internal API"], include_in_schema=False)
+app.include_router(personalities_router, prefix="/admin", tags=["Admin UI"], include_in_schema=False)
+app.include_router(personalities_router, prefix="/api/v1", tags=["Internal API"], include_in_schema=False)
+app.include_router(importer_router, prefix="/admin/api/importer", tags=["Importer API"], include_in_schema=False)
+app.include_router(conception_router, prefix="/admin", tags=["Admin UI"], include_in_schema=False)
 
 @app.get("/", include_in_schema=False, summary="Root")
 def read_root():

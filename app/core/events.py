@@ -12,7 +12,7 @@ class ProxyEvent:
     request_id: str
     model: str = "unknown"
     server: str = "none"
-    sender: str = "anon"
+    sender: str = "system"
     timestamp: float = 0.0
     ttft: float = 0.0      # Time To First Token (ms)
     tps: float = 0.0       # Tokens Per Second

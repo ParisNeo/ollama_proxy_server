@@ -117,6 +117,14 @@ async def admin_playground_stream(
         messages = updated_messages
         data["model"] = model_name
         data["messages"] = messages
+        
+        # Add tools if provided by workflow/agent
+        if hasattr(request.state, 'graph_tools') and request.state.graph_tools:
+            if "tools" not in data or not data["tools"]:
+                data["tools"] =[]
+            for t in request.state.graph_tools:
+                if t not in data["tools"]:
+                    data["tools"].append(t)
 
         # --- END ORCHESTRATION ---
 

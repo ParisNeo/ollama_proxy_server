@@ -1,0 +1,412 @@
+{% extends "admin/base.html" %}
+{% block title %}Skills Library{% endblock %}
+{% block header_title %}Skills Library (Claude Native){% endblock %}
+
+{% block content %}
+<div class="space-y-6 h-[80vh] flex flex-col">
+    <!-- Header Controls -->
+    <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-black/20 p-4 rounded-xl border border-white/10 flex-shrink-0">
+        <div class="flex gap-2 items-center">
+            <button onclick="createNewSkill()" class="bg-indigo-600 hover:bg-indigo-500 px-6 py-2 rounded font-black text-xs uppercase tracking-widest shadow-[0_0_15px_rgba(99,102,241,0.4)] transition-all">
+                + New Skill
+            </button>
+            <div class="h-6 w-px bg-white/10 mx-2"></div>
+            <button onclick="document.getElementById('import-file').click()" class="bg-white/10 hover:bg-white/20 px-4 py-2 rounded font-bold text-xs uppercase transition-colors">
+                Import (.md / .skill)
+            </button>
+            <button onclick="buildSkillWithAI()" class="bg-purple-600 hover:bg-purple-500 px-6 py-2 rounded font-black text-xs uppercase tracking-widest transition-colors">
+                ✨ Build with AI
+            </button>
+            <input type="file" id="import-file" class="hidden" accept=".md,.skill,.zip" onchange="importSkill(event)">
+        </div>
+    </div>
+
+    <!-- Main Workspace -->
+    <div class="flex-grow grid grid-cols-1 lg:grid-cols-4 gap-6 min-h-0">
+        <!-- Sidebar: Skill List -->
+        <div class="lg:col-span-1 flex flex-col gap-4 min-h-0 h-full">
+            <div class="card-style bg-black/40 border-white/5 flex flex-col h-full p-4 overflow-hidden">
+                <div class="flex justify-between items-center mb-4 flex-shrink-0">
+                    <h3 class="text-[10px] font-black text-gray-500 uppercase tracking-widest flex items-center gap-2">
+                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path></svg>
+                        Local Skills
+                    </h3>
+                    <button onclick="loadSkills()" class="text-[9px] text-indigo-400 hover:text-white uppercase font-bold">Refresh</button>
+                </div>
+                <div class="relative mb-3 flex-shrink-0">
+                    <input type="text" id="skill-search" placeholder="Search skills..." class="w-full bg-black/40 border border-white/10 rounded px-3 py-1.5 text-xs text-white outline-none focus:border-indigo-500">
+                </div>
+                <div id="skills-list" class="space-y-1 overflow-y-auto custom-scrollbar flex-grow pr-2"></div>
+            </div>
+        </div>
+
+        <!-- Main Editor View -->
+        <div class="lg:col-span-3 flex flex-col h-full min-h-0">
+            <div id="editor-container" class="hidden card-style border-indigo-500/30 bg-[#0a0a0f] flex flex-col h-full p-0 overflow-hidden">
+                <div class="flex justify-between items-center p-4 border-b border-white/10 flex-shrink-0 bg-black/20">
+                    <h3 class="text-white font-bold text-sm tracking-tight" id="current-filename"></h3>
+                    <div class="flex items-center gap-2">
+                        <button id="btn-copy-raw" class="text-[10px] text-gray-500 hover:text-white px-2 py-0.5 rounded border border-white/10 uppercase font-bold">Copy Raw</button>
+                        <button id="btn-edit" onclick="toggleEditMode()" class="text-[10px] font-bold bg-white/5 hover:bg-white/10 px-3 py-1.5 rounded text-indigo-400 uppercase">Edit</button>
+                        <div class="h-4 w-px bg-white/10 mx-2"></div>
+                        <button onclick="exportCurrentSkill()" class="text-[10px] font-bold text-gray-400 hover:text-white uppercase">.SKILL</button>
+                        <button onclick="deleteCurrentSkill()" class="text-[10px] font-bold text-red-400 hover:text-red-300 uppercase">Delete</button>
+                        <button id="btn-save" onclick="saveCurrentSkill()" class="text-[10px] font-black bg-indigo-600 hover:bg-indigo-500 px-4 py-1.5 rounded text-white uppercase tracking-widest hidden">Save</button>
+                    </div>
+                </div>
+                <div class="flex-grow p-4 overflow-hidden flex flex-col relative">
+                    <div id="markdown-preview" class="flex-grow w-full overflow-y-auto custom-scrollbar prose prose-invert max-w-none text-sm text-gray-300 leading-relaxed pb-8">
+                        <div id="meta-grid" class="space-y-3 mb-8 pb-6 border-b border-white/10"></div>
+                        <div id="content-body" class="prose-headings:font-black prose-headings:text-indigo-400"></div>
+                    </div>
+                    <textarea id="markdown-editor" class="flex-grow w-full bg-transparent border-none font-mono text-xs text-gray-300 outline-none resize-none custom-scrollbar leading-relaxed hidden" spellcheck="false"></textarea>
+                </div>
+            </div>
+            <div id="empty-state" class="card-style border-dashed border-white/10 flex flex-col items-center justify-center h-full text-center p-8">
+                <h3 class="text-xl font-bold text-white mb-2">Skills Library</h3>
+                <p class="text-sm text-gray-400 max-w-md">Select a skill from the sidebar to edit, or create a new one.</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Template for AI Builder -->
+<template id="ai-builder-modal-template">
+    <div class="space-y-4">
+        <div id="build-ui-container" class="space-y-4">
+            <textarea id="build-prompt" class="w-full h-40 p-3 bg-black/40 border border-white/10 rounded-xl text-sm text-white focus:border-indigo-500 outline-none transition-colors" placeholder="Describe the skill you want to build..."></textarea>
+            
+            <div class="flex flex-col gap-2">
+                <span class="text-[10px] font-black text-gray-500 uppercase tracking-widest px-1">Attached Context</span>
+                <div id="m-previews" class="flex flex-wrap gap-2 min-h-[32px] p-2 bg-black/20 border border-white/5 rounded-lg">
+                    <!-- Dynamic list of files and imports -->
+                </div>
+            </div>
+
+            <div class="flex gap-2">
+                <button type="button" onclick="document.getElementById('m-img-input').click()" class="flex items-center gap-2 text-[10px] font-bold py-2 px-3 bg-white/5 rounded-lg border border-white/10 hover:bg-white/10 transition-colors">
+                    <svg class="w-3.5 h-3.5 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
+                    Images
+                </button>
+                <button type="button" onclick="document.getElementById('m-doc-input').click()" class="flex items-center gap-2 text-[10px] font-bold py-2 px-3 bg-white/5 rounded-lg border border-white/10 hover:bg-white/10 transition-colors">
+                    <svg class="w-3.5 h-3.5 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                    Docs
+                </button>
+                <button type="button" onclick="window.triggerSkillImporter()" class="flex items-center gap-2 text-[10px] font-bold py-2 px-3 bg-indigo-600/20 text-indigo-300 rounded-lg border border-indigo-500/30 hover:bg-indigo-600/30 transition-colors">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+                    Web Import
+                </button>
+            </div>
+            
+            <input type="file" id="m-img-input" class="hidden" multiple accept="image/*">
+            <input type="file" id="m-doc-input" class="hidden" multiple accept=".txt,.md,.pdf,.csv">
+        </div>
+        <div id="build-status-container" class="hidden space-y-2">
+            <div id="build-console" class="bg-black/60 border border-white/10 rounded-lg p-3 h-32 overflow-y-auto font-mono text-[10px] text-gray-400 space-y-1 custom-scrollbar"></div>
+        </div>
+        <button onclick="window.executeBuild()" id="build-run-btn" class="w-full py-3 bg-indigo-600 hover:bg-indigo-500 rounded-xl font-black text-xs uppercase tracking-widest transition-all">Run AI Builder</button>
+    </div>
+</template>
+
+<script>
+let currentEditingSkill = null;
+let allSkills = [];
+let isEditMode = false;
+let buildContextFiles = [];
+let buildImportedContext = "";
+
+document.addEventListener('DOMContentLoaded', () => {
+    loadSkills();
+    
+    // --- SSE Listener for Build events ---
+    const buildEvtSource = new EventSource("{{ url_for('sse_events') }}");
+    buildEvtSource.onmessage = (e) => {
+        const msg = JSON.parse(e.data);
+        const consoleEl = document.getElementById('build-console');
+        if (!consoleEl || !msg.id || !msg.id.startsWith('sys_build_')) return;
+        
+        let color = 'text-gray-400';
+        if (msg.type === 'error') color = 'text-red-400';
+        if (msg.type === 'completed') color = 'text-green-400 font-bold';
+        if (msg.type === 'received' || msg.type === 'active') color = 'text-indigo-300';
+
+        if (msg.error) {
+            const entry = document.createElement('div');
+            entry.className = color;
+            entry.innerHTML = `<span class="opacity-50">[${new Date().toLocaleTimeString()}]</span> ${msg.error}`;
+            consoleEl.appendChild(entry);
+            consoleEl.scrollTop = consoleEl.scrollHeight;
+        }
+    };
+});
+
+// Store both local files and external context items in a unified array
+window.buildUnifiedContext = [];
+window.cachedBuildPrompt = "";
+
+window.buildSkillWithAI = (initialPrompt = "") => {
+    const template = document.getElementById('ai-builder-modal-template');
+    window.showModal("Build Skill with AI", template.innerHTML);
+    
+    // Restore prompt
+    const promptInput = document.getElementById('build-prompt');
+    promptInput.value = initialPrompt || window.cachedBuildPrompt;
+    
+    // Bind listeners
+    document.getElementById('m-img-input').onchange = (e) => window.handleBuildFiles(e.target.files);
+    document.getElementById('m-doc-input').onchange = (e) => window.handleBuildFiles(e.target.files);
+    
+    window.renderUnifiedPreviews();
+};
+
+window.handleBuildFiles = (files) => {
+    for (let f of files) {
+        window.buildUnifiedContext.push({ type: 'file', name: f.name, data: f });
+    }
+    window.renderUnifiedPreviews();
+};
+
+window.renderUnifiedPreviews = () => {
+    const container = document.getElementById('m-previews');
+    if (!container) {
+        console.warn("Preview container 'm-previews' missing from DOM.");
+        return;
+    }
+    container.innerHTML = '';
+    
+    if (window.buildUnifiedContext.length === 0) {
+        container.innerHTML = '<span class="text-[9px] text-gray-700 italic py-1">No items attached...</span>';
+        return;
+    }
+
+    window.buildUnifiedContext.forEach((item, index) => {
+        const div = document.createElement('div');
+        const isWeb = item.type === 'web';
+        const colorClass = isWeb ? 'bg-emerald-900/40 border-emerald-500/50' : 'bg-indigo-900/40 border-indigo-500/50';
+        const icon = isWeb ? '🌍' : '📄';
+        
+        div.className = `flex items-center gap-2 text-[9px] ${colorClass} p-1 px-2 rounded-lg border text-white group`;
+        div.innerHTML = `
+            <span class="opacity-70">${icon}</span>
+            <span class="font-bold truncate max-w-[120px]">${item.name}</span>
+            <button type="button" onclick="window.removeContextItem(${index})" class="text-white/40 hover:text-red-400 font-bold ml-1">&times;</button>
+        `;
+        container.appendChild(div);
+    });
+};
+
+window.removeContextItem = (index) => {
+    window.buildUnifiedContext.splice(index, 1);
+    window.renderUnifiedPreviews();
+};
+
+window.triggerSkillImporter = () => {
+    const promptEl = document.getElementById('build-prompt');
+    if (promptEl) {
+        window.cachedBuildPrompt = promptEl.value;
+    }
+    
+    window.openKnowledgeImporter((title, content) => {
+        // Add to our global list
+        window.buildUnifiedContext.push({ 
+            type: 'web', 
+            name: title.substring(0, 30), 
+            content: content 
+        });
+        
+        // RE-OPEN the original modal instead of letting it close
+        const template = document.getElementById('ai-builder-modal-template');
+        // This re-writes the innerHTML of the modal
+        window.showModal("Build Skill with AI", template.innerHTML);
+        
+        // Restore prompt value
+        const newPromptEl = document.getElementById('build-prompt');
+        if (newPromptEl) newPromptEl.value = window.cachedBuildPrompt;
+
+        // Re-bind listeners to the NEW elements
+        document.getElementById('m-img-input').onchange = (e) => window.handleBuildFiles(e.target.files);
+        document.getElementById('m-doc-input').onchange = (e) => window.handleBuildFiles(e.target.files);
+
+        // Update list
+        window.renderUnifiedPreviews();
+    });
+};
+
+// Also fix standard web-importer calls in skills.html to close the modal
+// (In case you use Knowledge Importer elsewhere in this page)
+const originalOpenImporter = window.openKnowledgeImporter;
+window.openKnowledgeImporter = (callback) => {
+    // We wrap the callback: if we aren't in the middle of a "Build with AI", 
+    // we should close the modal as per standard behavior.
+    const wrappedCallback = (title, content) => {
+        callback(title, content);
+        // Only close if we are NOT currently building with AI
+        if (!document.getElementById('build-run-btn')) {
+            document.getElementById('modal-close-btn').click();
+        }
+    };
+    originalOpenImporter(wrappedCallback);
+};
+
+window.switchBuildTab = (tab) => {
+    const pPrompt = document.getElementById('panel-prompt');
+    const pSources = document.getElementById('panel-sources');
+    if (!pPrompt || !pSources) return;
+
+    pPrompt.classList.toggle('hidden', tab !== 'prompt');
+    pSources.classList.toggle('hidden', tab !== 'sources');
+    
+    const btnP = document.getElementById('tab-prompt');
+    const btnS = document.getElementById('tab-sources');
+    if (btnP) {
+        btnP.className = tab === 'prompt' ? "pb-2 text-xs font-bold text-indigo-400 border-b-2 border-indigo-500" : "pb-2 text-xs font-bold text-gray-500 border-b-2 border-transparent";
+    }
+    if (btnS) {
+        btnS.className = tab === 'sources' ? "pb-2 text-xs font-bold text-indigo-400 border-b-2 border-indigo-500" : "pb-2 text-xs font-bold text-gray-500 border-b-2 border-transparent";
+    }
+};
+
+window.executeBuild = async () => {
+    const promptInput = document.getElementById('build-prompt');
+    const prompt = promptInput.value;
+    if (!prompt.trim()) return alert("Enter instructions first.");
+
+    const btn = document.getElementById('build-run-btn');
+    btn.disabled = true;
+    btn.innerText = "ARCHITECTING...";
+    document.getElementById('build-status-container').classList.remove('hidden');
+
+    // Aggregate external context to append to the prompt
+    let externalText = "";
+    window.buildUnifiedContext.forEach(item => {
+        if (item.type === 'web') {
+            externalText += `\n\n--- EXTERNAL SOURCE: ${item.name} ---\n${item.content}`;
+        }
+    });
+
+    const formData = new FormData();
+    formData.append("prompt", prompt + externalText);
+    formData.append("csrf_token", "{{ csrf_token }}");
+    
+    // Add local files
+    window.buildUnifiedContext.forEach(item => {
+        if (item.type === 'file') {
+            formData.append("files", item.data);
+        }
+    });
+
+    try {
+        const resp = await fetch("{{ url_for('api_build_skill') }}", { method: 'POST', body: formData });
+        const data = await resp.json();
+        if (data.success) {
+            await loadSkills();
+            openSkill(data.filename);
+            document.getElementById('modal-close-btn').click();
+        } else {
+            alert(data.error || "Build failed.");
+        }
+    } catch(e) { alert("Connection error."); }
+    finally { btn.disabled = false; btn.innerText = "Run AI Builder"; }
+};
+
+// --- Standard CRUD Logic ---
+
+async function loadSkills() {
+    const listEl = document.getElementById('skills-list');
+    const resp = await fetch("{{ url_for('api_get_skills') }}");
+    allSkills = await resp.json();
+    renderList();
+}
+
+function renderList() {
+    const listEl = document.getElementById('skills-list');
+    listEl.innerHTML = allSkills.map(s => `
+        <div class="w-full text-left p-3 rounded-lg hover:bg-white/5 group border-b border-white/5 transition-all mb-1 flex items-center justify-between ${currentEditingSkill === s.filename ? 'bg-indigo-500/10 border-l-2 border-l-indigo-500' : ''}">
+            <button onclick="openSkill('${s.filename}')" class="flex-grow text-left min-w-0">
+                <div class="text-xs font-bold text-white group-hover:text-indigo-400 truncate">${s.name}</div>
+                <div class="text-[10px] text-gray-500 group-hover:text-gray-300 line-clamp-1 leading-tight">${s.description}</div>
+            </button>
+        </div>
+    `).join('');
+}
+
+window.openSkill = (filename) => {
+    const skill = allSkills.find(s => s.filename === filename);
+    if (!skill) return;
+    currentEditingSkill = filename;
+    document.getElementById('current-filename').textContent = filename;
+    document.getElementById('markdown-editor').value = skill.raw;
+    document.getElementById('empty-state').classList.add('hidden');
+    document.getElementById('editor-container').classList.remove('hidden');
+    displaySkill(skill.raw);
+    setEditorMode(false);
+    renderList();
+};
+
+function displaySkill(raw) {
+    const contentBody = document.getElementById('content-body');
+    const metaGrid = document.getElementById('meta-grid');
+    const match = raw.match(/^---\n([\s\S]*?)\n---/);
+    
+    if (match) {
+        try {
+            const meta = jsyaml.load(match[1]);
+            metaGrid.innerHTML = Object.entries(meta).map(([k, v]) => `
+                <div class="flex items-start">
+                    <div class="w-32 text-[10px] uppercase text-gray-500 font-black tracking-widest pt-0.5">${k}</div>
+                    <div class="text-sm font-bold text-indigo-300 break-words">${v}</div>
+                </div>
+            `).join('');
+            contentBody.innerHTML = marked.parse(raw.slice(match[0].length).trim());
+        } catch(e) { metaGrid.innerHTML = "Error parsing frontmatter"; }
+    } else {
+        metaGrid.innerHTML = "";
+        contentBody.innerHTML = marked.parse(raw);
+    }
+}
+
+function setEditorMode(mode) {
+    isEditMode = mode;
+    document.getElementById('markdown-editor').classList.toggle('hidden', !mode);
+    document.getElementById('markdown-preview').classList.toggle('hidden', mode);
+    document.getElementById('btn-save').classList.toggle('hidden', !mode);
+    document.getElementById('btn-edit').innerText = mode ? 'Preview' : 'Edit';
+}
+
+window.saveCurrentSkill = async () => {
+    const content = document.getElementById('markdown-editor').value;
+    const formData = new FormData();
+    formData.append("csrf_token", "{{ csrf_token }}");
+    formData.append("filename", currentEditingSkill);
+    formData.append("content", content);
+
+    const resp = await fetch("{{ url_for('api_save_skill') }}", { method: "POST", body: formData });
+    if (resp.ok) {
+        await loadSkills();
+        setEditorMode(false);
+        displaySkill(content);
+    }
+};
+
+window.exportCurrentSkill = () => {
+    if (currentEditingSkill) window.location.href = `/admin/api/skills/${currentEditingSkill}/export`;
+};
+
+window.deleteCurrentSkill = async () => {
+    if (!confirm("Delete permanently?")) return;
+    await fetch(`/admin/api/skills/${currentEditingSkill}`, { 
+        method: "DELETE", 
+        headers: { "X-CSRF-Token": "{{ csrf_token }}" } 
+    });
+    window.location.reload();
+};
+
+window.createNewSkill = () => {
+    currentEditingSkill = "new-skill.md";
+    document.getElementById('markdown-editor').value = "---\nname: my-skill\ndescription: ...\n---\n# My Skill";
+    document.getElementById('empty-state').classList.add('hidden');
+    document.getElementById('editor-container').classList.remove('hidden');
+    setEditorMode(true);
+};
+</script>
+{% endblock %}

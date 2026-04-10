@@ -1031,7 +1031,14 @@ async def admin_update_model_metadata(
 async def admin_settings_form(request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
     from app.database.models import VirtualAgent
     context = get_template_context(request)
-    app_settings: AppSettingsModel = request.app.state.settings
+    
+    # SECURITY & CONSISTENCY FIX: Always fetch fresh settings from DB for the form.
+    # This prevents the UI from showing stale data if a different Gunicorn worker handled the last update.
+    db_settings_obj = await settings_crud.get_app_settings(db)
+    if db_settings_obj:
+        app_settings = AppSettingsModel.model_validate(db_settings_obj.settings_data)
+    else:
+        app_settings = request.app.state.settings
     
     # Get list of agents for the management dropdown
     res = await db.execute(select(VirtualAgent.name))
@@ -1043,6 +1050,20 @@ async def admin_settings_form(request: Request, db: AsyncSession = Depends(get_d
     return templates.TemplateResponse("admin/settings.html", context)
 
 
+@router.post("/settings/refresh-assets", name="admin_refresh_vendor_assets", dependencies=[Depends(validate_csrf_token)])
+async def admin_refresh_vendor_assets(request: Request, admin_user: User = Depends(require_admin_user)):
+    from app.core.assets import ensure_local_assets, MANIFEST_PATH
+    import os
+    try:
+        # Clear manifest to force a clean download of all binaries
+        if MANIFEST_PATH.exists():
+            os.remove(MANIFEST_PATH)
+        await ensure_local_assets(force_refresh=True)
+        flash(request, "All vendor libraries have been re-downloaded to the latest patched versions.", "success")
+    except Exception as e:
+        flash(request, f"Failed to refresh assets: {str(e)}", "error")
+    return RedirectResponse(url=request.url_for("admin_settings"), status_code=status.HTTP_303_SEE_OTHER)
+
 @router.post("/settings", name="admin_settings_post", dependencies=[Depends(validate_csrf_token)])
 async def admin_settings_post(
     request: Request,
@@ -1052,7 +1073,13 @@ async def admin_settings_post(
     ssl_key_file: UploadFile = File(None),
     ssl_cert_file: UploadFile = File(None)
 ):
-    current_settings: AppSettingsModel = request.app.state.settings
+    # SECURITY & PERSISTENCE FIX: Load the AUTHORITATIVE settings from DB 
+    # instead of relying on the potentially stale in-memory app.state.settings.
+    db_settings_obj = await settings_crud.get_app_settings(db)
+    if not db_settings_obj:
+        db_settings_obj = await settings_crud.create_initial_settings(db)
+    
+    current_settings = AppSettingsModel.model_validate(db_settings_obj.settings_data)
     form_data = await request.form()
     
     # --- Create a dictionary to hold the final updated values ---
@@ -1315,6 +1342,15 @@ async def admin_settings_post(
     except (ValueError, TypeError):
         model_update_interval = 10
     
+    # SECURITY FIX: Use safe type conversion helper to prevent ValueError from crashing the update
+    # if a user clears a numeric input field (like a port).
+    def safe_int(key, default):
+        val = form_data.get(key)
+        try:
+            return int(val) if val and val.strip() else default
+        except (ValueError, TypeError):
+            return default
+
     update_data.update({
         "admin_agent_name": (form_data.get("admin_agent_name") or None),
         "branding_title": form_data.get("branding_title", current_settings.branding_title)[:128],
@@ -1327,21 +1363,28 @@ async def admin_settings_post(
         "allowed_ips": form_data.get("allowed_ips", "")[:2048],
         "denied_ips": form_data.get("denied_ips", "")[:2048],
         "blocked_ollama_endpoints": form_data.get("blocked_ollama_endpoints", "")[:1024],
-        "instance_scan_start_port": int(form_data.get("instance_scan_start_port", 11434)),
-        "instance_scan_end_port": int(form_data.get("instance_scan_end_port", 11445)),
+        "google_search_api_key": form_data.get("google_search_api_key") or None,
+        "instance_scan_start_port": safe_int("instance_scan_start_port", current_settings.instance_scan_start_port),
+        "instance_scan_end_port": safe_int("instance_scan_end_port", current_settings.instance_scan_end_port),
         "enable_ollama_api": form_data.get("enable_ollama_api") == "true",
         "enable_openai_api": form_data.get("enable_openai_api") == "true",
-        "openai_port": int(form_data.get("openai_port", 8081)),
+        "openai_port": safe_int("openai_port", current_settings.openai_port),
     })
     
     if new_redis_password:
         update_data["redis_password"] = new_redis_password
         
     try:
+        # Apply the validated update_data to our fresh DB-sourced model
         updated_settings_data = current_settings.model_copy(update=update_data)
+        
+        # Save to Database
         await settings_crud.update_app_settings(db, settings_data=updated_settings_data)
+        
+        # Update local memory (for this worker only)
         request.app.state.settings = updated_settings_data
-        flash(request, "Settings updated successfully. A restart is required for some changes (like HTTPS) to take effect.", "success")
+        
+        flash(request, "Settings updated successfully.", "success")
     except (ValueError, TypeError) as e:
         logger.error(f"Invalid form data for settings: {e}")
         flash(request, "Error: Invalid data provided for a setting.", "error")
@@ -2491,7 +2534,10 @@ async def analyze_logs_ai(request: Request, db: AsyncSession = Depends(get_db), 
         resp, _ = await _reverse_proxy(
             request, "chat", servers, 
             json.dumps({"model": real_model, "messages": final_msgs, "stream": False}).encode(), 
-            is_subrequest=True
+            is_subrequest=True,
+            request_id=f"sys_analysis_{secrets.token_hex(4)}",
+            model=real_model,
+            sender=admin_user.username
         )
         
         if hasattr(resp, 'status_code') and resp.status_code != 200:
@@ -2623,7 +2669,10 @@ async def admin_enhance_prompt(
         resp, _ = await _reverse_proxy(
             request, "chat", servers, 
             json.dumps({"model": real_model, "messages": final_msgs, "stream": False}).encode(),
-            is_subrequest=True
+            is_subrequest=True,
+            request_id=f"sys_enhance_{secrets.token_hex(4)}",
+            model=real_model,
+            sender=admin_user.username
         )
         
         if hasattr(resp, 'body'):

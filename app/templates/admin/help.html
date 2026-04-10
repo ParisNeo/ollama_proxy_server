@@ -34,27 +34,9 @@
     <!-- Main Content -->
     <div class="w-full lg:w-3/4 space-y-12">
 
-        <!-- Getting Started Workflow -->
-        <div id="getting-started" class="card-style scroll-mt-20">
-            <h2 class="card-header text-2xl font-bold mb-6 pb-2">🚀 Getting Started: Your Workflow</h2>
-            <div class="space-y-4 text-current">
-                <ol class="list-decimal list-inside space-y-4">
-                    <li>
-                        <strong>Configure Servers:</strong> Go to the <a href="{{ url_for('admin_servers') }}" class="font-semibold text-[var(--color-primary-600)] hover:underline">Server Management</a> page. Add the URLs for all your backend instances (both Ollama and vLLM are supported).
-                    </li>
-                    <li>
-                        <strong>Create a User:</strong> Navigate to the <a href="{{ url_for('admin_users') }}" class="font-semibold text-[var(--color-primary-600)] hover:underline">User Management</a> page. This is where you'll create accounts for your users or applications.
-                    </li>
-                    <li>
-                        <strong>Generate an API Key:</strong> From the user list, click "Manage Keys" for a specific user. On their details page, you can generate new keys and set optional, per-key rate limits (requires Redis).
-                    </li>
-                    <li>
-                        <strong>Copy the Key:</strong> The full API key is shown **only once** upon creation. Copy it immediately and store it in a secure location like a password manager.
-                    </li>
-                    <li>
-                        <strong>Use the Key:</strong> In your applications, replace your Ollama URL with the proxy's URL (e.g., <code class="inline-code">http://127.0.0.1:8080</code>) and provide the API key in the <code class="inline-code">Authorization</code> header as a Bearer token.
-                    </li>
-                </ol>
+        <div id="help-content-container" class="h-[80vh] overflow-y-auto pr-4 custom-scrollbar">
+            <div id="markdown-body" class="prose prose-invert max-w-none">
+                <!-- Content injected here via JS -->
             </div>
         </div>
 
@@ -309,6 +291,31 @@
             </div>
         </div>
             
+        <!-- Skills & Personalities Section -->
+        <div id="skills-personalities" class="card-style scroll-mt-20">
+            <h2 class="card-header text-2xl font-bold mb-6 pb-2">🧠 Skills & Personalities</h2>
+            <div class="space-y-8 text-current">
+                <div>
+                    <h3 class="text-xl font-semibold mb-2">Skills Library</h3>
+                    <p>Skills are specialized instructions, workflows, or tool definitions that you can plug into your models.</p>
+                    <ul class="list-disc list-inside space-y-2 mt-2 pl-4">
+                        <li><strong>Standardization:</strong> Skills allow you to define repeatable procedures (like "Python Code Reviewer") in a single <code class="inline-code">.md</code> file.</li>
+                        <li><strong>Format:</strong> They use YAML Frontmatter (for metadata) and Markdown (for body logic).</li>
+                        <li><strong>Portability:</strong> You can export/import skills using <code class="inline-code">.skill</code> files, which are simple ZIP archives of the skill folder.</li>
+                    </ul>
+                </div>
+                <div>
+                    <h3 class="text-xl font-semibold mb-2">Personalities Studio</h3>
+                    <p>Personalities define the "soul" of your AI. They determine how the model speaks, acts, and behaves.</p>
+                    <ul class="list-disc list-inside space-y-2 mt-2 pl-4">
+                        <li><strong>Identity:</strong> Use the <code class="inline-code">## Identity</code> section to set the persona's backstory, tone, and character.</li>
+                        <li><strong>Behaviour:</strong> Use the <code class="inline-code">## Behaviour</code> section to define the core system prompt, greeting, and constraints.</li>
+                        <li><strong>Memory Seeds:</strong> You can embed persistent facts within the personality to ensure the model always knows specific details about your environment or preferences.</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
         <!-- Usage Examples Section -->
         <div id="examples" class="card-style scroll-mt-20">
             <h2 class="card-header text-2xl font-bold mb-6 pb-2">👨‍💻 Usage Examples</h2>
@@ -445,6 +452,7 @@ print(response.json())
                         <li><a href="#statistics" class="toc-link">Usage Statistics</a></li>
                         <li><a href="#security" class="toc-link">Security Features</a></li>
                         <li><a href="#examples" class="toc-link">Usage Examples</a></li>
+                        <li><a href="#skills-personalities" class="toc-link">Skills & Personalities</a></li>
                         <li><a href="#redis-setup" class="toc-link">Redis Setup</a></li>
                         <li><a href="#home-hub" class="toc-link">Home AI Hub</a></li>
                         <li><a href="#credits" class="toc-link">Credits</a></li>
@@ -455,8 +463,26 @@ print(response.json())
     </div>
 </div>
 
+<script src="{{ url_for('static', path='vendor/marked.min.js') }}"></script>
 <script>
 document.addEventListener('DOMContentLoaded', () => {
+    // Parse Markdown
+    // Parse Markdown
+    const content = document.getElementById('markdown-body');
+    const mdContent = `
+## 🚀 Getting Started: Your Workflow
+1. **Configure Servers:** Go to the [Server Management]({{ url_for('admin_servers') }}) page.
+2. **Create a User:** Navigate to [User Management]({{ url_for('admin_users') }}).
+3. **Generate an API Key:** Create keys on the user details page.
+4. **Copy the Key:** Copy it immediately; it won't be shown again.
+5. **Use the Key:** Use as a Bearer token in your Authorization header.
+
+## 🖥️ The Dashboard: Your Monitoring Hub
+The main dashboard provides a real-time, auto-updating overview...
+    `.trim();
+    
+    content.innerHTML = marked.parse(mdContent);
+
     // Copy button logic
     document.querySelectorAll('.copy-button').forEach(button => {
         button.addEventListener('click', () => {
