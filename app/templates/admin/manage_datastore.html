@@ -1,0 +1,157 @@
+{% extends "admin/base.html" %}
+{% block title %}Manage Datastore: {{ datastore.name }}{% endblock %}
+{% block header_title %}Manage Files: <span class="text-teal-500">{{ datastore.name }}</span>{% endblock %}
+
+{% block content %}
+<input type="hidden" id="ds-id-hidden" value="{{ datastore.id }}">
+<div class="space-y-8">
+    <div class="flex justify-start">
+        <a href="{{ url_for('admin_datastores') }}" class="text-[var(--color-primary-500)] hover:text-[var(--color-primary-700)]">&larr; Back to Data Stores</a>
+    </div>
+
+    <!-- Live Progress Console -->
+    <div id="ds-console-container" class="hidden card-style border-l-4 border-teal-500 bg-teal-500/5 mb-8">
+        <div class="flex justify-between items-center mb-3">
+            <div class="flex items-center gap-2">
+                <div class="w-2 h-2 bg-teal-500 rounded-full animate-ping"></div>
+                <span class="text-[10px] font-black uppercase tracking-widest text-teal-400">Processing Stream</span>
+            </div>
+            <button onclick="document.getElementById('ds-console-container').classList.add('hidden')" class="text-gray-500 hover:text-white">×</button>
+        </div>
+        <div id="ds-console" class="h-32 overflow-y-auto bg-black/60 rounded-lg p-3 font-mono text-[10px] text-teal-200 space-y-1 custom-scrollbar">
+            <div class="text-gray-600 italic">Awaiting events...</div>
+        </div>
+    </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+        <!-- Single File Upload -->
+        <div class="card-style">
+            <h2 class="card-header text-xl font-bold mb-4">Upload Document</h2>
+            <form action="{{ url_for('admin_upload_datastore', ds_id=datastore.id) }}" method="post" enctype="multipart/form-data" class="space-y-4">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <div>
+                    <label class="block text-xs text-gray-400 uppercase font-bold mb-2">Select File</label>
+                    <input type="file" name="file" required class="block w-full text-sm rounded-md border border-white/10 file:mr-4 file:py-2 file:px-4 file:rounded-l-md file:border-0 file:bg-teal-600 file:text-white hover:file:bg-teal-700 bg-black/20 text-gray-300">
+                </div>
+                <div class="flex items-center gap-3">
+                    <input type="checkbox" name="use_ai_metadata" id="use_ai_1" value="true" class="h-4 w-4 rounded text-teal-600">
+                    <label for="use_ai_1" class="text-xs text-gray-400">Generate AI Metadata Cohesion (via lollms)</label>
+                </div>
+                <div class="flex justify-end">
+                    <button type="submit" onclick="this.innerHTML='Processing...'; this.classList.add('opacity-50')" class="bg-teal-600 hover:bg-teal-500 px-6 py-2 rounded font-bold text-sm transition-all">Upload & Index</button>
+                </div>
+            </form>
+        </div>
+
+        <!-- Local Folder Ingestion -->
+        <div class="card-style border-indigo-500/20">
+            <h2 class="card-header text-xl font-bold mb-4">Add Local Folder</h2>
+            <form action="{{ url_for('admin_add_folder_datastore', ds_id=datastore.id) }}" method="post" class="space-y-4">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <div>
+                    <label class="block text-xs text-gray-400 uppercase font-bold mb-1">Full Path on Server</label>
+                    <input type="text" name="folder_path" placeholder="e.g. C:\Users\Admin\Documents" required class="w-full p-2 rounded bg-black/20 border border-white/10 text-xs">
+                </div>
+                <div>
+                    <label class="block text-xs text-gray-400 uppercase font-bold mb-1">Filter Extensions (comma separated)</label>
+                    <input type="text" name="extensions" value=".txt,.md,.pdf,.py" class="w-full p-2 rounded bg-black/20 border border-white/10 text-xs font-mono">
+                </div>
+                <div class="flex items-center gap-3">
+                    <input type="checkbox" name="use_ai_metadata" id="use_ai_2" value="true" class="h-4 w-4 rounded text-teal-600" checked>
+                    <label for="use_ai_2" class="text-xs text-gray-400">Generate AI Metadata Cohesion (via lollms)</label>
+                </div>
+                <div class="flex justify-end">
+                    <button type="submit" class="bg-indigo-600 hover:bg-indigo-500 px-6 py-2 rounded font-bold text-sm transition-all">Index Folder</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div class="card-style">
+        <h2 class="card-header text-xl font-bold mb-4">Indexed Documents</h2>
+        <div class="overflow-x-auto">
+            <table class="w-full text-left">
+                <thead>
+                    <tr class="text-gray-500 text-xs uppercase border-b border-white/10">
+                        <th class="p-3">File ID / Path</th>
+                        <th class="p-3">Total Chunks</th>
+                        <th class="p-3 text-right">Actions</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-white/5">
+                    {% for doc in documents %}
+                    <tr class="hover:bg-white/5 transition-colors">
+                        <td class="p-3 text-sm text-gray-300 font-mono break-all">{{ doc.file_path }}</td>
+                        <td class="p-3 text-sm text-gray-400 font-bold">{{ doc.chunk_count }}</td>
+                        <td class="p-3 text-right">
+                            <form action="{{ url_for('admin_delete_datastore_doc', ds_id=datastore.id) }}" method="post" class="m-0" onsubmit="return confirm('Delete this document from the index?');">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                <input type="hidden" name="file_path" value="{{ doc.file_path }}">
+                                <button type="submit" class="text-red-400 hover:text-red-300 font-bold text-xs uppercase">Delete</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="2" class="p-8 text-center text-gray-500 italic">No documents indexed in this store yet.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+<script>
+    (function() {
+        const dsId = document.getElementById('ds-id-hidden').value;
+        const consoleEl = document.getElementById('ds-console');
+        const containerEl = document.getElementById('ds-console-container');
+
+        window.viewDocument = async function(filePath) {
+            const url = `/admin/datastores/${dsId}/view_doc?file_path=${encodeURIComponent(filePath)}`;
+            window.showModal("Loading Document...", '<div class="p-10 text-center animate-pulse text-teal-500 font-bold">Reconstructing text from chunks...</div>');
+            try {
+                const resp = await fetch(url);
+                const data = await resp.json();
+                if (data.error) {
+                    window.showModal("Error", `<div class="p-4 text-red-400 font-mono">${data.error}</div>`);
+                    return;
+                }
+                const htmlContent = marked.parse(data.content || "*No content found.*");
+                const modalBody = `
+                    <div class="space-y-4">
+                        <div class="text-[10px] font-mono text-gray-500 border-b border-white/5 pb-2 mb-4 truncate" title="${filePath}">${filePath}</div>
+                        <div class="prose prose-invert max-w-none text-sm text-gray-300 max-h-[65vh] overflow-y-auto custom-scrollbar pr-2">${htmlContent}</div>
+                        <div class="flex justify-end pt-4 border-t border-white/10">
+                            <button onclick="document.getElementById('modal-close-btn').click()" class="bg-teal-600 px-6 py-2 rounded text-xs font-black uppercase text-white">Done</button>
+                        </div>
+                    </div>`;
+                window.showModal("Document Content", modalBody);
+                document.querySelectorAll('#modal pre code').forEach(b => { if(window.hljs) hljs.highlightElement(b); });
+            } catch (e) { window.showModal("Error", e.message); }
+        };
+
+        function logToConsole(text, color = 'text-teal-200') {
+            if (!containerEl || !consoleEl) return;
+            containerEl.classList.remove('hidden');
+            const entry = document.createElement('div');
+            entry.className = color + " flex gap-2";
+            entry.innerHTML = `<span class="opacity-40">[${new Date().toLocaleTimeString()}]</span> <span>${text}</span>`;
+            consoleEl.appendChild(entry);
+            consoleEl.scrollTop = consoleEl.scrollHeight;
+        }
+
+        const evtSource = new EventSource("{{ url_for('sse_events') }}");
+        evtSource.onmessage = (e) => {
+            const msg = JSON.parse(e.data);
+            if (msg.id === `sys_ds_${dsId}`) {
+                let color = (msg.type === 'error') ? 'text-red-400 font-bold' : (msg.type === 'completed' ? 'text-green-400 font-bold' : 'text-teal-200');
+                if (msg.error) logToConsole(msg.error, color);
+                if (msg.type === 'completed' && (msg.error.toLowerCase().includes("finish") || msg.error.toLowerCase().includes("index"))) {
+                    setTimeout(() => window.location.reload(), 1000);
+                }
+            }
+        };
+    })();
+</script>
+{% endblock %}

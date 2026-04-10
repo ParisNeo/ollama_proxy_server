@@ -3,7 +3,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 import json
-
+from app.api.v1.dependencies import get_csrf_token
 from app.database.session import get_db
 from app.database.models import User, Workflow
 from app.api.v1.routes.admin import require_admin_user, get_template_context, templates, flash
@@ -25,18 +25,24 @@ def load_nodes():
 
 @router.get("/conception", response_class=HTMLResponse, name="admin_conception")
 async def conception_page(request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
+    from app.nodes.registry import NodeRegistry
     context = get_template_context(request)
+    context["csrf_token"] = await get_csrf_token(request)
+    context["dynamic_nodes_js"] = NodeRegistry.get_all_js()
     
     # Mirror Playground grouping for consistent model selection (Workflows, Agents, Pools, etc.)
     model_groups = await server_crud.get_all_models_grouped_by_server(db)
     context["model_groups"] = model_groups or {}
     
     # We still keep logic_blocks for other UI elements if needed
-    from app.database.models import VirtualAgent, SmartRouter, EnsembleOrchestrator
+    from app.database.models import VirtualAgent, SmartRouter, EnsembleOrchestrator, DataStore
     res_a = await db.execute(select(VirtualAgent.name))
     res_r = await db.execute(select(SmartRouter.name))
     res_e = await db.execute(select(EnsembleOrchestrator.name))
     context["logic_blocks"] = res_a.scalars().all() + res_r.scalars().all() + res_e.scalars().all()
+    
+    res_ds = await db.execute(select(DataStore.name).order_by(DataStore.name))
+    context["datastores"] = res_ds.scalars().all()
     
     context["nodes"] = load_nodes()
     return templates.TemplateResponse("admin/conception.html", context)

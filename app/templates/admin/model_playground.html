@@ -1689,6 +1689,8 @@ SUPPORTED ANNOTATION SCHEMAS:
     if (modelFromUrl && modelSelector.querySelector(`option[value="${modelFromUrl}"]`)) {
         modelSelector.value = modelFromUrl;
         localStorage.setItem(LAST_MODEL_KEY, modelFromUrl);
+        // FORCE: If coming from Architect, create a fresh chat for this model immediately
+        createNewChat();
     } else {
         const lastModel = localStorage.getItem(LAST_MODEL_KEY);
         if (lastModel && modelSelector.querySelector(`option[value="${lastModel}"]`)) {
@@ -1702,11 +1704,16 @@ SUPPORTED ANNOTATION SCHEMAS:
     updateAnnotationToggleUI();
     updateThinkingToggleUI();
     
-    renderHistoryList();
-    if (chatHistory.length > 0) {
-        loadChat(chatHistory[0].id);
+    // Only perform default loading if we DIDN'T just force a new chat via URL
+    if (!modelFromUrl) {
+        renderHistoryList();
+        if (chatHistory.length > 0) {
+            loadChat(chatHistory[0].id);
+        } else {
+            createNewChat();
+        }
     } else {
-        createNewChat();
+        renderHistoryList();
     }
     
     updateSystemPromptIndicator();

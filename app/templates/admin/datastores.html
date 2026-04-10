@@ -1,0 +1,212 @@
+{% extends "admin/base.html" %}
+{% block title %}Data Stores{% endblock %}
+{% block header_title %}Data Stores (RAG){% endblock %}
+
+{% block content %}
+<div class="space-y-8">
+    <div class="card-style bg-teal-500/10 border border-teal-500/30">
+        <div class="flex items-start gap-3">
+            <svg class="w-6 h-6 text-teal-400 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"></path></svg>
+            <div class="text-sm text-gray-300">
+                <p class="font-semibold text-teal-300 mb-1">What are Data Stores?</p>
+                <p class="mb-2">Data Stores allow you to upload documents (PDFs, code, text) and semantically index them. You can then use the <strong>RAG Datastore</strong> node in the Workflow Architect to query this knowledge base.</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="card-style border-t-4 border-teal-600">
+        <h2 class="card-header text-xl font-bold mb-4">Create New Data Store</h2>
+        <form action="{{ url_for('admin_add_datastore') }}" method="post" class="space-y-4">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                    <label class="block text-xs text-gray-400 uppercase font-bold mb-1">Store Name</label>
+                    <input type="text" name="name" placeholder="e.g. company-policies" required class="w-full p-2 rounded bg-black/20 border border-white/10 focus:border-teal-500 outline-none">
+                </div>
+                <div>
+                    <label class="block text-xs text-gray-400 uppercase font-bold mb-1">Description</label>
+                    <input type="text" name="description" placeholder="Optional info..." class="w-full p-2 rounded bg-black/20 border border-white/10 focus:border-teal-500 outline-none">
+                </div>
+                
+                <div class="md:col-span-2">
+                    <label class="block text-xs text-gray-400 uppercase font-bold mb-1">Vectorizer Method</label>
+                    <select name="vectorizer_name" id="vectorizer-select" class="w-full p-2 rounded bg-black/20 border border-white/10" onchange="toggleVectorizerConfig()">
+                        <option value="tf_idf">TF-IDF (No deps, simple search)</option>
+                        <option value="sentense_transformer">SentenceTransformers (Local indexing)</option>
+                        <option value="ollama">Ollama (Server-side embedding)</option>
+                        <option value="openai">OpenAI (API embedding)</option>
+                        <option value="lollms">LoLLMs Hub (Proxy embedding)</option>
+                        <option value="cohere">Cohere (API embedding)</option>
+                    </select>
+                </div>
+
+                <div id="vectorizer-config" class="md:col-span-2 grid grid-cols-1 md:grid-cols-3 gap-6 hidden bg-black/40 p-4 border border-white/10 rounded-xl">
+                    <div>
+                        <label class="block text-[10px] text-gray-400 uppercase font-black mb-1">Model Selection</label>
+                        <select name="vectorizer_model" id="model-select-input" class="w-full p-2 rounded bg-black/40 border border-white/10 text-xs">
+                            <option value="">-- Choose Hub Model --</option>
+                            {% for m in embed_models %}
+                            <option value="{{ m }}">{{ m }}</option>
+                            {% endfor %}
+                        </select>
+                        <input type="text" name="vectorizer_model_custom" placeholder="Or type model name..." class="w-full p-2 mt-2 rounded bg-black/40 border border-white/10 text-xs outline-none focus:border-teal-500">
+                    </div>
+                    <div id="url-config-container">
+                        <label class="block text-[10px] text-gray-400 uppercase font-black mb-1">Base URL (Optional)</label>
+                        <input type="text" name="vectorizer_base_url" placeholder="e.g. http://127.0.0.1:8080" class="w-full p-2 rounded bg-black/40 border border-white/10 text-xs outline-none focus:border-teal-500">
+                    </div>
+                    <div>
+                        <label class="block text-[10px] text-gray-400 uppercase font-black mb-1">External API Key (Optional)</label>
+                        <input type="password" name="vectorizer_api_key" autocomplete="off" placeholder="Auto-managed for Hub" class="w-full p-2 rounded bg-black/40 border border-white/10 text-xs outline-none focus:border-teal-500">
+                    </div>
+                </div>
+                
+                <div>
+                    <label class="block text-xs text-gray-400 uppercase font-bold mb-1">Chunking Strategy</label>
+                    <select name="chunking_strategy" class="w-full p-2 rounded bg-black/20 border border-white/10">
+                        <option value="recursive">Recursive (Recommended)</option>
+                        <option value="token">Token</option>
+                        <option value="sentence">Sentence</option>
+                    </select>
+                </div>
+
+                <div>
+                    <label class="block text-xs text-gray-400 uppercase font-bold mb-1">Chunk Size (Tokens)</label>
+                    <input type="number" name="chunk_size" value="512" class="w-full p-2 rounded bg-black/20 border border-white/10">
+                </div>
+                <div>
+                    <label class="block text-xs text-gray-400 uppercase font-bold mb-1">Chunk Overlap</label>
+                    <input type="number" name="chunk_overlap" value="50" class="w-full p-2 rounded bg-black/20 border border-white/10">
+                </div>
+            </div>
+
+            <div class="flex justify-end">
+                <button type="submit" class="bg-teal-600 hover:bg-teal-500 px-8 py-2 rounded font-bold text-sm shadow-lg shadow-teal-900/20 transition-all">Create Data Store</button>
+            </div>
+        </form>
+    </div>
+
+    <div class="card-style">
+        <h2 class="card-header text-xl font-bold mb-4">Active Data Stores</h2>
+        <div class="overflow-x-auto">
+            <table class="w-full text-left">
+                <thead>
+                    <tr class="text-gray-500 text-xs uppercase border-b border-white/10">
+                        <th class="p-3">Name</th>
+                        <th class="p-3">Description</th>
+                        <th class="p-3">Vectorizer</th>
+                        <th class="p-3 text-right">Actions</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-white/5">
+                    {% for ds in datastores %}
+                    <tr class="hover:bg-white/5 transition-colors">
+                        <td class="p-3 font-bold text-teal-400">{{ ds.name }}</td>
+                        <td class="p-3 text-xs text-gray-400">{{ ds.description }}</td>
+                        <td class="p-3 text-xs text-gray-400 font-mono uppercase">{{ ds.vectorizer_name }}</td>
+                        <td class="p-3 text-right">
+                            <div class="flex justify-end gap-4">
+                                <a href="{{ url_for('admin_manage_datastore', ds_id=ds.id) }}" class="text-teal-400 font-bold text-xs uppercase hover:text-teal-300">Manage Files</a>
+                                <form action="{{ url_for('admin_delete_datastore', ds_id=ds.id) }}" method="post" onsubmit="return confirm('Delete this datastore permanently?');" class="m-0">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                    <button type="submit" class="text-red-400 font-bold text-xs uppercase hover:text-red-300">Delete</button>
+                                </form>
+                            </div>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="4" class="p-8 text-center text-gray-500 italic">No datastores configured.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<script>
+    /**
+     * Grounded List of Sentence Transformer Models (April 2026 Standards)
+     * Balanced by: Speed (MiniLM), Quality (MPNet), and Multilingual Capability (BGE/GTE)
+     */
+    const ST_MODELS = [
+        { val: "sentence-transformers/all-MiniLM-L6-v2", label: "⚡ all-MiniLM-L6-v2 (Fastest, 384d)" },
+        { val: "BAAI/bge-m3", label: "🌍 BGE-M3 (Versatile Multilingual, 1024d)" },
+        { val: "sentence-transformers/all-mpnet-base-v2", label: "🏆 all-mpnet-base-v2 (Best Quality English, 768d)" },
+        { val: "Alibaba-NLP/gte-multilingual-base", label: "🛡️ GTE Multilingual Base (Efficient/Precise)" },
+        { val: "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2", label: "🌐 Paraphrase Multilingual (50+ languages)" },
+        { val: "jinaai/jina-embeddings-v3", label: "🧩 Jina Embeddings v3 (Task-specific/Flexible)" },
+        { val: "Snowflake/snowflake-arctic-embed-l-v2.0", label: "🏢 Arctic Embed L v2 (Enterprise/Multi-domain)" },
+        { val: "sentence-transformers/all-MiniLM-L12-v2", label: "⚖️ all-MiniLM-L12-v2 (High Fidelity, 384d)" }
+    ];
+
+    // Hub models passed from Jinja2 (Ollama/vLLM/OpenAI)
+    const HUB_MODELS = {{ (embed_models or []) | tojson | safe }};
+
+    function toggleVectorizerConfig() {
+        const select = document.getElementById('vectorizer-select');
+        const configDiv = document.getElementById('vectorizer-config');
+        const modelSelect = document.getElementById('model-select-input');
+        const urlContainer = document.getElementById('url-config-container');
+        const keyContainer = document.getElementById('key-config-container');
+        
+        if (!select || !configDiv || !modelSelect) return;
+
+        const method = select.value;
+
+        // Show/Hide config panel based on method
+        if (method !== 'tf_idf') {
+            configDiv.classList.remove('hidden');
+        } else {
+            configDiv.classList.add('hidden');
+            return;
+        }
+
+        // SentenceTransformers is purely local, hide URL/Key
+        const isLocal = method === 'sentense_transformer';
+        
+        // Use inline-style or class to ensure immediate removal from layout
+        if (urlContainer) {
+            urlContainer.style.display = isLocal ? 'none' : 'block';
+        }
+        if (keyContainer) {
+            keyContainer.style.display = isLocal ? 'none' : 'block';
+        }
+
+        // Adjust grid columns: 1 for local, 3 for remote
+        configDiv.classList.toggle('md:grid-cols-3', !isLocal);
+        configDiv.classList.toggle('md:grid-cols-1', isLocal);
+
+        // 2. Dynamic Population Logic (with Null Check)
+        if (!modelSelect) {
+            console.error("Critical UI Error: Element 'vectorizer-model-select' not found in DOM.");
+            return;
+        }
+        modelSelect.innerHTML = '';
+        
+        if (method === 'sentense_transformer') {
+            // Add ST-specific models
+            modelSelect.innerHTML = '<option value="">-- Choose ST Model --</option>';
+            ST_MODELS.forEach(m => {
+                const opt = document.createElement('option');
+                opt.value = m.val;
+                opt.textContent = m.label;
+                modelSelect.appendChild(opt);
+            });
+        } else {
+            // Add Hub-managed models (Ollama, LoLLMs, etc.)
+            modelSelect.innerHTML = '<option value="">-- Choose Hub Model --</option>';
+            HUB_MODELS.forEach(m => {
+                const opt = document.createElement('option');
+                opt.value = m;
+                opt.textContent = m;
+                modelSelect.appendChild(opt);
+            });
+        }
+    }
+    
+    document.addEventListener('DOMContentLoaded', toggleVectorizerConfig);
+</script>
+{% endblock %}

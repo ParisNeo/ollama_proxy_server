@@ -219,7 +219,11 @@
                     <h1 class="text-4xl font-black text-white tracking-tight">Workflow Architect</h1>
                     <p class="text-gray-500 mt-2">Design complex AI cognitive graphs with modular reusable flows.</p>
                 </div>
-                <div class="relative">
+                <div class="flex gap-4">
+                    <button onclick="toggleStudio(true)" class="bg-white/5 hover:bg-white/10 text-indigo-400 px-6 py-4 rounded-2xl font-black uppercase text-sm border border-indigo-500/20 transition-all flex items-center gap-2">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"></path></svg>
+                        Node Studio
+                    </button>
                     <button onclick="document.getElementById('new-project-menu').classList.toggle('hidden')" class="bg-indigo-600 hover:bg-indigo-500 text-white px-8 py-4 rounded-2xl font-black uppercase text-sm shadow-2xl shadow-indigo-500/20 transition-all transform hover:scale-105 active:scale-95 flex items-center gap-2">
                         + New Project
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7-7-7-7"></path></svg>
@@ -250,6 +254,10 @@
                                 <span class="font-bold text-white group-hover:text-emerald-400">Intelligent Gateway</span>
                                 <span class="text-[10px] text-gray-500">Route complex intents to specialized models</span>
                             </button>
+                            <button onclick="createNewWorkflow('rag')" class="w-full text-left px-4 py-3 text-sm text-gray-300 hover:bg-white/5 rounded-lg flex flex-col group mt-1">
+                                <span class="font-bold text-white group-hover:text-teal-400">RAG Pipeline</span>
+                                <span class="text-[10px] text-gray-500">Extracts query, searches datastore, augments prompt</span>
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -257,6 +265,45 @@
 
             <div id="library-grid" class="workflow-grid">
                 <!-- Populated via loadLibrary() -->
+            </div>
+        </div>
+    </div>
+
+    <!-- View 3: Node Studio (IDE) -->
+    <div id="studio-view" class="hidden h-full flex flex-col bg-[#050507]">
+        <div class="arch-toolbar border-b border-white/10">
+            <div class="flex items-center gap-4">
+                <button onclick="toggleStudio(false)" class="p-2 hover:bg-white/5 rounded-xl text-indigo-400">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg>
+                </button>
+                <h2 class="text-xl font-black text-white uppercase tracking-tighter">Node Studio</h2>
+            </div>
+            <div class="flex gap-2">
+                <button onclick="window.openNodeArchitect()" class="bg-purple-600 hover:bg-purple-500 px-4 py-2 rounded-lg text-xs font-black uppercase tracking-widest text-white shadow-lg shadow-purple-500/20 transition-all flex items-center gap-2">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                    Architect with AI
+                </button>
+                <button onclick="exportNode()" class="px-4 py-2 bg-white/5 hover:bg-white/10 rounded-lg text-xs font-bold uppercase">Export .hubnode</button>
+                <button onclick="saveNode()" class="px-6 py-2 bg-indigo-600 hover:bg-indigo-500 rounded-lg text-xs font-black uppercase tracking-widest text-white">Deploy Node</button>
+            </div>
+        </div>
+        <div class="flex-grow flex min-h-0">
+            <!-- Sidebar: My Nodes -->
+            <div class="w-64 border-r border-white/10 p-4 space-y-4 overflow-y-auto custom-scrollbar">
+                <h3 class="text-[10px] font-black text-gray-500 uppercase tracking-widest">Your Custom Nodes</h3>
+                <div id="custom-nodes-list" class="space-y-1"></div>
+                <button onclick="initNewNode()" class="w-full py-2 border border-dashed border-white/20 rounded-lg text-[10px] font-bold text-gray-500 hover:border-indigo-500 hover:text-indigo-400">+ New Node Type</button>
+            </div>
+            <!-- Editors -->
+            <div class="flex-1 grid grid-cols-2 gap-px bg-white/10">
+                <div class="flex flex-col bg-[#0a0a0f]">
+                    <div class="p-2 bg-indigo-500/10 text-indigo-400 text-[10px] font-black uppercase px-4 border-b border-white/5">Frontend (LiteGraph JS)</div>
+                    <textarea id="node-js-editor" class="flex-grow p-4 bg-transparent font-mono text-xs text-gray-300 outline-none resize-none"></textarea>
+                </div>
+                <div class="flex flex-col bg-[#0a0a0f]">
+                    <div class="p-2 bg-emerald-500/10 text-emerald-400 text-[10px] font-black uppercase px-4 border-b border-white/5">Backend (Logic Python)</div>
+                    <textarea id="node-py-editor" class="flex-grow p-4 bg-transparent font-mono text-xs text-gray-300 outline-none resize-none"></textarea>
+                </div>
             </div>
         </div>
     </div>
@@ -307,6 +354,8 @@
                     <div class="node-item" onclick="addNode('hub/skill')"><svg class="w-4 h-4 text-purple-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg> Skill</div>
                     <div class="node-item" onclick="addNode('hub/tool')"><svg class="w-4 h-4 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path></svg> Tool Definition</div>
                     <div class="node-item" onclick="addNode('hub/vision')"><svg class="w-4 h-4 text-sky-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg> Vision Expert</div>
+                    <div class="node-category-label mt-6">Knowledge & Data</div>
+                    <div class="node-item" onclick="addNode('hub/datastore')"><svg class="w-4 h-4 text-teal-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"></path></svg> RAG Datastore</div>
                     <div class="node-category-label mt-6">Logic & Routing</div>
                     <div class="node-item" onclick="addNode('hub/autorouter')"><svg class="w-4 h-4 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"></path></svg> Auto Router</div>
                     <div class="node-item" onclick="addNode('hub/extract_text')"><svg class="w-4 h-4 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h7"></path></svg> Extract Text</div>
@@ -334,6 +383,7 @@
     // --- DATA INJECTION FROM SERVER ---
     const model_groups = {{ (model_groups or {}) | tojson | safe }};
     const logic_blocks = {{ (logic_blocks or []) | tojson | safe }};
+    const datastores_list = {{ (datastores or []) | tojson | safe }};
 
     // Flatten model_groups into a prioritized list for LiteGraph combos
     // Order: Proxy Features first (Workflows, Agents, Pools), then Server Models
@@ -574,39 +624,6 @@
         this.size = [260, 60];
     }
     LiteGraph.registerNodeType("hub/output", NodeExit);
-
-    // 1. LLM Chat Block
-    function NodeLLMChat() {
-        this.addInput("Messages", "messages");
-        this.addInput("Settings", "object");
-        this.addInput("Model Override", "string");
-        this.addOutput("Content", "string");
-        
-        this.properties = { model: "auto" };
-        
-        this.mWidget = this.addWidget("combo", "Model", this.properties.model, (v) => { 
-            this.properties.model = v; 
-            pushHistoryState();
-        }, { values: available_models });
-
-        this.addWidget("button", "+ Add Tool", null, () => {
-            this.addInput("Tool " + (this.inputs.length - 2), "tool,array");
-            // Automatically resize based on internal content
-            this.size = this.computeSize();
-            this.setDirtyCanvas(true, true);
-        });
-
-        this.addWidget("button", "ℹ️ Help", null, () => { showNodeHelp("hub/llm_chat"); });
-        
-        this.color = "#312e81";
-        this.bgcolor = "#1e1b4b";
-        // Ensure initial size calculation
-        this.size = this.computeSize();
-    }
-    NodeLLMChat.prototype.onConfigure = function() {
-        if(this.mWidget) this.mWidget.value = this.properties.model;
-    };
-    LiteGraph.registerNodeType("hub/llm_chat", NodeLLMChat);
 
     // 1.1 LLM Instruct Block
     function NodeLLMInstruct() {
@@ -1224,6 +1241,13 @@
     }
     LiteGraph.registerNodeType("hub/output", NodeOutput);
 
+    // --- DYNAMIC PLUGIN NODES ---
+    try {
+        {{ dynamic_nodes_js | safe }}
+    } catch(e) {
+        console.error("Failed to load plugin nodes:", e);
+    }
+
     // --- UI ENGINE ---
 
     // Fix Canvas Stretching & DPI Scaling
@@ -1299,7 +1323,7 @@
     const NODE_HELP = {
         "hub/input": "**ENTRY NODE:**\nThis node captures the incoming prompt from the user in the Chat Playground. Outputs the request as a 'messages' array and Request Settings.",
         "hub/output": "**EXIT NODE:**\nThis defines the final result returned back to the user. Connect your finalized string output to 'Source'.",
-        "hub/llm_chat": "**LLM CHAT Node**\n\nThis is the core cognitive engine. It executes an LLM inference request based on the provided conversation history.\n\n### Inputs:\n- **Messages:** Connect a 'messages' array (usually from an Entry, Composer, or Modifier node).\n- **Settings:** Optional input for configuration (temperature, top_p).\n- **Model Override:** Pass a string to force the use of a specific model, bypassing the 'auto' selector.\n- **Tool [N]:** Connect Tool Definition nodes here to provide the LLM with functions it can call.\n\n### Outputs:\n- **Content:** The finalized string generated by the LLM response.\n\n### Configuration:\nUse the dropdown to manually select a model, or leave it as 'auto' to utilize your router's intelligent selection logic.",
+        "hub/llm_chat": "**LLM CHAT Node**\n\nThis is the core cognitive engine. It executes an LLM inference request based on the provided conversation history.\n\n### Inputs:\n- **Messages:** Connect a 'messages' array. **Note:** If you need to inject a System Prompt or Persona, pass the messages through a **System Modifier** node *first*, then connect its output to this slot.\n- **Settings:** Optional input for configuration (temperature, top_p).\n- **Model Override:** Pass a string to force the use of a specific model, bypassing the 'auto' selector.\n- **Tool [N]:** Connect Tool Definition nodes here to provide the LLM with functions it can call.\n\n### Outputs:\n- **Content:** The finalized string generated by the LLM response.\n\n### Configuration:\nUse the dropdown to manually select a model, or leave it as 'auto' to utilize your router's intelligent selection logic.",
         "hub/special_personality": "**SPECIAL PERSONALITY NODE (The Soul)**\n\nThis node encapsulates an agent's persona and technical capabilities using a Markdown+YAML structure.\n\n### Markdown Philosophy\n- **Frontmatter:** The top block (between `---`) defines the metadata and structural capabilities (MCPs/Tools).\n- **Content Body:** Everything after the second `---` is treated as the raw System Prompt.\n\n### Supported YAML Fields:\n- `name`: Unique identifier for the agent.\n- `description`: A brief summary for your library.\n- `mcp_servers`: A list of MCP server objects (e.g., `{name: '...', url: '...', type: 'sse'}`).\n- `tools`: A list of tool schema definitions (OpenAI/JSON-Schema compatible).\n\n### Output Mapping:\n- **System Prompt:** Routes the body text to the System message of an LLM node.\n- **MCPs:** Routes the server list to your RAG/Tool orchestrator.\n- **Tools:** Routes the function schemas directly to an LLM's Tool input slot.\n\n*Use this node to build complex agents that carry their own tools and context-fetching capabilities.*",
         "hub/llm_instruct": "**LLM INSTRUCT:**\nExecutes an LLM in text completion mode. Takes a raw string prompt and outputs a raw string response.",
         "hub/system_composer": "**SYSTEM COMPOSER:**\nAggregates multiple text inputs (Personas, Skills, RAG data) into a single optimized instruction string.",
@@ -1492,17 +1516,18 @@
             "config": {}
         },
         multiskill: {
-            "last_node_id": 6,
-            "last_link_id": 5,
+            "last_node_id": 7,
+            "last_link_id": 6,
             "nodes": [
-                { "id": 1, "type": "hub/input", "pos": [50, 150], "outputs": [{ "name": "Messages", "type": "messages", "links": [1] }] },
+                { "id": 1, "type": "hub/input", "pos": [50, 150], "outputs": [{ "name": "Messages", "links": [1] }] },
                 { "id": 2, "type": "hub/personality", "pos": [50, 300], "properties": { "name": "parisneo" }, "outputs": [{ "name": "System Prompt", "links": [2] }] },
                 { "id": 3, "type": "hub/skill", "pos": [50, 450], "outputs": [{ "name": "Skill", "links": [3] }] },
                 { "id": 4, "type": "hub/system_merger", "pos": [450, 300], "inputs": [{ "name": "Base Identity", "link": 2 }, { "name": "Skill 1", "link": 3 }], "outputs": [{ "name": "Final System Prompt", "links": [4] }] },
-                { "id": 5, "type": "hub/llm_chat", "pos": [850, 150], "inputs": [{ "name": "Messages", "link": 1 }, { "name": "Model Override", "link": null }, { "name": "System Prompt", "link": 4 }], "outputs": [{ "name": "Content", "links": [5] }], "properties": { "model": "auto" } },
-                { "id": 6, "type": "hub/output", "pos": [1200, 150], "inputs": [{ "name": "Content", "link": 5 }] }
+                { "id": 5, "type": "hub/system_modifier", "pos": [800, 150], "inputs": [{ "name": "Messages", "link": 1 }, { "name": "System Prompt", "link": 4 }], "outputs": [{ "name": "Updated Messages", "links": [5] }] },
+                { "id": 6, "type": "hub/llm_chat", "pos": [1150, 150], "inputs": [{ "name": "Messages", "link": 5 }], "outputs": [{ "name": "Content", "links": [6] }], "properties": { "model": "auto" } },
+                { "id": 7, "type": "hub/output", "pos": [1500, 150], "inputs": [{ "name": "Content", "link": 6 }] }
             ],
-            "links": [[1, 1, 0, 5, 0, "messages"], [2, 2, 0, 4, 0, "string"], [3, 3, 0, 4, 1, "string"], [4, 4, 0, 5, 2, "string"], [5, 5, 0, 6, 0, "string"]],
+            "links": [[1, 1, 0, 5, 0, "messages"], [2, 2, 0, 4, 0, "string"], [3, 3, 0, 4, 1, "string"], [4, 4, 0, 5, 1, "string"], [5, 5, 0, 6, 0, "messages"], [6, 6, 0, 7, 0, "string"]],
             "config": {}
         },
         gateway: {
@@ -1516,6 +1541,21 @@
                 { "id": 5, "type": "hub/output", "pos": [900, 200], "inputs": [{ "name": "Content", "link": 4 }] }
             ],
             "links": [[1, 1, 0, 2, 0, "messages"], [2, 3, 0, 2, 1, "expert"], [3, 4, 0, 2, 2, "expert"], [4, 2, 0, 5, 0, "string"]],
+            "config": {}
+        },
+        rag: {
+            "last_node_id": 7,
+            "last_link_id": 6,
+            "nodes": [
+                { "id": 1, "type": "hub/input", "pos": [50, 200], "outputs": [{ "name": "Messages", "links": [1] }] },
+                { "id": 2, "type": "hub/extract_text", "pos": [50, 400], "inputs": [{ "name": "Messages", "link": 1 }], "outputs": [{ "name": "Last Response", "links": [2] }] },
+                { "id": 3, "type": "hub/datastore", "pos": [350, 400], "inputs": [{ "name": "Query", "link": 2 }], "outputs": [{ "name": "Context", "links": [3] }], "properties": { "top_k": 3 } },
+                { "id": 4, "type": "hub/system_composer", "pos": [350, 200], "inputs": [{ "name": "Persona", "link": null }, { "name": "Skill 1", "link": null }, { "name": "RAG Context", "link": 3 }], "outputs": [{ "name": "System String", "links": [4] }] },
+                { "id": 5, "type": "hub/system_modifier", "pos": [700, 200], "inputs": [{ "name": "Messages", "link": 1 }, { "name": "System Prompt", "link": 4 }], "outputs": [{ "name": "Updated Messages", "links": [5] }] },
+                { "id": 6, "type": "hub/llm_chat", "pos": [1000, 200], "inputs": [{ "name": "Messages", "link": 5 }], "outputs": [{ "name": "Content", "links": [6] }], "properties": {"model": "auto"} },
+                { "id": 7, "type": "hub/output", "pos": [1350, 200], "inputs": [{ "name": "Content", "link": 6 }] }
+            ],
+            "links": [[1, 1, 0, 2, 0, "messages"], [2, 2, 0, 3, 0, "string"], [3, 3, 0, 4, 2, "string"], [4, 4, 0, 5, 1, "string"], [5, 5, 0, 6, 0, "messages"], [6, 6, 0, 7, 0, "string"]],
             "config": {}
         }
     };
@@ -1757,13 +1797,192 @@
         }
     }
 
-    window.testInPlayground = () => {
+    window.testInPlayground = async () => {
         const name = document.getElementById('workflow-name').value;
         if (!name) {
-            alert("Please save or name the workflow first.");
+            alert("Please name the workflow first.");
             return;
         }
-        window.location.href = `/admin/playground?model=${encodeURIComponent(name)}`;
+        // Auto-save before testing to ensure consistency
+        const nameInput = document.getElementById('workflow-name');
+        const resp = await fetch("{{ url_for('admin_save_workflow') }}", {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': '{{ csrf_token }}' },
+            body: JSON.stringify({ name, graph: graph.serialize() })
+        });
+        
+        if (resp.ok) {
+            window.location.href = `/admin/playground?model=${encodeURIComponent(name)}`;
+        } else {
+            alert("Failed to sync workflow before test.");
+        }
+    };
+
+    // --- Node Studio Functions ---
+    window.initNewNode = () => {
+        document.getElementById('node-js-editor').value = '';
+        document.getElementById('node-py-editor').value = '';
+    };
+
+    window.exportNode = () => {
+        const js = document.getElementById('node-js-editor').value;
+        const py = document.getElementById('node-py-editor').value;
+        const blob = new Blob([JSON.stringify({js, py}, null, 2)], {type: 'application/json'});
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'node.hubnode';
+        a.click();
+    };
+
+    // --- Node Architect Logic ---
+    window.openNodeArchitect = () => {
+        const modalBody = `
+            <div class="space-y-4 text-left">
+                <p class="text-[10px] text-gray-500 uppercase font-black tracking-widest">Node Architect</p>
+                <textarea id="node-prompt" class="w-full h-32 p-3 bg-black/40 border border-white/10 rounded-xl text-sm text-white outline-none focus:border-purple-500" placeholder="Describe your node... (e.g. 'A node that fetches the top 5 news stories from HackerNews and outputs them as a list')"></textarea>
+                
+                <div class="flex flex-col gap-2">
+                    <span class="text-[9px] font-bold text-gray-600 uppercase px-1">Knowledge Ingestion</span>
+                    <div id="node-architect-previews" class="flex flex-wrap gap-2 min-h-[32px] p-2 bg-black/20 border border-white/5 rounded-lg"></div>
+                </div>
+
+                <div class="flex gap-2">
+                    <button type="button" onclick="document.getElementById('node-arch-files').click()" class="text-[10px] font-bold py-2 px-3 bg-white/5 rounded-lg border border-white/10 hover:bg-white/10">📄 Add API Docs</button>
+                    <button type="button" onclick="window.Architect.triggerWebImport('node-prompt', window.openNodeArchitect)" class="text-[10px] font-bold py-2 px-3 bg-indigo-600/20 text-indigo-300 rounded-lg border border-indigo-500/30 hover:bg-indigo-600/30">🌍 Web Search</button>
+                </div>
+                <input type="file" id="node-arch-files" class="hidden" multiple accept=".pdf,.txt,.md">
+
+                <div id="node-build-status" class="hidden bg-black/60 border border-white/10 rounded-lg p-3 h-24 overflow-y-auto font-mono text-[9px] text-indigo-300 custom-scrollbar"></div>
+                
+                <button onclick="window.executeNodeBuild()" id="node-build-btn" class="w-full py-3 bg-purple-600 hover:bg-purple-500 rounded-xl font-black text-xs uppercase tracking-widest text-white transition-all shadow-xl">Synthesize Node</button>
+            </div>
+        `;
+        window.showModal("AI Node Architect", modalBody);
+        
+        // Restore current architect context
+        if (typeof window.Architect !== 'undefined') {
+            window.Architect.renderPreviews('node-architect-previews');
+            document.getElementById('node-arch-files').onchange = (e) => window.Architect.handleFiles(e.target.files, () => window.Architect.renderPreviews('node-architect-previews'));
+            if (window.Architect.prompt) document.getElementById('node-prompt').value = window.Architect.prompt;
+        }
+    };
+
+    window.executeNodeBuild = async () => {
+        const promptEl = document.getElementById('node-prompt');
+        const statusBox = document.getElementById('node-build-status');
+        const btn = document.getElementById('node-build-btn');
+        
+        if (!promptEl.value.trim()) return alert("Please describe the node logic.");
+
+        btn.disabled = true;
+        btn.innerText = "ARCHITECTING...";
+        statusBox.classList.remove('hidden');
+        statusBox.innerHTML = '<div>[System] Consulting Node Building Skill...</div>';
+
+        const formData = typeof window.Architect !== 'undefined' 
+            ? window.Architect.prepareFormData('node-prompt')
+            : new FormData();
+        formData.append("csrf_token", "{{ csrf_token }}");
+
+        try {
+            // Reusing the skill builder endpoint but with a flag or separate route
+            const resp = await fetch("/admin/api/skills/build", { method: 'POST', body: formData });
+            const data = await resp.json();
+            
+            if (data.success && data.content) {
+                // The AI returns a Markdown file with JS and PY blocks. 
+                // We extract them and push them into the Studio editors.
+                const jsMatch = data.content.match(/```javascript\n([\s\S]*?)\n```/);
+                const pyMatch = data.content.match(/```python\n([\s\S]*?)\n```/);
+                
+                if (jsMatch) document.getElementById('node-js-editor').value = jsMatch[1].trim();
+                if (pyMatch) document.getElementById('node-py-editor').value = pyMatch[1].trim();
+                
+                statusBox.innerHTML += '<div class="text-green-400 font-bold">[Success] Node logic synthesized. Check the editors!</div>';
+                setTimeout(() => {
+                    const closeBtn = document.getElementById('modal-close-btn');
+                    if (closeBtn) closeBtn.click();
+                }, 1000);
+            } else {
+                statusBox.innerHTML += `<div class="text-red-400 font-bold">[Error] ${data.error || "Synthesis failed."}</div>`;
+            }
+        } catch (e) {
+            statusBox.innerHTML += `<div class="text-red-400">[Fatal] ${e.message}</div>`;
+        } finally {
+            btn.disabled = false;
+            btn.innerText = "Synthesize Node";
+        }
+    };
+
+    window.saveNode = async () => {
+        const js = document.getElementById('node-js-editor').value;
+        const py = document.getElementById('node-py-editor').value;
+        const name = prompt("Enter node name:");
+        if (!name) return;
+        
+        try {
+            const resp = await fetch("/admin/api/nodes", {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': '{{ csrf_token }}' },
+                body: JSON.stringify({ name, js, py })
+            });
+            if (resp.ok) {
+                alert("Node deployed successfully!");
+                loadCustomNodes();
+            } else {
+                alert("Failed to deploy node.");
+            }
+        } catch (e) {
+            alert("Error: " + e.message);
+        }
+    };
+
+    async function loadCustomNodes() {
+        try {
+            const resp = await fetch("/admin/api/nodes");
+            if (!resp.ok) return;
+            const nodes = await resp.json();
+            const list = document.getElementById('custom-nodes-list');
+            if (!list) return;
+            list.innerHTML = nodes.map(n => `
+                <div class="p-2 bg-white/5 rounded-lg flex justify-between items-center">
+                    <span class="text-xs text-gray-300">${n.name}</span>
+                    <button onclick="loadNode('${n.name}')" class="text-[10px] text-indigo-400 hover:text-indigo-300">Load</button>
+                </div>
+            `).join('');
+        } catch (e) {
+            console.error("Failed to load custom nodes", e);
+        }
+    }
+
+    window.loadNode = async (name) => {
+        try {
+            const resp = await fetch(`/admin/api/nodes/${name}`);
+            if (!resp.ok) return;
+            const node = await resp.json();
+            document.getElementById('node-js-editor').value = node.js || '';
+            document.getElementById('node-py-editor').value = node.py || '';
+        } catch (e) {
+            console.error("Failed to load node", e);
+        }
+    };
+
+    window.toggleStudio = (show) => {
+        const studio = document.getElementById('studio-view');
+        const designer = document.getElementById('designer-view');
+        const library = document.getElementById('library-view');
+        
+        if (show) {
+            studio.classList.remove('hidden');
+            designer.classList.add('hidden');
+            library.classList.add('hidden');
+            loadCustomNodes();
+        } else {
+            studio.classList.add('hidden');
+            designer.classList.remove('hidden');
+            setTimeout(() => { if(window.resizeCanvas) window.resizeCanvas(); }, 100);
+        }
     };
 
     function clearGraph() {
@@ -1786,12 +2005,19 @@
 
     // --- STARTUP ---   
     document.addEventListener('DOMContentLoaded', function() {
-        // Register Nodes dynamically
+        // 1. Register Plugin Nodes (from Python registry)
+        try {
+            {{ dynamic_nodes_js | safe }}
+        } catch(e) {
+            console.error("Failed to load dynamic registry nodes:", e);
+        }
+
+        // 2. Register Nodes from .js files
         const allNodes = {{ nodes | tojson | safe }};
         allNodes.forEach(n => {
             try {
-                eval(n.content); // Assumes content uses LiteGraph.registerNodeType(...)
-            } catch(e) { console.error("Failed to load node:", n.filename, e); }
+                eval(n.content); 
+            } catch(e) { console.error("Failed to load node file:", n.filename, e); }
         });
 
         // Initialize Core

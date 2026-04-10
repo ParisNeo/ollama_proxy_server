@@ -58,13 +58,20 @@ class EventManager:
             self.subscribers.remove(queue)
 
     def emit(self, event: ProxyEvent):
+        import time
+        # Use time.time() if loop is not accessible (from thread)
+        try:
+            now = asyncio.get_event_loop().time()
+        except RuntimeError:
+            now = time.time()
+
         data = {
             "type": event.event_type,
             "id": event.request_id,
             "model": event.model,
             "server": event.server,
             "sender": event.sender,
-            "ts": event.timestamp or asyncio.get_event_loop().time(),
+            "ts": event.timestamp or now,
             "ttft": event.ttft,
             "tps": event.tps,
             "tokens": event.token_count,

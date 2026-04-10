@@ -1,7 +1,7 @@
 [tool.poetry]
 name = "lollms-hub"
-version = "9.0.0"
-description = "A secure, high-performance AI hub and load balancer for Ollama and vLLM."
+version = "10.0.0"
+description = "A secure, high-performance universal AI gateway and load balancer for Ollama, vLLM, and llama.cpp."
 authors = ["ParisNeo <parisneo_ai@gmail.com>"]
 license = "Apache-2.0"
 readme = "README.md"
@@ -33,6 +33,7 @@ cryptography = "^46.0.5"
 ascii_colors=">=0.11.21"
 xhtml2pdf=">=0.2.17"
 pipmaster=">=0.6.1"
+safe-store=">=0.2.1"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.2.2"

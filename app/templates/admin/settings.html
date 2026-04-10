@@ -256,6 +256,16 @@
         <div>
             <h2 class="card-header text-xl font-bold mb-4 pb-2">Hub Orchestration</h2>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div class="md:col-span-2 bg-indigo-500/5 border border-indigo-500/20 p-4 rounded-xl flex items-center justify-between">
+                    <div>
+                        <span class="block font-bold text-indigo-400">Workflow Debug Mode</span>
+                        <span class="text-xs text-gray-500">When enabled, every node execution in a cognitive graph will emit a live trace to the Live Flow dashboard.</span>
+                    </div>
+                    <label class="relative inline-flex items-center cursor-pointer">
+                        <input type="checkbox" name="enable_debug_mode" value="true" class="sr-only peer" {% if settings.enable_debug_mode %}checked{% endif %}>
+                        <div class="w-11 h-6 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
+                    </label>
+                </div>
                 <div>
                     <label for="admin_agent_name" class="block text-sm font-medium text-current">Management Agent</label>
                     <select name="admin_agent_name" id="admin_agent_name" class="mt-1 block w-full px-3 py-2 rounded-md shadow-sm">

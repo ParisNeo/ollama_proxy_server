@@ -594,6 +594,17 @@ async def run_all_migrations(engine: AsyncEngine) -> None:
                 "vision_model": "VARCHAR NOT NULL",
                 "is_active": "BOOLEAN DEFAULT 1 NOT NULL",
                 "created_at": "DATETIME",
+            },
+            "data_stores": {
+                "name": "VARCHAR NOT NULL",
+                "description": "VARCHAR",
+                "db_path": "VARCHAR NOT NULL",
+                "vectorizer_name": "VARCHAR DEFAULT 'tfidf'",
+                "vectorizer_config": "JSON",
+                "chunking_strategy": "VARCHAR DEFAULT 'recursive'",
+                "chunk_size": "INTEGER DEFAULT 512",
+                "chunk_overlap": "INTEGER DEFAULT 50",
+                "created_at": "DATETIME",
             }
         }
 

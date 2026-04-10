@@ -1,3 +1,15 @@
+# 🧊 LoLLMs Hub Fortress: The Universal AI Gateway
+
+LoLLMs Hub is a secure, high-performance orchestration layer that unifies disparate AI backends into a single, managed API. It serves as a fortress for your compute resources, providing enterprise-grade security, intelligent routing, and advanced workflow automation.
+
+## 🏢 Unified Multi-Backend Architecture
+
+LoLLMs Hub is designed for extreme scale and flexibility. It treats different inference engines as swappable compute nodes:
+*   **Ollama**: Native support for local model management and serving.
+*   **vLLM**: High-throughput serving for production-grade LLM clusters.
+*   **llama.cpp**: Lightweight, GGUF-based local serving via the internal Binary Hub.
+*   **OpenAI-Compatible APIs**: Seamlessly proxy and load-balance cloud providers.
+
 ## 🏢 Hierarchical Architecture (The Master Hub Pattern)
 
 LoLLMs Hub is designed for extreme scale. Because its API is 100% compatible with Ollama and OpenAI, you can chain multiple Hubs together.

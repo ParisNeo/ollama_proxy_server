@@ -84,6 +84,7 @@ class AppSettingsModel(BaseModel):
     google_search_api_key: Optional[str] = Field(default=None, description="SerpApi or Google Custom Search Key")
 
     # --- GATEWAY SETTINGS ---
+    enable_debug_mode: bool = False
     enable_ollama_api: bool = True
     enable_openai_api: bool = True
     openai_port: int = 8081 # Default secondary port

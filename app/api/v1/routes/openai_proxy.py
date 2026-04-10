@@ -1,6 +1,7 @@
 import json
 import secrets
 import logging
+import datetime
 from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, Depends, Request, HTTPException, status
 from fastapi.responses import StreamingResponse, JSONResponse
@@ -23,23 +24,53 @@ async def list_models(request: Request, db: AsyncSession = Depends(get_db), api_
     from app.crud.model_metadata_crud import get_all_metadata
     
     try:
-        ollama_models = await federate_models(request, api_key, db)
+        # Use the already enhanced federation logic from proxy.py
+        ollama_models_resp = await federate_models(request, api_key, db)
         all_meta = await get_all_metadata(db)
         meta_map = {m.model_name: m for m in all_meta}
         
         data = []
-        for m in ollama_models.get("models", []):
+        # Get the list of model dictionaries
+        model_list = ollama_models_resp.get("models", [])
+        
+        for m in model_list:
             m_name = m["name"]
             meta = meta_map.get(m_name)
             
+            # Determine "owned_by" based on model format
+            details = m.get("details", {})
+            fmt = details.get("format", "unknown")
+            owner = "lollms-hub"
+            if fmt in ("workflow", "agent", "router"):
+                owner = f"lollms-{fmt}"
+
             data.append({
                 "id": m_name,
                 "object": "model",
-                "created": 1686935002,
-                "owned_by": "lollms-hub",
-                "context_window": meta.max_context if meta else 4096,
-                "description": meta.description if meta else "Auto-discovered model."
+                "created": int(datetime.datetime.now().timestamp()),
+                "owned_by": owner,
+                "permission": [{
+                    "id": f"modelperm-{secrets.token_hex(12)}",
+                    "object": "model_permission",
+                    "created": int(datetime.datetime.now().timestamp()),
+                    "allow_create_engine": False,
+                    "allow_sampling": True,
+                    "allow_logprobs": True,
+                    "allow_search_indices": False,
+                    "allow_view": True,
+                    "allow_fine_tuning": False,
+                    "organization": "*",
+                    "group": None,
+                    "is_blocking": False
+                }],
+                "root": m_name,
+                "parent": None,
+                # Metadata for the app UI
+                "context_window": meta.max_context if meta else 32768,
+                "description": meta.description if meta else f"Virtual {fmt} model."
             })
+        
+        logger.info(f"OpenAI Model List: Exposing {len(data)} models (including virtual entities)")
         return {"object": "list", "data": data}
     except Exception as e:
         logger.error(f"OpenAI Model List Error: {e}")

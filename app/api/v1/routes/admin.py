@@ -909,7 +909,18 @@ async def admin_models_manager_page(
                 if m_name:
                     if m_name not in model_to_servers:
                         model_to_servers[m_name] = []
-                    model_to_servers[m_name].append(s.name)
+                    
+                    # Logic: Determine if this model is administratively allowed on this server
+                    # If allowed_models is None/Empty, all are allowed.
+                    is_allowed = True
+                    if s.allowed_models and len(s.allowed_models) > 0:
+                        is_allowed = m_name in s.allowed_models
+                        
+                    model_to_servers[m_name].append({
+                        "id": s.id,
+                        "name": s.name,
+                        "is_allowed": is_allowed
+                    })
 
     all_model_names = list(model_to_servers.keys())
     
@@ -947,6 +958,62 @@ async def admin_models_manager_page(
     context["metadata_list"] = filtered_metadata
     context["csrf_token"] = await get_csrf_token(request)
     return templates.TemplateResponse("admin/models_manager.html", context)
+
+@router.post("/models-manager/toggle-server", name="admin_toggle_model_server")
+async def admin_toggle_model_server(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    admin_user: User = Depends(require_admin_user),
+    csrf_protect: bool = Depends(validate_csrf_token_header)
+):
+    """
+    Toggles a specific model's allowed status on a specific server.
+    If deactivating and the whitelist is empty, we must first populate 
+    the whitelist with all current models except the target.
+    """
+    data = await request.json()
+    server_id = data.get("server_id")
+    model_name = data.get("model_name")
+    
+    if not server_id or not model_name:
+        return JSONResponse({"success": False, "error": "Missing server_id or model_name"}, status_code=400)
+        
+    server = await server_crud.get_server_by_id(db, server_id)
+    if not server:
+        return JSONResponse({"success": False, "error": "Server not found"}, status_code=404)
+
+    allowed = list(server.allowed_models) if server.allowed_models else []
+    
+    # 1. Determine the set of models physically on the server for initialization
+    physical_models = []
+    if server.available_models:
+        for m in server.available_models:
+            if isinstance(m, dict) and m.get("name"):
+                physical_models.append(m.get("name"))
+
+    # 2. Toggle Logic
+    if model_name in allowed:
+        # It's explicitly allowed -> Remove it to block it
+        allowed.remove(model_name)
+    else:
+        # It's not in the list.
+        if not allowed:
+            # Current state: Allow All.
+            # To block only this model, we allow everything else.
+            allowed = [m for m in physical_models if m != model_name]
+        else:
+            # Current state: Restricted whitelist.
+            # Add it to the whitelist to allow it.
+            allowed.append(model_name)
+            
+    # Clean up: If we now allow exactly all physical models, reset to None for "Allow All" behavior
+    if set(allowed) == set(physical_models):
+        allowed = None
+
+    server.allowed_models = allowed
+    await db.commit()
+    
+    return {"success": True, "new_state": (not allowed or model_name in allowed)}
 
 @router.get("/models-manager/refresh-context", name="admin_refresh_model_context")
 async def admin_refresh_model_context(
@@ -1366,6 +1433,7 @@ async def admin_settings_post(
         "google_search_api_key": form_data.get("google_search_api_key") or None,
         "instance_scan_start_port": safe_int("instance_scan_start_port", current_settings.instance_scan_start_port),
         "instance_scan_end_port": safe_int("instance_scan_end_port", current_settings.instance_scan_end_port),
+        "enable_debug_mode": form_data.get("enable_debug_mode") == "true",
         "enable_ollama_api": form_data.get("enable_ollama_api") == "true",
         "enable_openai_api": form_data.get("enable_openai_api") == "true",
         "openai_port": safe_int("openai_port", current_settings.openai_port),

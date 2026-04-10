@@ -102,7 +102,17 @@
                         <td class="px-4 py-4 whitespace-nowrap text-xs">
                             <div class="flex flex-wrap gap-1">
                                 {% for srv in meta.origin_servers %}
-                                <span class="px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/20">{{ srv }}</span>
+                                <button type="button" 
+                                        onclick="toggleModelOnServer(event, {{ srv.id }}, '{{ meta.model_name }}')"
+                                        class="server-badge px-2 py-1 rounded-full border transition-all hover:scale-105 active:scale-95
+                                               {% if srv.is_allowed %}
+                                               bg-emerald-500/10 text-emerald-400 border-emerald-500/30
+                                               {% else %}
+                                               bg-red-500/10 text-red-400 border-red-500/30
+                                               {% endif %}"
+                                        title="{{ 'Active: Click to Deactivate' if srv.is_allowed else 'Blocked: Click to Activate' }} on {{ srv.name }}">
+                                    {{ srv.name }}
+                                </button>
                                 {% endfor %}
                             </div>
                         </td>
@@ -206,6 +216,54 @@
         checkboxes.forEach(cb => {
             cb.checked = value;
         });
+    }
+
+    /**
+     * Toggles administrative allowed status of a model on a specific server via AJAX.
+     */
+    async function toggleModelOnServer(event, serverId, modelName) {
+        const btn = event.currentTarget;
+        const originalClasses = btn.className;
+        
+        // Visual feedback for processing
+        btn.classList.add('opacity-50', 'animate-pulse');
+        btn.disabled = true;
+
+        try {
+            const response = await fetch("{{ url_for('admin_toggle_model_server') }}", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "X-CSRF-Token": "{{ csrf_token }}"
+                },
+                body: JSON.stringify({
+                    server_id: serverId,
+                    model_name: modelName
+                })
+            });
+
+            const data = await response.json();
+            if (data.success) {
+                // Update styling based on new state
+                if (data.new_state) {
+                    btn.className = "server-badge px-2 py-1 rounded-full border transition-all hover:scale-105 active:scale-95 bg-emerald-500/10 text-emerald-400 border-emerald-500/30";
+                    btn.title = "Active: Click to Deactivate on " + btn.innerText;
+                } else {
+                    btn.className = "server-badge px-2 py-1 rounded-full border transition-all hover:scale-105 active:scale-95 bg-red-500/10 text-red-400 border-red-500/30";
+                    btn.title = "Blocked: Click to Activate on " + btn.innerText;
+                }
+            } else {
+                alert("Error: " + (data.error || "Toggle failed"));
+                btn.className = originalClasses;
+            }
+        } catch (e) {
+            console.error("Server toggle error:", e);
+            alert("Connection error.");
+            btn.className = originalClasses;
+        } finally {
+            btn.classList.remove('opacity-50', 'animate-pulse');
+            btn.disabled = false;
+        }
     }
 </script>
 {% endblock %}

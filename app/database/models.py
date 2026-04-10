@@ -211,6 +211,19 @@ class VirtualAgent(Base):
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
+class DataStore(Base):
+    __tablename__ = "data_stores"
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, unique=True, index=True, nullable=False)
+    description = Column(String, nullable=True)
+    db_path = Column(String, nullable=False)
+    vectorizer_name = Column(String, default="tfidf")
+    vectorizer_config = Column(JSON, nullable=True)
+    chunking_strategy = Column(String, default="recursive")
+    chunk_size = Column(Integer, default=512)
+    chunk_overlap = Column(Integer, default=50)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
 class Workflow(Base):
     __tablename__ = "workflows"
     id = Column(Integer, primary_key=True, index=True)
@@ -220,4 +233,17 @@ class Workflow(Base):
     # Type hints for the proxy (e.g. 'chain', 'ensemble', 'router')
     workflow_type = Column(String, default="custom")
     is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+class DataStore(Base):
+    __tablename__ = "datastores"
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, unique=True, index=True, nullable=False)
+    description = Column(String, nullable=True)
+    db_path = Column(String, nullable=False)
+    vectorizer_name = Column(String, nullable=False)
+    chunking_strategy = Column(String, default="recursive")
+    chunk_size = Column(Integer, default=512)
+    chunk_overlap = Column(Integer, default=50)
+    vectorizer_config = Column(JSON, nullable=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)

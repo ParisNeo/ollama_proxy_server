@@ -7,6 +7,7 @@ to initialize the database on startup.
 import logging
 import os
 import sys
+import secrets
 import bcrypt
 
 # --- Passlib/Bcrypt 4.0.0 Compatibility Patch ---
@@ -45,6 +46,7 @@ from app.api.v1.routes.conception import router as conception_router
 from app.api.v1.routes.importer import router as importer_router
 from app.api.v1.routes.skills import router as skills_router
 from app.api.v1.routes.personalities import router as personalities_router
+from app.api.v1.routes.datastores import router as datastores_router
 from app.database.session import AsyncSessionLocal, engine
 from app.database.base import Base
 from app.database.migrations import run_all_migrations
@@ -98,6 +100,30 @@ async def create_initial_admin_user() -> None:
             logger.info("Admin user created successfully.")
         except IntegrityError:
             logger.info("Admin user was created concurrently by another worker.")
+
+async def ensure_system_service_key(app: FastAPI) -> None:
+    """Ensures a 'store_manager' user and API key exist for internal Hub tasks."""
+    from app.crud import apikey_crud
+    async with AsyncSessionLocal() as db:
+        sys_user = await user_crud.get_user_by_username(db, username="store_manager")
+        if not sys_user:
+            logger.info("Creating internal 'store_manager' system user...")
+            sys_user = await user_crud.create_user(db, UserCreate(username="store_manager", password=secrets.token_urlsafe(32)))
+        
+        keys = await apikey_crud.get_api_keys_for_user(db, user_id=sys_user.id)
+        active_key = next((k for k in keys if k.is_active and not k.is_revoked), None)
+        
+        if not active_key:
+            logger.info("Generating new internal system key...")
+            plain, _ = await apikey_crud.create_api_key(db, user_id=sys_user.id, key_name="Internal RAG Service")
+            app.state.system_key = plain
+        else:
+            # Note: We can't recover the plain key for an existing DB entry, 
+            # so we generate a fresh one if the state is missing.
+            # In a real app, you might store this encrypted in settings.
+            # For now, we'll generate a fresh session-based system key if none is in state.
+            plain, _ = await apikey_crud.create_api_key(db, user_id=sys_user.id, key_name=f"Session Key {secrets.token_hex(4)}")
+            app.state.system_key = plain
 
 async def periodic_model_refresh(app: FastAPI) -> None:
     """
@@ -183,6 +209,7 @@ async def lifespan(app: FastAPI):
         app.state.settings = AppSettingsModel.model_validate(current_data)
 
     await create_initial_admin_user()
+    await ensure_system_service_key(app)
 
     # Patient HTTP client: Connect fast, but read/write can take forever
     # None for read/write means we wait infinitely for the model to finish.
@@ -241,7 +268,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title=settings.APP_NAME,
     version=settings.APP_VERSION,
-    description="A secure, high‑performance AI hub and load balancer for Ollama and vLLM.",
+    description="A secure, high‑performance universal AI gateway and load balancer for Ollama, vLLM, and llama.cpp.",
     redoc_url=None,
     openapi_url="/api/v1/openapi.json",
     lifespan=lifespan,
@@ -286,6 +313,7 @@ app.include_router(personalities_router, prefix="/admin", tags=["Admin UI"], inc
 app.include_router(personalities_router, prefix="/api/v1", tags=["Internal API"], include_in_schema=False)
 app.include_router(importer_router, prefix="/admin/api/importer", tags=["Importer API"], include_in_schema=False)
 app.include_router(conception_router, prefix="/admin", tags=["Admin UI"], include_in_schema=False)
+app.include_router(datastores_router, prefix="/admin", tags=["Admin UI"], include_in_schema=False)
 
 @app.get("/", include_in_schema=False, summary="Root")
 def read_root():

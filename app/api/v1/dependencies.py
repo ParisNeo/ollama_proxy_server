@@ -96,6 +96,13 @@ async def get_valid_api_key(
 
     api_key_str = auth_header.split(" ")[1]
 
+    # --- INTERNAL SYSTEM BYPASS ---
+    # Allow the Hub's own SECRET_KEY to authenticate internal service requests (e.g. RAG)
+    from app.core.config import settings
+    if api_key_str == settings.SECRET_KEY:
+        # Return a synthetic system key object
+        return APIKey(key_name="Internal System", key_prefix="sys_internal", is_active=True, is_revoked=False)
+
     try:
         prefix, secret = api_key_str.rsplit("_", 1)
     except ValueError:
