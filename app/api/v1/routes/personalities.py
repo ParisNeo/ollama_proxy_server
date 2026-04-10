@@ -54,7 +54,7 @@ async def api_build_personality(
     request: Request,
     prompt: str = Form(...),
     csrf_token: str = Form(...),
-    files: Optional[List[UploadFile]] = File(None),
+    files: List[UploadFile] = File(default=[]),
     db: AsyncSession = Depends(get_db),
     admin_user = Depends(require_admin_user)
 ):
@@ -68,12 +68,13 @@ async def api_build_personality(
     if not target_agent:
         return JSONResponse({"error": "No Management Agent set in Settings."}, status_code=503)
 
-    # Use 'received' only once at the start
     event_manager.emit(ProxyEvent("received", build_id, "Persona Builder", "Local", admin_user.username, error_message="Initializing Persona Architect..."))
 
     file_context = ""
-    if files and any(f.filename for f in files):
-        file_context = await kit.extract_local_file_content([f for f in files if f.filename])
+    # Filter out empty file objects sometimes sent by browsers
+    valid_files = [f for f in files if f and f.filename]
+    if valid_files:
+        file_context = await kit.extract_local_file_content(valid_files)
 
     try:
         # --- PHASE 1: GENERATE YAML METADATA ---

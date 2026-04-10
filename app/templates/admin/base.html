@@ -612,29 +612,31 @@
                 context: [],
                 prompt: "",
                 
-                reset: () => {
+                reset: function() {
                     this.context = [];
                     this.prompt = "";
                 },
 
-                handleFiles: (files, renderCallback) => {
-                    for (let f of files) window.Architect.context.push({ type: 'file', name: f.name, data: f });
+                handleFiles: function(files, renderCallback) {
+                    for (let f of files) this.context.push({ type: 'file', name: f.name, data: f });
                     renderCallback();
                 },
 
-                triggerWebImport: (promptId, callback) => {
-                    window.Architect.prompt = document.getElementById(promptId).value;
+                triggerWebImport: function(promptId, callback) {
+                    const el = document.getElementById(promptId);
+                    if (el) this.prompt = el.value;
+                    
                     window.openKnowledgeImporter((title, content) => {
-                        window.Architect.context.push({ type: 'web', name: title, content: content });
+                        this.context.push({ type: 'web', name: title, content: content });
                         callback(); // Re-open parent modal
                     });
                 },
 
-                renderPreviews: (containerId) => {
+                renderPreviews: function(containerId) {
                     const container = document.getElementById(containerId);
                     if (!container) return;
-                    container.innerHTML = window.Architect.context.length ? '' : '<span class="text-[9px] text-gray-700 italic py-1">No sources attached...</span>';
-                    window.Architect.context.forEach((item, index) => {
+                    container.innerHTML = this.context.length ? '' : '<span class="text-[9px] text-gray-700 italic py-1">No sources attached...</span>';
+                    this.context.forEach((item, index) => {
                         const div = document.createElement('div');
                         div.className = "flex items-center gap-2 text-[9px] bg-white/5 p-1 px-2 rounded-lg border border-white/10 text-white";
                         div.innerHTML = `<span>${item.type === 'web' ? '🌍' : '📄'}</span><span class="font-bold truncate max-w-[100px]">${item.name}</span><button onclick="window.Architect.removeSource(${index}, '${containerId}')" class="text-red-400 font-bold ml-1">&times;</button>`;
@@ -642,36 +644,69 @@
                     });
                 },
 
-                removeSource: (idx, containerId) => {
-                    window.Architect.context.splice(idx, 1);
-                    window.Architect.renderPreviews(containerId);
+                removeSource: function(idx, containerId) {
+                    this.context.splice(idx, 1);
+                    this.renderPreviews(containerId);
                 },
 
-                prepareFormData: (promptId) => {
+                prepareFormData: function(promptId) {
                     const formData = new FormData();
-                    let fullPrompt = document.getElementById(promptId).value;
+                    const el = document.getElementById(promptId);
+                    let fullPrompt = el ? el.value : "";
                     
-                    window.Architect.context.forEach(it => {
+                    this.context.forEach(it => {
                         if (it.type === 'file') formData.append("files", it.data);
                         else fullPrompt += `\n\nSOURCE ${it.name}:\n${it.content}`;
                     });
                     
-                    formData.append("prompt", fullPrompt);
+                    formData.append("prompt", fullPrompt || "");
                     return formData;
                 },
 
-                executeBuild: async (promptId, endpoint, statusBoxId, btnId, successCallback) => {
+                executeBuild: async function(promptId, endpoint, statusBoxId, btnId, successCallback) {
                     const btn = document.getElementById(btnId);
                     const statusBox = document.getElementById(statusBoxId);
+                    const promptEl = document.getElementById(promptId);
                     
+                    if (!btn || !statusBox || !promptEl) {
+                        console.error("Architect Error: DOM elements missing.", {btn, statusBox, promptEl});
+                        alert("Architect Error: UI components not found. Please refresh.");
+                        return;
+                    }
+
+                    if (!promptEl.value.trim()) {
+                        alert("Please enter a description or prompt for the AI Architect.");
+                        return;
+                    }
+
                     btn.disabled = true; 
                     const originalText = btn.innerText;
                     btn.innerText = "PROCESSING...";
                     statusBox.classList.remove('hidden');
-                    statusBox.innerHTML = '<div>[System] Establishing link to Architect...</div>';
+                    statusBox.innerHTML = '<div>[System] Handshaking with Architect...</div>';
 
-                    const formData = window.Architect.prepareFormData(promptId);
-                    formData.append("csrf_token", document.querySelector('input[name="csrf_token"]').value);
+                    const formData = this.prepareFormData(promptId);
+                    
+                    // Defensively retrieve CSRF token from anywhere in the document
+                    let csrfToken = "";
+                    const csrfEl = document.querySelector('input[name="csrf_token"]');
+                    if (csrfEl) {
+                        csrfToken = csrfEl.value;
+                    } else {
+                        // Fallback: search for any 64-char hex string in hidden inputs (last resort)
+                        const allHidden = document.querySelectorAll('input[type="hidden"]');
+                        for(let h of allHidden) if(h.value.length === 64) { csrfToken = h.value; break; }
+                    }
+
+                    if (!csrfToken) {
+                        console.error("Architect: Critical Security Failure. CSRF token missing.");
+                        alert("Security error: Session token missing. Please reload the page.");
+                        btn.disabled = false;
+                        btn.innerText = originalText;
+                        return;
+                    }
+
+                    formData.append("csrf_token", csrfToken);
 
                     try {
                         const resp = await fetch(endpoint, { method: 'POST', body: formData });
@@ -679,7 +714,11 @@
                         if (data.success) {
                             successCallback(data);
                             document.getElementById('modal-close-btn').click();
-                        } else alert(data.error || "Build failed.");
+                        } else {
+                            const errMsg = data.error || "Generation failed.";
+                            statusBox.innerHTML += `<div class="text-red-400 font-bold">[Error] ${errMsg}</div>`;
+                            alert(errMsg);
+                        }
                     } catch(e) { 
                         console.error(e);
                         alert("Connection error during generation."); 

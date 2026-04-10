@@ -3,6 +3,7 @@
 {% block header_title %}Personalities Studio{% endblock %}
 
 {% block content %}
+<input type="hidden" name="csrf_token" value="{{ csrf_token }}">
 <div class="space-y-6 h-[80vh] flex flex-col">
     <!-- Header Controls -->
     <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-black/20 p-4 rounded-xl border border-white/10 flex-shrink-0">
@@ -182,12 +183,14 @@
         if (!isEditMode) displayPersonality(document.getElementById('p-textarea').value);
     }
 
-    // --- AI Persona Builder Logic (Powered by Architect Module) ---
+    // --- AI Persona Builder Logic (Powered by shared Architect module) ---
     window.buildPersonaWithAI = () => {
         const template = document.getElementById('ai-persona-builder-template');
         window.showModal("Build Personality with AI", template.innerHTML);
         
-        document.getElementById('build-persona-prompt').value = window.Architect.prompt;
+        const promptEl = document.getElementById('build-persona-prompt');
+        if (promptEl) promptEl.value = window.Architect.prompt;
+        
         document.getElementById('m-img-input').onchange = (e) => window.Architect.handleFiles(e.target.files, () => window.Architect.renderPreviews('m-previews'));
         document.getElementById('m-doc-input').onchange = (e) => window.Architect.handleFiles(e.target.files, () => window.Architect.renderPreviews('m-previews'));
         

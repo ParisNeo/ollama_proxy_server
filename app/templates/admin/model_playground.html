@@ -998,12 +998,7 @@ SUPPORTED ANNOTATION SCHEMAS:
             actionsDiv.innerHTML = actionsHTML;
 
             if (role === 'assistant') {
-                // Auto-wrap detected HTML to prevent rendering break
-                let displayContent = content;
-                if (typeof content === 'string' && /<[a-z][\s\S]*>/i.test(content)) {
-                    displayContent = "```html\n" + content + "\n```";
-                }
-                renderBotMessage(contentDiv, displayContent, msg.annotated_image_url);
+                renderBotMessage(contentDiv, content, msg.annotated_image_url);
                 if (stats && stats.ttft !== null && stats.tps !== null) {
                     statsDiv.innerHTML = `<span>TTFT: ${stats.ttft}ms</span> | <span>Speed: ${stats.tps.toFixed(2)} t/s</span>`;
                     statsDiv.classList.remove('hidden');
@@ -1356,7 +1351,9 @@ SUPPORTED ANNOTATION SCHEMAS:
         
         let rawTxt = contentDiv.dataset.rawContent || '';
         textarea.value = rawTxt;
-        textarea.rows = Math.min(20, Math.max(3, (rawTxt.match(/\n/g) || []).length + 2));
+        // Automatically calculate rows based on content
+        const lineCount = (rawTxt.match(/\n/g) || []).length + 1;
+        textarea.rows = Math.min(25, Math.max(5, lineCount + 2));
         
         const buttonGroup = document.createElement('div');
         buttonGroup.className = 'flex justify-end gap-3 mt-3';
@@ -1392,13 +1389,25 @@ SUPPORTED ANNOTATION SCHEMAS:
     
     function saveEdit(messageIndex, newContent) {
         const oldMessage = messages[messageIndex];
+        
+        // 1. Update the in-memory array
         if (Array.isArray(oldMessage.content)) {
             const textPart = oldMessage.content.find(p => p.type === 'text');
-            if (textPart) textPart.text = newContent; else oldMessage.content.unshift({type: 'text', text: newContent});
+            if (textPart) {
+                textPart.text = newContent;
+            } else {
+                oldMessage.content.unshift({type: 'text', text: newContent});
+            }
         } else {
             oldMessage.content = newContent;
         }
-        updateCurrentChat();
+
+        // 2. CRITICAL: Persist to LocalStorage
+        if (window.updateCurrentChat) {
+            window.updateCurrentChat();
+        }
+
+        // 3. Refresh UI
         renderChat();
     }
     

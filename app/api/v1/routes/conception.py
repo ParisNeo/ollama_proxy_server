@@ -26,8 +26,12 @@ def load_nodes():
 @router.get("/conception", response_class=HTMLResponse, name="admin_conception")
 async def conception_page(request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
     context = get_template_context(request)
-    context["available_models"] = await server_crud.get_all_available_model_names(db)
-    # Include existing workflows, agents, and routers as valid node targets
+    
+    # Mirror Playground grouping for consistent model selection (Workflows, Agents, Pools, etc.)
+    model_groups = await server_crud.get_all_models_grouped_by_server(db)
+    context["model_groups"] = model_groups or {}
+    
+    # We still keep logic_blocks for other UI elements if needed
     from app.database.models import VirtualAgent, SmartRouter, EnsembleOrchestrator
     res_a = await db.execute(select(VirtualAgent.name))
     res_r = await db.execute(select(SmartRouter.name))

@@ -332,8 +332,26 @@
 
 <script>
     // --- DATA INJECTION FROM SERVER ---
-    const available_models = {{ (available_models or []) | tojson | safe }};
+    const model_groups = {{ (model_groups or {}) | tojson | safe }};
     const logic_blocks = {{ (logic_blocks or []) | tojson | safe }};
+
+    // Flatten model_groups into a prioritized list for LiteGraph combos
+    // Order: Proxy Features first (Workflows, Agents, Pools), then Server Models
+    let available_models = ["auto"];
+    
+    if (model_groups["Proxy Features"]) {
+        model_groups["Proxy Features"].forEach(m => {
+            if (m !== "auto" && !available_models.includes(m)) available_models.push(m);
+        });
+    }
+
+    Object.keys(model_groups).forEach(server => {
+        if (server !== "Proxy Features") {
+            model_groups[server].forEach(m => {
+                if (!available_models.includes(m)) available_models.push(m);
+            });
+        }
+    });
 
     // --- GLOBAL SCOPE ---
     var graph = null;
@@ -566,10 +584,10 @@
         
         this.properties = { model: "auto" };
         
-        this.widget = this.addWidget("combo", "Model", this.properties.model, (v) => { 
+        this.mWidget = this.addWidget("combo", "Model", this.properties.model, (v) => { 
             this.properties.model = v; 
             pushHistoryState();
-        }, { values:["auto"].concat(available_models) });
+        }, { values: available_models });
 
         this.addWidget("button", "+ Add Tool", null, () => {
             this.addInput("Tool " + (this.inputs.length - 2), "tool,array");
@@ -585,6 +603,9 @@
         // Ensure initial size calculation
         this.size = this.computeSize();
     }
+    NodeLLMChat.prototype.onConfigure = function() {
+        if(this.mWidget) this.mWidget.value = this.properties.model;
+    };
     LiteGraph.registerNodeType("hub/llm_chat", NodeLLMChat);
 
     // 1.1 LLM Instruct Block
@@ -595,7 +616,10 @@
         this.addOutput("Response", "string");
         
         this.properties = { model: "auto" };
-        this.addWidget("combo", "Model", this.properties.model, (v) => { this.properties.model = v; }, { values: ["auto"].concat(available_models) });
+        this.mWidget = this.addWidget("combo", "Model", this.properties.model, (v) => { 
+            this.properties.model = v; 
+            pushHistoryState();
+        }, { values: ["auto"].concat(available_models) });
 
         this.addWidget("button", "+ Add Tool", null, () => {
             this.addInput("Tool " + (this.inputs.length - 2), "tool,array");
@@ -614,6 +638,9 @@
         this.bgcolor = "#111827";
         this.size =[300, 120];
     }
+    NodeLLMInstruct.prototype.onConfigure = function() {
+        if(this.mWidget) this.mWidget.value = this.properties.model;
+    };
     LiteGraph.registerNodeType("hub/llm_instruct", NodeLLMInstruct);
 
     // 1.8 Enhanced Auto Router (Dynamic & Semantic)
@@ -825,13 +852,19 @@
     function NodeSkill() {
         this.addOutput("Skill", "skill");
         this.properties = { name: "" };
-        this.addWidget("combo", "Skill", this.properties.name, (v) => { this.properties.name = v; }, { values: GLOBAL_SKILLS.map(s => s.name) });
+        this.sWidget = this.addWidget("combo", "Skill", this.properties.name, (v) => { 
+            this.properties.name = v; 
+            pushHistoryState();
+        }, { values: GLOBAL_SKILLS.map(s => s.name) });
         this.addWidget("button", "ℹ️ Help", null, () => { showNodeHelp("hub/skill"); });
         this.title = "📜 SKILL";
         this.color = "#7c3aed";
         this.bgcolor = "#2e1065";
         setupNodeResizing(this);
     }
+    NodeSkill.prototype.onConfigure = function() {
+        if(this.sWidget) this.sWidget.value = this.properties.name;
+    };
     LiteGraph.registerNodeType("hub/skill", NodeSkill);
 
     // 1.5 Personality Node
@@ -839,11 +872,20 @@
         this.addOutput("System Prompt", "string");
         this.addOutput("MCPs", "array");
         this.addOutput("Tools", "array");
-        this.properties = { name: "" };
+        this.addOutput("Settings", "object");
+
+        this.properties = { name: "", temperature: 0.7 };
+        
         this.pWidget = this.addWidget("combo", "Personality", this.properties.name, (v) => { 
             this.properties.name = v;
             pushHistoryState(); 
         }, { values: GLOBAL_PERSONALITIES.map(p => p.name) });
+
+        this.tWidget = this.addWidget("number", "Temperature", this.properties.temperature, (v) => {
+            this.properties.temperature = v;
+            pushHistoryState();
+        }, { min: 0, max: 2, step: 0.1 });
+
         this.addWidget("button", "ℹ️ Help", null, () => { showNodeHelp("hub/special_personality"); });
         this.title = "🎭 PERSONALITY";
         this.color = "#86198f";
@@ -854,6 +896,7 @@
     }
     NodePersonality.prototype.onConfigure = function(config) {
         if(this.pWidget) this.pWidget.value = this.properties.name;
+        if(this.tWidget) this.tWidget.value = this.properties.temperature;
     };
     LiteGraph.registerNodeType("hub/personality", NodePersonality);
 
@@ -913,7 +956,7 @@
             this.size = this.computeSize();
             this.setDirtyCanvas(true, true);
             pushHistoryState();
-        }, { values: {{ available_models|tojson }} });
+        }, { values: available_models });
         
         this.addWidget("button", "ℹ️ Help", null, () => { showNodeHelp("hub/ensemble"); });
         this.color = "#701a75"; // fuchsia-900
@@ -924,22 +967,75 @@
     NodeEnsemble.desc = "Parallel execution and synthesis";
     LiteGraph.registerNodeType("hub/ensemble", NodeEnsemble);
 
-    // 1.9 Model Selector Node
+    // 1.9 Model Selector Node (Cognitive Bundle)
     function NodeModel() {
         this.addOutput("Expert", "expert");
-        this.properties = { model: "auto" };
+        
+        this.properties = { 
+            model: "auto",
+            persona: "",
+            skills: [] // Array of selected skill names
+        };
+        
+        // 1. Model Dropdown
         this.mWidget = this.addWidget("combo", "Model", this.properties.model, (v) => { 
             this.properties.model = v;
             pushHistoryState(); 
-        }, { values: ["auto"].concat(available_models) });
+        }, { values: available_models });
+
+        // 2. Persona Dropdown
+        const personaNames = [""].concat(GLOBAL_PERSONALITIES.map(p => p.name));
+        this.pWidget = this.addWidget("combo", "Persona", this.properties.persona, (v) => {
+            this.properties.persona = v;
+            pushHistoryState();
+        }, { values: personaNames });
+
+        // 3. Dynamic Skill Dropdowns
+        this.addWidget("button", "+ Add Skill Slot", null, () => {
+             const idx = this.properties.skills.length;
+             this.properties.skills.push("");
+             this.addSkillWidget(idx);
+             this.size = this.computeSize();
+             this.setDirtyCanvas(true, true);
+        });
+
         this.title = "🧠 MODEL SELECTOR";
         this.color = "#4338ca";
         this.bgcolor = "#1e1b4b";
-        this.size = [260, 60];
+        this.size = [280, 100];
         this.serialize_widgets = true;
     }
+    NodeModel.prototype.addSkillWidget = function(index) {
+        const skillNames = [""].concat(GLOBAL_SKILLS.map(s => s.name));
+        this.addWidget("combo", "Skill " + (index + 1), this.properties.skills[index], (v) => {
+            this.properties.skills[index] = v;
+            pushHistoryState();
+        }, { values: skillNames });
+    };
+
     NodeModel.prototype.onConfigure = function(config) {
-        if(this.mWidget) this.mWidget.value = this.properties.model;
+        // Redraw widgets from properties
+        this.widgets = []; // Clear current UI widgets
+        
+        // Re-add static widgets
+        this.mWidget = this.addWidget("combo", "Model", this.properties.model, (v) => { this.properties.model = v; pushHistoryState(); }, { values: available_models });
+        const pNames = [""].concat(GLOBAL_PERSONALITIES.map(p => p.name));
+        this.pWidget = this.addWidget("combo", "Persona", this.properties.persona, (v) => { this.properties.persona = v; pushHistoryState(); }, { values: pNames });
+        
+        this.addWidget("button", "+ Add Skill Slot", null, () => {
+             const idx = this.properties.skills.length;
+             this.properties.skills.push("");
+             this.addSkillWidget(idx);
+             this.size = this.computeSize();
+             this.setDirtyCanvas(true, true);
+        });
+
+        // Re-add dynamic skill widgets
+        if (this.properties.skills) {
+            this.properties.skills.forEach((s, i) => this.addSkillWidget(i));
+        }
+
+        this.size = this.computeSize();
     };
     LiteGraph.registerNodeType("hub/model", NodeModel);
 
@@ -949,6 +1045,7 @@
         this.addInput("User Context", "messages");
         this.addInput("Expert 1", "expert,string");
         this.addInput("Expert 2", "expert,string");
+        this.addInput("Settings", "object");
         this.addOutput("Synthesized Output", "string");
         
         this.properties = { 
@@ -961,7 +1058,7 @@
         this.orchWidget = this.addWidget("combo", "Orchestrator", this.properties.orchestrator, (v) => { 
             this.properties.orchestrator = v; 
             pushHistoryState();
-        }, { values: ["auto"].concat(available_models) });
+        }, { values: available_models });
 
         this.monologueWidget = this.addWidget("toggle", "Show Monologue", this.properties.show_monologue, (v) => {
             this.properties.show_monologue = v;
@@ -1021,9 +1118,9 @@
     function NodeVision() {
         this.addInput("Input", "string");
         this.addOutput("Result", "string");
-        this.properties = { vlm: "", text: "" };
-        this.vWidget = this.addWidget("combo", "VLM Expert", this.properties.vlm, (v) => { this.properties.vlm = v; }, { values: {{ available_models|tojson }} });
-        this.tWidget = this.addWidget("combo", "Text Target", this.properties.text, (v) => { this.properties.text = v; }, { values: {{ available_models|tojson }} });
+        this.properties = { vlm: "auto", text: "auto" };
+        this.vWidget = this.addWidget("combo", "VLM Expert", this.properties.vlm, (v) => { this.properties.vlm = v; pushHistoryState(); }, { values: available_models });
+        this.tWidget = this.addWidget("combo", "Text Target", this.properties.text, (v) => { this.properties.text = v; pushHistoryState(); }, { values: available_models });
         this.addWidget("button", "ℹ️ Help", null, () => { showNodeHelp("hub/vision"); });
         this.title = "VISION ENABLED";
         this.serialize_widgets = true;
@@ -1035,6 +1132,88 @@
         if(this.tWidget) this.tWidget.value = this.properties.text;
     };
     LiteGraph.registerNodeType("hub/vision", NodeVision);
+
+    // 1.11 MCP Tool Node
+    function NodeMCP() {
+        this.addOutput("Tool", "tool");
+        this.properties = {
+            name: "mcp-server",
+            type: "sse",
+            url: "http://localhost:3000",
+            icon: "🛠️"
+        };
+        this.addWidget("text", "Name", this.properties.name, (v) => { this.properties.name = v; pushHistoryState(); });
+        this.addWidget("combo", "Type", this.properties.type, (v) => { this.properties.type = v; pushHistoryState(); }, { values: ["sse", "stdio"] });
+        this.addWidget("text", "URL/Cmd", this.properties.url, (v) => { this.properties.url = v; pushHistoryState(); });
+        this.title = "🔌 MCP TOOL";
+        this.color = "#0ea5e9";
+        this.bgcolor = "#0c4a6e";
+        this.serialize_widgets = true;
+    }
+    NodeMCP.prototype.onConfigure = function() {
+        this.widgets[0].value = this.properties.name;
+        this.widgets[1].value = this.properties.type;
+        this.widgets[2].value = this.properties.url;
+    };
+    LiteGraph.registerNodeType("hub/mcp", NodeMCP);
+
+    // 1.12 Agentic Reasoner Node
+    function NodeAgent() {
+        this.addInput("Messages", "messages");
+        this.addInput("Settings", "object");
+        this.addOutput("Content", "string");
+        
+        this.properties = {
+            model: "auto",
+            system_prompt: "You are an autonomous agent. Use your tools to fulfill the user request. Think before you act.",
+            max_loops: 5
+        };
+
+        this.mWidget = this.addWidget("combo", "Model", this.properties.model, (v) => { this.properties.model = v; pushHistoryState(); }, { values: ["auto"].concat(available_models) });
+        this.addWidget("number", "Max Loops", this.properties.max_loops, (v) => { this.properties.max_loops = v; pushHistoryState(); }, { min: 1, max: 20 });
+        
+        this.addWidget("button", "Edit Agent Persona", null, () => {
+            const val = prompt("Agent Instructions:", this.properties.system_prompt);
+            if (val !== null) { this.properties.system_prompt = val; pushHistoryState(); }
+        });
+
+        this.addWidget("button", "+ Add Tool Slot", null, () => {
+             this.addInput("Tool " + (this.inputs.length - 1), "tool");
+             this.size = this.computeSize();
+             this.setDirtyCanvas(true, true);
+        });
+
+        this.title = "🤖 AGENT REASONER";
+        this.color = "#f43f5e"; // rose-500
+        this.bgcolor = "#881337"; // rose-900
+        this.size = [300, 180];
+        this.serialize_widgets = true;
+    }
+    NodeAgent.prototype.onConfigure = function() {
+        if(this.mWidget) this.mWidget.value = this.properties.model;
+    };
+    LiteGraph.registerNodeType("hub/agent", NodeAgent);
+
+    // 1.10 Settings Modifier
+    function NodeSettingsModifier() {
+        this.addInput("In Settings", "object");
+        this.addOutput("Out Settings", "object");
+        this.properties = { temperature: 0.7 };
+        this.tWidget = this.addWidget("number", "Temp Override", this.properties.temperature, (v) => {
+            this.properties.temperature = v;
+            pushHistoryState();
+        }, { min: 0, max: 2, step: 0.1 });
+        
+        this.title = "⚙️ SETTINGS MODIFIER";
+        this.color = "#4b5563";
+        this.bgcolor = "#1f2937";
+        this.size = [240, 60];
+        this.serialize_widgets = true;
+    }
+    NodeSettingsModifier.prototype.onConfigure = function() {
+        if(this.tWidget) this.tWidget.value = this.properties.temperature;
+    }
+    LiteGraph.registerNodeType("hub/settings_modifier", NodeSettingsModifier);
 
     function NodeOutput() {
         this.addInput("Content", "string");

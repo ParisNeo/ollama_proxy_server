@@ -2523,7 +2523,8 @@ async def analyze_logs_ai(request: Request, db: AsyncSession = Depends(get_db), 
 
     try:
         logger.info(f"AI Log Analysis started using agent: {target_agent}")
-        real_model, final_msgs = await _resolve_target(db, target_agent, payload["messages"])
+        req_id = f"sys_analysis_{secrets.token_hex(4)}"
+        real_model, final_msgs = await _resolve_target(db, target_agent, payload["messages"], request_id=req_id, sender=admin_user.username)
         servers = await server_crud.get_servers_with_model(db, real_model)
         
         if not servers: 
@@ -2535,7 +2536,7 @@ async def analyze_logs_ai(request: Request, db: AsyncSession = Depends(get_db), 
             request, "chat", servers, 
             json.dumps({"model": real_model, "messages": final_msgs, "stream": False}).encode(), 
             is_subrequest=True,
-            request_id=f"sys_analysis_{secrets.token_hex(4)}",
+            request_id=req_id,
             model=real_model,
             sender=admin_user.username
         )
@@ -2642,7 +2643,8 @@ async def admin_enhance_prompt(
         # Resolve the agent to a physical model
         from app.api.v1.routes.proxy import _resolve_target, _reverse_proxy
         
-        resolution = await _resolve_target(db, target_agent, payload["messages"])
+        req_id = f"sys_enhance_{secrets.token_hex(4)}"
+        resolution = await _resolve_target(db, target_agent, payload["messages"], request_id=req_id, sender=admin_user.username)
         if not resolution or not isinstance(resolution, tuple):
             return JSONResponse({"error": f"Failed to resolve management agent '{target_agent}'"}, status_code=500)
             
@@ -2660,7 +2662,7 @@ async def admin_enhance_prompt(
         # We'll use a more direct approach since we are inside the app:
         from app.api.v1.routes.proxy import _reverse_proxy, _resolve_target, _async_log_usage
         
-        real_model, final_msgs = await _resolve_target(db, target_agent, payload["messages"])
+        real_model, final_msgs = resolution # Use already resolved model/messages
         servers = await server_crud.get_servers_with_model(db, real_model)
         
         if not servers:
@@ -2670,7 +2672,7 @@ async def admin_enhance_prompt(
             request, "chat", servers, 
             json.dumps({"model": real_model, "messages": final_msgs, "stream": False}).encode(),
             is_subrequest=True,
-            request_id=f"sys_enhance_{secrets.token_hex(4)}",
+            request_id=req_id,
             model=real_model,
             sender=admin_user.username
         )
