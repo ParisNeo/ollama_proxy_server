@@ -881,8 +881,7 @@ async def get_model_details_from_server(http_client: httpx.AsyncClient, server: 
             except: pass
 
             # Standard vLLM/OpenAI doesn't expose context window easily. 
-            # We check the model ID for common suffixes (e.g., -128k)
-            import re
+            # We check the model ID for common suffixes (e.g., -128k)re
             match = re.search(r'-(\d+)[kK]', model_name)
             if match:
                 return {"context_length": int(match.group(1)) * 1024}

@@ -5,39 +5,56 @@
 {% block content %}
 <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
 <div class="space-y-6 h-[80vh] flex flex-col">
+    <!-- Header Controls -->
     <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-black/20 p-4 rounded-xl border border-white/10 flex-shrink-0">
         <div class="flex gap-2 items-center">
-            <button onclick="createNewTool()" class="bg-sky-600 hover:bg-sky-500 px-6 py-2 rounded font-black text-xs uppercase tracking-widest shadow-[0_0_15px_rgba(14,165,233,0.4)] transition-all">+ New Toolset</button>
+            <button onclick="createNewTool()" class="bg-sky-600 hover:bg-sky-500 px-6 py-2 rounded font-black text-xs uppercase tracking-widest shadow-[0_0_15px_rgba(14,165,233,0.4)] transition-all">
+                + New Toolset
+            </button>
             <div class="h-6 w-px bg-white/10 mx-2"></div>
-            <button onclick="buildToolWithAI()" class="bg-purple-600 hover:bg-purple-500 px-6 py-2 rounded font-black text-xs uppercase tracking-widest transition-colors">✨ Build with AI</button>
+            <button onclick="buildToolWithAI()" class="bg-purple-600 hover:bg-purple-500 px-6 py-2 rounded font-black text-xs uppercase tracking-widest transition-colors">
+                ✨ Build with AI
+            </button>
         </div>
     </div>
 
-    <div class="flex-grow grid grid-cols-1 lg:grid-cols-4 gap-6 min-h-0">
+    <!-- Main Workspace -->
+    <div class="flex-grow grid grid-cols-1 lg:grid-cols-4 gap-6 min-h-0 h-full">
+        <!-- Sidebar: Tool List -->
         <div class="lg:col-span-1 flex flex-col gap-4 min-h-0 h-full">
             <div class="card-style bg-black/40 border-white/5 flex flex-col h-full p-4 overflow-hidden">
                 <div class="flex justify-between items-center mb-4 flex-shrink-0">
-                    <h3 class="text-[10px] font-black text-gray-500 uppercase tracking-widest">Active Toolsets</h3>
+                    <h3 class="text-[10px] font-black text-gray-500 uppercase tracking-widest flex items-center gap-2">
+                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+                        Local Toolsets
+                    </h3>
                     <button onclick="loadTools()" class="text-[9px] text-sky-400 hover:text-white uppercase font-bold">Refresh</button>
                 </div>
                 <div id="tools-list" class="space-y-1 overflow-y-auto custom-scrollbar flex-grow pr-2"></div>
             </div>
         </div>
 
+        <!-- Main Editor View -->
         <div class="lg:col-span-3 flex flex-col h-full min-h-0">
             <div id="editor-container" class="hidden card-style border-sky-500/30 bg-[#0a0a0f] flex flex-col h-full p-0 overflow-hidden">
                 <div class="flex justify-between items-center p-4 border-b border-white/10 flex-shrink-0 bg-black/20">
-                    <h3 class="text-white font-bold text-sm tracking-tight" id="current-filename"></h3>
+                    <div class="flex items-center gap-3">
+                        <h3 class="text-white font-bold text-sm tracking-tight" id="current-filename"></h3>
+                        <span id="t-lib-name" class="text-[10px] bg-sky-500/20 text-sky-300 px-2 py-0.5 rounded font-black uppercase"></span>
+                    </div>
                     <div class="flex items-center gap-2">
                         <button id="btn-save" onclick="saveCurrentTool()" class="text-[10px] font-black bg-sky-600 hover:bg-sky-500 px-4 py-1.5 rounded text-white uppercase tracking-widest">Save & Deploy</button>
                         <button onclick="deleteCurrentTool()" class="text-[10px] font-bold text-red-400 hover:text-red-300 uppercase">Delete</button>
                     </div>
                 </div>
-                <div id="code-editor-container" class="flex-grow relative"></div>
+                <!-- Unified flex container for Editor -->
+                <div class="flex-grow relative overflow-hidden bg-[#030305]">
+                    <div id="code-editor-container" class="absolute inset-0"></div>
+                </div>
             </div>
             <div id="empty-state" class="card-style border-dashed border-white/10 flex flex-col items-center justify-center h-full text-center p-8">
-                <h3 class="text-xl font-bold text-white mb-2">Tools Library</h3>
-                <p class="text-sm text-gray-400">Select a tool library to edit logic or use the AI generator.</p>
+                <h3 class="text-xl font-bold text-white mb-2">Tools Studio</h3>
+                <p class="text-sm text-gray-400 max-w-md">Select a library from the sidebar to modify Python tool logic, or use the AI builder to scaffold new capabilities.</p>
             </div>
         </div>
     </div>
@@ -46,7 +63,23 @@
 <template id="ai-tool-builder-template">
     <div class="space-y-4">
         <textarea id="build-tool-prompt" class="w-full h-40 p-3 bg-black/40 border border-white/10 rounded-xl text-sm text-white focus:border-indigo-500 outline-none" placeholder="e.g. Create a tool library to interact with Spotify to search tracks..."></textarea>
-        {% include 'partials/_file_upload.html' %}
+        
+        <div class="flex flex-col gap-2">
+            <span class="text-[10px] font-black text-gray-500 uppercase tracking-widest px-1">Source Context</span>
+            <div id="m-previews" class="flex flex-wrap gap-2 min-h-[32px] p-2 bg-black/20 border border-white/5 rounded-lg">
+                <span class="text-[9px] text-gray-700 italic py-1">No sources attached...</span>
+            </div>
+        </div>
+
+        <div class="flex gap-2">
+            <button type="button" onclick="document.getElementById('m-img-input').click()" class="flex items-center gap-2 text-[10px] font-bold py-2 px-3 bg-white/5 rounded-lg border border-white/10 hover:bg-white/10 transition-colors">📷 Images</button>
+            <button type="button" onclick="document.getElementById('m-doc-input').click()" class="flex items-center gap-2 text-[10px] font-bold py-2 px-3 bg-white/5 rounded-lg border border-white/10 hover:bg-white/10 transition-colors">📄 Docs</button>
+            <button type="button" onclick="window.triggerToolWebImport()" class="flex items-center gap-2 text-[10px] font-bold py-2 px-3 bg-indigo-600/20 text-indigo-300 rounded-lg border border-indigo-500/30 hover:bg-indigo-600/30 transition-colors">🌍 Web Import</button>
+        </div>
+        
+        <input type="file" id="m-img-input" class="hidden" multiple accept="image/*">
+        <input type="file" id="m-doc-input" class="hidden" multiple accept=".txt,.md,.pdf,.csv">
+
         <div id="build-tool-status" class="hidden bg-black/60 border border-white/10 rounded-lg p-3 h-24 overflow-y-auto font-mono text-[10px] text-gray-400 space-y-1"></div>
         <button onclick="window.executeToolBuild()" id="tool-build-run-btn" class="w-full py-3 bg-indigo-600 hover:bg-indigo-500 rounded-xl font-black text-xs uppercase tracking-widest transition-all">Generate Implementation</button>
     </div>
@@ -68,8 +101,11 @@ document.addEventListener('DOMContentLoaded', () => {
         mode: 'python',
         theme: 'monokai',
         lineNumbers: true,
-        lineWrapping: true
+        lineWrapping: true,
+        viewportMargin: Infinity // Helps with internal scroll calculation
     });
+    
+    // Proper sizing for CodeMirror in absolute container
     editor.setSize("100%", "100%");
 
     const sse = new EventSource("{{ url_for('sse_events') }}");
@@ -89,14 +125,29 @@ document.addEventListener('DOMContentLoaded', () => {
 async function loadTools() {
     const resp = await fetch("{{ url_for('api_get_tools') }}");
     allTools = await resp.json();
-    document.getElementById('tools-list').innerHTML = allTools.map(t => `
-        <button onclick="openTool('${t.filename}')" class="w-full text-left p-3 rounded-lg hover:bg-white/5 border-b border-white/5 flex items-center gap-3 ${currentFile === t.filename ? 'bg-sky-500/10 border-l-2 border-l-sky-500' : ''}">
-            <span class="text-lg">${t.icon}</span>
-            <div class="min-w-0">
-                <div class="text-xs font-bold text-white truncate">${t.name}</div>
-                <div class="text-[9px] text-gray-500 truncate">${t.description}</div>
+    renderToolsList();
+}
+
+function renderToolsList() {
+    const listEl = document.getElementById('tools-list');
+    listEl.innerHTML = allTools.map(t => `
+        <div class="w-full text-left p-3 rounded-lg hover:bg-white/5 group border-b border-white/5 transition-all mb-1 flex items-center justify-between ${currentFile === t.filename ? 'bg-sky-500/10 border-l-2 border-l-sky-500' : ''}">
+            <button onclick="openTool('${t.filename}')" class="flex-grow text-left min-w-0 flex items-center gap-3">
+                <span class="text-lg flex-shrink-0">${t.icon || '🔧'}</span>
+                <div class="min-w-0">
+                    <div class="text-xs font-bold text-white group-hover:text-sky-400 truncate">${t.name}</div>
+                    <div class="text-[9px] text-gray-500 group-hover:text-gray-300 line-clamp-1 leading-tight">${t.description}</div>
+                </div>
+            </button>
+            <div class="flex items-center opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0 ml-2">
+                <button onclick="renameTool('${t.filename}')" class="p-1 text-gray-500 hover:text-indigo-400" title="Rename File">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.5L15.232 5.232z"></path></svg>
+                </button>
+                <button onclick="deleteTool('${t.filename}')" class="p-1 text-gray-500 hover:text-red-400" title="Delete Library">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                </button>
             </div>
-        </button>
+        </div>
     `).join('');
 }
 
@@ -105,35 +156,102 @@ window.openTool = (filename) => {
     if (!tool) return;
     currentFile = filename;
     document.getElementById('current-filename').textContent = filename;
+    document.getElementById('t-lib-name').textContent = tool.name;
+    
     editor.setValue(tool.raw);
     document.getElementById('empty-state').classList.add('hidden');
     document.getElementById('editor-container').classList.remove('hidden');
-    loadTools();
+    
+    // Force refresh CodeMirror layout
+    setTimeout(() => editor.refresh(), 50);
+    renderToolsList();
 };
 
 window.saveCurrentTool = async () => {
+    const content = editor.getValue();
+    const btn = document.getElementById('btn-save');
+    const originalText = btn.innerText;
+    
+    btn.disabled = true;
+    btn.innerText = "DEPLOYING...";
+
     const formData = new FormData();
     formData.append("filename", currentFile);
-    formData.append("content", editor.getValue());
+    formData.append("content", content);
     formData.append("csrf_token", "{{ csrf_token }}");
-    await fetch("{{ url_for('api_save_tool') }}", { method: "POST", body: formData });
-    loadTools();
+
+    try {
+        const resp = await fetch("{{ url_for('api_save_tool') }}", { method: "POST", body: formData });
+        if (resp.ok) {
+            btn.innerText = "SUCCESS ✓";
+            btn.classList.replace('bg-sky-600', 'bg-green-600');
+            await loadTools();
+            setTimeout(() => {
+                btn.innerText = originalText;
+                btn.classList.replace('bg-green-600', 'bg-sky-600');
+                btn.disabled = false;
+            }, 2000);
+        }
+    } catch(e) {
+        alert("Save failed: " + e.message);
+        btn.disabled = false;
+        btn.innerText = originalText;
+    }
 };
 
-window.deleteCurrentTool = async () => {
-    if (!confirm("Delete this toolset?")) return;
-    await fetch(`/admin/api/tools/${currentFile}`, { 
-        method: "DELETE", 
-        headers: { "X-CSRF-Token": "{{ csrf_token }}" } 
-    });
-    window.location.reload();
+window.renameTool = async (filename) => {
+    const oldName = filename;
+    const newName = prompt("Enter new filename (with .py):", oldName);
+    if (!newName || newName === oldName) return;
+
+    const formData = new FormData();
+    formData.append("old_filename", oldName);
+    formData.append("new_filename", newName);
+    formData.append("csrf_token", "{{ csrf_token }}");
+
+    try {
+        const resp = await fetch("{{ url_for('api_rename_tool') }}", { method: "POST", body: formData });
+        const data = await resp.json();
+        if (data.success) {
+            if (currentFile === oldName) currentFile = data.new_filename;
+            await loadTools();
+            if (currentFile === data.new_filename) openTool(data.new_filename);
+        } else {
+            alert(data.error);
+        }
+    } catch(e) { alert("Rename error"); }
 };
+
+window.deleteTool = async (filename) => {
+    if(!confirm(`Permanently delete '${filename}'?`)) return;
+    
+    try {
+        const resp = await fetch(`/api/v1/api/tools/${filename}`, { 
+            method: "DELETE", 
+            headers: { "X-CSRF-Token": "{{ csrf_token }}" } 
+        });
+        if (resp.ok) {
+            if (currentFile === filename) {
+                currentFile = null;
+                document.getElementById('editor-container').classList.add('hidden');
+                document.getElementById('empty-state').classList.remove('hidden');
+            }
+            await loadTools();
+        }
+    } catch(e) { alert("Delete failed"); }
+};
+
+// Required wrapper to prevent breaking button in deleteTool above
+window.deleteCurrentTool = () => deleteTool(currentFile);
 
 window.createNewTool = () => {
     currentFile = "new_toolset.py";
-    editor.setValue("TOOL_LIBRARY_NAME = 'New Toolset'\nTOOL_LIBRARY_DESC = '...'\nTOOL_LIBRARY_ICON = '🔧'\n\ndef init_tool_library():\n    pass\n\ndef tool_example(query: str):\n    '''Example tool docstring'''\n    return 'Hello World'");
+    document.getElementById('current-filename').textContent = currentFile;
+    document.getElementById('t-lib-name').textContent = "Draft Toolset";
+    editor.setValue("TOOL_LIBRARY_NAME = 'New Toolset'\nTOOL_LIBRARY_DESC = '...'\nTOOL_LIBRARY_ICON = '🔧'\n\ndef init_tool_library():\n    '''Initialize dependencies using pipmaster'''\n    import pipmaster as pm\n    # pm.ensure_packages({'requests':'>=2.0.0'})\n\ndef tool_example(args: dict):\n    '''\n    Example Tool Description\n    \n    Args:\n        args: dict with keys:\n            - query (str): search term\n    '''\n    try:\n        return f\"Processed: {args.get('query')}\"\n    except Exception as e:\n        return f\"Error: {str(e)}\"");
     document.getElementById('empty-state').classList.add('hidden');
     document.getElementById('editor-container').classList.remove('hidden');
+    setTimeout(() => editor.refresh(), 50);
 };
 
 window.buildToolWithAI = () => {

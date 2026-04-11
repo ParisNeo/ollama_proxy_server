@@ -242,7 +242,17 @@ async def lifespan(app: FastAPI):
         logger.info(f"Redis not detected. System is running in Essential Mode (Rate limiting disabled).")
         app.state.redis = None
 
+    from app.core.bot_manager import BotManager
+    app.state.bot_manager = BotManager(app)
+    
+    # Dummy request for internal sub-calls
+    from starlette.requests import Request as StarletteRequest
+    app.state.dummy_request = StarletteRequest({"type":"http", "method":"POST", "headers":[], "app": app})
+
     import asyncio
+    # Start background bots
+    asyncio.create_task(app.state.bot_manager.start_all_active_bots())
+    
     refresh_task = asyncio.create_task(periodic_model_refresh(app))
     app.state.refresh_task = refresh_task
 

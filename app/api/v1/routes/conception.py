@@ -14,6 +14,7 @@ from app.crud import server_crud
 from app.database.models import User, Workflow, DataStore, VirtualAgent, SmartRouter, EnsembleOrchestrator
 from app.database.session import get_db
 from app.nodes.registry import NodeRegistry
+import re
 
 logger = logging.getLogger(__name__)
 router = APIRouter()

@@ -25,7 +25,7 @@ from sqlalchemy.exc import IntegrityError
 from app.core.config import settings
 from app.core.security import verify_password
 from app.database.session import get_db
-from app.database.models import User, LogAnalysis
+from app.database.models import User, LogAnalysis, Workflow, BotConfig
 from app.crud import user_crud, apikey_crud, log_crud, server_crud, settings_crud, model_metadata_crud
 from app.core.events import event_manager
 from app.core.instance_manager import supervisor
@@ -34,6 +34,9 @@ from app.schema.user import UserCreate
 from app.schema.server import ServerCreate, ServerUpdate
 from app.schema.settings import AppSettingsModel
 from app.api.v1.dependencies import get_csrf_token, validate_csrf_token, validate_csrf_token_header, login_rate_limiter
+
+from app.database.models import BotConfig
+from app.core.encryption import encrypt_data
 
 
 logger = logging.getLogger(__name__)
@@ -1441,6 +1444,7 @@ async def admin_settings_post(
         "google_search_api_key": form_data.get("google_search_api_key") or None,
         "instance_scan_start_port": safe_int("instance_scan_start_port", current_settings.instance_scan_start_port),
         "instance_scan_end_port": safe_int("instance_scan_end_port", current_settings.instance_scan_end_port),
+        "enable_bot_mode": form_data.get("enable_bot_mode") == "true",
         "enable_debug_mode": form_data.get("enable_debug_mode") == "true",
         "enable_ollama_api": form_data.get("enable_ollama_api") == "true",
         "enable_openai_api": form_data.get("enable_openai_api") == "true",
@@ -2761,3 +2765,56 @@ async def admin_enhance_prompt(
     except Exception as e:
         logger.error(f"Enhancement failed: {e}")
         return JSONResponse({"error": f"Enhancement failed: {str(e)}"}, status_code=500)
+
+
+
+@router.get("/bots", response_class=HTMLResponse, name="admin_bots")
+async def admin_bots_page(request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
+    context = get_template_context(request)
+    res = await db.execute(select(BotConfig))
+    context["bots"] = res.scalars().all()
+    context["available_workflows"] = (await db.execute(select(Workflow.name))).scalars().all()
+    context["csrf_token"] = await get_csrf_token(request)
+    return templates.TemplateResponse("admin/bots.html", context)
+
+@router.post("/bots/add", name="admin_add_bot", dependencies=[Depends(validate_csrf_token)])
+async def admin_add_bot(
+    request: Request, db: AsyncSession = Depends(get_db), 
+    name: str = Form(...), platform: str = Form(...), 
+    token: str = Form(...), target_workflow: str = Form(...),
+    app_token: Optional[str] = Form(None), phone_id: Optional[str] = Form(None)
+):
+    extra = {}
+    if app_token: extra["app_token"] = encrypt_data(app_token)
+    if phone_id: extra["phone_id"] = phone_id
+
+    new_bot = BotConfig(
+        name=name, platform=platform, 
+        encrypted_token=encrypt_data(token),
+        target_workflow=target_workflow,
+        extra_settings=extra,
+        is_active=False
+    )
+    db.add(new_bot)
+    await db.commit()
+    flash(request, f"Bot '{name}' configured. Enable it to start.", "success")
+    return RedirectResponse(url=request.url_for("admin_bots"), status_code=303)
+
+@router.post("/bots/{bot_id}/toggle", name="admin_toggle_bot", dependencies=[Depends(validate_csrf_token)])
+async def admin_toggle_bot(bot_id: int, request: Request, db: AsyncSession = Depends(get_db)):
+    bot = await db.get(BotConfig, bot_id)
+    if not bot: raise HTTPException(status_code=404)
+    
+    bot.is_active = not bot.is_active
+    await db.commit()
+    
+    # Notify the running manager
+    manager = request.app.state.bot_manager
+    if bot.is_active:
+        await manager.start_bot(bot)
+        flash(request, f"Bot '{bot.name}' started.")
+    else:
+        await manager.stop_bot(bot.id)
+        flash(request, f"Bot '{bot.name}' stopped.")
+        
+    return RedirectResponse(url=request.url_for("admin_bots"), status_code=303)

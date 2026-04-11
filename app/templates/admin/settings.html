@@ -298,6 +298,13 @@
                             <span class="text-xs text-gray-500">Exposes /v1/chat/completions</span>
                         </div>
                     </label>
+                    <label class="flex items-center gap-3 cursor-pointer">
+                        <input type="checkbox" name="enable_bot_mode" value="true" class="h-5 w-5 rounded text-indigo-600" {% if settings.enable_bot_mode %}checked{% endif %}>
+                        <div>
+                            <span class="block font-bold">Enable Bot Mode</span>
+                            <span class="text-xs text-gray-500">Allow external bots (Telegram, etc.) to run</span>
+                        </div>
+                    </label>
                 </div>
                 <div>
                     <label for="openai_port" class="block text-sm font-medium">OpenAI Dedicated Port</label>

@@ -1,0 +1,108 @@
+{% extends "admin/base.html" %}
+{% block title %}Bot Mode{% endblock %}
+{% block header_title %}External Bot Connectors{% endblock %}
+
+{% block content %}
+<div class="space-y-8">
+    <div class="card-style bg-indigo-500/10 border border-indigo-500/30">
+        <p class="text-sm text-gray-300">
+            <strong>Bot Mode</strong> allows you to bridge your AI workflows to external apps. 
+            Ensure <code>Enable Bot Mode</code> is checked in <strong>Settings</strong> for these to function.
+        </p>
+    </div>
+
+    <!-- Add Bot -->
+    <div class="card-style">
+        <h2 class="card-header text-lg font-bold mb-4">Add New Connector</h2>
+        <form action="{{ url_for('admin_add_bot') }}" method="post" class="space-y-4">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <input type="text" name="name" placeholder="Friendly Name" required class="p-2 rounded bg-black/20 border border-white/10">
+                <select name="platform" id="platform-select" onchange="updateBotFields()" class="p-2 rounded bg-black/20 border border-white/10">
+                    <option value="telegram">Telegram</option>
+                    <option value="discord">Discord</option>
+                    <option value="slack">Slack (Socket Mode)</option>
+                    <option value="whatsapp">WhatsApp (Cloud API)</option>
+                </select>
+                <input type="password" name="token" placeholder="Primary Bot Token" required class="p-2 rounded bg-black/20 border border-white/10">
+                <select name="target_workflow" class="p-2 rounded bg-black/20 border border-white/10">
+                    <option value="auto">auto (Intelligent)</option>
+                    {% for w in available_workflows %}
+                    <option value="{{ w }}">{{ w }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            
+            <div id="extra-fields" class="grid grid-cols-1 md:grid-cols-2 gap-4 hidden">
+                <div id="slack-fields" class="hidden">
+                    <label class="block text-[10px] text-gray-500 uppercase font-black mb-1">Slack App Token (xapp-...)</label>
+                    <input type="password" name="app_token" class="w-full p-2 rounded bg-black/20 border border-white/10">
+                </div>
+                <div id="whatsapp-fields" class="hidden">
+                    <label class="block text-[10px] text-gray-500 uppercase font-black mb-1">WhatsApp Phone Number ID</label>
+                    <input type="text" name="phone_id" class="w-full p-2 rounded bg-black/20 border border-white/10">
+                </div>
+            </div>
+
+            <div class="flex justify-end">
+                <button type="submit" class="bg-indigo-600 px-8 py-2 rounded font-bold text-sm">Deploy Connector</button>
+            </div>
+        </form>
+
+        <script>
+            function updateBotFields() {
+                const platform = document.getElementById('platform-select').value;
+                const extra = document.getElementById('extra-fields');
+                const slack = document.getElementById('slack-fields');
+                const whatsapp = document.getElementById('whatsapp-fields');
+                
+                extra.classList.add('hidden');
+                slack.classList.add('hidden');
+                whatsapp.classList.add('hidden');
+
+                if (platform === 'slack') { extra.classList.remove('hidden'); slack.classList.remove('hidden'); }
+                if (platform === 'whatsapp') { extra.classList.remove('hidden'); whatsapp.classList.remove('hidden'); }
+            }
+        </script>
+    </div>
+
+    <!-- Bot List -->
+    <div class="card-style">
+        <table class="w-full text-left">
+            <thead>
+                <tr class="text-gray-500 text-xs uppercase border-b border-white/10">
+                    <th class="p-3">Bot Name</th>
+                    <th class="p-3">Platform</th>
+                    <th class="p-3">Workflow Target</th>
+                    <th class="p-3">Status</th>
+                    <th class="p-3 text-right">Actions</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-white/5">
+                {% for b in bots %}
+                <tr>
+                    <td class="p-3 font-bold">{{ b.name }}</td>
+                    <td class="p-3 text-xs uppercase font-black text-indigo-400">{{ b.platform }}</td>
+                    <td class="p-3 font-mono text-xs">{{ b.target_workflow }}</td>
+                    <td class="p-3">
+                        {% if b.is_active %}
+                        <span class="text-green-400 font-bold animate-pulse">● RUNNING</span>
+                        {% else %}
+                        <span class="text-gray-500">○ STOPPED</span>
+                        {% endif %}
+                    </td>
+                    <td class="p-3 text-right">
+                        <form action="{{ url_for('admin_toggle_bot', bot_id=b.id) }}" method="post">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                            <button type="submit" class="text-xs font-bold uppercase {{ 'text-red-400' if b.is_active else 'text-green-400' }}">
+                                {{ 'Stop' if b.is_active else 'Start' }}
+                            </button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

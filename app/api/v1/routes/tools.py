@@ -14,7 +14,7 @@ from app.core.tools_manager import ToolsManager
 from app.core import knowledge_importer as kit
 from app.api.v1.routes.proxy import _resolve_target, _reverse_proxy
 from app.crud import server_crud
-
+import re
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
@@ -34,14 +34,46 @@ async def api_save_tool(filename: str = Form(...), content: str = Form(...)):
     return {"success": True, "filename": saved}
 
 @router.delete("/api/tools/{filename}", name="api_delete_tool")
-async def api_delete_tool(filename: str, request: Request, admin_user=Depends(require_admin_user)):
+async def api_delete_tool(filename: str, request: Request, admin_user: User = Depends(require_admin_user)):
     from app.api.v1.dependencies import get_csrf_token
     token = request.headers.get("X-CSRF-Token")
-    if not token or not secrets.compare_digest(token, await get_csrf_token(request)):
-        raise HTTPException(status_code=403)
+    stored = await get_csrf_token(request)
+    if not token or not stored or not secrets.compare_digest(token, stored):
+        raise HTTPException(status_code=403, detail="CSRF token mismatch")
     if ToolsManager.delete_tool(filename):
         return {"success": True}
-    return JSONResponse({"error": "Not found"}, status_code=404)
+    return JSONResponse({"error": "File not found"}, status_code=404)
+
+@router.post("/api/tools/rename", name="api_rename_tool")
+async def api_rename_tool(
+    request: Request,
+    old_filename: str = Form(...),
+    new_filename: str = Form(...),
+    admin_user: User = Depends(require_admin_user)
+):
+    """Renames a tool library file on disk."""
+    import os
+    from app.core.tools_manager import USER_TOOLS_DIR
+    
+    # Validation
+    safe_old = re.sub(r'[^\w\-\.]', '', old_filename)
+    safe_new = re.sub(r'[^\w\-\.]', '', new_filename)
+    if not safe_new.endswith(".py"): safe_new += ".py"
+
+    old_path = USER_TOOLS_DIR / safe_old
+    new_path = USER_TOOLS_DIR / safe_new
+
+    if not old_path.exists():
+        raise HTTPException(status_code=404, detail="Original file not found")
+    if new_path.exists():
+        raise HTTPException(status_code=409, detail="A file with that name already exists")
+
+    try:
+        os.rename(old_path, new_path)
+        return {"success": True, "new_filename": safe_new}
+    except Exception as e:
+        logger.error(f"Rename failed: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
 
 @router.post("/api/tools/build", name="api_build_tool")
 async def api_build_tool(
@@ -76,7 +108,7 @@ async def api_build_tool(
         "def init_tool_library() -> None:\n"
         "    '''Initialize dependencies using pipmaster'''\n"
         "    import pipmaster as pm\n"
-        "    # pm.ensure('...')\n\n"
+        "    # pm.ensure_packages({'package_name':'the version == or >= or <= etc..'})\n\n"
         "def tool_[name](args):\n"
         "    '''Docstrings must include Args and Returns sections'''\n\n"
         "STRICT RULES:\n"

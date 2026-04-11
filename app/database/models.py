@@ -225,6 +225,18 @@ class DataStore(Base):
     chunk_overlap = Column(Integer, default=50)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
+class BotConfig(Base):
+    __tablename__ = "bot_configs"
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    platform = Column(String, nullable=False) # 'telegram', 'discord', 'slack'
+    encrypted_token = Column(String, nullable=False)
+    target_workflow = Column(String, nullable=False) # The model/workflow name to call
+    is_active = Column(Boolean, default=False)
+    # Extra config like specific channel IDs or server IDs
+    extra_settings = Column(JSON, nullable=True) 
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
 class Workflow(Base):
     __tablename__ = "workflows"
     id = Column(Integer, primary_key=True, index=True)
