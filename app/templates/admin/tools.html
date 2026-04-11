@@ -86,25 +86,36 @@
 <template id="ai-tool-builder-template">
     <div class="space-y-4">
         <textarea id="build-tool-prompt" class="w-full h-40 p-3 bg-black/40 border border-white/10 rounded-xl text-sm text-white focus:border-indigo-500 outline-none" placeholder="e.g. Create a tool library to interact with Spotify to search tracks..."></textarea>
+        {% include 'partials/_file_upload.html' %}
+        <div id="build-tool-status" class="hidden bg-black/60 border border-white/10 rounded-lg p-3 h-24 overflow-y-auto font-mono text-[10px] text-gray-400 space-y-1"></div>
+        <button onclick="window.executeToolBuild()" id="tool-build-run-btn" class="w-full py-3 bg-indigo-600 hover:bg-indigo-500 rounded-xl font-black text-xs uppercase tracking-widest transition-all">Generate Implementation</button>
+    </div>
+</template>
+
+<template id="ai-tool-fix-template">
+    <div class="space-y-4">
+        <div class="p-3 bg-indigo-500/10 border border-indigo-500/30 rounded-lg">
+            <h4 class="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-1">Contextual Repair</h4>
+            <p class="text-[11px] text-gray-400 leading-relaxed">The AI will review the <b>Current Source Code</b> and the <b>Console Output</b>. Add instructions or references below to guide the fix.</p>
+        </div>
+        
+        <textarea id="fix-tool-prompt" class="w-full h-32 p-3 bg-black/40 border border-white/10 rounded-xl text-sm text-white focus:border-indigo-500 outline-none" placeholder="e.g. Add a timeout to the request, or use the provided API documentation..."></textarea>
         
         <div class="flex flex-col gap-2">
-            <span class="text-[10px] font-black text-gray-500 uppercase tracking-widest px-1">Source Context</span>
-            <div id="m-previews" class="flex flex-wrap gap-2 min-h-[32px] p-2 bg-black/20 border border-white/5 rounded-lg">
-                <span class="text-[9px] text-gray-700 italic py-1">No sources attached...</span>
-            </div>
+            <span class="text-[10px] font-black text-gray-500 uppercase tracking-widest px-1">Attached References</span>
+            <div id="f-previews" class="flex flex-wrap gap-2 min-h-[32px] p-2 bg-black/20 border border-white/5 rounded-lg"></div>
         </div>
 
         <div class="flex gap-2">
-            <button type="button" onclick="document.getElementById('m-img-input').click()" class="flex items-center gap-2 text-[10px] font-bold py-2 px-3 bg-white/5 rounded-lg border border-white/10 hover:bg-white/10 transition-colors">📷 Images</button>
-            <button type="button" onclick="document.getElementById('m-doc-input').click()" class="flex items-center gap-2 text-[10px] font-bold py-2 px-3 bg-white/5 rounded-lg border border-white/10 hover:bg-white/10 transition-colors">📄 Docs</button>
-            <button type="button" onclick="window.triggerToolWebImport()" class="flex items-center gap-2 text-[10px] font-bold py-2 px-3 bg-indigo-600/20 text-indigo-300 rounded-lg border border-indigo-500/30 hover:bg-indigo-600/30 transition-colors">🌍 Web Import</button>
+            <button type="button" onclick="document.getElementById('f-img-input').click()" class="flex items-center gap-2 text-[10px] font-bold py-2 px-3 bg-white/5 rounded-lg border border-white/10 hover:bg-white/10 transition-colors">📷 Images</button>
+            <button type="button" onclick="document.getElementById('f-doc-input').click()" class="flex items-center gap-2 text-[10px] font-bold py-2 px-3 bg-white/5 rounded-lg border border-white/10 hover:bg-white/10 transition-colors">📄 Docs</button>
         </div>
         
-        <input type="file" id="m-img-input" class="hidden" multiple accept="image/*">
-        <input type="file" id="m-doc-input" class="hidden" multiple accept=".txt,.md,.pdf,.csv">
+        <input type="file" id="f-img-input" class="hidden" multiple accept="image/*">
+        <input type="file" id="f-doc-input" class="hidden" multiple accept=".txt,.md,.pdf,.csv">
 
-        <div id="build-tool-status" class="hidden bg-black/60 border border-white/10 rounded-lg p-3 h-24 overflow-y-auto font-mono text-[10px] text-gray-400 space-y-1"></div>
-        <button onclick="window.executeToolBuild()" id="tool-build-run-btn" class="w-full py-3 bg-indigo-600 hover:bg-indigo-500 rounded-xl font-black text-xs uppercase tracking-widest transition-all">Generate Implementation</button>
+        <div id="fix-tool-status" class="hidden bg-black/60 border border-white/10 rounded-lg p-3 h-24 overflow-y-auto font-mono text-[10px] text-gray-400 space-y-1"></div>
+        <button onclick="window.executeToolFix()" id="tool-fix-run-btn" class="w-full py-3 bg-purple-600 hover:bg-purple-500 rounded-xl font-black text-xs uppercase tracking-widest transition-all">Repair Logic</button>
     </div>
 </template>
 
@@ -328,28 +339,51 @@ window.runTest = async () => {
     finally { btn.disabled = false; }
 };
 
-window.fixWithAI = async () => {
-    const errorLog = document.getElementById('console-output').innerText;
-    const extra = prompt("Optional instruction for the fix (or leave blank):");
+window.fixWithAI = () => {
+    const template = document.getElementById('ai-tool-fix-template');
+    window.showModal("AI Tool Repair Architect", template.innerHTML);
     
-    logToConsole(">>> Sending to Architect for repair...", 'text-purple-400 animate-pulse');
+    // Clear architect context for a clean fix session
+    window.Architect.reset();
+    
+    document.getElementById('f-img-input').onchange = (e) => window.Architect.handleFiles(e.target.files, () => window.Architect.renderPreviews('f-previews'));
+    document.getElementById('f-doc-input').onchange = (e) => window.Architect.handleFiles(e.target.files, () => window.Architect.renderPreviews('f-previews'));
+};
 
-    const formData = new FormData();
+window.executeToolFix = async () => {
+    const consoleOutput = document.getElementById('console-output').innerText;
+    const btn = document.getElementById('tool-fix-run-btn');
+    const statusBox = document.getElementById('fix-tool-status');
+    const promptEl = document.getElementById('fix-tool-prompt');
+    
+    btn.disabled = true;
+    statusBox.classList.remove('hidden');
+    statusBox.innerHTML = '<div>[System] Preparing repair payload...</div>';
+
+    // Build form data manually to include the console log
+    const formData = window.Architect.prepareFormData('fix-tool-prompt');
     formData.append("filename", currentFile);
-    formData.append("error_log", errorLog);
-    formData.append("extra_prompt", extra || "");
+    formData.append("error_log", consoleOutput);
     formData.append("csrf_token", "{{ csrf_token }}");
+
+    logToConsole(">>> Initializing AI-driven logic repair...", 'text-purple-400 animate-pulse');
 
     try {
         const resp = await fetch("{{ url_for('api_fix_tool') }}", { method: 'POST', body: formData });
         const data = await resp.json();
         if (data.success) {
             editor.setValue(data.fixed_code);
-            logToConsole("REPAIR APPLIED. Review and Save.", 'text-fuchsia-400 font-bold');
+            logToConsole("✅ [REPAIR APPLIED]: The source code has been updated based on AI recommendations. Please Review and Save.", 'text-fuchsia-400 font-bold');
+            document.getElementById('modal-close-btn').click();
         } else {
-            logToConsole("FIX FAILED: " + data.error, 'text-red-400');
+            logToConsole("❌ [FIX FAILED]: " + (data.error || "Unknown Error"), 'text-red-400');
+            statusBox.innerHTML += `<div class="text-red-400">[Error] ${data.error}</div>`;
         }
-    } catch(e) { logToConsole("Error: " + e.message, 'text-red-400'); }
+    } catch(e) { 
+        logToConsole("Error: " + e.message, 'text-red-400'); 
+    } finally {
+        btn.disabled = false;
+    }
 };
 
 function logToConsole(text, colorClass) {

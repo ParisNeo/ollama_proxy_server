@@ -4,6 +4,7 @@ import json
 from typing import List, Optional, Any
 from fastapi import APIRouter, Depends, Request, Form, File, UploadFile, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse, Response
+from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.session import get_db
@@ -15,6 +16,7 @@ from app.core import knowledge_importer as kit
 from app.api.v1.routes.proxy import _resolve_target, _reverse_proxy
 from app.crud import server_crud
 import re
+import os
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
@@ -194,11 +196,13 @@ async def api_fix_tool(
     request: Request,
     filename: str = Form(...),
     error_log: str = Form(...),
-    extra_prompt: str = Form(""),
+    prompt: str = Form(""),
+    csrf_token: str = Form(...),
+    files: Optional[List[UploadFile]] = File(None),
     db: AsyncSession = Depends(get_db),
     admin_user: User = Depends(require_admin_user)
 ):
-    """Uses Hub Agent to fix the tool code based on error output."""
+    """Uses Hub Agent to fix the tool code based on error output and attached references."""
     from app.core.tools_manager import USER_TOOLS_DIR, SYSTEM_TOOLS_DIR
     path = USER_TOOLS_DIR / filename
     if not path.exists(): path = SYSTEM_TOOLS_DIR / filename
@@ -207,28 +211,40 @@ async def api_fix_tool(
     app_settings = request.app.state.settings
     target_agent = app_settings.admin_agent_name
 
+    file_context = ""
+    valid_files = [f for f in files if f and f.filename] if files else []
+    if valid_files:
+        file_context = await kit.extract_local_file_content(valid_files)
+
     instruction = (
-        "You are a Python Debugger. Review the provided code and the error/output. "
-        "Fix the implementation to handle the error or fulfill the requirement. "
-        "Output ONLY the raw Python code for the entire file. No chat."
+        "You are a Senior AI Debugger. Review the tool implementation, the console output/error, and user instructions. "
+        "Rewrite the code to fix the bugs or implement the requested features. "
+        "Output ONLY the updated raw Python code for the entire file. Start with the library variables. No chat."
     )
 
-    prompt = (
-        f"ERROR/OUTPUT:\n{error_log}\n\n"
-        f"USER REQUEST:\n{extra_prompt}\n\n"
-        f"CURRENT CODE:\n{current_code}"
+    user_payload = (
+        f"CONSOLE OUTPUT / ERRORS:\n{error_log}\n\n"
+        f"DEVELOPER INSTRUCTIONS:\n{prompt}\n\n"
     )
+    if file_context:
+        user_payload += f"REFERENCE DOCUMENTATION:\n{file_context}\n\n"
+    
+    user_payload += f"CURRENT SOURCE CODE:\n{current_code}"
 
     try:
-        real_model, msgs = await _resolve_target(db, target_agent, [{"role": "user", "content": prompt}])
+        real_model, msgs = await _resolve_target(db, target_agent, [{"role": "user", "content": user_payload}])
         msgs.insert(0, {"role": "system", "content": instruction})
         
         servers = await server_crud.get_servers_with_model(db, real_model)
+        if not servers: return JSONResponse({"error": "Backend nodes offline"}, status_code=503)
+
         resp, _ = await _reverse_proxy(request, "chat", servers, json.dumps({"model": real_model, "messages": msgs, "stream": False}).encode(), is_subrequest=True)
         
         if hasattr(resp, 'body'):
             data = json.loads(resp.body.decode())
             fixed_code = re.sub(r'^```python\s*|```$', '', data.get("message", {}).get("content", ""), flags=re.MULTILINE).strip()
+            # Normalize line endings
+            fixed_code = fixed_code.replace('\r\n', '\n').strip() + '\n'
             return {"success": True, "fixed_code": fixed_code}
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
