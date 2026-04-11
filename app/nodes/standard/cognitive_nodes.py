@@ -32,8 +32,16 @@ NodeLLMChat.prototype.onConfigure = function() { if(this.mWidget) this.mWidget.v
 LiteGraph.registerNodeType("hub/llm_chat", NodeLLMChat);
 """
     async def execute(self, engine, node: Dict[str, Any], output_slot_idx: int) -> Any:
+        """
+        Executed when this node is in the middle of a graph.
+        For terminal nodes, the engine now bypasses this and calls the proxy directly.
+        """
         target_model = str(node["properties"].get("model", "auto")).strip()
-        msgs = await engine._resolve_input(node, 0) or engine.initial_messages
+        
+        # Resolve inputs
+        msgs = await engine._resolve_input(node, 0)
+        if msgs is None: msgs = engine.initial_messages
+        
         settings = await engine._resolve_input(node, 1) or {}
         override = await engine._resolve_input(node, 2)
         if override: target_model = str(override)

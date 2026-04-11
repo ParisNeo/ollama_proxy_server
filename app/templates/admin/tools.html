@@ -1,0 +1,154 @@
+{% extends "admin/base.html" %}
+{% block title %}Tools Library{% endblock %}
+{% block header_title %}Tools Library (Python Native){% endblock %}
+
+{% block content %}
+<input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+<div class="space-y-6 h-[80vh] flex flex-col">
+    <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-black/20 p-4 rounded-xl border border-white/10 flex-shrink-0">
+        <div class="flex gap-2 items-center">
+            <button onclick="createNewTool()" class="bg-sky-600 hover:bg-sky-500 px-6 py-2 rounded font-black text-xs uppercase tracking-widest shadow-[0_0_15px_rgba(14,165,233,0.4)] transition-all">+ New Toolset</button>
+            <div class="h-6 w-px bg-white/10 mx-2"></div>
+            <button onclick="buildToolWithAI()" class="bg-purple-600 hover:bg-purple-500 px-6 py-2 rounded font-black text-xs uppercase tracking-widest transition-colors">✨ Build with AI</button>
+        </div>
+    </div>
+
+    <div class="flex-grow grid grid-cols-1 lg:grid-cols-4 gap-6 min-h-0">
+        <div class="lg:col-span-1 flex flex-col gap-4 min-h-0 h-full">
+            <div class="card-style bg-black/40 border-white/5 flex flex-col h-full p-4 overflow-hidden">
+                <div class="flex justify-between items-center mb-4 flex-shrink-0">
+                    <h3 class="text-[10px] font-black text-gray-500 uppercase tracking-widest">Active Toolsets</h3>
+                    <button onclick="loadTools()" class="text-[9px] text-sky-400 hover:text-white uppercase font-bold">Refresh</button>
+                </div>
+                <div id="tools-list" class="space-y-1 overflow-y-auto custom-scrollbar flex-grow pr-2"></div>
+            </div>
+        </div>
+
+        <div class="lg:col-span-3 flex flex-col h-full min-h-0">
+            <div id="editor-container" class="hidden card-style border-sky-500/30 bg-[#0a0a0f] flex flex-col h-full p-0 overflow-hidden">
+                <div class="flex justify-between items-center p-4 border-b border-white/10 flex-shrink-0 bg-black/20">
+                    <h3 class="text-white font-bold text-sm tracking-tight" id="current-filename"></h3>
+                    <div class="flex items-center gap-2">
+                        <button id="btn-save" onclick="saveCurrentTool()" class="text-[10px] font-black bg-sky-600 hover:bg-sky-500 px-4 py-1.5 rounded text-white uppercase tracking-widest">Save & Deploy</button>
+                        <button onclick="deleteCurrentTool()" class="text-[10px] font-bold text-red-400 hover:text-red-300 uppercase">Delete</button>
+                    </div>
+                </div>
+                <div id="code-editor-container" class="flex-grow relative"></div>
+            </div>
+            <div id="empty-state" class="card-style border-dashed border-white/10 flex flex-col items-center justify-center h-full text-center p-8">
+                <h3 class="text-xl font-bold text-white mb-2">Tools Library</h3>
+                <p class="text-sm text-gray-400">Select a tool library to edit logic or use the AI generator.</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<template id="ai-tool-builder-template">
+    <div class="space-y-4">
+        <textarea id="build-tool-prompt" class="w-full h-40 p-3 bg-black/40 border border-white/10 rounded-xl text-sm text-white focus:border-indigo-500 outline-none" placeholder="e.g. Create a tool library to interact with Spotify to search tracks..."></textarea>
+        {% include 'partials/_file_upload.html' %}
+        <div id="build-tool-status" class="hidden bg-black/60 border border-white/10 rounded-lg p-3 h-24 overflow-y-auto font-mono text-[10px] text-gray-400 space-y-1"></div>
+        <button onclick="window.executeToolBuild()" id="tool-build-run-btn" class="w-full py-3 bg-indigo-600 hover:bg-indigo-500 rounded-xl font-black text-xs uppercase tracking-widest transition-all">Generate Implementation</button>
+    </div>
+</template>
+
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.12/codemirror.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.12/theme/monokai.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.12/codemirror.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.12/mode/python/python.min.js"></script>
+
+<script>
+let currentFile = null;
+let allTools = [];
+let editor = null;
+
+document.addEventListener('DOMContentLoaded', () => {
+    loadTools();
+    editor = CodeMirror(document.getElementById('code-editor-container'), {
+        mode: 'python',
+        theme: 'monokai',
+        lineNumbers: true,
+        lineWrapping: true
+    });
+    editor.setSize("100%", "100%");
+
+    const sse = new EventSource("{{ url_for('sse_events') }}");
+    sse.onmessage = (e) => {
+        const msg = JSON.parse(e.data);
+        const box = document.getElementById('build-tool-status');
+        if (box && msg.id?.startsWith('sys_build_tool_') && msg.error) {
+            const entry = document.createElement('div');
+            entry.className = msg.type === 'error' ? 'text-red-400' : 'text-indigo-300';
+            entry.innerHTML = `<span class="opacity-50">[${new Date().toLocaleTimeString()}]</span> ${msg.error}`;
+            box.appendChild(entry); box.scrollTop = box.scrollHeight;
+            box.classList.remove('hidden');
+        }
+    };
+});
+
+async function loadTools() {
+    const resp = await fetch("{{ url_for('api_get_tools') }}");
+    allTools = await resp.json();
+    document.getElementById('tools-list').innerHTML = allTools.map(t => `
+        <button onclick="openTool('${t.filename}')" class="w-full text-left p-3 rounded-lg hover:bg-white/5 border-b border-white/5 flex items-center gap-3 ${currentFile === t.filename ? 'bg-sky-500/10 border-l-2 border-l-sky-500' : ''}">
+            <span class="text-lg">${t.icon}</span>
+            <div class="min-w-0">
+                <div class="text-xs font-bold text-white truncate">${t.name}</div>
+                <div class="text-[9px] text-gray-500 truncate">${t.description}</div>
+            </div>
+        </button>
+    `).join('');
+}
+
+window.openTool = (filename) => {
+    const tool = allTools.find(t => t.filename === filename);
+    if (!tool) return;
+    currentFile = filename;
+    document.getElementById('current-filename').textContent = filename;
+    editor.setValue(tool.raw);
+    document.getElementById('empty-state').classList.add('hidden');
+    document.getElementById('editor-container').classList.remove('hidden');
+    loadTools();
+};
+
+window.saveCurrentTool = async () => {
+    const formData = new FormData();
+    formData.append("filename", currentFile);
+    formData.append("content", editor.getValue());
+    formData.append("csrf_token", "{{ csrf_token }}");
+    await fetch("{{ url_for('api_save_tool') }}", { method: "POST", body: formData });
+    loadTools();
+};
+
+window.deleteCurrentTool = async () => {
+    if (!confirm("Delete this toolset?")) return;
+    await fetch(`/admin/api/tools/${currentFile}`, { 
+        method: "DELETE", 
+        headers: { "X-CSRF-Token": "{{ csrf_token }}" } 
+    });
+    window.location.reload();
+};
+
+window.createNewTool = () => {
+    currentFile = "new_toolset.py";
+    editor.setValue("TOOL_LIBRARY_NAME = 'New Toolset'\nTOOL_LIBRARY_DESC = '...'\nTOOL_LIBRARY_ICON = '🔧'\n\ndef init_tool_library():\n    pass\n\ndef tool_example(query: str):\n    '''Example tool docstring'''\n    return 'Hello World'");
+    document.getElementById('empty-state').classList.add('hidden');
+    document.getElementById('editor-container').classList.remove('hidden');
+};
+
+window.buildToolWithAI = () => {
+    const template = document.getElementById('ai-tool-builder-template');
+    window.showModal("Architect Tool with AI", template.innerHTML);
+    document.getElementById('build-tool-prompt').value = window.Architect.prompt;
+    document.getElementById('m-img-input').onchange = (e) => window.Architect.handleFiles(e.target.files, () => window.Architect.renderPreviews('m-previews'));
+    document.getElementById('m-doc-input').onchange = (e) => window.Architect.handleFiles(e.target.files, () => window.Architect.renderPreviews('m-previews'));
+    window.Architect.renderPreviews('m-previews');
+};
+
+window.executeToolBuild = () => {
+    window.Architect.executeBuild('build-tool-prompt', "{{ url_for('api_build_tool') }}", 'build-tool-status', 'tool-build-run-btn', (data) => {
+        loadTools().then(() => openTool(data.filename));
+    });
+};
+</script>
+{% endblock %}

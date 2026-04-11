@@ -36,27 +36,58 @@ class WorkflowEngine:
                             self.links[lid] = [lid, n["id"], idx, None, None, None]
 
     async def execute(self, messages: List[Dict[str, Any]]) -> Tuple[str, List[Dict[str, Any]]]:
+        """
+        Executes the graph. 
+        If the terminal node is a 'Generator' (LLM), it returns (model, messages) 
+        to allow the Gateway to stream directly to the client.
+        """
         self.initial_messages = messages
         exit_node = next((n for n in self.nodes.values() if n["type"] == "hub/output"), None)
         if not exit_node:
-            logger.warning(f"Workflow '{self.name}' has no Output node.")
             return await self.resolve_target_fn(self.db, "auto", messages, self.depth + 1, self.request, self.request_id, self.sender)
 
         if "inputs" in exit_node and exit_node["inputs"] and exit_node["inputs"][0].get("link") is not None:
             link = self.links.get(exit_node["inputs"][0]["link"])
             if link:
+                src_node = self.nodes.get(link[1])
+                # --- LATENCY FIX: Terminal LLM Passthrough ---
+                # If the last node before Output is an LLM, don't execute it here (which is blocking).
+                # Instead, resolve all its inputs and return them to the proxy for a streaming call.
+                if src_node and src_node["type"] in ("hub/llm_chat", "hub/llm_instruct", "hub/model"):
+                    props = src_node.get("properties", {})
+                    target_model = str(props.get("model", "auto")).strip()
+                    
+                    # Resolve inputs for the LLM node
+                    val = await self._resolve_input_by_name(src_node, "Messages")
+                    if val is None: val = await self._resolve_input_by_name(src_node, "Prompt")
+                    if val is None: val = await self._resolve_input(src_node, 0)
+                    
+                    resolved_messages = val if isinstance(val, list) else [{"role": "user", "content": str(val)}]
+
+                    # Handle dynamic settings (Temperature, etc)
+                    settings = await self._resolve_input_by_name(src_node, "Settings")
+                    if settings is None: settings = await self._resolve_input(src_node, 1)
+                    if isinstance(settings, dict) and self.request:
+                        self.request.state.graph_temperature = settings.get("temperature")
+
+                    # Handle Tools
+                    final_tools = []
+                    for inp_idx, inp in enumerate(src_node.get("inputs", [])):
+                        if inp.get("name", "").startswith("Tool"):
+                            tool_data = await self._resolve_input(src_node, inp_idx)
+                            if tool_data:
+                                if isinstance(tool_data, list): final_tools.extend(tool_data)
+                                else: final_tools.append(tool_data)
+                    
+                    if final_tools and self.request:
+                        self.request.state.graph_tools = final_tools
+
+                    # Recursively resolve the model name (in case of Agents/Routers)
+                    return await self.resolve_target_fn(self.db, target_model, resolved_messages, self.depth + 1, self.request, self.request_id, self.sender)
+
+                # For static outputs (Composers, Datastores), resolve normally
                 final_val = await self.resolve_node_output(link[1], link[2])
-                
-                # CASE A: A node returns a finalized resolution tuple (__result__, [msgs])
-                if isinstance(final_val, tuple) and len(final_val) == 2:
-                    return final_val
-                
-                # CASE B: A node (like Vision Hydrator) returned a processed list of messages
-                # We return this directly as the final state.
-                if isinstance(final_val, list) and len(final_val) > 0 and isinstance(final_val[0], dict):
-                    return "__result__", final_val
-                
-                # CASE C: Raw string (Composer, Datastore, etc)
+                if isinstance(final_val, tuple): return final_val
                 return "__result__", [{"role": "assistant", "content": str(final_val)}]
 
         return await self.resolve_target_fn(self.db, "auto", messages, self.depth + 1, self.request, self.request_id, self.sender)

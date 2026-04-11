@@ -47,6 +47,7 @@ from app.api.v1.routes.node_builder import router as node_builder_router
 from app.api.v1.routes.importer import router as importer_router
 from app.api.v1.routes.skills import router as skills_router
 from app.api.v1.routes.personalities import router as personalities_router
+from app.api.v1.routes.tools import router as tools_router
 from app.api.v1.routes.datastores import router as datastores_router
 from app.database.session import AsyncSessionLocal, engine
 from app.database.base import Base
@@ -312,6 +313,8 @@ app.include_router(skills_router, prefix="/admin", tags=["Admin UI"], include_in
 app.include_router(skills_router, prefix="/api/v1", tags=["Internal API"], include_in_schema=False)
 app.include_router(personalities_router, prefix="/admin", tags=["Admin UI"], include_in_schema=False)
 app.include_router(personalities_router, prefix="/api/v1", tags=["Internal API"], include_in_schema=False)
+app.include_router(tools_router, prefix="/admin", tags=["Admin UI"], include_in_schema=False)
+app.include_router(tools_router, prefix="/api/v1", tags=["Internal API"], include_in_schema=False)
 app.include_router(importer_router, prefix="/admin/api/importer", tags=["Importer API"], include_in_schema=False)
 app.include_router(conception_router, prefix="/admin", tags=["Admin UI"], include_in_schema=False)
 app.include_router(node_builder_router, prefix="/admin", tags=["Admin UI"], include_in_schema=False)
