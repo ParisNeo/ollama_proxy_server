@@ -42,21 +42,9 @@ LiteGraph.registerNodeType("hub/system_modifier", NodeSystemModifier);
             import copy
             history = copy.deepcopy(history)
         
-        # --- VISION AUGMENTATION SAFETY ---
-        for msg in history:
-            original_images = msg.get("images", [])
-            
-            if isinstance(msg.get("content"), list):
-                text_content = ""
-                for part in msg["content"]:
-                    if isinstance(part, dict) and part.get("type") == "text":
-                        text_content += part.get("text", "")
-                    elif isinstance(part, str):
-                        text_content += part
-                msg["content"] = text_content
-            
-            if original_images:
-                msg["images"] = original_images
+        # Note: We NO LONGER strip images here. The proxy layer handles final normalization
+        # based on the target server's capabilities. Preserving the list structure here
+        # ensures vision models receive the images.
 
         sys_prompt_text = await engine._resolve_input(node, 1)
         if not sys_prompt_text:

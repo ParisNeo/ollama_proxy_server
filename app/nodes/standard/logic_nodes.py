@@ -25,7 +25,12 @@ LiteGraph.registerNodeType("hub/extract_text", NodeExtractText);
     async def execute(self, engine, node: Dict[str, Any], output_slot_idx: int) -> Any:
         msgs = await engine._resolve_input(node, 0)
         if msgs and isinstance(msgs, list):
-            return msgs[-1].get("content", "")
+            last_msg = msgs[-1]
+            content = last_msg.get("content", "")
+            if isinstance(content, list):
+                # Multimodal content - extract only text parts
+                return "\n".join([p.get("text", "") for p in content if isinstance(p, dict) and p.get("type") == "text"]).strip()
+            return content
         return ""
 
 class PromptComposerNode(BaseNode):

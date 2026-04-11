@@ -14,8 +14,10 @@ class NodeRegistry:
     @classmethod
     def register(cls, node_class: Type[BaseNode]):
         if node_class.node_type:
+            is_new = node_class.node_type not in cls._nodes
             cls._nodes[node_class.node_type] = node_class
-            logger.info(f"Registered workflow node: {node_class.node_type}")
+            if is_new:
+                logger.info(f"Registered workflow node: {node_class.node_type}")
             
     @classmethod
     def get_node(cls, node_type: str) -> Type[BaseNode]:

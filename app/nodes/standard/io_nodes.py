@@ -28,7 +28,14 @@ LiteGraph.registerNodeType("hub/input", NodeInput);
         if output_slot_idx == 0: return engine.initial_messages
         if output_slot_idx == 1: return {}
         if output_slot_idx == 2: 
-            return engine.initial_messages[-1].get("content", "") if engine.initial_messages else ""
+            if not engine.initial_messages:
+                return ""
+            last_msg = engine.initial_messages[-1]
+            content = last_msg.get("content", "")
+            if isinstance(content, list):
+                # Extract only text parts for string output
+                return "\n".join([p.get("text", "") for p in content if isinstance(p, dict) and p.get("type") == "text"]).strip()
+            return content
         return None
 
 class OutputNode(BaseNode):
