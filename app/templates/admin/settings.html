@@ -284,27 +284,43 @@
             <h2 class="card-header text-xl font-bold mb-4 pb-2">Gateway Protocols</h2>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-6 bg-white/5 p-4 rounded-lg">
                 <div class="space-y-4">
-                    <label class="flex items-center gap-3 cursor-pointer">
+                    <label class="flex items-center gap-3 cursor-pointer group">
                         <input type="checkbox" name="enable_ollama_api" value="true" class="h-5 w-5 rounded text-indigo-600" {% if settings.enable_ollama_api %}checked{% endif %}>
                         <div>
-                            <span class="block font-bold">Enable Ollama API</span>
-                            <span class="text-xs text-gray-500">Exposes /api/chat, /api/generate (Port {{ settings.PROXY_PORT }})</span>
+                            <span class="block font-bold group-hover:text-indigo-400">Ollama API Protocol</span>
+                            <span class="text-[11px] text-gray-500">Exposes /api/chat, /api/generate on Primary Port ({{ settings.PROXY_PORT }}).</span>
                         </div>
                     </label>
-                    <label class="flex items-center gap-3 cursor-pointer">
+                    <label class="flex items-center gap-3 cursor-pointer group">
                         <input type="checkbox" name="enable_openai_api" value="true" class="h-5 w-5 rounded text-indigo-600" {% if settings.enable_openai_api %}checked{% endif %}>
                         <div>
-                            <span class="block font-bold">Enable OpenAI API</span>
-                            <span class="text-xs text-gray-500">Exposes /v1/chat/completions</span>
+                            <span class="block font-bold group-hover:text-indigo-400">OpenAI API Protocol</span>
+                            <span class="text-[11px] text-gray-500">Exposes /v1/chat/completions on Port {{ settings.openai_port }}.</span>
                         </div>
                     </label>
-                    <label class="flex items-center gap-3 cursor-pointer">
-                        <input type="checkbox" name="enable_bot_mode" value="true" class="h-5 w-5 rounded text-indigo-600" {% if settings.enable_bot_mode %}checked{% endif %}>
-                        <div>
-                            <span class="block font-bold">Enable Bot Mode</span>
-                            <span class="text-xs text-gray-500">Allow external bots (Telegram, etc.) to run</span>
+                    <div class="pt-2 border-t border-white/5">
+                    <div class="pt-2 border-t border-white/5">
+                        <label class="flex items-center gap-3 cursor-pointer group">
+                            <input type="checkbox" name="enable_bot_mode" value="true" class="h-5 w-5 rounded text-indigo-600" {% if settings.enable_bot_mode %}checked{% endif %}>
+                            <div>
+                                <span class="block font-bold group-hover:text-indigo-400">Integrated Bot Orchestration</span>
+                                <span class="text-[11px] text-gray-500">Enables the <b>Bot Connectors</b> UI and background services for Telegram, Discord, and Slack.</span>
+                            </div>
+                        </label>
+                        <div class="mt-3 p-3 bg-indigo-500/5 border border-indigo-500/20 rounded-lg">
+                            <h4 class="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-1">Configuration Note</h4>
+                            <p class="text-[11px] text-gray-400 leading-relaxed">
+                                Enabling this starts a background manager that maintains persistent connections to messaging APIs. 
+                                It allows your <b>Virtual Agents</b> and <b>Workflows</b> to be reachable via DM or group chat.
+                            </p>
                         </div>
-                    </label>
+                        {% if not settings.enable_bot_mode %}
+                        <div class="mt-2 text-[10px] text-amber-500 flex items-center gap-2 font-bold uppercase tracking-tighter">
+                             <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                             Currently Hidden from Sidebar
+                        </div>
+                        {% endif %}
+                    </div>
                 </div>
                 <div>
                     <label for="openai_port" class="block text-sm font-medium">OpenAI Dedicated Port</label>

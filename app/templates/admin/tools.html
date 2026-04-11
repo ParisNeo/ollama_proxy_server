@@ -43,13 +43,36 @@
                         <span id="t-lib-name" class="text-[10px] bg-sky-500/20 text-sky-300 px-2 py-0.5 rounded font-black uppercase"></span>
                     </div>
                     <div class="flex items-center gap-2">
+                        <button onclick="initToolLibrary()" class="text-[10px] font-bold bg-white/5 hover:bg-indigo-600/20 text-indigo-400 px-3 py-1.5 rounded border border-indigo-500/20 uppercase transition-all">Init Deps</button>
                         <button id="btn-save" onclick="saveCurrentTool()" class="text-[10px] font-black bg-sky-600 hover:bg-sky-500 px-4 py-1.5 rounded text-white uppercase tracking-widest">Save & Deploy</button>
                         <button onclick="deleteCurrentTool()" class="text-[10px] font-bold text-red-400 hover:text-red-300 uppercase">Delete</button>
                     </div>
                 </div>
-                <!-- Unified flex container for Editor -->
-                <div class="flex-grow relative overflow-hidden bg-[#030305]">
-                    <div id="code-editor-container" class="absolute inset-0"></div>
+                <!-- Unified flex container for Editor & Console -->
+                <div class="flex-grow flex flex-col min-h-0 bg-[#030305]">
+                    <div class="flex-grow relative overflow-hidden border-b border-white/5">
+                        <div id="code-editor-container" class="absolute inset-0"></div>
+                    </div>
+
+                    <!-- Test Console Section -->
+                    <div id="test-console" class="h-64 flex flex-col bg-black/40 border-t border-white/10 flex-shrink-0">
+                        <div class="p-2 px-4 bg-black/20 border-b border-white/5 flex justify-between items-center">
+                            <span class="text-[10px] font-black text-gray-500 uppercase tracking-widest">Interactive Test Console</span>
+                            <div class="flex gap-2">
+                                 <button onclick="fixWithAI()" class="text-[9px] font-bold text-purple-400 hover:text-purple-300 uppercase">✨ Fix with AI</button>
+                                 <button onclick="clearConsole()" class="text-[9px] font-bold text-gray-600 hover:text-white uppercase">Clear</button>
+                            </div>
+                        </div>
+                        <div class="flex-grow flex p-2 gap-4 overflow-hidden">
+                            <div class="w-1/3 flex flex-col gap-2">
+                                <textarea id="test-prompt" class="flex-grow bg-black/60 border border-white/10 rounded-lg p-2 text-xs text-indigo-200 outline-none focus:border-indigo-500 custom-scrollbar" placeholder="Ask AI to test the tool... (e.g. 'Search for Einstein on Wikipedia')"></textarea>
+                                <button onclick="runTest()" id="btn-test" class="bg-indigo-600 hover:bg-indigo-500 text-white font-black text-[10px] uppercase py-2 rounded-lg transition-all">Execute Test Call</button>
+                            </div>
+                            <div id="console-output" class="flex-grow bg-black/80 rounded-lg p-3 font-mono text-[11px] text-emerald-400 overflow-y-auto custom-scrollbar whitespace-pre-wrap">
+                                <span class="text-gray-600 italic">Console ready. Deploy your tool and run a test.</span>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
             <div id="empty-state" class="card-style border-dashed border-white/10 flex flex-col items-center justify-center h-full text-center p-8">
@@ -182,10 +205,25 @@ window.saveCurrentTool = async () => {
 
     try {
         const resp = await fetch("{{ url_for('api_save_tool') }}", { method: "POST", body: formData });
-        if (resp.ok) {
+        const result = await resp.json();
+        
+        if (resp.ok && result.success) {
             btn.innerText = "SUCCESS ✓";
             btn.classList.replace('bg-sky-600', 'bg-green-600');
-            await loadTools();
+            
+            // IMMEDIATE UI UPDATE: Update local model name without reload
+            if (result.meta) {
+                document.getElementById('t-lib-name').textContent = result.meta.name;
+                const toolIdx = allTools.findIndex(t => t.filename === currentFile);
+                if (toolIdx !== -1) {
+                    allTools[toolIdx].name = result.meta.name;
+                    allTools[toolIdx].description = result.meta.description;
+                    allTools[toolIdx].icon = result.meta.icon;
+                    allTools[toolIdx].raw = content;
+                    renderToolsList();
+                }
+            }
+
             setTimeout(() => {
                 btn.innerText = originalText;
                 btn.classList.replace('bg-green-600', 'bg-sky-600');
@@ -201,7 +239,7 @@ window.saveCurrentTool = async () => {
 
 window.renameTool = async (filename) => {
     const oldName = filename;
-    const newName = prompt("Enter new filename (with .py):", oldName);
+    const newName = prompt("Enter new filename (including .py):", oldName);
     if (!newName || newName === oldName) return;
 
     const formData = new FormData();
@@ -210,16 +248,121 @@ window.renameTool = async (filename) => {
     formData.append("csrf_token", "{{ csrf_token }}");
 
     try {
-        const resp = await fetch("{{ url_for('api_rename_tool') }}", { method: "POST", body: formData });
+        const resp = await fetch("{{ url_for('api_rename_tool') }}", { 
+            method: "POST", 
+            body: formData 
+        });
         const data = await resp.json();
         if (data.success) {
-            if (currentFile === oldName) currentFile = data.new_filename;
+            currentFile = data.new_filename;
             await loadTools();
-            if (currentFile === data.new_filename) openTool(data.new_filename);
+            openTool(currentFile);
         } else {
-            alert(data.error);
+            alert("Rename failed: " + (data.error || data.detail));
         }
-    } catch(e) { alert("Rename error"); }
+    } catch(e) { console.error(e); alert("Network error during rename."); }
+};
+
+window.initToolLibrary = async () => {
+    const btn = event.target;
+    const old = btn.innerText;
+    btn.innerText = "INITIALIZING...";
+    btn.disabled = true;
+
+    const formData = new FormData();
+    formData.append("filename", currentFile);
+    formData.append("csrf_token", "{{ csrf_token }}");
+
+    try {
+        const resp = await fetch("{{ url_for('api_init_tool') }}", { method: 'POST', body: formData });
+        const data = await resp.json();
+        logToConsole(data.message || data.error, data.error ? 'text-red-400' : 'text-indigo-400');
+    } catch(e) { logToConsole("Network error: " + e.message, 'text-red-400'); }
+    finally { btn.innerText = old; btn.disabled = false; }
+};
+
+window.runTest = async () => {
+    const prompt = document.getElementById('test-prompt').value;
+    const out = document.getElementById('console-output');
+    const btn = document.getElementById('btn-test');
+
+    if (!prompt.trim()) return alert("Enter a test prompt.");
+
+    btn.disabled = true;
+    out.innerHTML = ""; // Clear console
+    logToConsole(`🚀 [DISPATCH] Initiating AI Test Request: "${prompt}"`, 'text-indigo-400 font-bold');
+
+    const formData = new FormData();
+    formData.append("filename", currentFile);
+    formData.append("user_prompt", prompt);
+    formData.append("csrf_token", "{{ csrf_token }}");
+
+    try {
+        const resp = await fetch("{{ url_for('api_test_tool') }}", { method: 'POST', body: formData });
+        const data = await resp.json();
+        
+        if (data.success) {
+            if (data.ai_response && data.ai_response.content) {
+                logToConsole(`🤖 [AI THOUGHT]: ${data.ai_response.content}`, 'text-gray-400 italic');
+            }
+
+            if (data.executions && data.executions.length > 0) {
+                data.executions.forEach((ex, i) => {
+                    const fn = ex.call.function;
+                    logToConsole(`\n🛠️  [EXECUTE #${i+1}] Calling ${fn.name}(${JSON.stringify(fn.arguments)})`, 'text-amber-400 font-black');
+                    
+                    const isError = typeof ex.output === 'string' && (ex.output.includes('CRASH') || ex.output.includes('Error:'));
+                    const outColor = isError ? 'text-red-400 bg-red-950/20 p-2 rounded border border-red-500/30' : 'text-emerald-400';
+                    
+                    logToConsole(`📥 [RESULT]:`, 'text-gray-500 underline');
+                    logToConsole(typeof ex.output === 'object' ? JSON.stringify(ex.output, null, 2) : ex.output, outColor);
+                });
+            } else {
+                logToConsole("⚠️  [NOTICE]: AI did not trigger any tool calls. Try adjusting the prompt.", 'text-amber-500 font-bold');
+            }
+        } else {
+            logToConsole("🛑 [SYSTEM ERROR]:", 'text-red-500 font-black');
+            logToConsole(data.error, 'text-red-300');
+        }
+    } catch(e) { logToConsole("💥 [NETWORK ERROR]: " + e.message, 'text-red-500'); }
+    finally { btn.disabled = false; }
+};
+
+window.fixWithAI = async () => {
+    const errorLog = document.getElementById('console-output').innerText;
+    const extra = prompt("Optional instruction for the fix (or leave blank):");
+    
+    logToConsole(">>> Sending to Architect for repair...", 'text-purple-400 animate-pulse');
+
+    const formData = new FormData();
+    formData.append("filename", currentFile);
+    formData.append("error_log", errorLog);
+    formData.append("extra_prompt", extra || "");
+    formData.append("csrf_token", "{{ csrf_token }}");
+
+    try {
+        const resp = await fetch("{{ url_for('api_fix_tool') }}", { method: 'POST', body: formData });
+        const data = await resp.json();
+        if (data.success) {
+            editor.setValue(data.fixed_code);
+            logToConsole("REPAIR APPLIED. Review and Save.", 'text-fuchsia-400 font-bold');
+        } else {
+            logToConsole("FIX FAILED: " + data.error, 'text-red-400');
+        }
+    } catch(e) { logToConsole("Error: " + e.message, 'text-red-400'); }
+};
+
+function logToConsole(text, colorClass) {
+    const out = document.getElementById('console-output');
+    const div = document.createElement('div');
+    div.className = colorClass + " mb-2";
+    div.innerText = text;
+    out.appendChild(div);
+    out.scrollTop = out.scrollHeight;
+}
+
+window.clearConsole = () => {
+    document.getElementById('console-output').innerHTML = '<span class="text-gray-600 italic">Console cleared.</span>';
 };
 
 window.deleteTool = async (filename) => {

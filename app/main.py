@@ -313,18 +313,26 @@ app.mount("/static", StaticFiles(directory="app/static"), name="static")
 app.include_router(health_router, prefix="/api/v1", tags=["Health"])
 
 # Global Route Registration (Required for reliability)
-# Feature flagging is handled inside the routes via app.state.settings
-app.include_router(openai_router, prefix="/v1", tags=["OpenAI Protocol"])
-app.include_router(proxy_router, prefix="/api", tags=["Ollama Protocol"])
+# CRITICAL: Register specific internal APIs BEFORE greedy catch-all proxy routes.
 app.include_router(admin_router, prefix="/admin", tags=["Admin UI"], include_in_schema=False)
 app.include_router(playground_chat_router, prefix="/admin", tags=["Admin UI"], include_in_schema=False)
 app.include_router(playground_embedding_router, prefix="/admin", tags=["Admin UI"], include_in_schema=False)
-app.include_router(skills_router, prefix="/admin", tags=["Admin UI"], include_in_schema=False)
 app.include_router(skills_router, prefix="/api/v1", tags=["Internal API"], include_in_schema=False)
-app.include_router(personalities_router, prefix="/admin", tags=["Admin UI"], include_in_schema=False)
 app.include_router(personalities_router, prefix="/api/v1", tags=["Internal API"], include_in_schema=False)
-app.include_router(tools_router, prefix="/admin", tags=["Admin UI"], include_in_schema=False)
 app.include_router(tools_router, prefix="/api/v1", tags=["Internal API"], include_in_schema=False)
+app.include_router(importer_router, prefix="/admin/api/importer", tags=["Importer API"], include_in_schema=False)
+app.include_router(conception_router, prefix="/admin", tags=["Admin UI"], include_in_schema=False)
+app.include_router(node_builder_router, prefix="/admin", tags=["Admin UI"], include_in_schema=False)
+app.include_router(datastores_router, prefix="/admin", tags=["Admin UI"], include_in_schema=False)
+
+# Protocol Routes
+app.include_router(openai_router, prefix="/v1", tags=["OpenAI Protocol"])
+app.include_router(proxy_router, prefix="/api", tags=["Ollama Protocol"])
+
+# Secondary UI router inclusions
+app.include_router(skills_router, prefix="/admin", tags=["Admin UI"], include_in_schema=False)
+app.include_router(personalities_router, prefix="/admin", tags=["Admin UI"], include_in_schema=False)
+app.include_router(tools_router, prefix="/admin", tags=["Admin UI"], include_in_schema=False)
 app.include_router(importer_router, prefix="/admin/api/importer", tags=["Importer API"], include_in_schema=False)
 app.include_router(conception_router, prefix="/admin", tags=["Admin UI"], include_in_schema=False)
 app.include_router(node_builder_router, prefix="/admin", tags=["Admin UI"], include_in_schema=False)

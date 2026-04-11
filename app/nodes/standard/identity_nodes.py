@@ -5,7 +5,7 @@ from app.nodes.base import BaseNode
 class ModelSelectorNode(BaseNode):
     node_type = "hub/model"
     node_title = "Model Selector"
-    node_category = "Serving & Cognition"
+    node_category = "Selectors"
     node_icon = "🧠"
     
     @classmethod
@@ -59,7 +59,7 @@ LiteGraph.registerNodeType("hub/personality", NodePersonality);
 class SkillNode(BaseNode):
     node_type = "hub/skill"
     node_title = "Skill"
-    node_category = "Serving & Cognition"
+    node_category = "Selectors"
     node_icon = "📜"
     
     @classmethod

@@ -30,8 +30,12 @@ async def api_get_tools(admin_user=Depends(require_admin_user)):
 
 @router.post("/api/tools", name="api_save_tool", dependencies=[Depends(validate_csrf_token)])
 async def api_save_tool(filename: str = Form(...), content: str = Form(...)):
-    saved = ToolsManager.save_tool(filename, content)
-    return {"success": True, "filename": saved}
+    # FIX: Normalize line endings to prevent \r\n doubling and strip trailing bloat
+    clean_content = content.replace('\r\n', '\n').strip() + '\n'
+    saved = ToolsManager.save_tool(filename, clean_content)
+    # Return metadata so the UI can update the title immediately
+    meta = ToolsManager.parse_metadata(clean_content)
+    return {"success": True, "filename": saved, "meta": meta}
 
 @router.delete("/api/tools/{filename}", name="api_delete_tool")
 async def api_delete_tool(filename: str, request: Request, admin_user: User = Depends(require_admin_user)):
@@ -53,26 +57,180 @@ async def api_rename_tool(
 ):
     """Renames a tool library file on disk."""
     import os
-    from app.core.tools_manager import USER_TOOLS_DIR
+    from app.core.tools_manager import USER_TOOLS_DIR, SYSTEM_TOOLS_DIR
     
-    # Validation
     safe_old = re.sub(r'[^\w\-\.]', '', old_filename)
     safe_new = re.sub(r'[^\w\-\.]', '', new_filename)
     if not safe_new.endswith(".py"): safe_new += ".py"
 
+    # Check User dir first, then System dir
     old_path = USER_TOOLS_DIR / safe_old
-    new_path = USER_TOOLS_DIR / safe_new
+    if not old_path.exists():
+        old_path = SYSTEM_TOOLS_DIR / safe_old
+
+    new_path = USER_TOOLS_DIR / safe_new # Always rename into USER space
 
     if not old_path.exists():
         raise HTTPException(status_code=404, detail="Original file not found")
-    if new_path.exists():
-        raise HTTPException(status_code=409, detail="A file with that name already exists")
 
     try:
-        os.rename(old_path, new_path)
+        os.rename(str(old_path.absolute()), str(new_path.absolute()))
         return {"success": True, "new_filename": safe_new}
     except Exception as e:
         logger.error(f"Rename failed: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+@router.post("/api/tools/init", name="api_init_tool")
+async def api_init_tool(filename: str = Form(...), admin_user: User = Depends(require_admin_user)):
+    """Dynamically loads the tool library and executes its init_tool_library function."""
+    import importlib.util
+    from app.core.tools_manager import USER_TOOLS_DIR, SYSTEM_TOOLS_DIR
+    
+    path = USER_TOOLS_DIR / filename
+    if not path.exists(): path = SYSTEM_TOOLS_DIR / filename
+    
+    try:
+        spec = importlib.util.spec_from_file_location("dynamic_tool_lib", str(path.absolute()))
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        
+        if hasattr(module, "init_tool_library"):
+            await run_in_threadpool(module.init_tool_library)
+            return {"success": True, "message": "Dependencies initialized successfully."}
+        return {"success": True, "message": "No initialization function found. Library is ready."}
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+async def _execute_tool_call_local(code: str, call: dict) -> Any:
+    """Helper to execute a function from a raw string using provided arguments."""
+    import importlib.util
+    import sys
+    import tempfile
+
+    fn_name = call.get("function", {}).get("name")
+    args = call.get("function", {}).get("arguments", {})
+    if isinstance(args, str):
+        try: args = json.loads(args)
+        except: pass
+
+    # 1. Write to temp file to import as module
+    with tempfile.NamedTemporaryFile(suffix=".py", delete=False, mode='w', encoding='utf-8') as f:
+        f.write(code)
+        temp_path = f.name
+
+    try:
+        spec = importlib.util.spec_from_file_location("test_tool_lib", temp_path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        
+        if hasattr(module, fn_name):
+            func = getattr(module, fn_name)
+            # Execute in threadpool to prevent blocking the event loop
+            return await run_in_threadpool(func, args)
+        return f"Error: Function {fn_name} not found in code."
+    except Exception as e:
+        import traceback
+        return f"CRASH DURING EXECUTION:\n{str(e)}\n\nTRACEBACK:\n{traceback.format_exc()}"
+    finally:
+        if os.path.exists(temp_path): os.remove(temp_path)
+
+@router.post("/api/tools/test", name="api_test_tool")
+async def api_test_tool(
+    request: Request,
+    filename: str = Form(...),
+    user_prompt: str = Form(...),
+    db: AsyncSession = Depends(get_db),
+    admin_user: User = Depends(require_admin_user)
+):
+    """Asks AI to call a tool, then EXECUTES that tool locally and returns results."""
+    from app.core.tools_manager import USER_TOOLS_DIR, SYSTEM_TOOLS_DIR, ToolsManager
+    path = USER_TOOLS_DIR / filename
+    if not path.exists(): path = SYSTEM_TOOLS_DIR / filename
+    
+    content = path.read_text(encoding="utf-8")
+    tool_defs = ToolsManager.get_tool_definitions(content)
+    
+    if not tool_defs:
+        return JSONResponse({"error": "No valid tool definitions found."}, status_code=400)
+
+    app_settings = request.app.state.settings
+    target_agent = app_settings.admin_agent_name
+    if not target_agent: return JSONResponse({"error": "No Management Agent set."}, status_code=503)
+
+    try:
+        # PHASE 1: Get Tool Call from AI
+        real_model, msgs = await _resolve_target(db, target_agent, [{"role": "user", "content": user_prompt}])
+        servers = await server_crud.get_servers_with_model(db, real_model)
+        
+        resp, _ = await _reverse_proxy(request, "chat", servers, json.dumps({"model": real_model, "messages": msgs, "tools": tool_defs, "stream": False}).encode(), is_subrequest=True)
+        
+        if not hasattr(resp, 'body'): return JSONResponse({"error": "Empty response from AI"}, status_code=500)
+        
+        ai_data = json.loads(resp.body.decode())
+        ai_msg = ai_data.get("message", {})
+        tool_calls = ai_msg.get("tool_calls", [])
+
+        # PHASE 2: Execute found tool calls
+        execution_results = []
+        if tool_calls:
+            for call in tool_calls:
+                result = await _execute_tool_call_local(content, call)
+                execution_results.append({
+                    "call": call,
+                    "output": result
+                })
+
+        return {
+            "success": True, 
+            "ai_response": ai_msg,
+            "executions": execution_results
+        }
+    except Exception as e:
+        logger.error(f"Test Execution Failed: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+@router.post("/api/tools/fix", name="api_fix_tool")
+async def api_fix_tool(
+    request: Request,
+    filename: str = Form(...),
+    error_log: str = Form(...),
+    extra_prompt: str = Form(""),
+    db: AsyncSession = Depends(get_db),
+    admin_user: User = Depends(require_admin_user)
+):
+    """Uses Hub Agent to fix the tool code based on error output."""
+    from app.core.tools_manager import USER_TOOLS_DIR, SYSTEM_TOOLS_DIR
+    path = USER_TOOLS_DIR / filename
+    if not path.exists(): path = SYSTEM_TOOLS_DIR / filename
+    
+    current_code = path.read_text(encoding="utf-8")
+    app_settings = request.app.state.settings
+    target_agent = app_settings.admin_agent_name
+
+    instruction = (
+        "You are a Python Debugger. Review the provided code and the error/output. "
+        "Fix the implementation to handle the error or fulfill the requirement. "
+        "Output ONLY the raw Python code for the entire file. No chat."
+    )
+
+    prompt = (
+        f"ERROR/OUTPUT:\n{error_log}\n\n"
+        f"USER REQUEST:\n{extra_prompt}\n\n"
+        f"CURRENT CODE:\n{current_code}"
+    )
+
+    try:
+        real_model, msgs = await _resolve_target(db, target_agent, [{"role": "user", "content": prompt}])
+        msgs.insert(0, {"role": "system", "content": instruction})
+        
+        servers = await server_crud.get_servers_with_model(db, real_model)
+        resp, _ = await _reverse_proxy(request, "chat", servers, json.dumps({"model": real_model, "messages": msgs, "stream": False}).encode(), is_subrequest=True)
+        
+        if hasattr(resp, 'body'):
+            data = json.loads(resp.body.decode())
+            fixed_code = re.sub(r'^```python\s*|```$', '', data.get("message", {}).get("content", ""), flags=re.MULTILINE).strip()
+            return {"success": True, "fixed_code": fixed_code}
+    except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
 @router.post("/api/tools/build", name="api_build_tool")
@@ -136,9 +294,16 @@ async def api_build_tool(
         # Clean markdown fences
         raw_code = re.sub(r'^```python\s*|```$', '', raw_code, flags=re.MULTILINE).strip()
         
-        meta = ToolsManager.parse_metadata(raw_code)
-        filename = f"{meta['name'].lower().replace(' ', '_')}.py"
-        ToolsManager.save_tool(filename, raw_code)
+        # Normalize code from AI
+        clean_code = raw_code.replace('\r\n', '\n').strip() + '\n'
+        meta = ToolsManager.parse_metadata(clean_code)
+        
+        # EXTRACT NAME FROM VARIABLE: 
+        # Convert 'Wikipedia Search' -> 'wikipedia_search.py'
+        lib_id = meta.get('name', 'new_toolset').lower().replace(' ', '_')
+        filename = f"{lib_id}.py"
+        
+        ToolsManager.save_tool(filename, clean_code)
         
         event_manager.emit(ProxyEvent("completed", build_id, "Tool Architect", "Local", admin_user.username, error_message="Deployment Successful!"))
         return {"success": True, "filename": filename, "content": raw_code}

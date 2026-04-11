@@ -254,7 +254,7 @@ class DataStore(Base):
     name = Column(String, unique=True, index=True, nullable=False)
     description = Column(String, nullable=True)
     db_path = Column(String, nullable=False)
-    vectorizer_name = Column(String, nullable=False)
+    vectorizer_name = Column(String, nullable=False, default="tfidf")
     chunking_strategy = Column(String, default="recursive")
     chunk_size = Column(Integer, default=512)
     chunk_overlap = Column(Integer, default=50)

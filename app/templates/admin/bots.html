@@ -5,66 +5,173 @@
 {% block content %}
 <div class="space-y-8">
     <div class="card-style bg-indigo-500/10 border border-indigo-500/30">
-        <p class="text-sm text-gray-300">
-            <strong>Bot Mode</strong> allows you to bridge your AI workflows to external apps. 
-            Ensure <code>Enable Bot Mode</code> is checked in <strong>Settings</strong> for these to function.
-        </p>
+        <div class="flex items-start gap-4">
+            <div class="p-2 bg-indigo-500 rounded-lg flex-shrink-0">
+                <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+            </div>
+            <div class="text-sm text-gray-300">
+                <p class="font-bold text-white mb-2">Bot Orchestration is Active</p>
+                <p class="mb-4">Bridge your AI cognitive graphs to messaging apps. Connection tokens are stored using AES-256 encryption.</p>
+                
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6 pt-2">
+                    <div class="bg-black/30 p-3 rounded-lg border border-white/5">
+                        <h4 class="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-1">How it works</h4>
+                        <p class="text-[11px] leading-relaxed">Incoming messages trigger the <strong>Target Workflow</strong>. The Hub resolves the model or graph, executes the request, and sends the final answer back to the platform.</p>
+                    </div>
+                    <div class="bg-black/30 p-3 rounded-lg border border-white/5">
+                        <h4 class="text-[10px] font-black text-amber-400 uppercase tracking-widest mb-1">Telemetry</h4>
+                        <p class="text-[11px] leading-relaxed">Bot requests appear in the <b>Live System Flow</b> with a "BOT" badge. You can monitor latency and speed as your bots interact with users.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
 
     <!-- Add Bot -->
-    <div class="card-style">
-        <h2 class="card-header text-lg font-bold mb-4">Add New Connector</h2>
-        <form action="{{ url_for('admin_add_bot') }}" method="post" class="space-y-4">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-            <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
-                <input type="text" name="name" placeholder="Friendly Name" required class="p-2 rounded bg-black/20 border border-white/10">
-                <select name="platform" id="platform-select" onchange="updateBotFields()" class="p-2 rounded bg-black/20 border border-white/10">
-                    <option value="telegram">Telegram</option>
-                    <option value="discord">Discord</option>
-                    <option value="slack">Slack (Socket Mode)</option>
-                    <option value="whatsapp">WhatsApp (Cloud API)</option>
-                </select>
-                <input type="password" name="token" placeholder="Primary Bot Token" required class="p-2 rounded bg-black/20 border border-white/10">
-                <select name="target_workflow" class="p-2 rounded bg-black/20 border border-white/10">
-                    <option value="auto">auto (Intelligent)</option>
-                    {% for w in available_workflows %}
-                    <option value="{{ w }}">{{ w }}</option>
-                    {% endfor %}
-                </select>
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        <div class="lg:col-span-2">
+            <div class="card-style h-full">
+                <h2 class="card-header text-lg font-bold mb-6">Deploy New Connector</h2>
+                <form action="{{ url_for('admin_add_bot') }}" method="post" class="space-y-6" autocomplete="off">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                    
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div>
+                            <label class="block text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1 px-1">Friendly Name</label>
+                            <input type="text" name="name" placeholder="e.g. Support-Bot" required 
+                                   class="w-full p-2.5 rounded-lg bg-black/40 border border-white/10 focus:border-indigo-500 outline-none transition-colors" 
+                                   autocomplete="off">
+                        </div>
+                        <div>
+                            <label class="block text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1 px-1">Messaging Platform</label>
+                            <select name="platform" id="platform-select" onchange="updateBotView()" 
+                                    class="w-full p-2.5 rounded-lg bg-black/40 border border-white/10 text-indigo-400 font-bold outline-none">
+                                <option value="telegram">Telegram</option>
+                                <option value="discord">Discord</option>
+                                <option value="slack">Slack (Socket Mode)</option>
+                                <option value="whatsapp">WhatsApp (Cloud API)</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div>
+                            <label class="block text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1 px-1">Primary Access Token</label>
+                            <input type="password" name="token" placeholder="Paste platform token..." required 
+                                   class="w-full p-2.5 rounded-lg bg-black/40 border border-white/10 focus:border-indigo-500 outline-none transition-colors"
+                                   autocomplete="new-password">
+                        </div>
+                        <div>
+                            <label class="block text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1 px-1">Target Workflow (Brains)</label>
+                            <select name="target_workflow" class="w-full p-2.5 rounded-lg bg-black/40 border border-white/10 outline-none">
+                                <option value="auto">auto (Intelligent Routing)</option>
+                                {% for w in available_workflows %}
+                                <option value="{{ w }}">{{ w }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                    </div>
+                    
+                    <div id="extra-fields" class="grid grid-cols-1 md:grid-cols-2 gap-6 hidden pt-4 border-t border-white/5">
+                        <div id="slack-fields" class="hidden">
+                            <label class="block text-[10px] font-black text-purple-400 uppercase tracking-widest mb-1 px-1">Slack App-Level Token (xapp-...)</label>
+                            <input type="password" name="app_token" placeholder="Required for Socket Mode" class="w-full p-2.5 rounded-lg bg-black/40 border border-purple-500/20 outline-none" autocomplete="new-password">
+                        </div>
+                        <div id="whatsapp-fields" class="hidden">
+                            <label class="block text-[10px] font-black text-green-400 uppercase tracking-widest mb-1 px-1">Phone Number ID</label>
+                            <input type="text" name="phone_id" placeholder="From Meta Dev Portal" class="w-full p-2.5 rounded-lg bg-black/40 border border-green-500/20 outline-none" autocomplete="off">
+                        </div>
+                    </div>
+
+                    <div class="flex justify-end pt-4">
+                        <button type="submit" class="bg-indigo-600 hover:bg-indigo-500 px-10 py-3 rounded-xl font-black text-xs uppercase tracking-widest text-white shadow-lg transition-all transform active:scale-95">Deploy Connector</button>
+                    </div>
+                </form>
             </div>
-            
-            <div id="extra-fields" class="grid grid-cols-1 md:grid-cols-2 gap-4 hidden">
-                <div id="slack-fields" class="hidden">
-                    <label class="block text-[10px] text-gray-500 uppercase font-black mb-1">Slack App Token (xapp-...)</label>
-                    <input type="password" name="app_token" class="w-full p-2 rounded bg-black/20 border border-white/10">
+        </div>
+
+        <!-- Documentation Card (Dynamic) -->
+        <div class="lg:col-span-1">
+            <div class="card-style bg-black/40 border-indigo-500/20 h-full">
+                <h2 id="help-title" class="text-xs font-black text-indigo-400 uppercase tracking-widest mb-4 border-b border-white/10 pb-2">Configuration Guide</h2>
+                <div id="help-content" class="text-xs text-gray-400 space-y-4 leading-relaxed overflow-y-auto custom-scrollbar h-[350px] pr-2">
+                    <!-- Populated by JS -->
                 </div>
-                <div id="whatsapp-fields" class="hidden">
-                    <label class="block text-[10px] text-gray-500 uppercase font-black mb-1">WhatsApp Phone Number ID</label>
-                    <input type="text" name="phone_id" class="w-full p-2 rounded bg-black/20 border border-white/10">
-                </div>
             </div>
-
-            <div class="flex justify-end">
-                <button type="submit" class="bg-indigo-600 px-8 py-2 rounded font-bold text-sm">Deploy Connector</button>
-            </div>
-        </form>
-
-        <script>
-            function updateBotFields() {
-                const platform = document.getElementById('platform-select').value;
-                const extra = document.getElementById('extra-fields');
-                const slack = document.getElementById('slack-fields');
-                const whatsapp = document.getElementById('whatsapp-fields');
-                
-                extra.classList.add('hidden');
-                slack.classList.add('hidden');
-                whatsapp.classList.add('hidden');
-
-                if (platform === 'slack') { extra.classList.remove('hidden'); slack.classList.remove('hidden'); }
-                if (platform === 'whatsapp') { extra.classList.remove('hidden'); whatsapp.classList.remove('hidden'); }
-            }
-        </script>
+        </div>
     </div>
+
+    <script>
+        const PLATFORM_GUIDE = {
+            telegram: {
+                title: "TELEGRAM SETUP",
+                content: `
+                    <p>1. Open <a href="https://t.me/botfather" class="text-indigo-400 underline">@BotFather</a> on Telegram.</p>
+                    <p>2. Send <b>/newbot</b> and follow steps to get your <b>API Token</b>.</p>
+                    <p>3. Paste the token into the "Primary Access Token" field.</p>
+                    <div class="p-2 bg-indigo-500/10 border border-indigo-500/20 rounded mt-2">
+                        <b>Pro Tip:</b> Use <i>/setprivacy</i> to "Disabled" if you want the bot to read all messages in groups.
+                    </div>
+                `
+            },
+            discord: {
+                title: "DISCORD SETUP",
+                content: `
+                    <p>1. Go to <a href="https://discord.com/developers/applications" class="text-indigo-400 underline">Discord Dev Portal</a>.</p>
+                    <p>2. Create application → Bot section.</p>
+                    <p>3. Enable <b>MESSAGE CONTENT INTENT</b> (Critical!).</p>
+                    <p>4. Reset/Copy the <b>Bot Token</b>.</p>
+                    <p>5. Invite bot via OAuth2 URL Generator (scopes: bot, message.read).</p>
+                `
+            },
+            slack: {
+                title: "SLACK SOCKET MODE",
+                content: `
+                    <p>1. Create App on <a href="https://api.slack.com/apps" class="text-indigo-400 underline">Slack API</a>.</p>
+                    <p>2. Enable <b>Socket Mode</b>.</p>
+                    <p>3. Copy <b>App-Level Token</b> (starts with <i>xapp-</i>) and put in Extra Fields.</p>
+                    <p>4. Copy <b>Bot User OAuth Token</b> (starts with <i>xoxb-</i>) and put in Primary Token.</p>
+                    <p>5. Add <i>message.channels</i> to Event Subscriptions.</p>
+                `
+            },
+            whatsapp: {
+                title: "WHATSAPP CLOUD",
+                content: `
+                    <p>1. Create App on <a href="https://developers.facebook.com" class="text-indigo-400 underline">Meta for Developers</a>.</p>
+                    <p>2. Add <b>WhatsApp</b> product.</p>
+                    <p>3. Get <b>Temporary Access Token</b> and <b>Phone Number ID</b> from Getting Started.</p>
+                    <div class="p-2 bg-amber-500/10 border border-amber-500/20 rounded mt-2 text-amber-300">
+                        <b>Warning:</b> WhatsApp requires a public URL (https) for webhooks. LoLLMs Hub must be reachable from Meta's servers.
+                    </div>
+                `
+            }
+        };
+
+        function updateBotView() {
+            const platform = document.getElementById('platform-select').value;
+            const extra = document.getElementById('extra-fields');
+            const slack = document.getElementById('slack-fields');
+            const whatsapp = document.getElementById('whatsapp-fields');
+            
+            const helpTitle = document.getElementById('help-title');
+            const helpContent = document.getElementById('help-content');
+
+            // Toggle form fields
+            extra.classList.add('hidden');
+            slack.classList.add('hidden');
+            whatsapp.classList.add('hidden');
+
+            if (platform === 'slack') { extra.classList.remove('hidden'); slack.classList.remove('hidden'); }
+            if (platform === 'whatsapp') { extra.classList.remove('hidden'); whatsapp.classList.remove('hidden'); }
+
+            // Toggle help
+            const guide = PLATFORM_GUIDE[platform];
+            helpTitle.innerText = guide.title;
+            helpContent.innerHTML = guide.content;
+        }
+
+        document.addEventListener('DOMContentLoaded', updateBotView);
+    </script>
 
     <!-- Bot List -->
     <div class="card-style">

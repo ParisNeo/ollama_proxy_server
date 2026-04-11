@@ -2770,6 +2770,11 @@ async def admin_enhance_prompt(
 
 @router.get("/bots", response_class=HTMLResponse, name="admin_bots")
 async def admin_bots_page(request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
+    # SECURITY: Prevent manual navigation if disabled
+    if not request.app.state.settings.enable_bot_mode:
+        flash(request, "Bot Connectors are currently disabled in Settings.", "error")
+        return RedirectResponse(url=request.url_for("admin_settings"), status_code=303)
+        
     context = get_template_context(request)
     res = await db.execute(select(BotConfig))
     context["bots"] = res.scalars().all()
@@ -2803,18 +2808,27 @@ async def admin_add_bot(
 @router.post("/bots/{bot_id}/toggle", name="admin_toggle_bot", dependencies=[Depends(validate_csrf_token)])
 async def admin_toggle_bot(bot_id: int, request: Request, db: AsyncSession = Depends(get_db)):
     bot = await db.get(BotConfig, bot_id)
-    if not bot: raise HTTPException(status_code=404)
+    if not bot:
+        raise HTTPException(status_code=404, detail="Bot configuration not found")
     
-    bot.is_active = not bot.is_active
+    # Toggle state and capture locally
+    new_state = not bot.is_active
+    bot.is_active = new_state
+    
+    # Commit to DB - this expires the 'bot' object
     await db.commit()
+    
+    # REPAIR MISSION: Refresh the bot instance so we can access bot.name/bot.id 
+    # in the manager without triggering a synchronous lazy-load error (MissingGreenlet).
+    await db.refresh(bot)
     
     # Notify the running manager
     manager = request.app.state.bot_manager
-    if bot.is_active:
+    if new_state:
         await manager.start_bot(bot)
-        flash(request, f"Bot '{bot.name}' started.")
+        flash(request, f"Bot '{bot.name}' started.", "success")
     else:
         await manager.stop_bot(bot.id)
-        flash(request, f"Bot '{bot.name}' stopped.")
+        flash(request, f"Bot '{bot.name}' stopped.", "info")
         
     return RedirectResponse(url=request.url_for("admin_bots"), status_code=303)

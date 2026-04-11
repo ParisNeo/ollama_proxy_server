@@ -418,6 +418,14 @@ select { cursor: pointer; transition: all 0.2s ease; }
     background-color: rgba(255, 255, 255, 0.03);
 }
 
+/* Fix sidebar tool label alignment */
+#tools-list button {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    text-align: left;
+}
+
 /* --- Image Annotation Styles --- */
 .annotated-image-container {
     position: relative;

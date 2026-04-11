@@ -398,6 +398,14 @@
         // --- MARKDOWN MODAL LOGIC (SKILLS & PERSONALITIES) ---
         let currentEditingNode = null;
         let SERVER_SKILLS = [];
+        let SERVER_TOOLS = [];
+
+        async function fetchServerTools() {
+            try {
+                const resp = await fetch("/api/v1/api/tools");
+                if (resp.ok) SERVER_TOOLS = await resp.json();
+            } catch(e) { console.error("Failed to load tools", e); }
+        }
 
         async function fetchServerSkills() {
             try {
@@ -881,7 +889,7 @@
         "hub/personality": "**PERSONALITY:**\nLoads a persona defined in the Personalities Studio.\n\n### Output:\nOutputs the raw Markdown body as a System Prompt string.",
         "hub/system_composer": "**SYSTEM COMPOSER:**\nMerges a Persona, Skills, and RAG context into a single structured system instruction.",
         "hub/subgraph": "**SUB-WORKFLOW:**\nEmbeds another saved Workflow as a reusable single node.",
-        "hub/tool": "**TOOL DEFINITION:**\nDefines a function schema (OpenAI format) that an LLM can call. \n\n### Usage:\nConnect this to the **Tool** inputs of an **LLM Chat** node. The model will then see this function as an available capability.",
+        "hub/tool_selector": "**TOOL SELECTOR:**\nDynamically links a Python tool from your **Tools Library** to an AI node.\n\n### Configuration:\n- **Library:** Select the Python file (e.g., `wikipedia_search.py`).\n- **Function:** Select the specific `tool_` function to expose.\n\n### Usage:\nConnect the output to the **Tool** slots of an **LLM Chat** or **Autonomous Agent** node.",
         "hub/mcp": "**MCP SERVER:**\nConfigures a Model Context Protocol connection. \n\n### Type:\n- **SSE:** Connect to a remote web server (e.g., Brave Search, Local RAG).\n- **Stdio:** Run a local command (e.g., npx server-filesystem)."
     };
 
@@ -1628,6 +1636,7 @@ LiteGraph.registerNodeType("custom/my_unique_id", MyNodeUI);
         // 5. Force Initial Size & Ensure Library View
         setTimeout(async () => {
             await fetchLibraries();
+            await fetchServerTools();
             resizeCanvas();
             loadWorkflows();
             loadTemplates();

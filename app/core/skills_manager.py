@@ -9,7 +9,75 @@ from typing import List, Dict, Any
 # Store skills in project tree (default) and user space (custom)
 SYSTEM_SKILLS_DIR = Path("app/skills")
 USER_SKILLS_DIR = Path.home() / ".lollms_hub" / "skills"
+BOOTSTRAP_TOOLS = [
+    {
+        "name": "wikipedia_search.py",
+        "content": """TOOL_LIBRARY_NAME = 'Wikipedia Search'
+TOOL_LIBRARY_DESC = 'Search and retrieve article summaries from Wikipedia.'
+TOOL_LIBRARY_ICON = '📖'
 
+def init_tool_library() -> None:
+    '''Initialize dependencies using pipmaster'''
+    import pipmaster as pm
+    pm.ensure_packages({'wikipedia': '>=1.4.0'})
+
+def tool_search_wikipedia(args: dict):
+    '''
+    Search Wikipedia for articles matching a query and return summaries.
+    
+    Args:
+        args: dict with keys:
+            - query (str): The search term or phrase
+            - max_results (int, optional): Maximum number of results to return (default: 3)
+    '''
+    import wikipedia
+    try:
+        query = args.get('query')
+        limit = args.get('max_results', 3)
+        search_results = wikipedia.search(query)
+        output = []
+        for title in search_results[:limit]:
+            try:
+                page = wikipedia.summary(title, sentences=5)
+                output.append(f"--- {title} ---\\n{page}")
+            except: continue
+        return "\\n\\n".join(output) if output else "No results found."
+    except Exception as e:
+        return f"Error: {str(e)}"
+"""
+    },
+    {
+        "name": "arxiv_search.py",
+        "content": """TOOL_LIBRARY_NAME = 'ArXiv Explorer'
+TOOL_LIBRARY_DESC = 'Search scientific papers and pre-prints on ArXiv.'
+TOOL_LIBRARY_ICON = '🔬'
+
+def init_tool_library() -> None:
+    import pipmaster as pm
+    pm.ensure_packages({'arxiv': '>=2.1.0'})
+
+def tool_search_papers(args: dict):
+    '''
+    Search for scientific papers on ArXiv.
+    
+    Args:
+        args: dict with keys:
+            - query (str): Scientific keywords or paper ID
+            - count (int, optional): Number of papers to fetch
+    '''
+    import arxiv
+    try:
+        client = arxiv.Client()
+        search = arxiv.Search(query=args.get('query'), max_results=args.get('count', 3))
+        results = []
+        for res in client.results(search):
+            results.append(f"[{res.entry_id}] {res.title}\\nAbstract: {res.summary[:500]}...")
+        return "\\n\\n".join(results) if results else "No papers found."
+    except Exception as e:
+        return f"Error: {str(e)}"
+"""
+    }
+]
 DEFAULT_SKILLS = [
     {
         "name": "Claude XML Reasoning",

@@ -2,6 +2,7 @@ import importlib
 import pkgutil
 import inspect
 import logging
+import sys
 from typing import Dict, Type
 from app.nodes.base import BaseNode
 
@@ -59,6 +60,9 @@ class NodeRegistry:
             for package in [app.nodes.standard, app.nodes.custom]:
                 for _, module_name, _ in pkgutil.iter_modules(package.__path__, package.__name__ + "."):
                     try:
+                        # Force reload to ensure code changes in standard nodes are reflected
+                        if module_name in sys.modules:
+                            importlib.reload(sys.modules[module_name])
                         mod = importlib.import_module(module_name)
                         for attr_name in dir(mod):
                             attr = getattr(mod, attr_name)

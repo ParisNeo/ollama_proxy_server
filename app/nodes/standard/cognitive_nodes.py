@@ -69,8 +69,13 @@ LiteGraph.registerNodeType("hub/llm_chat", NodeLLMChat);
         }
         
         if tools:
-            # Filter out None and deduplicate
-            payload["tools"] = [t for t in tools if t]
+            # Flatten potential lists from the [ALL FUNCTIONS] selection
+            flat_tools = []
+            for t in tools:
+                if isinstance(t, list): flat_tools.extend(t)
+                elif t: flat_tools.append(t)
+                
+            payload["tools"] = flat_tools
             if not payload["tools"]: del payload["tools"]
 
         # 4. Call Backend

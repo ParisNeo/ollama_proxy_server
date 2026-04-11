@@ -6,7 +6,7 @@
     "last_link_id": 10,
     "nodes": [
       { "id": 1, "type": "hub/input", "pos": [50, 50], "outputs": [{ "name": "Messages", "links": [1] }, { "name": "Settings", "links": [2] }] },
-      { "id": 2, "type": "hub/tool", "pos": [50, 300], "outputs": [{ "name": "Tool", "links": [3] }], "properties": { "name": "web_search", "description": "Search the internet for current facts.", "parameters": { "type": "object", "properties": { "query": { "type": "string" } }, "required": ["query"] } } },
+      { "id": 2, "type": "hub/tool_selector", "pos": [50, 300], "outputs": [{ "name": "Tool Schema", "links": [3] }], "properties": { "library": "wikipedia_search.py", "function": "tool_search_wikipedia" } },
       { "id": 3, "type": "hub/agent", "pos": [550, 50], "inputs": [{ "name": "In Messages", "link": 1 }, { "name": "Settings", "link": 2 }, { "name": "Tool 1", "link": 3 }], "outputs": [{ "name": "Final Answer", "links": [4] }], "properties": { "max_turns": 10, "model": "auto" } },
       { "id": 4, "type": "hub/output", "pos": [1050, 50], "inputs": [{ "name": "Content", "link": 4 }] }
     ],
