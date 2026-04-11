@@ -222,15 +222,10 @@ async def _send_backend_request(
 
 def _normalize_payload_for_ollama(body_bytes: bytes, max_context_limit: int = 32768, enforce_strict: bool = False) -> bytes:
     """
-    Ensures payload is compatible with Ollama backends.
-    1. Converts OpenAI-style multi-part messages to Ollama string+images format.
-    2. Handles context size: preserves user's choice for raw models, enforces metadata for bundles.
-    
-    Args:
-        body_bytes: The raw JSON payload
-        max_context_limit: The maximum context window from model metadata
-        enforce_strict: If True, always use max_context_limit (for bundles/orchestrators).
-                       If False, only clamp if user exceeded limit (for raw models).
+    Ensures payload is 100% compatible with Ollama's strict Go-based JSON unmarshaler.
+    1. Forces 'content' fields to be simple strings (joins array-based multimodal parts).
+    2. Extracts base64 images into the top-level 'images' list per message.
+    3. Handles KV cache pre-allocation by enforcing 'num_ctx'.
     """
     if not body_bytes:
         return body_bytes
@@ -238,82 +233,61 @@ def _normalize_payload_for_ollama(body_bytes: bytes, max_context_limit: int = 32
         temp_body = json.loads(body_bytes)
         modified = False
         
-        # Initialize options dict if missing
-        if "options" not in temp_body:
+        # Ensure options is a valid dictionary even if passed as null
+        if not temp_body.get("options"):
             temp_body["options"] = {}
             
         requested_ctx = temp_body["options"].get("num_ctx")
-        
-        try:
-            req_ctx_int = int(requested_ctx) if requested_ctx is not None else None
-        except ValueError:
-            req_ctx_int = None
-            
-        # KV CACHE PRE-ALLOCATION FIX:
-        # To force Ollama to allocate a maxed-out KV cache once and for all,
-        # we consistently inject the max_context_limit into every request.
-        # This causes a long TTFT on the very first prompt, but allows 
-        # lightning-fast TPS on all subsequent prompts because Ollama 
-        # reuses the pre-allocated VRAM instead of reloading the model.
-        if req_ctx_int != max_context_limit:
+        if requested_ctx != max_context_limit:
             temp_body["options"]["num_ctx"] = max_context_limit
             modified = True
-            logger.info(f"Enforcing max KV cache allocation: {max_context_limit} (was {req_ctx_int})")
 
-        # --- 2. Message Format Normalization ---
+        # --- Aggressive Content Stringification (Ollama/Go Compatibility) ---
+        # Any 'content' field that is a list/array MUST be flattened to a string.
+        # This includes multimodal parts and array-of-strings.
         if "messages" in temp_body:
             for msg in temp_body["messages"]:
-                    if isinstance(msg.get("content"), list):
-                        text_parts = []
-                        images = []
-                        for part in msg["content"]:
-                            if isinstance(part, dict):
-                                if part.get("type") == "text":
-                                    text_parts.append(part.get("text", ""))
-                                elif part.get("type") == "image_url":
-                                    url = part.get("image_url", {}).get("url", "")
-                                    if url.startswith("data:"):
-                                        try:
-                                            base64_data = url.split(",", 1)[1]
-                                            if base64_data:
-                                                images.append(base64_data)
-                                        except (IndexError, AttributeError):
-                                            pass
-                                    else:
-                                        images.append(url)
-                        msg["content"] = "\n".join(text_parts)
-                        if images:
-                            msg["images"] = images
-                        elif "images" in msg:
-                            del msg["images"]
-                        modified = True
+                content = msg.get("content")
+                
+                if isinstance(content, (list, tuple)):
+                    text_parts = []
+                    images = msg.get("images") or []
+                    
+                    for part in content:
+                        if isinstance(part, str):
+                            text_parts.append(part)
+                        elif isinstance(part, dict):
+                            if part.get("type") == "text":
+                                text_parts.append(str(part.get("text", "")))
+                            elif part.get("type") == "image_url":
+                                url = part.get("image_url", {}).get("url", "")
+                                img_val = url.split(",")[-1] if "," in url else url
+                                if img_val:
+                                    images.append(img_val)
+                        else:
+                            text_parts.append(str(part))
+                    
+                    # Force conversion to simple string for Ollama
+                    msg["content"] = "\n".join(text_parts).strip()
+                    if images:
+                        msg["images"] = list(dict.fromkeys(images)) # Deduplicate
+                    modified = True
+                
+                # Clean standalone images field from data prefixes
+                if "images" in msg and isinstance(msg["images"], list):
+                    msg["images"] = [img.split(",")[-1] for img in msg["images"] if isinstance(img, str)]
+                    modified = True
 
-                    # 2. Clean 'data:image' prefix from base64 strings
-                    if "images" in msg and isinstance(msg["images"], list):
-                        cleaned_images = []
-                        for img in msg["images"]:
-                            if isinstance(img, str) and img.startswith("data:"):
-                                try:
-                                    img = img.split(",", 1)[1]
-                                    modified = True
-                                except IndexError:
-                                    pass
-                            if img:
-                                cleaned_images.append(img)
-                        
-                        msg["images"] = cleaned_images
-                        if not msg["images"]:
-                            del msg["images"]
-                            modified = True
+        # Handle top-level single image for /api/generate
+        if isinstance(temp_body.get("images"), list):
+            temp_body["images"] = [img.split(",")[-1] for img in temp_body["images"] if isinstance(img, str)]
+            modified = True
 
-        # Always return the modified payload if we touched options/context/images
-        if modified:
-            return json.dumps(temp_body).encode('utf-8')
+        return json.dumps(temp_body).encode('utf-8')
             
     except Exception as e:
-        logger.warning(f"Payload normalization failed: {e}", exc_info=True)
-        
-    return body_bytes
+        logger.warning(f"Ollama-Native normalization failed: {e}")
+        return body_bytes
 
 
 def _extract_tokens_from_chunk(chunk_data: Dict[str, Any]) -> Dict[str, Optional[int]]:
@@ -447,7 +421,8 @@ async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer
 
         # --- RE-ENCODING FOR OLLAMA ---
         local_body_bytes = body_bytes
-        if chosen_server.server_type == 'ollama':
+        # Apply normalization to both local Ollama and Ollama Cloud instances
+        if chosen_server.server_type in ('ollama', 'cloud'):
             # Use strict context enforcement for bundles/orchestrators, lenient for raw models
             is_strict = getattr(request.state, 'enforce_strict_context', False)
             local_body_bytes = _normalize_payload_for_ollama(
@@ -2478,8 +2453,11 @@ async def proxy_ollama(
         
         resolved_model_name, resolved_messages = await _resolve_target(db, model_name, input_msgs, request=request, request_id=req_id, sender=api_key.user.username)
         
-        if resolved_model_name != model_name or resolved_messages != input_msgs:
-            content = resolved_messages[-1]["content"]
+        # --- STATIC RESULT INTERCEPTION ---
+        # Handles cases where a Graph Workflow produces a final answer (Composer/Aggregation)
+        # without needing a final LLM inference step.
+        if resolved_model_name == "__result__":
+            content = resolved_messages[-1]["content"] if resolved_messages else ""
             final_data = {
                 "model": requested_model_name,
                 "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z"),
@@ -2489,6 +2467,9 @@ async def proxy_ollama(
                 final_data["message"] = {"role": "assistant", "content": content}
             else:
                 final_data["response"] = content
+            
+            # Emit completion event for the UI
+            event_manager.emit(ProxyEvent("completed", req_id, requested_model_name, "Workflow Engine", api_key.user.username, token_count=len(content)//4))
             return JSONResponse(content=final_data)
 
         if resolved_model_name != model_name or resolved_messages != input_msgs:

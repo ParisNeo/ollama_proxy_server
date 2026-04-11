@@ -1,0 +1,26 @@
+{
+  "name": "Multi-Agent Refinement",
+  "description": "A self-correction loop where a second agent reviews the initial draft before finalizing.",
+  "graph": {
+    "last_node_id": 10,
+    "last_link_id": 12,
+    "nodes": [
+      { "id": 1, "type": "hub/input", "pos": [50, 50], "outputs": [{ "name": "Messages", "links": [1] }, { "name": "Settings", "links": [2] }] },
+      { "id": 2, "type": "hub/llm_chat", "pos": [450, 50], "inputs": [{ "name": "Messages", "link": 1 }, { "name": "Settings", "link": 2 }], "outputs": [{ "name": "Content", "links": [3] }], "properties": { "model": "auto", "title": "Drafting Agent" } },
+      { "id": 3, "type": "hub/composer", "pos": [450, 300], "inputs": [{ "name": "A", "link": 3 }], "outputs": [{ "name": "Merged", "links": [4] }], "properties": { "template": "Review the following draft and provide improvements:\n\n{A}" } },
+      { "id": 4, "type": "hub/create_message", "pos": [850, 300], "inputs": [{ "name": "Text", "link": 4 }], "outputs": [{ "name": "Message", "links": [5] }], "properties": { "role": "user" } },
+      { "id": 5, "type": "hub/append_message", "pos": [1250, 50], "inputs": [{ "name": "Messages", "link": 1 }, { "name": "Role", "link": null }, { "name": "Content", "link": null }], "outputs": [{ "name": "Updated Messages", "links": [6] }] },
+      { "id": 6, "type": "hub/llm_chat", "pos": [1650, 50], "inputs": [{ "name": "Messages", "link": 6 }, { "name": "Settings", "link": 2 }], "outputs": [{ "name": "Content", "links": [7] }], "properties": { "model": "auto", "title": "Final Polisher" } },
+      { "id": 7, "type": "hub/output", "pos": [2050, 50], "inputs": [{ "name": "Content", "link": 7 }] }
+    ],
+    "links": [
+      [1, 1, 0, 2, 0, "messages"],
+      [2, 1, 1, 2, 1, "object"],
+      [3, 2, 0, 3, 0, "string"],
+      [4, 3, 0, 4, 0, "string"],
+      [5, 4, 0, 5, 2, "message_obj"],
+      [6, 1, 0, 5, 0, "messages"],
+      [7, 5, 0, 6, 0, "messages"]
+    ]
+  }
+}

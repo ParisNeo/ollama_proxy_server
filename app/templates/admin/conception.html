@@ -4,7 +4,7 @@
 {% block content %}
 <!-- Core LiteGraph Dependencies -->
 <link rel="stylesheet" type="text/css" href="/static/vendor/litegraph.css">
-<script type="text/javascript" src="/static/vendor/gl-matrix.js"></script>
+<script type="text/javascript" src="/static/vendor/gl-matrix.js"d></script>
 <script type="text/javascript" src="/static/vendor/litegraph.js"></script>
 <script src="{{ url_for('static', path='vendor/marked.min.js') }}"></script>
 <!-- CodeMirror for Node Studio -->
@@ -226,6 +226,10 @@
                     <p class="text-gray-500 mt-2">Design complex AI cognitive graphs with modular reusable flows.</p>
                 </div>
                 <div class="flex gap-4">
+                    <button onclick="window.openGraphArchitect()" class="bg-purple-600 hover:bg-purple-500 text-white px-6 py-4 rounded-2xl font-black uppercase text-sm shadow-xl shadow-purple-500/10 transition-all flex items-center gap-2">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                        AI Architect
+                    </button>
                     <button onclick="toggleStudio(true)" class="bg-white/5 hover:bg-white/10 text-indigo-400 px-6 py-4 rounded-2xl font-black uppercase text-sm border border-indigo-500/20 transition-all flex items-center gap-2">
                         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"></path></svg>
                         Node Studio
@@ -375,10 +379,10 @@
     var canvas = null;
     
     // Modern UI Overrides for LiteGraph
-    LiteGraph.NODE_WIDTH = 320; 
-    LiteGraph.NODE_WIDGET_HEIGHT = 24; // Taller widgets
-    LiteGraph.NODE_SLOT_HEIGHT = 20;
-    LiteGraph.WIDGET_MARGIN = 10;
+    LiteGraph.NODE_WIDTH = 200; 
+    LiteGraph.NODE_WIDGET_HEIGHT = 28;
+    LiteGraph.NODE_SLOT_HEIGHT = 24;
+    LiteGraph.WIDGET_MARGIN = 8;
     
     // Helper to calculate total required height for a node
     function getAutoHeight(node) {
@@ -870,12 +874,15 @@
         "hub/input": "**ENTRY NODE:**\nCaptures the user's incoming message and settings from the Chat Playground.\n\n### Outputs:\n- **Messages:** Full conversation history.\n- **Settings:** Port, temperature, etc.\n- **Input:** Just the text of the *last* user message.",
         "hub/output": "**EXIT NODE:**\nDefines the final response sent back to the chat bubble. Connect your AI's answer here.",
         "hub/llm_chat": "**LLM CHAT:**\nCore conversational engine.\n\n### Inputs:\n- **Messages:** Connect a 'Messages' array (usually from Input or System Modifier).\n- **Settings:** Custom generation parameters.\n- **Model Override:** Force a specific model ID.\n- **Tool [N]:** Connect Tool nodes to enable function calling.",
+        "hub/agent": "**AUTONOMOUS AGENT:**\nA multi-turn reasoning engine. It will loop up to 'Max Turns' to solve a problem.\n\n### Reasoning Logic:\n1. **Thought:** The agent uses `<thought>` tags to plan.\n2. **Action:** It calls connected Tools or MCPs.\n3. **Observation:** It processes tool results.\n4. **Final Answer:** It outputs the result when the task is complete.\n\n### Inputs:\n- **In Messages:** The starting conversation state.\n- **Tool [N]:** Add as many Tool or MCP nodes as needed.",
         "hub/system_modifier": "**SYSTEM MODIFIER:**\nInjects or appends a System Prompt into the conversation history.\n\n### Configuration:\n- **Replace Existing:** If enabled, clears all prior system instructions and sets the new one as the 'Soul' (Recommended for Personalities).",
         "hub/datastore": "**RAG DATASTORE:**\nRetrieves relevant chunks from your local indexed knowledge bases.\n\n### Configuration:\n- **Store:** Select one of your created Datastores.\n- **Top K:** Number of context chunks to retrieve.",
         "hub/web_search": "**WEB SEARCH:**\nPerforms real-time queries against Wikipedia, ArXiv, or Google.\n\n### Configuration:\n- **Service:** The provider to use.\n- **Max Results:** How many snippets to include.",
         "hub/personality": "**PERSONALITY:**\nLoads a persona defined in the Personalities Studio.\n\n### Output:\nOutputs the raw Markdown body as a System Prompt string.",
         "hub/system_composer": "**SYSTEM COMPOSER:**\nMerges a Persona, Skills, and RAG context into a single structured system instruction.",
-        "hub/subgraph": "**SUB-WORKFLOW:**\nEmbeds another saved Workflow as a reusable single node."
+        "hub/subgraph": "**SUB-WORKFLOW:**\nEmbeds another saved Workflow as a reusable single node.",
+        "hub/tool": "**TOOL DEFINITION:**\nDefines a function schema (OpenAI format) that an LLM can call. \n\n### Usage:\nConnect this to the **Tool** inputs of an **LLM Chat** node. The model will then see this function as an available capability.",
+        "hub/mcp": "**MCP SERVER:**\nConfigures a Model Context Protocol connection. \n\n### Type:\n- **SSE:** Connect to a remote web server (e.g., Brave Search, Local RAG).\n- **Stdio:** Run a local command (e.g., npx server-filesystem)."
     };
 
     window.showNodeHelp = function(nodeType) {
@@ -1505,6 +1512,61 @@ LiteGraph.registerNodeType("custom/my_unique_id", MyNodeUI);
 
     window.addWorkflowAsNode = function(name) {
         addNode("hub/subgraph", { workflow_name: name });
+    };
+
+    // --- AI GRAPH ARCHITECT ---
+    window.openGraphArchitect = () => {
+        const body = `
+            <div class="space-y-4">
+                <p class="text-xs text-gray-500 uppercase font-black">Describe the workflow you want the AI to build</p>
+                <textarea id="ai-graph-prompt" class="w-full h-32 p-3 bg-black/40 border border-white/10 rounded-xl text-sm focus:border-purple-500 outline-none" placeholder="e.g. Create a flow that takes user input, retrieves from 'CompanyDocs' datastore, then summarizes the context before answering."></textarea>
+                <div id="ai-graph-status" class="hidden text-[10px] font-mono text-purple-400 animate-pulse bg-purple-500/5 p-2 rounded">Architecting your solution...</div>
+                <button id="ai-graph-run-btn" onclick="executeAIGraphBuild()" class="w-full py-3 bg-purple-600 hover:bg-purple-500 rounded-xl font-black text-xs uppercase tracking-widest transition-all">Generate Workflow</button>
+            </div>
+        `;
+        window.showModal("AI Graph Architect", body);
+    };
+
+    window.executeAIGraphBuild = async () => {
+        const prompt = document.getElementById('ai-graph-prompt').value;
+        const status = document.getElementById('ai-graph-status');
+        const btn = document.getElementById('ai-graph-run-btn');
+        
+        if(!prompt.trim()) return alert("Please provide a description.");
+
+        btn.disabled = true;
+        status.classList.remove('hidden');
+
+        try {
+            const formData = new FormData();
+            formData.append('prompt', prompt);
+            formData.append('csrf_token', "{{ csrf_token }}");
+
+            const resp = await fetch("{{ url_for('admin_api_build_workflow') }}", {
+                method: 'POST',
+                body: formData
+            });
+            const data = await resp.json();
+
+            if (data.success) {
+                // RENDER THE GRAPH
+                toggleLibrary(false); // Switch to designer
+                clearGraph();
+                graph.configure(data.graph);
+                
+                // Final polish
+                rearrangeNodes();
+                document.getElementById('workflow-name').value = "AI Generated Flow";
+                document.getElementById('modal-close-btn').click();
+            } else {
+                alert("Generation failed: " + (data.error || "Unknown Error"));
+            }
+        } catch(e) {
+            alert("Connection error: " + e.message);
+        } finally {
+            btn.disabled = false;
+            status.classList.add('hidden');
+        }
     };
 
     loadWorkflows();

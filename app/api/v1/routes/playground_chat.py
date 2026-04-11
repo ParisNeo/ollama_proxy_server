@@ -113,6 +113,24 @@ async def admin_playground_stream(
         import copy
         messages_copy = copy.deepcopy(messages)
         resolved_name, updated_messages = await _resolve_target(db, model_name, messages_copy, request=request, request_id=req_id, sender=sender)
+        
+        # --- STATIC RESULT INTERCEPTION ---
+        # If the workflow returned a final text result (e.g. from a Composer node),
+        # return it immediately instead of calling a backend model named "__result__"
+        if resolved_name == "__result__":
+            content = updated_messages[-1]["content"] if updated_messages else ""
+            from datetime import datetime, timezone
+            final_data = {
+                "model": model_name,
+                "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                "message": {"role": "assistant", "content": content},
+                "done": True
+            }
+            # Emit completion event for the UI
+            from app.core.events import event_manager, ProxyEvent
+            event_manager.emit(ProxyEvent("completed", req_id, model_name, "Workflow Engine", sender, token_count=len(content)//4))
+            return Response(json.dumps(final_data) + '\n', media_type="application/x-ndjson")
+
         model_name = resolved_name
         messages = updated_messages
         data["model"] = model_name

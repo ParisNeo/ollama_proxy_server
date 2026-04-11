@@ -14,10 +14,12 @@ function NodeSystemModifier() {
     this.addInput("Messages", "messages");
     this.addInput("System Prompt", "string");
     this.addOutput("Updated Messages", "messages");
-    this.properties = { replace_all: false };
+    this.properties = { replace_all: false, deep_copy: true };
     this.addWidget("toggle", "Replace Existing", false, (v) => { 
         this.properties.replace_all = v; 
-        if(window.pushHistoryState) window.pushHistoryState();
+    });
+    this.addWidget("toggle", "Deep Copy", true, (v) => { 
+        this.properties.deep_copy = v; 
     });
     this.addWidget("button", "ℹ️ Documentation", null, () => { showNodeHelp(this.type); });
     this.title = "⚡ SYSTEM MODIFIER";
@@ -33,15 +35,34 @@ LiteGraph.registerNodeType("hub/system_modifier", NodeSystemModifier);
         if history is None:
             history = engine.initial_messages
         
-        import copy
-        # Deep copy to avoid mutating shared state or initial_messages
-        history = copy.deepcopy(history)
+        # Determine mode
+        use_deep_copy = node["properties"].get("deep_copy", True)
         
+        if use_deep_copy:
+            import copy
+            history = copy.deepcopy(history)
+        
+        # --- VISION AUGMENTATION SAFETY ---
+        for msg in history:
+            original_images = msg.get("images", [])
+            
+            if isinstance(msg.get("content"), list):
+                text_content = ""
+                for part in msg["content"]:
+                    if isinstance(part, dict) and part.get("type") == "text":
+                        text_content += part.get("text", "")
+                    elif isinstance(part, str):
+                        text_content += part
+                msg["content"] = text_content
+            
+            if original_images:
+                msg["images"] = original_images
+
         sys_prompt_text = await engine._resolve_input(node, 1)
         if not sys_prompt_text:
             return history
             
-        replace_all = node["properties"].get("replace_all", True)
+        replace_all = node["properties"].get("replace_all", False)
         
         if not isinstance(history, list):
             history = [{"role": "user", "content": str(history)}]

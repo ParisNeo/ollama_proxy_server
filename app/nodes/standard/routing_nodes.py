@@ -136,7 +136,16 @@ function NodeMoE() {
     this.addInput("User Context", "messages");
     this.addInput("Expert 1", "expert,string");
     this.addOutput("Synthesized", "string");
+    this.properties = { orchestrator: "auto", system_prompt: "Synthesize the provided expert views into a cohesive final response." };
+    this.addWidget("combo", "Orchestrator", this.properties.orchestrator, (v) => { this.properties.orchestrator = v; pushHistoryState(); }, { values: window.available_models || ["auto"] });
+    this.addWidget("button", "+ Add Expert Slot", null, () => {
+        this.addInput("Expert " + this.inputs.length, "expert,string");
+        this.size = this.computeSize();
+    });
+    this.addWidget("button", "ℹ️ Documentation", null, () => { showNodeHelp(this.type); });
     this.title = "✨ MIXTURE OF EXPERTS";
+    this.serialize_widgets = true;
+    this.size = this.computeSize();
 }
 LiteGraph.registerNodeType("hub/moe", NodeMoE);
 """

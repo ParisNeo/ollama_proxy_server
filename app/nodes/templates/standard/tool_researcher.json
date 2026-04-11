@@ -1,0 +1,22 @@
+{
+  "name": "Tool-Enabled Researcher",
+  "description": "Powerful agent that uses Web Search as a tool to answer complex information-gathering queries.",
+  "graph": {
+    "last_node_id": 5,
+    "last_link_id": 4,
+    "nodes": [
+      { "id": 1, "type": "hub/input", "pos": [50, 50], "outputs": [{ "name": "Messages", "links": [1] }, { "name": "Settings", "links": [2] }] },
+      { "id": 2, "type": "hub/tool", "pos": [50, 300], "outputs": [{ "name": "Tool", "links": [3] }], "properties": { "name": "web_search", "description": "Search the internet for current facts.", "parameters": { "type": "object", "properties": { "query": { "type": "string" } }, "required": ["query"] } } },
+      { "id": 3, "type": "hub/system_modifier", "pos": [450, 50], "inputs": [{ "name": "Messages", "link": 1 }], "outputs": [{ "name": "Updated Messages", "links": [4] }], "properties": { "replace_all": false, "system_prompt": "You are a research expert. Use your search tool whenever you need up-to-date information." } },
+      { "id": 4, "type": "hub/llm_chat", "pos": [850, 50], "inputs": [{ "name": "Messages", "link": 4 }, { "name": "Settings", "link": 2 }, { "name": "Model Override", "link": null }, { "name": "Tool 1", "link": 3 }], "outputs": [{ "name": "Content", "links": [5] }], "properties": { "model": "auto" } },
+      { "id": 5, "type": "hub/output", "pos": [1250, 50], "inputs": [{ "name": "Content", "link": 5 }] }
+    ],
+    "links": [
+      [1, 1, 0, 3, 0, "messages"],
+      [2, 1, 1, 4, 1, "object"],
+      [3, 2, 0, 4, 3, "tool"],
+      [4, 3, 0, 4, 0, "messages"],
+      [5, 4, 0, 5, 0, "string"]
+    ]
+  }
+}

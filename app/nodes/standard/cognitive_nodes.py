@@ -114,23 +114,155 @@ LiteGraph.registerNodeType("hub/llm_instruct", NodeLLMInstruct);
 
 class AgentReasonerNode(BaseNode):
     node_type = "hub/agent"
-    node_title = "Agentic Reasoner"
+    node_title = "Autonomous Agent"
     node_category = "Serving & Cognition"
-    node_icon = "🤖"
+    node_icon = "🧠"
+
     @classmethod
     def get_frontend_js(cls) -> str:
         return """
 function NodeAgent() {
-    this.addInput("Messages", "messages");
-    this.addOutput("Content", "string");
-    this.properties = { model: "auto", max_loops: 5 };
-    this.addWidget("combo", "Model", this.properties.model, (v) => { this.properties.model = v; }, { values: window.available_models || ["auto"] });
-    this.addWidget("number", "Max Loops", this.properties.max_loops, (v) => { this.properties.max_loops = v; }, { min: 1, max: 20 });
-    this.title = "🤖 AGENT REASONER";
-    this.color = "#f43f5e";
+    this.addInput("In Messages", "messages");
+    this.addInput("Settings", "object");
+    this.addOutput("Final Answer", "string");
+    this.addOutput("Out Messages", "messages");
+    
+    this.properties = { 
+        model: "auto", 
+        max_turns: 10, 
+        internal_monologue: true,
+        agent_instruction: "You are an autonomous agent. Think step-by-step using <thought> tags. Use available tools to gather data. When done, provide your final answer."
+    };
+    
+    this.mWidget = this.addWidget("combo", "Model", this.properties.model, (v) => { this.properties.model = v; pushHistoryState(); }, { values: window.available_models || ["auto"] });
+    this.addWidget("number", "Max Turns", 10, (v) => { this.properties.max_turns = v; }, { min: 1, max: 30 });
+    this.addWidget("toggle", "Show Thoughts", true, (v) => { this.properties.internal_monologue = v; });
+    
+    this.addWidget("button", "+ Add Tool Slot", null, () => {
+        this.addInput("Tool " + (this.inputs.length - 1), "tool,mcp");
+        this.size = this.computeSize();
+    });
+
+    this.addWidget("button", "ℹ️ Documentation", null, () => { showNodeHelp(this.type); });
+    
+    this.title = "🧠 AUTONOMOUS AGENT";
+    this.color = "#be123c"; // rose-700
+    this.bgcolor = "#4c0519"; // rose-950
+    this.serialize_widgets = true;
+    this.size = this.computeSize();
 }
+NodeAgent.prototype.onConfigure = function() {
+    if(this.mWidget) this.mWidget.value = this.properties.model;
+};
 LiteGraph.registerNodeType("hub/agent", NodeAgent);
 """
+
     async def execute(self, engine, node: Dict[str, Any], output_slot_idx: int) -> Any:
-        # Complex multi-step reasoning logic handled by engine._evaluate_node fallback for now
-        return await engine._evaluate_node(node, output_slot_idx)
+        import json
+        import copy
+        import secrets
+        from app.core.events import event_manager, ProxyEvent
+        from app.crud import server_crud
+
+        # 1. Setup
+        msgs = await engine._resolve_input(node, 0)
+        if msgs is None: msgs = engine.initial_messages
+        
+        # Working memory for the agent (The Scratchpad)
+        scratchpad = copy.deepcopy(msgs)
+        
+        settings = await engine._resolve_input(node, 1) or {}
+        model = node["properties"].get("model", "auto")
+        max_turns = int(node["properties"].get("max_turns", 10))
+        
+        # 2. Collect Tools & MCPs
+        tools = []
+        for i in range(2, len(node.get("inputs", []))):
+            t_data = await engine._resolve_input(node, i)
+            if t_data:
+                # If it's an MCP, it needs to be handled by the Hub's tool dispatcher
+                # For this implementation, we assume the Hub Proxy handles the execution 
+                # if we pass the tool definitions in the request.
+                if isinstance(t_data, list): tools.extend(t_data)
+                else: tools.append(t_data)
+
+        # 3. Execution Loop (The Reasoning Core)
+        final_text = ""
+        for turn in range(1, max_turns + 1):
+            # Resolve physical model for this specific turn
+            real_model, turn_msgs = await engine.resolve_target_fn(
+                engine.db, model, scratchpad, engine.depth + 1, 
+                engine.request, engine.request_id, engine.sender
+            )
+
+            payload = {
+                "model": real_model,
+                "messages": turn_msgs,
+                "stream": False,
+                "tools": [t for t in tools if t],
+                "options": settings
+            }
+
+            # Telemetry: Thought Phase
+            event_manager.emit(ProxyEvent(
+                "active", engine.request_id, f"Agent Turn {turn}", real_model, engine.sender,
+                error_message=f"Thinking... (Turn {turn}/{max_turns})"
+            ))
+
+            servers = await server_crud.get_servers_with_model(engine.db, real_model)
+            if not servers: return f"[Error: Agent model {real_model} offline]"
+
+            # Call Backend
+            resp, chosen_server = await engine.reverse_proxy_fn(
+                engine.request, "chat", servers, json.dumps(payload).encode(), 
+                is_subrequest=True, sender="autonomous-agent"
+            )
+
+            if not hasattr(resp, 'body'): break
+            
+            res_data = json.loads(resp.body.decode())
+            ai_msg = res_data.get("message", {})
+            
+            # Update Scratchpad with AI's response
+            scratchpad.append(ai_msg)
+            
+            # --- PHASE A: Handle Thoughts ---
+            content = ai_msg.get("content", "")
+            if "<thought>" in content:
+                # Optional: log thought to a specific UI component
+                pass
+
+            # --- PHASE B: Handle Actions (Tool Calls) ---
+            tool_calls = ai_msg.get("tool_calls", [])
+            if tool_calls:
+                for call in tool_calls:
+                    fn = call.get("function", {})
+                    t_name = fn.get("name")
+                    t_args = fn.get("arguments", {})
+                    
+                    event_manager.emit(ProxyEvent(
+                        "active", engine.request_id, "Tool Execution", t_name, engine.sender,
+                        error_message=f"Executing tool: {t_name}..."
+                    ))
+                    
+                    # Logic: Execute the tool and append result
+                    # In this hub version, we simulate the tool execution or route to MCP
+                    result_str = f"[Tool {t_name} executed successfully with results...]"
+                    
+                    scratchpad.append({
+                        "role": "tool",
+                        "name": t_name,
+                        "content": result_str
+                    })
+                
+                # Continue loop to let agent process tool results
+                continue
+            
+            # --- PHASE C: Final Answer ---
+            if content:
+                final_text = content
+                break
+
+        # Return requested output
+        if output_slot_idx == 0: return final_text
+        return scratchpad

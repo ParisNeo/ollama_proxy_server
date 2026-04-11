@@ -1,0 +1,20 @@
+{
+  "name": "Vision Augmenter (VLM)",
+  "description": "Surgically hydrates conversation history by replacing images with AI-generated text descriptions before sending to a text expert.",
+  "graph": {
+    "last_node_id": 4,
+    "last_link_id": 4,
+    "nodes": [
+      { "id": 1, "type": "hub/input", "pos": [50, 50], "outputs": [{ "name": "Messages", "links": [1] }, { "name": "Settings", "links": [3] }] },
+      { "id": 2, "type": "hub/vision", "pos": [450, 50], "inputs": [{ "name": "In Messages", "link": 1 }], "outputs": [{ "name": "Out Messages", "links": [2] }], "properties": { "vlm": "auto" } },
+      { "id": 3, "type": "hub/llm_chat", "pos": [850, 50], "inputs": [{ "name": "Messages", "link": 2 }, { "name": "Settings", "link": 3 }], "outputs": [{ "name": "Content", "links": [4] }], "properties": { "model": "auto" } },
+      { "id": 4, "type": "hub/output", "pos": [1250, 50], "inputs": [{ "name": "Content", "link": 4 }] }
+    ],
+    "links": [
+      [1, 1, 0, 2, 0, "messages"],
+      [2, 2, 0, 3, 0, "messages"],
+      [3, 1, 1, 3, 1, "object"],
+      [4, 3, 0, 4, 0, "string"]
+    ]
+  }
+}

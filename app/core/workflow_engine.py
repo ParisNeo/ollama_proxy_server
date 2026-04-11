@@ -47,11 +47,16 @@ class WorkflowEngine:
             if link:
                 final_val = await self.resolve_node_output(link[1], link[2])
                 
-                # If a cognitive node returns a finalized tuple request
-                if isinstance(final_val, tuple) and len(final_val) == 2 and isinstance(final_val[1], list):
+                # CASE A: A node returns a finalized resolution tuple (__result__, [msgs])
+                if isinstance(final_val, tuple) and len(final_val) == 2:
                     return final_val
                 
-                # Otherwise, it's a raw string (Composer, Datastore, etc)
+                # CASE B: A node (like Vision Hydrator) returned a processed list of messages
+                # We return this directly as the final state.
+                if isinstance(final_val, list) and len(final_val) > 0 and isinstance(final_val[0], dict):
+                    return "__result__", final_val
+                
+                # CASE C: Raw string (Composer, Datastore, etc)
                 return "__result__", [{"role": "assistant", "content": str(final_val)}]
 
         return await self.resolve_target_fn(self.db, "auto", messages, self.depth + 1, self.request, self.request_id, self.sender)

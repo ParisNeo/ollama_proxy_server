@@ -3,7 +3,7 @@ import logging
 from pathlib import Path
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, Request, HTTPException, status
+from fastapi import APIRouter, Depends, Request, HTTPException, status, Form
 from fastapi.responses import HTMLResponse, JSONResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -129,6 +129,61 @@ async def delete_workflow(
         await db.delete(workflow)
         await db.commit()
     return {"success": True}
+
+@router.post("/conception/build", name="admin_api_build_workflow")
+async def api_build_workflow(
+    request: Request,
+    prompt: str = Form(...),
+    db: AsyncSession = Depends(get_db),
+    admin_user: User = Depends(require_admin_user)
+):
+    """Generates a workflow JSON from a user prompt using the Hub Agent."""
+    from app.core.skills_manager import SkillsManager
+    from app.api.v1.routes.proxy import _resolve_target, _reverse_proxy
+    import secrets
+
+    app_settings = request.app.state.settings
+    target_agent = app_settings.admin_agent_name
+    if not target_agent:
+        return JSONResponse({"error": "No Management Agent set in Settings."}, status_code=503)
+
+    # Load Architect Knowledge
+    skill = next((s for s in SkillsManager.get_all_skills() if s["name"] == "workflow-architect"), None)
+    architect_instruction = skill["raw"] if skill else "Generate LiteGraph JSON."
+
+    system_prompt = (
+        f"{architect_instruction}\n\n"
+        "TASK: Build a LoLLMs Hub Workflow based on the user request. "
+        "Output ONLY valid JSON. Ensure all links connect correctly. "
+        "Increment node IDs starting from 1."
+    )
+
+    try:
+        # Resolve and Proxy call
+        req_id = f"sys_graph_{secrets.token_hex(4)}"
+        real_model, msgs = await _resolve_target(db, target_agent, [{"role": "user", "content": prompt}])
+        
+        # Inject our expert instructions
+        msgs.insert(0, {"role": "system", "content": system_prompt})
+        
+        servers = await server_crud.get_servers_with_model(db, real_model)
+        if not servers: return JSONResponse({"error": "Backend offline"}, status_code=503)
+
+        resp, _ = await _reverse_proxy(request, "chat", servers, json.dumps({"model": real_model, "messages": msgs, "stream": False}).encode(), is_subrequest=True, request_id=req_id, model=real_model, sender=admin_user.username)
+        
+        if hasattr(resp, 'body'):
+            data = json.loads(resp.body.decode())
+            raw_output = data.get("message", {}).get("content", "").strip()
+            
+            # Clean possible markdown fences
+            clean_json = re.sub(r'^```json\s*|```$', '', raw_output, flags=re.MULTILINE).strip()
+            
+            # Validate JSON before returning
+            parsed = json.loads(clean_json)
+            return {"success": True, "graph": parsed}
+    except Exception as e:
+        logger.error(f"Graph Generation Failed: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
 
 @router.post("/conception/templates/save", name="admin_save_template")
 async def save_template(request: Request, admin_user: User = Depends(require_admin_user)):
