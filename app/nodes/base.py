@@ -4,10 +4,12 @@ from typing import Dict, Any
 class BaseNode(ABC):
     """
     Base class for all Workflow Architect nodes.
-    A self-contained node provides both its frontend representation
-    and its backend execution logic.
+    Provides metadata for the sidebar and the execution interface.
     """
     node_type: str = ""
+    node_title: str = "Unnamed Node"
+    node_category: str = "Logic & Routing"
+    node_icon: str = "🧩"
 
     @classmethod
     def get_frontend_js(cls) -> str:
@@ -18,6 +20,5 @@ class BaseNode(ABC):
     async def execute(self, engine, node: Dict[str, Any], output_slot_idx: int) -> Any:
         """
         Executes the backend logic for this node.
-        `engine` is the WorkflowEngine instance.
         """
         pass

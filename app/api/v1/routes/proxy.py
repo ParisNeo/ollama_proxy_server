@@ -492,8 +492,6 @@ async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer
                 model=model
             )
             
-            first_attempt_duration = asyncio.get_event_loop().time() - first_attempt_start
-            
             _update_health_cache(chosen_server.id, True)
             
             # Check if this is a streaming response
@@ -568,10 +566,18 @@ async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer
             status_code = resp.status_code if resp else None
             
             is_busy = status_code in (429, 503)
-            is_server_error = status_code == 500 # Strict check for internal logic crashes
+            is_server_error = status_code == 500
             
+            # Detect Ollama OOM/Runner Crash
+            error_body = ""
+            if resp:
+                try:
+                    error_body = (await resp.aread()).decode()
+                except: pass
+            
+            is_oom_crash = "runner process has terminated" in error_body.lower() or "out of memory" in error_body.lower()
+
             if is_busy:
-                # FOR BUSY (503): High patience, wait and retry.
                 if request_id:
                     event_manager.emit(ProxyEvent(
                         event_type="received", request_id=request_id, 
@@ -579,16 +585,22 @@ async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer
                         error_message="Server Busy - Waiting for slot..."
                     ))
                 await asyncio.sleep(2)
-            elif is_server_error:
-                # FOR SERVER ERROR (500): Low patience. Fail fast so user sees the error.
-                logger.error(f"Fatal Backend Error from {chosen_server.name}. Logic error or malformed request. Skipping retries.")
-                # We don't mark it 'False' (Dead) because the server is alive, it just didn't like THIS request.
+            elif is_server_error and not is_oom_crash:
+                logger.error(f"Fatal Backend Error from {chosen_server.name}. Skipping retries.")
                 break 
+            elif is_oom_crash:
+                logger.warning(f"Ollama OOM detected on {chosen_server.name}. Retrying with reduced context...")
+                # Strip the forced num_ctx for the retry to allow Ollama to use its internal defaults
+                try:
+                    temp_body = json.loads(local_body_bytes)
+                    if "options" in temp_body:
+                        del temp_body["options"]["num_ctx"]
+                        local_body_bytes = json.dumps(temp_body).encode()
+                except: pass
             else:
-                # For network timeouts/connection refused: Mark as DEAD.
                 _update_health_cache(chosen_server.id, False)
             
-            logger.warning(f"Attempt failed for '{chosen_server.name}' (Busy: {is_busy}, SrvErr: {is_server_error}). Error: {first_error}")
+            logger.warning(f"Attempt failed for '{chosen_server.name}'. Error: {first_error}")
             
             retry_result = await retry_with_backoff(
                 _send_backend_request,
@@ -598,7 +610,7 @@ async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer
                 method=request.method,
                 headers=headers,
                 query_params=request.query_params,
-                body_bytes=local_body_bytes,
+                body_bytes=local_body_bytes, # Uses reduced-context body if OOM occurred
                 config=retry_config,
                 retry_on_exceptions=(Exception,),
                 operation_name=f"Request to {chosen_server.name}"
@@ -2507,15 +2519,25 @@ async def proxy_ollama(
             if "options" not in body: body["options"] = {}
             body["options"]["temperature"] = graph_temp
         # --- TOOL SANITIZATION ---
-        # Only forward 'tools' if the list actually has items to prevent 500 errors
+        # Robustly handle tool list. If the workflow provides an empty tool list,
+        # we MUST delete the key from the payload or the model will expect a tool call.
         if "tools" in body:
+            # Flatten potential nested lists from the graph
+            if isinstance(body["tools"], list):
+                # Filter out None or empty dicts
+                body["tools"] = [t for t in body["tools"] if t]
+                
             if isinstance(body["tools"], list) and len(body["tools"]) > 0:
-                logger.info(f"Forwarding {len(body['tools'])} tools to backend.")
+                logger.info(f"Forwarding {len(body['tools'])} tool(s) to backend.")
             else:
-                # Remove empty tool definitions that crash some cloud providers
+                # If the list is empty after filtering, strip it entirely
                 del body["tools"]
                 if "tool_choice" in body:
                     del body["tool_choice"]
+
+        # Final check: Ensure tool_choice is never sent without tools
+        if "tool_choice" in body and "tools" not in body:
+            del body["tool_choice"]
 
         # --- REFINED THINKING LOGIC ---
         # 1. Fetch exact UI configuration for this model
@@ -2657,6 +2679,9 @@ async def proxy_ollama(
     # Explicitly check if the client wants a stream
     client_wants_stream = body.get("stream", True) if isinstance(body, dict) else True
 
+    # Initialize sources list in request state
+    request.state.sources = []
+
     # Proxy to one of the candidate servers
     response, chosen_server = await _reverse_proxy(
         request, path, candidate_servers, body_bytes,
@@ -2666,6 +2691,16 @@ async def proxy_ollama(
         sender=api_key.user.username,
         client_wants_stream=client_wants_stream
     )
+
+    # --- INJECT RAG SOURCES INTO FINAL RESPONSE ---
+    if not client_wants_stream and hasattr(response, 'body') and request.state.sources:
+        try:
+            data = json.loads(response.body.decode())
+            data["sources"] = request.state.sources
+            # Return updated JSON
+            return JSONResponse(content=data, status_code=response.status_code)
+        except:
+            pass
 
     # Update log with server_id if we have a log entry
     if log_id and chosen_server:

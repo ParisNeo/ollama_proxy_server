@@ -189,6 +189,32 @@
 </div>
 
 <script>
+    document.addEventListener('DOMContentLoaded', () => {
+        const backendSelector = document.getElementById('backend_selector');
+        const pathLabel = document.getElementById('path_label');
+        const pathInput = document.getElementById('model_path_input');
+
+        function updateUI() {
+            const val = backendSelector.value;
+            if (val === 'ollama') {
+                pathLabel.innerText = "Custom Models Folder (Optional)";
+                pathInput.placeholder = "/data/ollama/models";
+                pathInput.required = false;
+            } else if (val === 'llamacpp') {
+                pathLabel.innerHTML = 'Model File Path <span class="text-red-500">*</span>';
+                pathInput.placeholder = "C:\\path\\to\\model.gguf";
+                pathInput.required = true;
+            } else if (val === 'vllm') {
+                pathLabel.innerHTML = 'Model Path / HF ID <span class="text-red-500">*</span>';
+                pathInput.placeholder = "facebook/opt-125m or /local/path";
+                pathInput.required = true;
+            }
+        }
+
+        backendSelector.addEventListener('change', updateUI);
+        updateUI();
+    });
+
     const systemConsole = document.getElementById('system-console');
     const taskPanel = document.getElementById('system-task-panel');
 

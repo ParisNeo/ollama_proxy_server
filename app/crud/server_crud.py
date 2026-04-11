@@ -294,25 +294,38 @@ async def pull_model_on_server(http_client: httpx.AsyncClient, server: OllamaSer
     pull_url = f"{server.url.rstrip('/')}/api/pull"
     payload = {"name": model_name, "stream": False}
     try:
+        from app.core.events import event_manager, ProxyEvent
         # Use a long timeout as pulling can take a significant amount of time
-        # But cap it to prevent indefinite hanging
         async with http_client.stream("POST", pull_url, json=payload, timeout=1800.0, headers=headers) as response:
-            # Check for immediate errors
             if response.status_code >= 400:
                 error_text = await response.aread()
-                raise httpx.HTTPStatusError(
-                    f"Pull failed with status {response.status_code}", 
-                    request=response.request, 
-                    response=response
-                )
+                raise httpx.HTTPStatusError(f"Pull failed: {error_text.decode()}", request=response.request, response=response)
                 
-            async for chunk in response.aiter_text():
+            async for line_text in response.aiter_lines():
+                if not line_text: continue
                 try:
-                    line = json.loads(chunk)
-                    # You could process status updates here if needed in the future
-                    logger.debug(f"Pull status for {model_name} on {server.name}: {line.get('status')}")
+                    data = json.loads(line_text)
+                    status = data.get("status", "processing")
+                    completed = data.get("completed", 0)
+                    total = data.get("total", 0)
+                    
+                    # Calculate progress percentage
+                    progress = 0
+                    if total > 0:
+                        progress = round((completed / total) * 100, 1)
+                        status = f"{status} ({progress}%)"
+
+                    # Emit a specialized active event for the UI to catch
+                    # We use a naming convention: pull_[server_id]_[model_name]
+                    task_id = f"pull_{server.id}_{model_name}"
+                    event_manager.emit(ProxyEvent(
+                        "active", task_id, model_name, server.name, "system",
+                        error_message=status # We repurpose error_message to carry the status text
+                    ))
+                    
+                    logger.debug(f"Pulling {model_name}: {status}")
                 except json.JSONDecodeError:
-                    continue # Ignore non-json chunks
+                    continue 
         
         logger.info(f"Successfully pulled/updated model '{model_name}' on server '{server.name}'")
         return {"success": True, "message": f"Model '{model_name}' pulled/updated successfully."}
@@ -497,7 +510,9 @@ def is_embedding_model(model_name: str) -> bool:
     """Heuristically determines if a model is for embeddings."""
     if not isinstance(model_name, str):
         return False
-    return "embed" in model_name.lower()
+    m_lower = model_name.lower()
+    # Explicitly check for 'embedding' as requested, plus common provider patterns
+    return any(kw in m_lower for kw in ["embed", "embedding", "bge", "gte", "nomic", "snowflake"])
 
 
 async def get_all_available_model_names(db: AsyncSession, filter_type: Optional[str] = None) -> List[str]:
@@ -648,18 +663,18 @@ async def get_all_models_grouped_by_server(db: AsyncSession, filter_type: Option
 
 async def get_active_models_all_servers(db: AsyncSession, http_client: httpx.AsyncClient) -> List[Dict[str, Any]]:
     """
-    Fetches running models (`/api/ps`) from active Ollama servers and
-    lists available models from active vLLM servers as they are always 'active'.
+    Fetches running models (`/api/ps`) from active Ollama servers.
+    Skip Cloud/vLLM servers for the 'Currently in VRAM' check to reduce latency.
     """
     servers = await get_servers(db)
-    active_servers = [s for s in servers if s.is_active]
-    
-    ollama_servers = [s for s in active_servers if s.server_type == 'ollama']
-    vllm_servers = [s for s in active_servers if s.server_type == 'vllm']
+    # Only check local/dedicated Ollama servers for 'ps' status
+    ollama_servers = [s for s in servers if s.is_active and s.server_type == 'ollama' and "ollama.com" not in s.url]
     
     all_models = []
 
     # 1. Fetch actively running models from Ollama servers
+    vllm_servers = [s for s in servers if s.is_active and s.server_type == 'vllm']
+    
     if ollama_servers:
         # Fetch metadata once to avoid multiple DB calls inside the loop
         from app.crud.model_metadata_crud import get_all_metadata

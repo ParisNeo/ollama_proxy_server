@@ -1,0 +1,26 @@
+{
+  "name": "Live Search Pipeline",
+  "description": "Searches the web (Wikipedia/ArXiv) and uses the findings to answer user queries.",
+  "graph": {
+    "last_node_id": 7,
+    "last_link_id": 8,
+    "nodes": [
+      { "id": 1, "type": "hub/input", "pos": [50, 50], "outputs": [{ "name": "Messages", "links": [1, 7] }, { "name": "Settings", "links": [8] }, { "name": "Input", "links": [2] }] },
+      { "id": 2, "type": "hub/web_search", "pos": [450, 400], "inputs": [{ "name": "Query", "link": 2 }], "outputs": [{ "name": "Results", "links": [3] }], "properties": { "service": "wikipedia", "max_results": 3 } },
+      { "id": 4, "type": "hub/system_composer", "pos": [450, 50], "inputs": [{ "name": "Persona", "link": null }, { "name": "Skill 1", "link": null }, { "name": "RAG Context", "link": 3 }], "outputs": [{ "name": "System String", "links": [4] }] },
+      { "id": 5, "type": "hub/system_modifier", "pos": [850, 50], "inputs": [{ "name": "Messages", "link": 7 }, { "name": "System Prompt", "link": 4 }], "outputs": [{ "name": "Updated Messages", "links": [5] }], "properties": { "replace_all": true } },
+      { "id": 6, "type": "hub/llm_chat", "pos": [1250, 50], "inputs": [{ "name": "Messages", "link": 5 }, { "name": "Settings", "link": 8 }], "outputs": [{ "name": "Content", "links": [6] }], "properties": { "model": "auto" } },
+      { "id": 7, "type": "hub/output", "pos": [1650, 50], "inputs": [{ "name": "Content", "link": 6 }] }
+    ],
+    "links": [
+      [1, 1, 0, 5, 0, "messages"],
+      [2, 1, 2, 2, 0, "string"],
+      [3, 2, 0, 4, 2, "string"],
+      [4, 4, 0, 5, 1, "string"],
+      [5, 5, 0, 6, 0, "messages"],
+      [6, 6, 0, 7, 0, "string"],
+      [7, 1, 0, 5, 0, "messages"],
+      [8, 1, 1, 6, 1, "object"]
+    ]
+  }
+}

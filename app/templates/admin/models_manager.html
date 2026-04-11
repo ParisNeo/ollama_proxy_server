@@ -52,6 +52,14 @@
                         <th class="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Servers</th>
                         <th class="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Description</th>
                         <th class="px-4 py-3 text-center text-xs font-medium text-gray-400 uppercase tracking-wider">
+                            <div class="mb-1">Embedding</div>
+                            <div class="flex justify-center gap-2 text-[9px] font-bold">
+                                <button type="button" onclick="toggleColumn('is_embedding_model_', true)" class="text-indigo-400 hover:text-white uppercase">All</button>
+                                <span class="text-gray-600">|</span>
+                                <button type="button" onclick="toggleColumn('is_embedding_model_', false)" class="text-gray-500 hover:text-white uppercase">None</button>
+                            </div>
+                        </th>
+                        <th class="px-4 py-3 text-center text-xs font-medium text-gray-400 uppercase tracking-wider">
                             <div class="mb-1">Supports Images</div>
                             <div class="flex justify-center gap-2 text-[9px] font-bold">
                                 <button type="button" onclick="toggleColumn('supports_images_', true)" class="text-indigo-400 hover:text-white uppercase">All</button>
@@ -120,7 +128,13 @@
                             <input type="text" name="description_{{ meta.id }}" value="{{ meta.description or '' }}" placeholder="A short description..." class="w-full min-w-48 px-2 py-1 rounded-md shadow-sm sm:text-sm">
                         </td>
                         <td class="px-4 py-4 whitespace-nowrap text-center">
-                            <input type="checkbox" name="supports_images_{{ meta.id }}" value="true" class="h-5 w-5 rounded text-[var(--color-primary-600)]" {% if meta.supports_images %}checked{% endif %}>
+                            <input type="checkbox" name="is_embedding_model_{{ meta.id }}" value="true" class="embedding-toggle h-5 w-5 rounded text-amber-500" data-meta-id="{{ meta.id }}" {% if meta.is_embedding_model %}checked{% endif %}>
+                        </td>
+                        <td class="px-4 py-4 whitespace-nowrap text-center">
+                            <input type="checkbox" name="supports_images_{{ meta.id }}" value="true" class="capability-toggle h-5 w-5 rounded text-[var(--color-primary-600)]" {% if meta.supports_images %}checked{% endif %}>
+                        </td>
+                        <td class="px-4 py-4 whitespace-nowrap text-center">
+                            <input type="checkbox" name="supports_images_{{ meta.id }}" value="true" class="capability-toggle h-5 w-5 rounded text-[var(--color-primary-600)]" data-meta-id="{{ meta.id }}" {% if meta.supports_images %}checked{% endif %}>
                         </td>
                         <td class="px-4 py-4 whitespace-nowrap text-center">
                             <input type="checkbox" name="supports_thinking_{{ meta.id }}" value="true" class="h-5 w-5 rounded text-[var(--color-primary-600)]" {% if meta.supports_thinking %}checked{% endif %}>
@@ -215,8 +229,38 @@
         const checkboxes = document.querySelectorAll(`input[name^="${prefix}"]`);
         checkboxes.forEach(cb => {
             cb.checked = value;
+            // Trigger change event to run the exclusivity logic
+            cb.dispatchEvent(new Event('change', { bubbles: true }));
         });
     }
+
+    /**
+     * Mutual Exclusivity: If Embedding is selected, disable and clear other capabilities.
+     */
+    document.addEventListener('change', function(e) {
+        if (e.target.classList.contains('embedding-toggle')) {
+            const row = e.target.closest('tr');
+            const otherCheckboxes = row.querySelectorAll('input[type="checkbox"]:not(.embedding-toggle)');
+            
+            if (e.target.checked) {
+                otherCheckboxes.forEach(cb => {
+                    cb.checked = false;
+                    cb.disabled = true;
+                    cb.parentElement.classList.add('opacity-30');
+                });
+            } else {
+                otherCheckboxes.forEach(cb => {
+                    cb.disabled = false;
+                    cb.parentElement.classList.remove('opacity-30');
+                });
+            }
+        }
+    });
+
+    // Run on load for existing state
+    document.querySelectorAll('.embedding-toggle').forEach(el => {
+        if (el.checked) el.dispatchEvent(new Event('change', { bubbles: true }));
+    });
 
     /**
      * Toggles administrative allowed status of a model on a specific server via AJAX.

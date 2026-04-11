@@ -122,6 +122,7 @@ class ModelMetadata(Base):
     is_code_model = Column(Boolean, default=False, nullable=False)
     supports_thinking = Column(Boolean, default=False, nullable=False)
     is_chat_model = Column(Boolean, default=True, nullable=False)
+    is_embedding_model = Column(Boolean, default=False, nullable=False)
     is_fast_model = Column(Boolean, default=False, nullable=False)
     is_reasoning_model = Column(Boolean, default=False, nullable=False)
     max_context = Column(Integer, default=4096, nullable=False)

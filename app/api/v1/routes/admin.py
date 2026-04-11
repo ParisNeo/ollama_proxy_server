@@ -376,7 +376,12 @@ async def get_system_and_ollama_info(
     
     # Get total carbon from DB
     total_co2 = await log_crud.get_total_carbon_footprint(db)
-
+    
+    # Calculate relatable metrics
+    # Standards: Smartphone charge ~5g, 1km driving ~120g, Boiling 1L water ~15g
+    total_users_res = await db.execute(select(sqlalchemy.func.count(User.id)))
+    total_users_count = total_users_res.scalar() or 1
+    
     return {
         "system_info": system_info, 
         "running_models": running_models,
@@ -390,7 +395,13 @@ async def get_system_and_ollama_info(
         "active_users_summary": user_summary,
         "sustainability": {
             "session_co2_g": round(session_co2, 3),
-            "total_co2_g": round(total_co2, 2)
+            "total_co2_g": round(total_co2, 2),
+            "per_user_g": round(total_co2 / total_users_count, 2),
+            "equivalents": {
+                "smartphone_charges": round(total_co2 / 5.0, 1),
+                "kilometers_driven": round(total_co2 / 120.0, 2),
+                "liters_boiled": round(total_co2 / 15.0, 1)
+            }
         }
     }
     
@@ -693,45 +704,51 @@ async def admin_manage_server_models(
 async def admin_pull_model(
     request: Request,
     server_id: int,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     admin_user: User = Depends(require_admin_user),
     model_name: str = Form(...)
 ):
-    # Validate server_id
+    # 1. Validation
     try:
         server_id = int(server_id)
-        if server_id <= 0:
-            raise ValueError
+        if server_id <= 0: raise ValueError
     except (ValueError, TypeError):
         raise HTTPException(status_code=400, detail="Invalid server ID")
         
-    # Validate model_name
-    if not model_name or len(model_name) > 256:
-        flash(request, "Model name is required and must be under 256 characters", "error")
-        return RedirectResponse(url=request.url_for("admin_manage_server_models", server_id=server_id), status_code=status.HTTP_303_SEE_OTHER)
+    if not model_name or len(model_name) > 256 or not re.match(r'^[\w\.\-:@]+$', model_name):
+        flash(request, "Invalid model name", "error")
+        return RedirectResponse(url=request.url_for("admin_manage_server_models", server_id=server_id), status_code=303)
         
-    # Sanitize model name - only allow alphanumeric, dashes, dots, colons
-    if not re.match(r'^[\w\.\-:@]+$', model_name):
-        flash(request, "Model name contains invalid characters", "error")
-        return RedirectResponse(url=request.url_for("admin_manage_server_models", server_id=server_id), status_code=status.HTTP_303_SEE_OTHER)
-        
-    server = await server_crud.get_server_by_id(db, server_id=server_id)
-    if not server:
-        raise HTTPException(status_code=404, detail="Server not found")
+    server = await server_crud.get_server_by_id(db, server_id)
+    if not server: raise HTTPException(status_code=404, detail="Server not found")
 
-    flash(request, f"Pull initiated for '{model_name}'. This may take several minutes...", "info")
+    # 2. Background Task Execution
+    # We define an inner function to handle the long-running HTTP stream
+    async def pull_task_wrapper():
+        from app.database.session import AsyncSessionLocal
+        from app.core.events import event_manager, ProxyEvent
+        import secrets
+        
+        req_id = f"pull_{secrets.token_hex(4)}"
+        # Emit initial event so it shows in Live Flow
+        event_manager.emit(ProxyEvent("received", req_id, model_name, server.name, admin_user.username, request_type="PULL"))
+        
+        http_client: httpx.AsyncClient = request.app.state.http_client
+        result = await server_crud.pull_model_on_server(http_client, server, model_name)
+        
+        if result["success"]:
+            # Success: update the local cache of available models
+            async with AsyncSessionLocal() as background_db:
+                await server_crud.fetch_and_update_models(background_db, server_id=server_id)
+            event_manager.emit(ProxyEvent("completed", req_id, model_name, server.name, admin_user.username))
+        else:
+            event_manager.emit(ProxyEvent("error", req_id, model_name, server.name, admin_user.username, error_message=result["message"]))
+
+    background_tasks.add_task(pull_task_wrapper)
     
-    http_client: httpx.AsyncClient = request.app.state.http_client
-    result = await server_crud.pull_model_on_server(http_client, server, model_name)
-
-    if result["success"]:
-        flash(request, result["message"], "success")
-        # Refresh the model list in the proxy's database after a successful pull
-        await server_crud.fetch_and_update_models(db, server_id=server_id)
-    else:
-        flash(request, result["message"], "error")
-        
-    return RedirectResponse(url=request.url_for("admin_manage_server_models", server_id=server_id), status_code=status.HTTP_303_SEE_OTHER)
+    flash(request, f"Download started for '{model_name}'. Check the Live System Flow dashboard for progress.", "success")
+    return RedirectResponse(url=request.url_for("admin_manage_server_models", server_id=server_id), status_code=303)
 
 
 @router.post("/servers/{server_id}/delete-model", name="admin_delete_model", dependencies=[Depends(validate_csrf_token)])
@@ -924,27 +941,17 @@ async def admin_models_manager_page(
 
     all_model_names = list(model_to_servers.keys())
     
-    # 2. Deep scan: Ensure metadata exists for all CURRENT models
+    # 2. Metadata Sync: Ensure skeleton metadata exists for all discovered models
+    # We do this purely in-DB to avoid hammering backend APIs on page load
     for model_name in all_model_names:
         if not model_name or len(model_name) > 256 or not re.match(r'^[\w\.\-:@]+$', model_name):
             continue
             
         existing_meta = await model_metadata_crud.get_metadata_by_model_name(db, model_name)
-        
-        # If metadata is missing OR exists but has the default 4096 context, try to fetch real info
-        if not existing_meta or existing_meta.max_context == 4096:
-            servers = await server_crud.get_servers_with_model(db, model_name)
-            suggested_ctx = None
-            if servers:
-                # Try the first server that has this model
-                details = await server_crud.get_model_details_from_server(http_client, servers[0], model_name)
-                suggested_ctx = details.get("context_length")
-            
-            if not existing_meta:
-                await model_metadata_crud.get_or_create_metadata(db, model_name=model_name, suggested_ctx=suggested_ctx)
-            elif suggested_ctx and suggested_ctx != 4096:
-                # Autocorrect existing default if we found better info
-                await model_metadata_crud.update_metadata(db, model_name=model_name, max_context=suggested_ctx)
+        if not existing_meta:
+            # Create a basic local entry. Real context length will be fetched 
+            # if the user clicks 'Refresh' in the UI or during background maintenance.
+            await model_metadata_crud.get_or_create_metadata(db, model_name=model_name)
         
     # 3. Only fetch metadata for models that actually exist on a server
     full_metadata_list = await model_metadata_crud.get_all_metadata(db)
@@ -1083,6 +1090,7 @@ async def admin_update_model_metadata(
                 "supports_images": f"supports_images_{meta_id}" in form_data,
                 "supports_thinking": f"supports_thinking_{meta_id}" in form_data,
                 "is_code_model": f"is_code_model_{meta_id}" in form_data,
+                "is_embedding_model": f"is_embedding_model_{meta_id}" in form_data,
                 "is_fast_model": f"is_fast_model_{meta_id}" in form_data,
                 "is_reasoning_model": f"is_reasoning_model_{meta_id}" in form_data,
                 "max_context": int(form_data.get(f"max_context_{meta_id}", 4096)),

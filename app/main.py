@@ -43,6 +43,7 @@ from app.api.v1.routes.playground_embedding import router as playground_embeddin
 from app.api.v1.routes.openai_proxy import router as openai_router
 from app.api.v1.routes.personalities import router as personalities_router
 from app.api.v1.routes.conception import router as conception_router
+from app.api.v1.routes.node_builder import router as node_builder_router
 from app.api.v1.routes.importer import router as importer_router
 from app.api.v1.routes.skills import router as skills_router
 from app.api.v1.routes.personalities import router as personalities_router
@@ -284,7 +285,7 @@ async def add_security_headers(request: Request, call_next):
     csp_policy = (
         "default-src 'self'; "
         "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.tailwindcss.com https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; "
-        "style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdn.jsdelivr.net; "
+        "style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; "
         "font-src 'self' data:; "
         "img-src 'self' https: data:; "
         "connect-src 'self'; "
@@ -313,6 +314,7 @@ app.include_router(personalities_router, prefix="/admin", tags=["Admin UI"], inc
 app.include_router(personalities_router, prefix="/api/v1", tags=["Internal API"], include_in_schema=False)
 app.include_router(importer_router, prefix="/admin/api/importer", tags=["Importer API"], include_in_schema=False)
 app.include_router(conception_router, prefix="/admin", tags=["Admin UI"], include_in_schema=False)
+app.include_router(node_builder_router, prefix="/admin", tags=["Admin UI"], include_in_schema=False)
 app.include_router(datastores_router, prefix="/admin", tags=["Admin UI"], include_in_schema=False)
 
 @app.get("/", include_in_schema=False, summary="Root")

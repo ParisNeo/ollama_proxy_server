@@ -568,6 +568,7 @@ async def run_all_migrations(engine: AsyncEngine) -> None:
                 "supports_thinking": "BOOLEAN DEFAULT 0 NOT NULL",
                 "is_code_model": "BOOLEAN DEFAULT 0 NOT NULL",
                 "is_chat_model": "BOOLEAN DEFAULT 1 NOT NULL",
+                "is_embedding_model": "BOOLEAN DEFAULT 0 NOT NULL",
                 "is_fast_model": "BOOLEAN DEFAULT 0 NOT NULL",
                 "is_reasoning_model": "BOOLEAN DEFAULT 0 NOT NULL",
                 "max_context": "INTEGER DEFAULT 4096 NOT NULL",

@@ -7,6 +7,12 @@
 <script type="text/javascript" src="/static/vendor/gl-matrix.js"></script>
 <script type="text/javascript" src="/static/vendor/litegraph.js"></script>
 <script src="{{ url_for('static', path='vendor/marked.min.js') }}"></script>
+<!-- CodeMirror for Node Studio -->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.12/codemirror.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.12/theme/monokai.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.12/codemirror.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.12/mode/javascript/javascript.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.12/mode/python/python.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/js-yaml@4.1.0/dist/js-yaml.min.js"></script>
 
 <style>
@@ -229,35 +235,8 @@
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7-7-7-7"></path></svg>
                     </button>
                     <div id="new-project-menu" class="hidden absolute right-0 mt-2 w-64 rounded-xl shadow-lg bg-[#0a0a0f] border border-white/10 ring-1 ring-black ring-opacity-5 z-[200]">
-                        <div class="py-2 p-2">
-                            <button onclick="createNewWorkflow('blank')" class="w-full text-left px-4 py-3 text-sm text-gray-300 hover:bg-white/5 rounded-lg flex flex-col group">
-                                <span class="font-bold text-white group-hover:text-indigo-400">Blank Project</span>
-                                <span class="text-[10px] text-gray-500">Start from scratch</span>
-                            </button>
-                            <button onclick="createNewWorkflow('persona')" class="w-full text-left px-4 py-3 text-sm text-gray-300 hover:bg-white/5 rounded-lg flex flex-col group mt-1">
-                                <span class="font-bold text-white group-hover:text-fuchsia-400">Persona-Backed Assistant</span>
-                                <span class="text-[10px] text-gray-500">Template with system prompt injection</span>
-                            </button>
-                            <button onclick="createNewWorkflow('reasoner')" class="w-full text-left px-4 py-3 text-sm text-gray-300 hover:bg-white/5 rounded-lg flex flex-col group mt-1">
-                                <span class="font-bold text-white group-hover:text-amber-400">Self-Reflecting Reasoner</span>
-                                <span class="text-[10px] text-gray-500">Chain-of-Thought logic flow</span>
-                            </button>
-                            <button onclick="createNewWorkflow('vision')" class="w-full text-left px-4 py-3 text-sm text-gray-300 hover:bg-white/5 rounded-lg flex flex-col group mt-1">
-                                <span class="font-bold text-white group-hover:text-sky-400">Vision Analysis Pipeline</span>
-                                <span class="text-[10px] text-gray-500">VLM description followed by text analysis</span>
-                            </button>
-                            <button onclick="createNewWorkflow('multiskill')" class="w-full text-left px-4 py-3 text-sm text-gray-300 hover:bg-white/5 rounded-lg flex flex-col group mt-1">
-                                <span class="font-bold text-white group-hover:text-violet-400">Multi-Skill Specialist</span>
-                                <span class="text-[10px] text-gray-500">Persona merged with modular skills</span>
-                            </button>
-                            <button onclick="createNewWorkflow('gateway')" class="w-full text-left px-4 py-3 text-sm text-gray-300 hover:bg-white/5 rounded-lg flex flex-col group mt-1">
-                                <span class="font-bold text-white group-hover:text-emerald-400">Intelligent Gateway</span>
-                                <span class="text-[10px] text-gray-500">Route complex intents to specialized models</span>
-                            </button>
-                            <button onclick="createNewWorkflow('rag')" class="w-full text-left px-4 py-3 text-sm text-gray-300 hover:bg-white/5 rounded-lg flex flex-col group mt-1">
-                                <span class="font-bold text-white group-hover:text-teal-400">RAG Pipeline</span>
-                                <span class="text-[10px] text-gray-500">Extracts query, searches datastore, augments prompt</span>
-                            </button>
+                        <div id="new-project-menu-items" class="py-2 p-2">
+                            <!-- Populated via renderNewProjectMenu() -->
                         </div>
                     </div>
                 </div>
@@ -294,16 +273,15 @@
                 <div id="custom-nodes-list" class="space-y-1"></div>
                 <button onclick="initNewNode()" class="w-full py-2 border border-dashed border-white/20 rounded-lg text-[10px] font-bold text-gray-500 hover:border-indigo-500 hover:text-indigo-400">+ New Node Type</button>
             </div>
-            <!-- Editors -->
-            <div class="flex-1 grid grid-cols-2 gap-px bg-white/10">
-                <div class="flex flex-col bg-[#0a0a0f]">
-                    <div class="p-2 bg-indigo-500/10 text-indigo-400 text-[10px] font-black uppercase px-4 border-b border-white/5">Frontend (LiteGraph JS)</div>
-                    <textarea id="node-js-editor" class="flex-grow p-4 bg-transparent font-mono text-xs text-gray-300 outline-none resize-none"></textarea>
+            <!-- Single Unified Editor -->
+            <div class="flex-1 flex flex-col bg-[#0a0a0f]">
+                <div class="p-2 bg-emerald-500/10 text-emerald-400 text-[10px] font-black uppercase px-4 border-b border-white/5 flex justify-between">
+                    <span>Unified Node Logic (Python)</span>
+                    <span class="text-gray-400 font-normal">Embed JS UI inside the get_frontend_js() method</span>
                 </div>
-                <div class="flex flex-col bg-[#0a0a0f]">
-                    <div class="p-2 bg-emerald-500/10 text-emerald-400 text-[10px] font-black uppercase px-4 border-b border-white/5">Backend (Logic Python)</div>
-                    <textarea id="node-py-editor" class="flex-grow p-4 bg-transparent font-mono text-xs text-gray-300 outline-none resize-none"></textarea>
-                </div>
+                <div id="cm-py-container" class="flex-grow"></div>
+                <!-- JS container hidden but kept for legacy script compatibility -->
+                <div id="cm-js-container" class="hidden"></div>
             </div>
         </div>
     </div>
@@ -326,9 +304,16 @@
                     <button onclick="undo()" class="p-2 hover:bg-white/10 rounded-lg text-gray-400 hover:text-white transition-all" title="Undo"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"></path></svg></button>
                     <button onclick="redo()" class="p-2 hover:bg-white/10 rounded-lg text-gray-400 hover:text-white transition-all" title="Redo"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 10h-10a8 8 0 00-8 8v2M21 10l-6 6m6-6l-6-6"></path></svg></button>
                 </div>
-                <button onclick="saveWorkflow()" class="bg-indigo-600 hover:bg-indigo-500 px-6 py-2 rounded-xl font-black text-xs uppercase tracking-widest text-white shadow-lg shadow-indigo-500/20 transition-all flex items-center gap-2">
+                <button onclick="saveWorkflow()" class="bg-indigo-600 hover:bg-indigo-500 px-4 py-2 rounded-xl font-black text-xs uppercase tracking-widest text-white shadow-lg shadow-indigo-500/20 transition-all flex items-center gap-2">
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"></path></svg>
                     Save
+                </button>
+                <button onclick="saveAsTemplate()" class="bg-white/5 hover:bg-white/10 border border-white/10 px-4 py-2 rounded-xl font-black text-xs uppercase tracking-widest text-indigo-400 transition-all">
+                    Template
+                </button>
+                <button onclick="rearrangeNodes()" class="bg-white/5 hover:bg-white/10 border border-white/10 px-4 py-2 rounded-xl font-black text-xs uppercase tracking-widest text-amber-400 transition-all flex items-center gap-2">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16m-7 6h7"></path></svg>
+                    Auto Layout
                 </button>
                 <button onclick="testInPlayground()" class="bg-emerald-600 hover:bg-emerald-500 px-6 py-2 rounded-xl font-black text-xs uppercase tracking-widest text-white shadow-lg shadow-emerald-500/20 transition-all flex items-center gap-2">
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
@@ -340,33 +325,8 @@
 
         <div id="conception-container">
             <aside class="block-library">
-                <div class="library-scroll custom-scrollbar">
-                    <div class="node-category-label">IO & Terminal</div>
-                    <div class="node-item" onclick="addNode('hub/input')"><svg class="w-4 h-4 text-sky-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1"></path></svg> Request Input</div>
-                    <div class="node-item" onclick="addNode('hub/output')"><svg class="w-4 h-4 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path></svg> Global Output</div>
-                    
-                    <div class="node-category-label mt-6">Serving & Cognition</div>
-                    <div class="node-item" onclick="addNode('hub/model')"><svg class="w-4 h-4 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"></path></svg> Model Selector</div>
-                    <div class="node-item" onclick="addNode('hub/llm_chat')"><svg class="w-4 h-4 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"></path></svg> LLM Chat</div>
-                    <div class="node-item" onclick="addNode('hub/personality')"><svg class="w-4 h-4 text-fuchsia-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 9l-6 6m0 0l6 6m-6-6h12M4 4l16 16"></path></svg> Personality</div>
-                    <div class="node-item" onclick="addNode('hub/llm_instruct')"><svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg> LLM Instruct</div>
-                    <div class="node-item" onclick="addNode('hub/system_composer')"><svg class="w-4 h-4 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"></path></svg> System Composer</div>
-                    <div class="node-item" onclick="addNode('hub/skill')"><svg class="w-4 h-4 text-purple-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg> Skill</div>
-                    <div class="node-item" onclick="addNode('hub/tool')"><svg class="w-4 h-4 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path></svg> Tool Definition</div>
-                    <div class="node-item" onclick="addNode('hub/vision')"><svg class="w-4 h-4 text-sky-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg> Vision Expert</div>
-                    <div class="node-category-label mt-6">Knowledge & Data</div>
-                    <div class="node-item" onclick="addNode('hub/datastore')"><svg class="w-4 h-4 text-teal-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"></path></svg> RAG Datastore</div>
-                    <div class="node-category-label mt-6">Logic & Routing</div>
-                    <div class="node-item" onclick="addNode('hub/autorouter')"><svg class="w-4 h-4 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"></path></svg> Auto Router</div>
-                    <div class="node-item" onclick="addNode('hub/extract_text')"><svg class="w-4 h-4 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h7"></path></svg> Extract Text</div>
-                    <div class="node-item" onclick="addNode('hub/create_message')"><svg class="w-4 h-4 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"></path></svg> Create Message</div>
-                    <div class="node-item" onclick="addNode('hub/append_message')"><svg class="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path></svg> Append to Chat</div>
-                    <div class="node-item" onclick="addNode('hub/system_modifier')"><svg class="w-4 h-4 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg> System Modifier</div>
-                    <div class="node-item" onclick="addNode('hub/selector')"><svg class="w-4 h-4 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"></path></svg> Message Selector</div>
-                    <div class="node-item" onclick="addNode('hub/router')"><svg class="w-4 h-4 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"></path></svg> Keyword Router</div>
-                    <div class="node-item" onclick="addNode('hub/moe')"><svg class="w-4 h-4 text-fuchsia-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012v2M7 7h10"></path></svg> Advanced MoE</div>
-                    <div class="node-item" onclick="addNode('hub/ensemble')"><svg class="w-4 h-4 text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012v2M7 7h10"></path></svg> Simple Ensemble</div>
-                    <div class="node-item" onclick="addNode('hub/composer')"><svg class="w-4 h-4 text-rose-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg> Prompt Composer</div>
+                <div class="library-scroll custom-scrollbar" id="sidebar-node-list">
+                    <!-- Categories will be injected here via JS -->
                 </div>
             </aside>
 
@@ -380,25 +340,32 @@
 </div>
 
 <script>
+    // --- DYNAMIC NODE REGISTRATION ---
+    // Registers nodes before sidebar/graph initialization to prevent "Replacing node type" warnings
+    try {
+        {{ dynamic_nodes_js | safe }}
+    } catch(e) {
+        console.error("LiteGraph dynamic registration failed:", e);
+    }
+
     // --- DATA INJECTION FROM SERVER ---
     const model_groups = {{ (model_groups or {}) | tojson | safe }};
-    const logic_blocks = {{ (logic_blocks or []) | tojson | safe }};
-    const datastores_list = {{ (datastores or []) | tojson | safe }};
+    window.logic_blocks = {{ (logic_blocks or []) | tojson | safe }};
+    window.datastores_list = {{ (datastores or []) | tojson | safe }};
 
     // Flatten model_groups into a prioritized list for LiteGraph combos
-    // Order: Proxy Features first (Workflows, Agents, Pools), then Server Models
-    let available_models = ["auto"];
+    window.available_models = ["auto"];
     
     if (model_groups["Proxy Features"]) {
         model_groups["Proxy Features"].forEach(m => {
-            if (m !== "auto" && !available_models.includes(m)) available_models.push(m);
+            if (m !== "auto" && !window.available_models.includes(m)) window.available_models.push(m);
         });
     }
 
     Object.keys(model_groups).forEach(server => {
         if (server !== "Proxy Features") {
             model_groups[server].forEach(m => {
-                if (!available_models.includes(m)) available_models.push(m);
+                if (!window.available_models.includes(m)) window.available_models.push(m);
             });
         }
     });
@@ -422,16 +389,7 @@
     }
 
     // --- NODE REGISTRATION ---
-    // Define nodes globally so LiteGraph can register them before DOM ready if needed
-    
-    function NodeInput() {
-        this.addOutput("Input", "string");
-        this.title = "USER INPUT";
-        this.color = "#1e1e26";
-        this.bgcolor = "#312e81";
-        this.size = [260, 60];
-    }
-    LiteGraph.registerNodeType("hub/input", NodeInput);
+    // Standard and Custom nodes are now loaded dynamically from the NodeRegistry
 
         // --- MARKDOWN MODAL LOGIC (SKILLS & PERSONALITIES) ---
         let currentEditingNode = null;
@@ -668,12 +626,16 @@
         
         this.properties = { 
             classifier_model: "auto",
-            use_semantic: true,
-            rules: [] // Array of { slot: 1, label: "General", keywords: "", intent: "" }
+            use_semantic: false,
+            rules: [] // Array of { slot: 1, label: "General", conditions: [], intent: "" }
         };
 
-        this.cWidget = this.addWidget("combo", "Classifier", this.properties.classifier_model, (v) => { this.properties.classifier_model = v; pushHistoryState(); }, { values: ["auto"].concat(available_models) });
-        this.sWidget = this.addWidget("toggle", "Semantic Path", this.properties.use_semantic, (v) => { this.properties.use_semantic = v; pushHistoryState(); });
+        // Semantic Toggle
+        this.sWidget = this.addWidget("toggle", "Semantic Path", this.properties.use_semantic, (v) => { 
+            this.properties.use_semantic = v; 
+            this.refreshWidgets();
+            pushHistoryState(); 
+        });
 
         this.addWidget("button", "Configure Rules & Intents", null, () => {
             window.openRouterModal(this);
@@ -689,10 +651,31 @@
         this.title = "🔀 AUTO ROUTER";
         this.color = "#059669"; // emerald-600
         this.bgcolor = "#064e3b"; // emerald-900
-        this.size = [300, 160];
+        this.size = [300, 140];
         this.serialize_widgets = true;
+        this.refreshWidgets();
     }
+
+    NodeAutoRouter.prototype.refreshWidgets = function() {
+        // Clear non-static widgets
+        if (this.widgets) {
+            this.widgets = this.widgets.filter(w => w.name === "Semantic Path" || w.type === "button");
+        }
+
+        if (this.properties.use_semantic) {
+            this.cWidget = this.addWidget("combo", "Classifier", this.properties.classifier_model, (v) => { 
+                this.properties.classifier_model = v; 
+                pushHistoryState(); 
+            }, { values: ["auto"].concat(available_models) });
+            // Move classifier above buttons
+            const classifier = this.widgets.pop();
+            this.widgets.splice(1, 0, classifier);
+        }
+        this.size = this.computeSize();
+    };
+
     NodeAutoRouter.prototype.onConfigure = function() {
+        this.refreshWidgets();
         if(this.cWidget) this.cWidget.value = this.properties.classifier_model;
         if(this.sWidget) this.sWidget.value = this.properties.use_semantic;
     };
@@ -701,545 +684,108 @@
     // --- ROUTER MODAL LOGIC ---
     window.openRouterModal = (node) => {
         currentEditingNode = node;
-        const slots = node.inputs.slice(1); // Skip context input
+        const slots = node.inputs.slice(1);
         
-        let html = `<div class="space-y-6 text-left max-h-[70vh] overflow-y-auto custom-scrollbar pr-2">
+        let html = `<div class="space-y-6 text-left max-h-[75vh] overflow-y-auto custom-scrollbar pr-2">
             <p class="text-[11px] text-gray-500 uppercase font-black tracking-widest">Decision Matrix for ${node.inputs.length - 1} Paths</p>
         `;
 
         slots.forEach((input, idx) => {
             const slotIdx = idx + 1;
-            const rule = node.properties.rules.find(r => r.slot === slotIdx) || { label: `Expert ${slotIdx}`, keywords: "", intent: "" };
+            const rule = node.properties.rules.find(r => r.slot === slotIdx) || { label: input.label, conditions: [], intent: "" };
             
             html += `
                 <div class="p-4 bg-white/5 border border-white/10 rounded-xl space-y-4">
                     <div class="flex justify-between items-center border-b border-white/5 pb-2">
                         <span class="text-xs font-black text-indigo-400">PATH ${slotIdx}: ${input.label}</span>
-                        <input type="text" id="label-${slotIdx}" value="${rule.label}" placeholder="Friendly Name" class="text-[10px] bg-black/40 border border-white/10 rounded px-2 py-1 w-32">
+                        <input type="text" id="label-${slotIdx}" value="${rule.label}" placeholder="Label" class="text-[10px] bg-black/40 border border-white/10 rounded px-2 py-1 w-32">
                     </div>
-                    <div>
-                        <label class="block text-[9px] font-bold text-gray-500 uppercase mb-1">Fast Rules (Keywords / Regex)</label>
-                        <input type="text" id="keywords-${slotIdx}" value="${rule.keywords}" placeholder="e.g. python, help, /reg[ex]/i" class="w-full text-xs bg-black/40 border border-white/10 rounded p-2 font-mono">
+                    
+                    <div class="space-y-2">
+                        <label class="block text-[9px] font-bold text-gray-500 uppercase px-1">Logical Conditions</label>
+                        <div id="cond-container-${slotIdx}" class="space-y-2">
+                            ${(rule.conditions || []).map((c, cIdx) => `
+                                <div class="flex gap-2 items-center bg-black/20 p-2 rounded border border-white/5">
+                                    <select class="cond-type text-[10px] bg-transparent border border-white/10 rounded" data-slot="${slotIdx}">
+                                        <option value="keyword" ${c.type === 'keyword' ? 'selected' : ''}>Keyword</option>
+                                        <option value="regex" ${c.type === 'regex' ? 'selected' : ''}>Regex</option>
+                                        <option value="min_len" ${c.type === 'min_len' ? 'selected' : ''}>Min Length</option>
+                                        <option value="max_len" ${c.type === 'max_len' ? 'selected' : ''}>Max Length</option>
+                                        <option value="has_images" ${c.type === 'has_images' ? 'selected' : ''}>Has Images</option>
+                                        <option value="user" ${c.type === 'user' ? 'selected' : ''}>User is</option>
+                                    </select>
+                                    <input type="text" class="cond-val text-[10px] bg-black/40 border border-white/10 rounded flex-grow" value="${c.value || ''}">
+                                    <button type="button" onclick="this.parentElement.remove()" class="text-red-500 hover:text-red-400">&times;</button>
+                                </div>
+                            `).join('')}
+                        </div>
+                        <button type="button" onclick="addCondToModal(${slotIdx})" class="text-[9px] text-indigo-400 hover:underline">+ Add Condition</button>
                     </div>
-                    <div>
-                        <label class="block text-[9px] font-bold text-gray-500 uppercase mb-1">Semantic Intent (Classifier Prompt)</label>
-                        <textarea id="intent-${slotIdx}" rows="2" placeholder="e.g. User wants to debug a script or optimize code" class="w-full text-xs bg-black/40 border border-white/10 rounded p-2">${rule.intent}</textarea>
-                    </div>
+
+                    ${node.properties.use_semantic ? `
+                    <div class="pt-2 border-t border-white/5">
+                        <label class="block text-[9px] font-bold text-purple-400 uppercase mb-1">AI Intent Classifier Context</label>
+                        <textarea id="intent-${slotIdx}" rows="2" placeholder="Describe the intent for this path..." class="w-full text-xs bg-black/40 border border-white/10 rounded p-2">${rule.intent || ''}</textarea>
+                    </div>` : ''}
                 </div>
             `;
         });
 
         html += `
             <div class="flex justify-end pt-4 sticky bottom-0 bg-[#0a0a0f]">
-                <button onclick="saveRouterRules()" class="bg-indigo-600 hover:bg-indigo-500 px-10 py-2 rounded font-black text-xs uppercase tracking-widest text-white shadow-lg">Apply Decision Rules</button>
+                <button onclick="saveRouterRules()" class="bg-indigo-600 hover:bg-indigo-500 px-10 py-2 rounded font-black text-xs uppercase tracking-widest text-white shadow-lg">Save Router Matrix</button>
             </div>
         </div>`;
 
-        window.showModal("Router Architecture", html);
+        window.showModal("Advanced Router Matrix", html);
+    };
+
+    window.addCondToModal = (slot) => {
+        const container = document.getElementById(`cond-container-${slot}`);
+        const div = document.createElement('div');
+        div.className = "flex gap-2 items-center bg-black/20 p-2 rounded border border-white/5";
+        div.innerHTML = `
+            <select class="cond-type text-[10px] bg-transparent border border-white/10 rounded" data-slot="${slot}">
+                <option value="keyword">Keyword</option>
+                <option value="regex">Regex</option>
+                <option value="min_len">Min Length</option>
+                <option value="max_len">Max Length</option>
+                <option value="has_images">Has Images</option>
+                <option value="user">User is</option>
+            </select>
+            <input type="text" class="cond-val text-[10px] bg-black/40 border border-white/10 rounded flex-grow" placeholder="Value...">
+            <button type="button" onclick="this.parentElement.remove()" class="text-red-500 hover:text-red-400">&times;</button>
+        `;
+        container.appendChild(div);
     };
 
     window.saveRouterRules = () => {
         const node = currentEditingNode;
         const newRules = [];
         for(let i=1; i < node.inputs.length; i++) {
+            const container = document.getElementById(`cond-container-${i}`);
+            const conds = [];
+            if (container) {
+                container.querySelectorAll('.flex').forEach(div => {
+                    conds.push({
+                        type: div.querySelector('.cond-type').value,
+                        value: div.querySelector('.cond-val').value
+                    });
+                });
+            }
+            
+            const intentEl = document.getElementById(`intent-${i}`);
             newRules.push({
                 slot: i,
                 label: document.getElementById(`label-${i}`).value,
-                keywords: document.getElementById(`keywords-${i}`).value,
-                intent: document.getElementById(`intent-${i}`).value
+                conditions: conds,
+                intent: intentEl ? intentEl.value : ""
             });
         }
         node.properties.rules = newRules;
         document.getElementById('modal-close-btn').click();
         pushHistoryState();
     };
-
-    // 1.2 System Prompt Composer (Classic)
-    function NodeSystemComposer() {
-        this.addInput("Persona", "string");
-        this.addInput("Skill 1", "string,skill");
-        this.addInput("Skill 2", "string,skill");
-        this.addInput("RAG Context", "string");
-        this.addOutput("System String", "string");
-        
-        this.addWidget("button", "+ Add Ingredient", null, () => {
-             this.addInput("Extra " + (this.inputs.length - 3), "string");
-             this.size[1] += 24;
-        });
-        this.addWidget("button", "ℹ️ Help", null, () => { showNodeHelp("hub/system_composer"); });
-
-        this.title = "SYSTEM COMPOSER";
-        this.color = "#7c3aed";
-        this.bgcolor = "#2e1065";
-        this.size = [280, 160];
-    }
-    LiteGraph.registerNodeType("hub/system_composer", NodeSystemComposer);
-
-    // 1.2.1 Advanced System Merger (Persona + Dynamic Skills)
-    function NodeSystemMerger() {
-        this.addInput("Base Identity", "string");
-        this.addInput("Skill 1", "string,skill");
-        this.addOutput("Final System Prompt", "string");
-        
-        this.addWidget("button", "+ Add Skill Slot", null, () => {
-             this.addInput("Skill " + (this.inputs.length), "string,skill");
-             this.size = this.computeSize();
-             this.setDirtyCanvas(true, true);
-        });
-
-        this.title = "🧩 SYSTEM MERGER";
-        this.color = "#8b5cf6"; // violet-500
-        this.bgcolor = "#4c1d95"; // violet-900
-        this.size = [280, 100];
-    }
-    LiteGraph.registerNodeType("hub/system_merger", NodeSystemMerger);
-
-    // 1.3 Message Selector (Router)
-    function NodeSelector() {
-        this.addInput("Messages", "messages");
-        this.addOutput("Path A", "messages");
-        this.addOutput("Path B", "messages");
-        this.addOutput("Default", "messages");
-        this.properties = { condition_a: "", condition_b: "" };
-        this.addWidget("text", "If A contains", this.properties.condition_a, (v) => { this.properties.condition_a = v; });
-        this.addWidget("text", "If B contains", this.properties.condition_b, (v) => { this.properties.condition_b = v; });
-        this.addWidget("button", "ℹ️ Help", null, () => { showNodeHelp("hub/selector"); });
-        this.title = "SELECTOR";
-        this.color = "#92400e";
-        this.bgcolor = "#451a03";
-        this.size = [280, 140];
-    }
-    LiteGraph.registerNodeType("hub/selector", NodeSelector);
-
-    // 1.4 Extract Response (Messages -> String)
-    function NodeExtractResponse() {
-        this.addInput("Messages", "messages");
-        this.addOutput("Last Response", "string");
-        this.addWidget("button", "ℹ️ Help", null, () => { showNodeHelp("hub/extract_text"); });
-        this.title = "EXTRACT TEXT";
-        this.color = "#059669";
-        this.bgcolor = "#064e3b";
-        this.size = [220, 60];
-    }
-    LiteGraph.registerNodeType("hub/extract_text", NodeExtractResponse);
-
-    // 1.5 String to Message (String -> Single Message Object)
-    function NodeStringToMsg() {
-        this.addInput("Text", "string");
-        this.addOutput("Message", "message_obj");
-        this.properties = { role: "user" };
-        this.addWidget("combo", "Role", this.properties.role, (v) => { this.properties.role = v; }, { values:["user", "assistant", "system"] });
-        this.addWidget("button", "ℹ️ Help", null, () => { showNodeHelp("hub/create_message"); });
-        this.title = "CREATE MESSAGE";
-        this.color = "#2563eb";
-        this.bgcolor = "#1e3a8a";
-        this.size = [220, 80];
-    }
-    LiteGraph.registerNodeType("hub/create_message", NodeStringToMsg);
-
-    // 1.6 Append Message
-    function NodeAppendMsg() {
-        this.addInput("Messages", "messages");
-        this.addInput("Content", "string");
-        this.addOutput("Updated Messages", "messages");
-        this.properties = { role: "user" };
-        this.addWidget("combo", "Role", this.properties.role, (v) => { this.properties.role = v; }, { values: ["user", "assistant", "system"] });
-        this.addWidget("button", "ℹ️ Help", null, () => { showNodeHelp("hub/append_message"); });
-        this.title = "APPEND TO CHAT";
-        this.color = "#2563eb";
-        this.bgcolor = "#1e3a8a";
-        this.size =[220, 100];
-    }
-    LiteGraph.registerNodeType("hub/append_message", NodeAppendMsg);
-
-    // 1.7 System Prompt Modifier
-    function NodeSystemModifier() {
-        this.addInput("Messages", "messages");
-        this.addInput("System Prompt", "string");
-        this.addOutput("Updated Messages", "messages");
-        this.addWidget("button", "ℹ️ Help", null, () => { showNodeHelp("hub/system_modifier"); });
-        this.title = "SYSTEM MODIFIER";
-        this.color = "#2563eb";
-        this.bgcolor = "#1e3a8a";
-        this.size = [240, 80];
-    }
-    LiteGraph.registerNodeType("hub/system_modifier", NodeSystemModifier);
-
-    // 1.2 Skill Node
-    function NodeSkill() {
-        this.addOutput("Skill", "skill");
-        this.properties = { name: "" };
-        this.sWidget = this.addWidget("combo", "Skill", this.properties.name, (v) => { 
-            this.properties.name = v; 
-            pushHistoryState();
-        }, { values: GLOBAL_SKILLS.map(s => s.name) });
-        this.addWidget("button", "ℹ️ Help", null, () => { showNodeHelp("hub/skill"); });
-        this.title = "📜 SKILL";
-        this.color = "#7c3aed";
-        this.bgcolor = "#2e1065";
-        setupNodeResizing(this);
-    }
-    NodeSkill.prototype.onConfigure = function() {
-        if(this.sWidget) this.sWidget.value = this.properties.name;
-    };
-    LiteGraph.registerNodeType("hub/skill", NodeSkill);
-
-    // 1.5 Personality Node
-    function NodePersonality() {
-        this.addOutput("System Prompt", "string");
-        this.addOutput("MCPs", "array");
-        this.addOutput("Tools", "array");
-        this.addOutput("Settings", "object");
-
-        this.properties = { name: "", temperature: 0.7 };
-        
-        this.pWidget = this.addWidget("combo", "Personality", this.properties.name, (v) => { 
-            this.properties.name = v;
-            pushHistoryState(); 
-        }, { values: GLOBAL_PERSONALITIES.map(p => p.name) });
-
-        this.tWidget = this.addWidget("number", "Temperature", this.properties.temperature, (v) => {
-            this.properties.temperature = v;
-            pushHistoryState();
-        }, { min: 0, max: 2, step: 0.1 });
-
-        this.addWidget("button", "ℹ️ Help", null, () => { showNodeHelp("hub/special_personality"); });
-        this.title = "🎭 PERSONALITY";
-        this.color = "#86198f";
-        this.bgcolor = "#4a044e";
-        this.size = this.computeSize();
-        this.serialize_widgets = true;
-        setupNodeResizing(this);
-    }
-    NodePersonality.prototype.onConfigure = function(config) {
-        if(this.pWidget) this.pWidget.value = this.properties.name;
-        if(this.tWidget) this.tWidget.value = this.properties.temperature;
-    };
-    LiteGraph.registerNodeType("hub/personality", NodePersonality);
-
-    // 1.6 Tool Node
-    function NodeTool() {
-        this.addOutput("Tool", "tool,array");
-
-        this.properties = {
-            raw: "---\nname: my_tool\ndescription: Description of the tool\nparameters:\n  type: object\n  properties:\n    arg1:\n      type: string\n---\n# Tool Documentation",
-            content: "# Tool Documentation",
-            metadata: { name: "my_tool" }
-        };
-
-        this.title = "🔧 NEW TOOL";
-
-        this.addWidget("button", "Configure Tool (.md)", null, () => {
-            window.openMarkdownModal(this, 'tool');
-        });
-
-        this.addWidget("button", "ℹ️ Help", null, () => { showNodeHelp("hub/tool"); });
-
-        this.color = "#0284c7"; // sky-600
-        this.bgcolor = "#075985"; // sky-800
-        setupNodeResizing(this);
-    }
-    LiteGraph.registerNodeType("hub/tool", NodeTool);
-
-    // 2. Logic: Router (Condition)
-    function NodeRouter() {
-        this.addInput("In", "string");
-        this.addOutput("Matched", "string");
-        this.addOutput("Fallback", "string");
-        this.properties = { keyword: "" };
-        this.addWidget("text", "If contains...", this.properties.keyword, (v) => { 
-            this.properties.keyword = v; 
-            this.size = this.computeSize();
-            this.setDirtyCanvas(true, true);
-            pushHistoryState();
-        });
-        
-        this.addWidget("button", "ℹ️ Help", null, () => { showNodeHelp("hub/router"); });
-        this.color = "#064e3b"; // emerald-900
-        this.bgcolor = "#022c22"; // emerald-950
-        setupNodeResizing(this);
-    }
-    NodeRouter.title = "Router Gate";
-    NodeRouter.desc = "Conditional routing";
-    LiteGraph.registerNodeType("hub/router", NodeRouter);
-
-    // 3. Logic: Parallel Ensemble (Classic)
-    function NodeEnsemble() {
-        this.addInput("Trigger", "string");
-        this.addOutput("Aggregated", "string");
-        this.properties = { master: "auto" };
-        this.addWidget("combo", "Synthesizer", this.properties.master, (v) => { 
-            this.properties.master = v; 
-            this.size = this.computeSize();
-            this.setDirtyCanvas(true, true);
-            pushHistoryState();
-        }, { values: available_models });
-        
-        this.addWidget("button", "ℹ️ Help", null, () => { showNodeHelp("hub/ensemble"); });
-        this.color = "#701a75"; // fuchsia-900
-        this.bgcolor = "#4a044e"; // fuchsia-950
-        setupNodeResizing(this);
-    }
-    NodeEnsemble.title = "Parallel Ensemble";
-    NodeEnsemble.desc = "Parallel execution and synthesis";
-    LiteGraph.registerNodeType("hub/ensemble", NodeEnsemble);
-
-    // 1.9 Model Selector Node (Cognitive Bundle)
-    function NodeModel() {
-        this.addOutput("Expert", "expert");
-        
-        this.properties = { 
-            model: "auto",
-            persona: "",
-            skills: [] // Array of selected skill names
-        };
-        
-        // 1. Model Dropdown
-        this.mWidget = this.addWidget("combo", "Model", this.properties.model, (v) => { 
-            this.properties.model = v;
-            pushHistoryState(); 
-        }, { values: available_models });
-
-        // 2. Persona Dropdown
-        const personaNames = [""].concat(GLOBAL_PERSONALITIES.map(p => p.name));
-        this.pWidget = this.addWidget("combo", "Persona", this.properties.persona, (v) => {
-            this.properties.persona = v;
-            pushHistoryState();
-        }, { values: personaNames });
-
-        // 3. Dynamic Skill Dropdowns
-        this.addWidget("button", "+ Add Skill Slot", null, () => {
-             const idx = this.properties.skills.length;
-             this.properties.skills.push("");
-             this.addSkillWidget(idx);
-             this.size = this.computeSize();
-             this.setDirtyCanvas(true, true);
-        });
-
-        this.title = "🧠 MODEL SELECTOR";
-        this.color = "#4338ca";
-        this.bgcolor = "#1e1b4b";
-        this.size = [280, 100];
-        this.serialize_widgets = true;
-    }
-    NodeModel.prototype.addSkillWidget = function(index) {
-        const skillNames = [""].concat(GLOBAL_SKILLS.map(s => s.name));
-        this.addWidget("combo", "Skill " + (index + 1), this.properties.skills[index], (v) => {
-            this.properties.skills[index] = v;
-            pushHistoryState();
-        }, { values: skillNames });
-    };
-
-    NodeModel.prototype.onConfigure = function(config) {
-        // Redraw widgets from properties
-        this.widgets = []; // Clear current UI widgets
-        
-        // Re-add static widgets
-        this.mWidget = this.addWidget("combo", "Model", this.properties.model, (v) => { this.properties.model = v; pushHistoryState(); }, { values: available_models });
-        const pNames = [""].concat(GLOBAL_PERSONALITIES.map(p => p.name));
-        this.pWidget = this.addWidget("combo", "Persona", this.properties.persona, (v) => { this.properties.persona = v; pushHistoryState(); }, { values: pNames });
-        
-        this.addWidget("button", "+ Add Skill Slot", null, () => {
-             const idx = this.properties.skills.length;
-             this.properties.skills.push("");
-             this.addSkillWidget(idx);
-             this.size = this.computeSize();
-             this.setDirtyCanvas(true, true);
-        });
-
-        // Re-add dynamic skill widgets
-        if (this.properties.skills) {
-            this.properties.skills.forEach((s, i) => this.addSkillWidget(i));
-        }
-
-        this.size = this.computeSize();
-    };
-    LiteGraph.registerNodeType("hub/model", NodeModel);
-
-    // 3.1 Advanced Mixture of Experts (Interactive)
-    // 3.1 Advanced Mixture of Experts (Interactive)
-    function NodeMoE() {
-        this.addInput("User Context", "messages");
-        this.addInput("Expert 1", "expert,string");
-        this.addInput("Expert 2", "expert,string");
-        this.addInput("Settings", "object");
-        this.addOutput("Synthesized Output", "string");
-        
-        this.properties = { 
-            orchestrator: "auto",
-            system_prompt: "Review the expert opinions above and provide a finalized, high-quality response to the user query.",
-            show_monologue: false,
-            send_status_update: true
-        };
-
-        this.orchWidget = this.addWidget("combo", "Orchestrator", this.properties.orchestrator, (v) => { 
-            this.properties.orchestrator = v; 
-            pushHistoryState();
-        }, { values: available_models });
-
-        this.monologueWidget = this.addWidget("toggle", "Show Monologue", this.properties.show_monologue, (v) => {
-            this.properties.show_monologue = v;
-            pushHistoryState();
-        });
-
-        this.statusWidget = this.addWidget("toggle", "Send Status", this.properties.send_status_update, (v) => {
-            this.properties.send_status_update = v;
-            pushHistoryState();
-        });
-
-        this.addWidget("button", "+ Add Expert Input", null, () => {
-            this.addInput("Expert " + (this.inputs.length), "expert,string");
-            this.size = this.computeSize();
-            this.setDirtyCanvas(true, true);
-        });
-
-        this.addWidget("button", "Edit Orchestrator Prompt", null, () => {
-            const val = prompt("Synthesis Instructions:", this.properties.system_prompt);
-            if (val !== null) {
-                this.properties.system_prompt = val;
-                pushHistoryState();
-            }
-        });
-
-        this.title = "✨ MIXTURE OF EXPERTS";
-        this.color = "#86198f";
-        this.bgcolor = "#4a044e";
-        this.size = [320, 210];
-        this.serialize_widgets = true;
-    }
-    NodeMoE.prototype.onConfigure = function(config) {
-        if(this.orchWidget) this.orchWidget.value = this.properties.orchestrator;
-        if(this.monologueWidget) this.monologueWidget.value = this.properties.show_monologue;
-        if(this.statusWidget) this.statusWidget.value = this.properties.send_status_update;
-    };
-    LiteGraph.registerNodeType("hub/moe", NodeMoE);
-
-    function NodeComposer() {
-        this.addInput("A", "string");
-        this.addInput("B", "string");
-        this.addOutput("Merged", "string");
-        this.properties = { template: "{A}\n\n{B}" };
-        this.tmplWidget = this.addWidget("text", "Template", this.properties.template, (v) => { this.properties.template = v; });
-        this.addWidget("button", "+ Add Variable", null, () => {
-             this.addInput(String.fromCharCode(65 + this.inputs.length), "string");
-        });
-        this.addWidget("button", "ℹ️ Help", null, () => { showNodeHelp("hub/composer"); });
-        this.title = "PROMPT COMPOSER";
-        this.serialize_widgets = true;
-    }
-    NodeComposer.prototype.onConfigure = function() {
-        if(this.tmplWidget) this.tmplWidget.value = this.properties.template;
-    };
-    LiteGraph.registerNodeType("hub/composer", NodeComposer);
-
-    function NodeVision() {
-        this.addInput("Input", "string");
-        this.addOutput("Result", "string");
-        this.properties = { vlm: "auto", text: "auto" };
-        this.vWidget = this.addWidget("combo", "VLM Expert", this.properties.vlm, (v) => { this.properties.vlm = v; pushHistoryState(); }, { values: available_models });
-        this.tWidget = this.addWidget("combo", "Text Target", this.properties.text, (v) => { this.properties.text = v; pushHistoryState(); }, { values: available_models });
-        this.addWidget("button", "ℹ️ Help", null, () => { showNodeHelp("hub/vision"); });
-        this.title = "VISION ENABLED";
-        this.serialize_widgets = true;
-        this.size = this.computeSize();
-        if(this.size[0] < MIN_NODE_WIDTH) this.size[0] = MIN_NODE_WIDTH;
-    }
-    NodeVision.prototype.onConfigure = function() {
-        if(this.vWidget) this.vWidget.value = this.properties.vlm;
-        if(this.tWidget) this.tWidget.value = this.properties.text;
-    };
-    LiteGraph.registerNodeType("hub/vision", NodeVision);
-
-    // 1.11 MCP Tool Node
-    function NodeMCP() {
-        this.addOutput("Tool", "tool");
-        this.properties = {
-            name: "mcp-server",
-            type: "sse",
-            url: "http://localhost:3000",
-            icon: "🛠️"
-        };
-        this.addWidget("text", "Name", this.properties.name, (v) => { this.properties.name = v; pushHistoryState(); });
-        this.addWidget("combo", "Type", this.properties.type, (v) => { this.properties.type = v; pushHistoryState(); }, { values: ["sse", "stdio"] });
-        this.addWidget("text", "URL/Cmd", this.properties.url, (v) => { this.properties.url = v; pushHistoryState(); });
-        this.title = "🔌 MCP TOOL";
-        this.color = "#0ea5e9";
-        this.bgcolor = "#0c4a6e";
-        this.serialize_widgets = true;
-    }
-    NodeMCP.prototype.onConfigure = function() {
-        this.widgets[0].value = this.properties.name;
-        this.widgets[1].value = this.properties.type;
-        this.widgets[2].value = this.properties.url;
-    };
-    LiteGraph.registerNodeType("hub/mcp", NodeMCP);
-
-    // 1.12 Agentic Reasoner Node
-    function NodeAgent() {
-        this.addInput("Messages", "messages");
-        this.addInput("Settings", "object");
-        this.addOutput("Content", "string");
-        
-        this.properties = {
-            model: "auto",
-            system_prompt: "You are an autonomous agent. Use your tools to fulfill the user request. Think before you act.",
-            max_loops: 5
-        };
-
-        this.mWidget = this.addWidget("combo", "Model", this.properties.model, (v) => { this.properties.model = v; pushHistoryState(); }, { values: ["auto"].concat(available_models) });
-        this.addWidget("number", "Max Loops", this.properties.max_loops, (v) => { this.properties.max_loops = v; pushHistoryState(); }, { min: 1, max: 20 });
-        
-        this.addWidget("button", "Edit Agent Persona", null, () => {
-            const val = prompt("Agent Instructions:", this.properties.system_prompt);
-            if (val !== null) { this.properties.system_prompt = val; pushHistoryState(); }
-        });
-
-        this.addWidget("button", "+ Add Tool Slot", null, () => {
-             this.addInput("Tool " + (this.inputs.length - 1), "tool");
-             this.size = this.computeSize();
-             this.setDirtyCanvas(true, true);
-        });
-
-        this.title = "🤖 AGENT REASONER";
-        this.color = "#f43f5e"; // rose-500
-        this.bgcolor = "#881337"; // rose-900
-        this.size = [300, 180];
-        this.serialize_widgets = true;
-    }
-    NodeAgent.prototype.onConfigure = function() {
-        if(this.mWidget) this.mWidget.value = this.properties.model;
-    };
-    LiteGraph.registerNodeType("hub/agent", NodeAgent);
-
-    // 1.10 Settings Modifier
-    function NodeSettingsModifier() {
-        this.addInput("In Settings", "object");
-        this.addOutput("Out Settings", "object");
-        this.properties = { temperature: 0.7 };
-        this.tWidget = this.addWidget("number", "Temp Override", this.properties.temperature, (v) => {
-            this.properties.temperature = v;
-            pushHistoryState();
-        }, { min: 0, max: 2, step: 0.1 });
-        
-        this.title = "⚙️ SETTINGS MODIFIER";
-        this.color = "#4b5563";
-        this.bgcolor = "#1f2937";
-        this.size = [240, 60];
-        this.serialize_widgets = true;
-    }
-    NodeSettingsModifier.prototype.onConfigure = function() {
-        if(this.tWidget) this.tWidget.value = this.properties.temperature;
-    }
-    LiteGraph.registerNodeType("hub/settings_modifier", NodeSettingsModifier);
-
-    function NodeOutput() {
-        this.addInput("Content", "string");
-        this.title = "GLOBAL OUTPUT";
-        this.color = "#1e1e26";
-        this.bgcolor = "#059669";
-        this.size = [240, 60];
-    }
-    LiteGraph.registerNodeType("hub/output", NodeOutput);
 
     // --- DYNAMIC PLUGIN NODES ---
     try {
@@ -1321,26 +867,15 @@
 
     // --- NODE HELP MODAL LOGIC ---
     const NODE_HELP = {
-        "hub/input": "**ENTRY NODE:**\nThis node captures the incoming prompt from the user in the Chat Playground. Outputs the request as a 'messages' array and Request Settings.",
-        "hub/output": "**EXIT NODE:**\nThis defines the final result returned back to the user. Connect your finalized string output to 'Source'.",
-        "hub/llm_chat": "**LLM CHAT Node**\n\nThis is the core cognitive engine. It executes an LLM inference request based on the provided conversation history.\n\n### Inputs:\n- **Messages:** Connect a 'messages' array. **Note:** If you need to inject a System Prompt or Persona, pass the messages through a **System Modifier** node *first*, then connect its output to this slot.\n- **Settings:** Optional input for configuration (temperature, top_p).\n- **Model Override:** Pass a string to force the use of a specific model, bypassing the 'auto' selector.\n- **Tool [N]:** Connect Tool Definition nodes here to provide the LLM with functions it can call.\n\n### Outputs:\n- **Content:** The finalized string generated by the LLM response.\n\n### Configuration:\nUse the dropdown to manually select a model, or leave it as 'auto' to utilize your router's intelligent selection logic.",
-        "hub/special_personality": "**SPECIAL PERSONALITY NODE (The Soul)**\n\nThis node encapsulates an agent's persona and technical capabilities using a Markdown+YAML structure.\n\n### Markdown Philosophy\n- **Frontmatter:** The top block (between `---`) defines the metadata and structural capabilities (MCPs/Tools).\n- **Content Body:** Everything after the second `---` is treated as the raw System Prompt.\n\n### Supported YAML Fields:\n- `name`: Unique identifier for the agent.\n- `description`: A brief summary for your library.\n- `mcp_servers`: A list of MCP server objects (e.g., `{name: '...', url: '...', type: 'sse'}`).\n- `tools`: A list of tool schema definitions (OpenAI/JSON-Schema compatible).\n\n### Output Mapping:\n- **System Prompt:** Routes the body text to the System message of an LLM node.\n- **MCPs:** Routes the server list to your RAG/Tool orchestrator.\n- **Tools:** Routes the function schemas directly to an LLM's Tool input slot.\n\n*Use this node to build complex agents that carry their own tools and context-fetching capabilities.*",
-        "hub/llm_instruct": "**LLM INSTRUCT:**\nExecutes an LLM in text completion mode. Takes a raw string prompt and outputs a raw string response.",
-        "hub/system_composer": "**SYSTEM COMPOSER:**\nAggregates multiple text inputs (Personas, Skills, RAG data) into a single optimized instruction string.",
-        "hub/extract_text": "**EXTRACT TEXT:**\nExtracts the raw text from the last message in a 'messages' array.",
-        "hub/create_message": "**CREATE MESSAGE:**\nWraps a raw string into a standard message object with a specific role (e.g., user, assistant, system).",
-        "hub/append_message": "**APPEND MESSAGE:**\nTakes an existing 'messages' array and appends a new message using the provided role and content.",
-        "hub/system_modifier": "**SYSTEM MODIFIER:**\nPrepends a system prompt to the beginning of the messages list.",
-        "hub/autorouter": "**AUTO ROUTER:**\nIntelligently selects the best model based on the input messages and configured preferences. Connect its output to the 'Model Override' slot of an LLM node.",
-        "hub/skill": "**SKILL NODE:**\nDefines specific instructions, capabilities, or constraints in Markdown format with YAML frontmatter. Outputs the content body.",
-        "hub/personality": "**PERSONALITY NODE:**\nDefines a reusable persona in Markdown with YAML frontmatter. Outputs System Prompt, MCPs list, and Tools.",
-        "hub/tool": "**TOOL NODE:**\nDefines a tool/function that the LLM can call. Configured using YAML frontmatter (needs name, description, parameters schema). Connect its output to an LLM node's Tool input.",
-        "hub/selector": "**MESSAGE SELECTOR:**\nRoutes a 'messages' array based on keyword conditions. Evaluates inputs A and B sequentially, falling back to 'Default' if no match.",
-        "hub/router": "**ROUTER GATE:**\nA conditional logic gateway. Evaluates incoming text against a keyword. If matched, it passes text to 'Matched'; otherwise, to 'Fallback'.",
-        "hub/ensemble": "**ENSEMBLE:**\nParallel execution. Pass a trigger to activate all your available active models simultaneously, then the chosen Synthesizer model merges their answers into one.",
-        "hub/composer": "**PROMPT COMPOSER:**\nMerges multiple string inputs based on a custom text template using {A}, {B} variables.",
-        "hub/vision": "**VISION ENABLED:**\nProvides vision capabilities by offloading image parsing to a VLM (Vision Language Model), passing the combined text context to the target model.",
-        "hub/subgraph": "**SUBGRAPH:**\nEmbeds another saved Workflow as a reusable node. The internal workflow must have an ENTRY and EXIT node."
+        "hub/input": "**ENTRY NODE:**\nCaptures the user's incoming message and settings from the Chat Playground.\n\n### Outputs:\n- **Messages:** Full conversation history.\n- **Settings:** Port, temperature, etc.\n- **Input:** Just the text of the *last* user message.",
+        "hub/output": "**EXIT NODE:**\nDefines the final response sent back to the chat bubble. Connect your AI's answer here.",
+        "hub/llm_chat": "**LLM CHAT:**\nCore conversational engine.\n\n### Inputs:\n- **Messages:** Connect a 'Messages' array (usually from Input or System Modifier).\n- **Settings:** Custom generation parameters.\n- **Model Override:** Force a specific model ID.\n- **Tool [N]:** Connect Tool nodes to enable function calling.",
+        "hub/system_modifier": "**SYSTEM MODIFIER:**\nInjects or appends a System Prompt into the conversation history.\n\n### Configuration:\n- **Replace Existing:** If enabled, clears all prior system instructions and sets the new one as the 'Soul' (Recommended for Personalities).",
+        "hub/datastore": "**RAG DATASTORE:**\nRetrieves relevant chunks from your local indexed knowledge bases.\n\n### Configuration:\n- **Store:** Select one of your created Datastores.\n- **Top K:** Number of context chunks to retrieve.",
+        "hub/web_search": "**WEB SEARCH:**\nPerforms real-time queries against Wikipedia, ArXiv, or Google.\n\n### Configuration:\n- **Service:** The provider to use.\n- **Max Results:** How many snippets to include.",
+        "hub/personality": "**PERSONALITY:**\nLoads a persona defined in the Personalities Studio.\n\n### Output:\nOutputs the raw Markdown body as a System Prompt string.",
+        "hub/system_composer": "**SYSTEM COMPOSER:**\nMerges a Persona, Skills, and RAG context into a single structured system instruction.",
+        "hub/subgraph": "**SUB-WORKFLOW:**\nEmbeds another saved Workflow as a reusable single node."
     };
 
     window.showNodeHelp = function(nodeType) {
@@ -1394,170 +929,93 @@
 
     LiteGraph.registerNodeType("hub/subgraph", NodeSubGraph);
 
-    const TEMPLATES = {
-        blank: null,
-        persona: {
-            "last_node_id": 5,
-            "last_link_id": 4,
-            "nodes":[
-                {
-                    "id": 1,
-                    "type": "hub/input",
-                    "pos": [100, 200],
-                    "size":[260, 80],
-                    "flags": {},
-                    "order": 0,
-                    "mode": 0,
-                    "outputs":[
-                        { "name": "Messages", "type": "messages", "links": [1] },
-                        { "name": "Settings", "type": "object", "links": null }
-                    ],
-                    "properties": { "help_id": "hub/input" }
-                },
-                {
-                    "id": 2,
-                    "type": "hub/personality",
-                    "pos": [100, 400],
-                    "size":[300, 100],
-                    "flags": {},
-                    "order": 1,
-                    "mode": 0,
-                    "outputs":[
-                        { "name": "System Prompt", "type": "string", "links": [2] },
-                        { "name": "MCPs", "type": "array", "links": null },
-                        { "name": "Tools", "type": "array", "links": null }
-                    ],
-                    "title": "🎭 EXPERT ASSISTANT",
-                    "properties": {
-                        "raw": "---\nname: Expert Assistant\nauthor: System\ndescription: A helpful persona.\n---\nYou are a highly intelligent and helpful AI assistant.",
-                        "content": "You are a highly intelligent and helpful AI assistant.",
-                        "metadata": { "name": "Expert Assistant" }
-                    }
-                },
-                {
-                    "id": 3,
-                    "type": "hub/system_modifier",
-                    "pos": [450, 200],
-                    "size":[240, 80],
-                    "flags": {},
-                    "order": 2,
-                    "mode": 0,
-                    "inputs":[
-                        { "name": "Messages", "type": "messages", "link": 1 },
-                        { "name": "System Prompt", "type": "string", "link": 2 }
-                    ],
-                    "outputs":[
-                        { "name": "Updated Messages", "type": "messages", "links": [3] }
-                    ],
-                    "properties": {}
-                },
-                {
-                    "id": 4,
-                    "type": "hub/llm_chat",
-                    "pos": [750, 200],
-                    "size":[300, 100],
-                    "flags": {},
-                    "order": 3,
-                    "mode": 0,
-                    "inputs":[
-                        { "name": "Messages", "type": "messages", "link": 3 },
-                        { "name": "Settings", "type": "object", "link": null }
-                    ],
-                    "outputs":[
-                        { "name": "Content", "type": "string", "links": [4] }
-                    ],
-                    "properties": { "model": "auto" }
-                },
-                {
-                    "id": 5,
-                    "type": "hub/output",
-                    "pos": [1100, 200],
-                    "size":[240, 60],
-                    "flags": {},
-                    "order": 4,
-                    "mode": 0,
-                    "inputs":[
-                        { "name": "Content", "type": "string", "link": 4 }
-                    ],
-                    "properties": {}
-                }
-            ],
-            "links": [
-                [1, 1, 0, 3, 0, "messages"],
-                [2, 2, 0, 3, 1, "string"],[3, 3, 0, 4, 0, "messages"],[4, 4, 0, 5, 0, "string"]
-            ],
-            "groups":[],
-            "config": {}
-        },
-        reasoner: {
-            "last_node_id": 6,
-            "last_link_id": 5,
-            "nodes": [
-                { "id": 1, "type": "hub/input", "pos": [50, 200], "outputs": [{ "name": "Messages", "type": "messages", "links": [1] }] },
-                { "id": 2, "type": "hub/system_modifier", "pos": [350, 200], "inputs": [{ "name": "Messages", "type": "messages", "link": 1 }, { "name": "System Prompt", "type": "string", "link": null }], "outputs": [{ "name": "Updated Messages", "type": "messages", "links": [2] }], "properties": { "raw": "First, think step-by-step about the problem." } },
-                { "id": 3, "type": "hub/llm_chat", "pos": [650, 200], "title": "THINKER", "inputs": [{ "name": "Messages", "type": "messages", "link": 2 }], "outputs": [{ "name": "Content", "type": "string", "links": [3] }], "properties": { "model": "auto" } },
-                { "id": 4, "type": "hub/append_message", "pos": [1000, 200], "inputs": [{ "name": "Messages", "type": "messages", "link": 2 }, { "name": "Content", "type": "string", "link": 3 }], "outputs": [{ "name": "Updated Messages", "type": "messages", "links": [4] }], "properties": { "role": "assistant" } },
-                { "id": 5, "type": "hub/llm_chat", "pos": [1300, 200], "title": "FINAL ANSWER", "inputs": [{ "name": "Messages", "type": "messages", "link": 4 }], "outputs": [{ "name": "Content", "type": "string", "links": [5] }], "properties": { "model": "auto" } },
-                { "id": 6, "type": "hub/output", "pos": [1650, 200], "inputs": [{ "name": "Content", "type": "string", "link": 5 }] }
-            ],
-            "links": [[1, 1, 0, 2, 0, "messages"], [2, 2, 0, 3, 0, "messages"], [3, 3, 0, 4, 1, "string"], [4, 4, 0, 5, 0, "messages"], [5, 5, 0, 6, 0, "string"]],
-            "config": {}
-        },
-        vision: {
-            "last_node_id": 4,
-            "last_link_id": 3,
-            "nodes": [
-                { "id": 1, "type": "hub/input", "pos": [50, 250], "outputs": [{ "name": "Messages", "type": "messages", "links": null }, { "name": "Input", "type": "string", "links": [1] }] },
-                { "id": 2, "type": "hub/vision", "pos": [400, 250], "inputs": [{ "name": "Input", "type": "string", "link": 1 }], "outputs": [{ "name": "Result", "type": "string", "links": [2] }] },
-                { "id": 3, "type": "hub/llm_instruct", "pos": [750, 250], "inputs": [{ "name": "Prompt", "type": "string", "link": 2 }], "outputs": [{ "name": "Response", "type": "string", "links": [3] }] },
-                { "id": 4, "type": "hub/output", "pos": [1100, 250], "inputs": [{ "name": "Content", "type": "string", "link": 3 }] }
-            ],
-            "links": [[1, 1, 1, 2, 0, "string"], [2, 2, 0, 3, 0, "string"], [3, 3, 0, 4, 0, "string"]],
-            "config": {}
-        },
-        multiskill: {
-            "last_node_id": 7,
-            "last_link_id": 6,
-            "nodes": [
-                { "id": 1, "type": "hub/input", "pos": [50, 150], "outputs": [{ "name": "Messages", "links": [1] }] },
-                { "id": 2, "type": "hub/personality", "pos": [50, 300], "properties": { "name": "parisneo" }, "outputs": [{ "name": "System Prompt", "links": [2] }] },
-                { "id": 3, "type": "hub/skill", "pos": [50, 450], "outputs": [{ "name": "Skill", "links": [3] }] },
-                { "id": 4, "type": "hub/system_merger", "pos": [450, 300], "inputs": [{ "name": "Base Identity", "link": 2 }, { "name": "Skill 1", "link": 3 }], "outputs": [{ "name": "Final System Prompt", "links": [4] }] },
-                { "id": 5, "type": "hub/system_modifier", "pos": [800, 150], "inputs": [{ "name": "Messages", "link": 1 }, { "name": "System Prompt", "link": 4 }], "outputs": [{ "name": "Updated Messages", "links": [5] }] },
-                { "id": 6, "type": "hub/llm_chat", "pos": [1150, 150], "inputs": [{ "name": "Messages", "link": 5 }], "outputs": [{ "name": "Content", "links": [6] }], "properties": { "model": "auto" } },
-                { "id": 7, "type": "hub/output", "pos": [1500, 150], "inputs": [{ "name": "Content", "link": 6 }] }
-            ],
-            "links": [[1, 1, 0, 5, 0, "messages"], [2, 2, 0, 4, 0, "string"], [3, 3, 0, 4, 1, "string"], [4, 4, 0, 5, 1, "string"], [5, 5, 0, 6, 0, "messages"], [6, 6, 0, 7, 0, "string"]],
-            "config": {}
-        },
-        gateway: {
-            "last_node_id": 6,
-            "last_link_id": 5,
-            "nodes": [
-                { "id": 1, "type": "hub/input", "pos": [50, 200], "outputs": [{ "name": "Messages", "links": [1] }] },
-                { "id": 2, "type": "hub/autorouter", "pos": [450, 200], "inputs": [{ "name": "User Context", "link": 1 }, { "name": "Code Expert", "link": 2 }, { "name": "General Expert", "link": 3 }], "properties": { "use_semantic": true, "rules": [{ "slot": 1, "label": "Coding", "keywords": "def, class, import", "intent": "Programming tasks" }, { "slot": 2, "label": "General", "keywords": "", "intent": "General questions" }] } },
-                { "id": 3, "type": "hub/model", "pos": [50, 400], "properties": { "model": "codellama" }, "outputs": [{ "name": "Expert", "links": [2] }] },
-                { "id": 4, "type": "hub/model", "pos": [50, 550], "properties": { "model": "llama3" }, "outputs": [{ "name": "Expert", "links": [3] }] },
-                { "id": 5, "type": "hub/output", "pos": [900, 200], "inputs": [{ "name": "Content", "link": 4 }] }
-            ],
-            "links": [[1, 1, 0, 2, 0, "messages"], [2, 3, 0, 2, 1, "expert"], [3, 4, 0, 2, 2, "expert"], [4, 2, 0, 5, 0, "string"]],
-            "config": {}
-        },
-        rag: {
-            "last_node_id": 7,
-            "last_link_id": 6,
-            "nodes": [
-                { "id": 1, "type": "hub/input", "pos": [50, 200], "outputs": [{ "name": "Messages", "links": [1] }] },
-                { "id": 2, "type": "hub/extract_text", "pos": [50, 400], "inputs": [{ "name": "Messages", "link": 1 }], "outputs": [{ "name": "Last Response", "links": [2] }] },
-                { "id": 3, "type": "hub/datastore", "pos": [350, 400], "inputs": [{ "name": "Query", "link": 2 }], "outputs": [{ "name": "Context", "links": [3] }], "properties": { "top_k": 3 } },
-                { "id": 4, "type": "hub/system_composer", "pos": [350, 200], "inputs": [{ "name": "Persona", "link": null }, { "name": "Skill 1", "link": null }, { "name": "RAG Context", "link": 3 }], "outputs": [{ "name": "System String", "links": [4] }] },
-                { "id": 5, "type": "hub/system_modifier", "pos": [700, 200], "inputs": [{ "name": "Messages", "link": 1 }, { "name": "System Prompt", "link": 4 }], "outputs": [{ "name": "Updated Messages", "links": [5] }] },
-                { "id": 6, "type": "hub/llm_chat", "pos": [1000, 200], "inputs": [{ "name": "Messages", "link": 5 }], "outputs": [{ "name": "Content", "links": [6] }], "properties": {"model": "auto"} },
-                { "id": 7, "type": "hub/output", "pos": [1350, 200], "inputs": [{ "name": "Content", "link": 6 }] }
-            ],
-            "links": [[1, 1, 0, 2, 0, "messages"], [2, 2, 0, 3, 0, "string"], [3, 3, 0, 4, 2, "string"], [4, 4, 0, 5, 1, "string"], [5, 5, 0, 6, 0, "messages"], [6, 6, 0, 7, 0, "string"]],
-            "config": {}
+    // --- TEMPLATE ENGINE ---
+    let serverTemplates = [];
+
+    async function loadTemplates() {
+        try {
+            const resp = await fetch("{{ url_for('admin_list_templates') }}");
+            if (!resp.ok) {
+                console.error("Templates fetch failed:", resp.status);
+                return;
+            }
+            serverTemplates = await resp.json();
+            renderNewProjectMenu();
+        } catch(e) { 
+            console.error("Failed to load templates:", e); 
         }
+    }
+
+    function renderNewProjectMenu() {
+        const menu = document.getElementById('new-project-menu-items');
+        if (!menu) return;
+        
+        // Group templates by category
+        const groups = {};
+        serverTemplates.forEach(t => {
+            if (!groups[t.category]) groups[t.category] = [];
+            groups[t.category].push(t);
+        });
+
+        let html = `
+            <button onclick="createNewWorkflow('blank')" class="w-full text-left px-4 py-3 text-sm text-gray-300 hover:bg-white/5 rounded-lg flex flex-col group border-b border-white/5">
+                <span class="font-bold text-white group-hover:text-indigo-400">Blank Project</span>
+                <span class="text-[10px] text-gray-500">Start from a clean slate</span>
+            </button>
+        `;
+
+        Object.keys(groups).forEach(cat => {
+            html += `<div class="px-4 py-2 text-[9px] font-black text-gray-600 uppercase tracking-tighter mt-2">${cat} Templates</div>`;
+            groups[cat].forEach(t => {
+                const color = cat === 'Standard' ? 'indigo' : 'emerald';
+                html += `
+                    <button onclick="applyTemplateById('${t.id}')" class="w-full text-left px-4 py-3 text-sm text-gray-300 hover:bg-white/5 rounded-lg flex flex-col group mt-1">
+                        <span class="font-bold text-white group-hover:text-${color}-400">${t.name}</span>
+                        <span class="text-[10px] text-gray-500">${t.description}</span>
+                    </button>
+                `;
+            });
+        });
+        menu.innerHTML = html;
+    }
+
+    window.applyTemplateById = (id) => {
+        const t = serverTemplates.find(x => x.id === id);
+        if (!t) return;
+        
+        clearGraph();
+        try {
+            graph.configure(t.graph);
+            document.getElementById('workflow-name').value = "New " + t.name;
+            
+            // Auto-layout on template start
+            rearrangeNodes();
+            
+            historyStack = [JSON.stringify(graph.serialize())];
+            document.getElementById('new-project-menu').classList.add('hidden');
+            document.getElementById('library-view').classList.add('hidden');
+            document.getElementById('designer-view').classList.remove('hidden');
+            setTimeout(() => { if(window.resizeCanvas) window.resizeCanvas(); }, 100);
+        } catch(e) { console.error("Template load failed", e); }
+    };
+
+    window.saveAsTemplate = () => {
+        const name = prompt("Template Name:", document.getElementById('workflow-name').value);
+        if (!name) return;
+        const desc = prompt("Short Description:");
+        
+        fetch("{{ url_for('admin_save_template') }}", {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': '{{ csrf_token }}' },
+            body: JSON.stringify({
+                name: name,
+                description: desc,
+                graph: graph.serialize()
+            })
+        }).then(r => r.json()).then(data => {
+            alert(data.message);
+            loadTemplates();
+        });
     };
 
     window.toggleLibrary = function(forceShowLibrary = false) {
@@ -1751,13 +1209,8 @@
             if (!graphData.nodes) graphData.nodes = [];
             graph.configure(graphData);
 
-            // AUTO-RESIZE PASS: Compute full size for all nodes in the template
-            graph._nodes.forEach(node => {
-                const size = node.computeSize();
-                // Ensure a reasonable minimum width for readability
-                node.size[0] = Math.max(size[0], 280); 
-                node.size[1] = size[1];
-            });
+            // 3. Auto-layout on load to prevent overlapping/crumbled views
+            rearrangeNodes();
 
         } catch (err) {
             console.error("LiteGraph configuration failed:", err);
@@ -1818,123 +1271,101 @@
         }
     };
 
+    // --- Node Studio Editors (CodeMirror) ---
+    let jsEditor, pyEditor;
+
+    function initEditors() {
+        // Mock JS editor for compatibility
+        jsEditor = { getValue: () => "", setValue: () => "", setSize: () => "" };
+        
+        pyEditor = CodeMirror(document.getElementById("cm-py-container"), {
+            mode: "python",
+            theme: "monokai",
+            lineNumbers: true,
+            indentUnit: 4,
+            matchBrackets: true
+        });
+
+        // Stretch CodeMirror to fill container
+        const fixSize = () => {
+            jsEditor.setSize("100%", "100%");
+            pyEditor.setSize("100%", "100%");
+        };
+        fixSize();
+        window.addEventListener("resize", fixSize);
+    }
+
     // --- Node Studio Functions ---
     window.initNewNode = () => {
-        document.getElementById('node-js-editor').value = '';
-        document.getElementById('node-py-editor').value = '';
-    };
-
-    window.exportNode = () => {
-        const js = document.getElementById('node-js-editor').value;
-        const py = document.getElementById('node-py-editor').value;
-        const blob = new Blob([JSON.stringify({js, py}, null, 2)], {type: 'application/json'});
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = 'node.hubnode';
-        a.click();
-    };
-
-    // --- Node Architect Logic ---
-    window.openNodeArchitect = () => {
-        const modalBody = `
-            <div class="space-y-4 text-left">
-                <p class="text-[10px] text-gray-500 uppercase font-black tracking-widest">Node Architect</p>
-                <textarea id="node-prompt" class="w-full h-32 p-3 bg-black/40 border border-white/10 rounded-xl text-sm text-white outline-none focus:border-purple-500" placeholder="Describe your node... (e.g. 'A node that fetches the top 5 news stories from HackerNews and outputs them as a list')"></textarea>
-                
-                <div class="flex flex-col gap-2">
-                    <span class="text-[9px] font-bold text-gray-600 uppercase px-1">Knowledge Ingestion</span>
-                    <div id="node-architect-previews" class="flex flex-wrap gap-2 min-h-[32px] p-2 bg-black/20 border border-white/5 rounded-lg"></div>
-                </div>
-
-                <div class="flex gap-2">
-                    <button type="button" onclick="document.getElementById('node-arch-files').click()" class="text-[10px] font-bold py-2 px-3 bg-white/5 rounded-lg border border-white/10 hover:bg-white/10">📄 Add API Docs</button>
-                    <button type="button" onclick="window.Architect.triggerWebImport('node-prompt', window.openNodeArchitect)" class="text-[10px] font-bold py-2 px-3 bg-indigo-600/20 text-indigo-300 rounded-lg border border-indigo-500/30 hover:bg-indigo-600/30">🌍 Web Search</button>
-                </div>
-                <input type="file" id="node-arch-files" class="hidden" multiple accept=".pdf,.txt,.md">
-
-                <div id="node-build-status" class="hidden bg-black/60 border border-white/10 rounded-lg p-3 h-24 overflow-y-auto font-mono text-[9px] text-indigo-300 custom-scrollbar"></div>
-                
-                <button onclick="window.executeNodeBuild()" id="node-build-btn" class="w-full py-3 bg-purple-600 hover:bg-purple-500 rounded-xl font-black text-xs uppercase tracking-widest text-white transition-all shadow-xl">Synthesize Node</button>
-            </div>
-        `;
-        window.showModal("AI Node Architect", modalBody);
+        if (!confirm("Start a fresh node? Current unsaved editor content will be cleared.")) return;
         
-        // Restore current architect context
-        if (typeof window.Architect !== 'undefined') {
-            window.Architect.renderPreviews('node-architect-previews');
-            document.getElementById('node-arch-files').onchange = (e) => window.Architect.handleFiles(e.target.files, () => window.Architect.renderPreviews('node-architect-previews'));
-            if (window.Architect.prompt) document.getElementById('node-prompt').value = window.Architect.prompt;
-        }
-    };
+        pyEditor.setValue(`from typing import Dict, Any
+from app.nodes.base import BaseNode
 
-    window.executeNodeBuild = async () => {
-        const promptEl = document.getElementById('node-prompt');
-        const statusBox = document.getElementById('node-build-status');
-        const btn = document.getElementById('node-build-btn');
+class MyUnifiedNode(BaseNode):
+    node_type = "custom/my_unique_id"
+    node_title = "My Unified Node"
+    node_category = "Custom Blocks"
+    node_icon = "🚀"
+
+    @classmethod
+    def get_frontend_js(cls) -> str:
+        return """
+function MyNodeUI() {
+    this.addInput("Input", "string");
+    this.addOutput("Output", "string");
+    this.properties = { prefix: "Hello" };
+    this.addWidget("text", "Prefix", "Hello", (v) => { this.properties.prefix = v; });
+    this.title = "MY UNIFIED NODE";
+    this.size = this.computeSize();
+}
+LiteGraph.registerNodeType("custom/my_unique_id", MyNodeUI);
+"""
+
+    async def execute(self, engine, node: Dict[str, Any], output_slot_idx: int) -> Any:
+        # Example of dynamic dependency installation
+        import pipmaster as pm
+        pm.ensure_packages(["requests"], verbose=True)
         
-        if (!promptEl.value.trim()) return alert("Please describe the node logic.");
-
-        btn.disabled = true;
-        btn.innerText = "ARCHITECTING...";
-        statusBox.classList.remove('hidden');
-        statusBox.innerHTML = '<div>[System] Consulting Node Building Skill...</div>';
-
-        const formData = typeof window.Architect !== 'undefined' 
-            ? window.Architect.prepareFormData('node-prompt')
-            : new FormData();
-        formData.append("csrf_token", "{{ csrf_token }}");
-
-        try {
-            // Reusing the skill builder endpoint but with a flag or separate route
-            const resp = await fetch("/admin/api/skills/build", { method: 'POST', body: formData });
-            const data = await resp.json();
-            
-            if (data.success && data.content) {
-                // The AI returns a Markdown file with JS and PY blocks. 
-                // We extract them and push them into the Studio editors.
-                const jsMatch = data.content.match(/```javascript\n([\s\S]*?)\n```/);
-                const pyMatch = data.content.match(/```python\n([\s\S]*?)\n```/);
-                
-                if (jsMatch) document.getElementById('node-js-editor').value = jsMatch[1].trim();
-                if (pyMatch) document.getElementById('node-py-editor').value = pyMatch[1].trim();
-                
-                statusBox.innerHTML += '<div class="text-green-400 font-bold">[Success] Node logic synthesized. Check the editors!</div>';
-                setTimeout(() => {
-                    const closeBtn = document.getElementById('modal-close-btn');
-                    if (closeBtn) closeBtn.click();
-                }, 1000);
-            } else {
-                statusBox.innerHTML += `<div class="text-red-400 font-bold">[Error] ${data.error || "Synthesis failed."}</div>`;
-            }
-        } catch (e) {
-            statusBox.innerHTML += `<div class="text-red-400">[Fatal] ${e.message}</div>`;
-        } finally {
-            btn.disabled = false;
-            btn.innerText = "Synthesize Node";
-        }
+        val = await engine._resolve_input(node, 0)
+        prefix = node['properties'].get('prefix', 'Hi')
+        return f"{prefix} {val}"
+`);
     };
 
     window.saveNode = async () => {
-        const js = document.getElementById('node-js-editor').value;
-        const py = document.getElementById('node-py-editor').value;
-        const name = prompt("Enter node name:");
-        if (!name) return;
+        const py = pyEditor.getValue();
         
+        if (!py.trim() || !py.includes("get_frontend_js")) {
+            return alert("Invalid Node: Ensure you have a class inheriting from BaseNode and a get_frontend_js method.");
+        }
+        
+        const classNameMatch = py.match(/class\s+(\w+)\(BaseNode\)/);
+        if (!classNameMatch) return alert("Could not find a class inheriting from BaseNode.");
+        
+        const className = classNameMatch[1];
+        const fileName = className.toLowerCase().replace(/node$/, "") + "_node";
+
         try {
-            const resp = await fetch("/admin/api/nodes", {
+            const resp = await fetch("/admin/node-builder/save", {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': '{{ csrf_token }}' },
-                body: JSON.stringify({ name, js, py })
+                body: JSON.stringify({ 
+                    name: fileName, 
+                    class_name: className,
+                    py_code: py 
+                })
             });
-            if (resp.ok) {
-                alert("Node deployed successfully!");
+            
+            const result = await resp.json();
+            if (resp.ok && result.success) {
+                alert(result.message);
                 loadCustomNodes();
             } else {
-                alert("Failed to deploy node.");
+                alert("Deployment failed: " + (result.error || "Check logs"));
             }
         } catch (e) {
-            alert("Error: " + e.message);
+            alert("Network error: " + e.message);
         }
     };
 
@@ -1944,28 +1375,23 @@
             if (!resp.ok) return;
             const nodes = await resp.json();
             const list = document.getElementById('custom-nodes-list');
-            if (!list) return;
             list.innerHTML = nodes.map(n => `
-                <div class="p-2 bg-white/5 rounded-lg flex justify-between items-center">
-                    <span class="text-xs text-gray-300">${n.name}</span>
-                    <button onclick="loadNode('${n.name}')" class="text-[10px] text-indigo-400 hover:text-indigo-300">Load</button>
+                <div class="p-2 bg-white/5 rounded-lg flex justify-between items-center group">
+                    <span class="text-xs text-gray-300 font-mono">${n.name}.py</span>
+                    <button onclick="loadNode('${n.name}')" class="text-[10px] text-indigo-400 font-bold uppercase opacity-0 group-hover:opacity-100 transition-opacity">Load File</button>
                 </div>
             `).join('');
-        } catch (e) {
-            console.error("Failed to load custom nodes", e);
-        }
+        } catch (e) { console.error(e); }
     }
 
     window.loadNode = async (name) => {
         try {
             const resp = await fetch(`/admin/api/nodes/${name}`);
             if (!resp.ok) return;
-            const node = await resp.json();
-            document.getElementById('node-js-editor').value = node.js || '';
-            document.getElementById('node-py-editor').value = node.py || '';
-        } catch (e) {
-            console.error("Failed to load node", e);
-        }
+            const data = await resp.json();
+            jsEditor.setValue(data.js || '');
+            pyEditor.setValue(data.py || '');
+        } catch (e) { alert("Failed to load: " + e.message); }
     };
 
     window.toggleStudio = (show) => {
@@ -1977,6 +1403,7 @@
             studio.classList.remove('hidden');
             designer.classList.add('hidden');
             library.classList.add('hidden');
+            if (!jsEditor) initEditors();
             loadCustomNodes();
         } else {
             studio.classList.add('hidden');
@@ -1996,6 +1423,86 @@
         historyIndex = 0;
     }
 
+    /**
+     * Correctly rearranges all nodes in the graph using a Longest-Path algorithm.
+     * Ensures nodes are always placed to the right of all their dependencies.
+     */
+    window.rearrangeNodes = function() {
+        if (!graph || graph._nodes.length === 0) return;
+
+        const nodes = graph._nodes;
+        const levels = new Map();
+        const spacingX = 550; // Extra width for wide nodes
+        const spacingY = 60;
+        const startX = 80;
+        const startY = 80;
+
+        // 1. Initialize all nodes to level 0
+        nodes.forEach(n => levels.set(n.id, 0));
+
+        // 2. Iterative Leveling (Longest Path)
+        // Ensures node level = max(parent_level) + 1
+        let changed = true;
+        let iterations = 0;
+        const maxIterations = nodes.length * 2;
+
+        while (changed && iterations < maxIterations) {
+            changed = false;
+            iterations++;
+            
+            // Check every link in the graph
+            Object.values(graph.links).forEach(link => {
+                if (!link) return;
+                const origin = graph.getNodeById(link.origin_id);
+                const target = graph.getNodeById(link.target_id);
+                
+                if (origin && target) {
+                    const minTargetLevel = levels.get(origin.id) + 1;
+                    if (levels.get(target.id) < minTargetLevel) {
+                        levels.set(target.id, minTargetLevel);
+                        changed = true;
+                    }
+                }
+            });
+        }
+
+        // 3. Group nodes by their calculated levels
+        const levelGroups = {};
+        nodes.forEach(node => {
+            const lv = levels.get(node.id);
+            if (!levelGroups[lv]) levelGroups[lv] = [];
+            levelGroups[lv].push(node);
+        });
+
+        // 4. Position nodes in a grid
+        Object.keys(levelGroups).sort((a, b) => a - b).forEach(lv => {
+            let currentY = startY;
+            const column = levelGroups[lv];
+            
+            column.forEach(node => {
+                // Ensure size is fresh for vertical calculation
+                node.size = node.computeSize();
+                const nodeWidth = node.size[0];
+                const nodeHeight = node.size[1];
+
+                // Set position: X based on level, Y stacked with spacing
+                node.pos[0] = startX + (lv * spacingX);
+                node.pos[1] = currentY;
+
+                currentY += nodeHeight + spacingY;
+            });
+        });
+
+        // 5. Update UI
+        if (canvas) {
+            canvas.setDirty(true, true);
+            // Center the view on the new layout
+            canvas.ds.offset[0] = 0;
+            canvas.ds.offset[1] = 0;
+        }
+        pushHistoryState();
+    };
+
     window.addWorkflowAsNode = function(name) {
         addNode("hub/subgraph", { workflow_name: name });
     };
@@ -2005,19 +1512,31 @@
 
     // --- STARTUP ---   
     document.addEventListener('DOMContentLoaded', function() {
-        // 1. Register Plugin Nodes (from Python registry)
-        try {
-            {{ dynamic_nodes_js | safe }}
-        } catch(e) {
-            console.error("Failed to load dynamic registry nodes:", e);
-        }
+        // 2. Build Sidebar from Registered Nodes
+        const regNodes = {{ registered_nodes | tojson | safe }};
+        const sidebar = document.getElementById('sidebar-node-list');
+        const cats = {};
+        regNodes.forEach(n => {
+            if(!cats[n.category]) cats[n.category] = [];
+            cats[n.category].push(n);
+        });
 
-        // 2. Register Nodes from .js files
-        const allNodes = {{ nodes | tojson | safe }};
-        allNodes.forEach(n => {
-            try {
-                eval(n.content); 
-            } catch(e) { console.error("Failed to load node file:", n.filename, e); }
+        Object.keys(cats).forEach(cat => {
+            const catDiv = document.createElement('div');
+            catDiv.className = "node-category-label " + (sidebar.children.length > 0 ? "mt-6" : "");
+            catDiv.innerText = cat;
+            sidebar.appendChild(catDiv);
+
+            cats[cat].forEach(n => {
+                const item = document.createElement('div');
+                item.className = "node-item";
+                item.innerHTML = `
+                    <span class="text-lg opacity-70">${n.icon || '🧩'}</span>
+                    <span class="font-bold">${n.title}</span>
+                `;
+                item.onclick = () => addNode(n.type);
+                sidebar.appendChild(item);
+            });
         });
 
         // Initialize Core
@@ -2049,6 +1568,7 @@
             await fetchLibraries();
             resizeCanvas();
             loadWorkflows();
+            loadTemplates();
             fetchServerSkills();
             window.toggleLibrary(true);
         }, 150);

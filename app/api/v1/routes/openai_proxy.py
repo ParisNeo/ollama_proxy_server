@@ -148,7 +148,7 @@ async def openai_chat(request: Request, db: AsyncSession = Depends(get_db), api_
             openai_msg = {"role": "assistant", "content": msg.get("content")}
             if "tool_calls" in msg: openai_msg["tool_calls"] = msg["tool_calls"]
 
-            return {
+            res_payload = {
                 "id": f"chatcmpl-{secrets.token_hex(12)}", "object": "chat.completion", "created": 123456789,
                 "model": model_name,
                 "choices": [{
@@ -161,6 +161,12 @@ async def openai_chat(request: Request, db: AsyncSession = Depends(get_db), api_
                     "total_tokens": hub_data.get("prompt_eval_count", 0) + hub_data.get("eval_count", 0)
                 }
             }
+            
+            # Map Hub sources to OpenAI-style metadata if any were found by Workflow
+            if hasattr(request.state, "sources") and request.state.sources:
+                res_payload["sources"] = request.state.sources
+                
+            return res_payload
         return response
     except Exception as e:
         logger.error(f"OpenAI Proxy Error: {e}", exc_info=True)

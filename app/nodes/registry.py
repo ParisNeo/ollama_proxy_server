@@ -33,6 +33,19 @@ class NodeRegistry:
         return "\n\n".join(js_codes)
 
     @classmethod
+    def get_node_list(cls):
+        if not cls._loaded: cls.load_all()
+        return [
+            {
+                "type": n.node_type,
+                "title": n.node_title,
+                "category": n.node_category,
+                "icon": n.node_icon
+            }
+            for n in cls._nodes.values()
+        ]
+
+    @classmethod
     def load_all(cls):
         if cls._loaded: return
         cls._loaded = True

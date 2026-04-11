@@ -59,15 +59,43 @@
                 <div id="vram-details" class="text-xs text-gray-400 mt-2">-- / -- GB</div>
             </div>
             <!-- Sustainability -->
-            <div class="p-4 rounded-lg border-l border-white/5">
-                <h3 class="text-sm font-medium uppercase text-green-500">Eco Impact</h3>
-                <div class="mt-4">
-                    <div id="session-co2" class="text-2xl font-black text-white">0.000<span class="text-[10px] ml-1 text-gray-500">g</span></div>
-                    <div class="text-[10px] font-bold text-gray-500 uppercase tracking-tighter mt-1">Current Session CO₂e</div>
+            <div class="p-4 rounded-lg border-l border-white/5 bg-green-500/5">
+                <h3 class="text-xs font-black uppercase text-green-500 tracking-widest mb-4 flex items-center justify-center gap-2">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 002 2 2 2 0 012 2v.65M18 20.41L18 18.34C18 17.51 17.65 16.59 17.02 16.02L15.35 14.35"></path></svg>
+                    Environmental Footprint
+                </h3>
+                
+                <div class="grid grid-cols-2 gap-4 text-left border-b border-white/5 pb-4">
+                    <div>
+                        <div class="text-[9px] font-bold text-gray-500 uppercase">This Session</div>
+                        <div id="session-co2" class="text-xl font-black text-white">0.000g</div>
+                    </div>
+                    <div>
+                        <div class="text-[9px] font-bold text-gray-500 uppercase">Per User Avg</div>
+                        <div id="user-avg-co2" class="text-xl font-black text-indigo-400">0.00g</div>
+                    </div>
                 </div>
-                <div class="mt-3 pt-3 border-t border-white/5">
-                    <div id="total-co2" class="text-sm font-bold text-green-400">0.00 <span class="text-[9px]">g</span></div>
-                    <div class="text-[9px] text-gray-500 uppercase">Lifetime Total</div>
+
+                <div class="mt-4 space-y-3">
+                    <div class="flex items-center justify-between">
+                        <span class="text-[10px] text-gray-400">Lifetime Impact</span>
+                        <span id="total-co2" class="text-sm font-bold text-green-400">0.00g</span>
+                    </div>
+                    <!-- Relatability Grid -->
+                    <div class="grid grid-cols-3 gap-1 pt-2">
+                        <div class="bg-black/40 p-2 rounded text-center" title="Equivalent Smartphone Charges">
+                            <div class="text-lg">📱</div>
+                            <div id="eq-phones" class="text-[10px] font-bold text-white">0</div>
+                        </div>
+                        <div class="bg-black/40 p-2 rounded text-center" title="Equivalent Km Driven (Avg Car)">
+                            <div class="text-lg">🚗</div>
+                            <div id="eq-km" class="text-[10px] font-bold text-white">0</div>
+                        </div>
+                        <div class="bg-black/40 p-2 rounded text-center" title="Liters of water boiled">
+                            <div class="text-lg">☕</div>
+                            <div id="eq-liters" class="text-[10px] font-bold text-white">0</div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -319,8 +347,14 @@ document.addEventListener('DOMContentLoaded', () => {
         const tbody = document.getElementById('live-sessions-tbody');
         
         // Update Sustainability Gauges
-        document.getElementById('session-co2').innerHTML = `${sustain.session_co2_g.toFixed(3)}<span class="text-[10px] ml-1 text-gray-500">g</span>`;
-        document.getElementById('total-co2').innerHTML = `${sustain.total_co2_g.toLocaleString()} <span class="text-[9px]">g CO₂e</span>`;
+        document.getElementById('session-co2').textContent = `${sustain.session_co2_g.toFixed(3)}g`;
+        document.getElementById('user-avg-co2').textContent = `${sustain.per_user_g.toLocaleString()}g`;
+        document.getElementById('total-co2').textContent = `${sustain.total_co2_g.toLocaleString()}g CO₂e`;
+        
+        // Update Equivalents
+        document.getElementById('eq-phones').textContent = Math.round(sustain.equivalents.smartphone_charges);
+        document.getElementById('eq-km').textContent = sustain.equivalents.kilometers_driven.toFixed(2);
+        document.getElementById('eq-liters').textContent = Math.round(sustain.equivalents.liters_boiled);
 
         if (sessions.length === 0) {
             container.classList.add('hidden');
