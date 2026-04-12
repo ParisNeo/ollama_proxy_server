@@ -86,7 +86,21 @@
 <template id="ai-tool-builder-template">
     <div class="space-y-4">
         <textarea id="build-tool-prompt" class="w-full h-40 p-3 bg-black/40 border border-white/10 rounded-xl text-sm text-white focus:border-indigo-500 outline-none" placeholder="e.g. Create a tool library to interact with Spotify to search tracks..."></textarea>
-        {% include 'partials/_file_upload.html' %}
+        
+        <div class="flex flex-col gap-2">
+            <span class="text-[10px] font-black text-gray-500 uppercase tracking-widest px-1">Attached Context</span>
+            <div id="m-previews" class="flex flex-wrap gap-2 min-h-[32px] p-2 bg-black/20 border border-white/5 rounded-lg"></div>
+        </div>
+
+        <div class="flex gap-2">
+            <button type="button" onclick="document.getElementById('m-img-input').click()" class="flex items-center gap-2 text-[10px] font-bold py-2 px-3 bg-white/5 rounded-lg border border-white/10 hover:bg-white/10">📷 Images</button>
+            <button type="button" onclick="document.getElementById('m-doc-input').click()" class="flex items-center gap-2 text-[10px] font-bold py-2 px-3 bg-white/5 rounded-lg border border-white/10 hover:bg-white/10">📄 Docs</button>
+            <button type="button" onclick="window.triggerToolBuildWebImport()" class="flex items-center gap-2 text-[10px] font-bold py-2 px-3 bg-indigo-600/20 text-indigo-300 rounded-lg border border-indigo-500/30 hover:bg-indigo-600/30 transition-all">🌍 Web Import</button>
+        </div>
+        
+        <input type="file" id="m-img-input" class="hidden" multiple accept="image/*">
+        <input type="file" id="m-doc-input" class="hidden" multiple accept=".txt,.md,.pdf,.csv">
+
         <div id="build-tool-status" class="hidden bg-black/60 border border-white/10 rounded-lg p-3 h-24 overflow-y-auto font-mono text-[10px] text-gray-400 space-y-1"></div>
         <button onclick="window.executeToolBuild()" id="tool-build-run-btn" class="w-full py-3 bg-indigo-600 hover:bg-indigo-500 rounded-xl font-black text-xs uppercase tracking-widest transition-all">Generate Implementation</button>
     </div>
@@ -109,6 +123,7 @@
         <div class="flex gap-2">
             <button type="button" onclick="document.getElementById('f-img-input').click()" class="flex items-center gap-2 text-[10px] font-bold py-2 px-3 bg-white/5 rounded-lg border border-white/10 hover:bg-white/10 transition-colors">📷 Images</button>
             <button type="button" onclick="document.getElementById('f-doc-input').click()" class="flex items-center gap-2 text-[10px] font-bold py-2 px-3 bg-white/5 rounded-lg border border-white/10 hover:bg-white/10 transition-colors">📄 Docs</button>
+            <button type="button" onclick="window.triggerToolFixWebImport()" class="flex items-center gap-2 text-[10px] font-bold py-2 px-3 bg-indigo-600/20 text-indigo-300 rounded-lg border border-indigo-500/30 hover:bg-indigo-600/30 transition-all">🌍 Web Import</button>
         </div>
         
         <input type="file" id="f-img-input" class="hidden" multiple accept="image/*">
@@ -343,11 +358,17 @@ window.fixWithAI = () => {
     const template = document.getElementById('ai-tool-fix-template');
     window.showModal("AI Tool Repair Architect", template.innerHTML);
     
-    // Clear architect context for a clean fix session
-    window.Architect.reset();
+    const promptEl = document.getElementById('fix-tool-prompt');
+    if (promptEl) promptEl.value = window.Architect.prompt;
     
     document.getElementById('f-img-input').onchange = (e) => window.Architect.handleFiles(e.target.files, () => window.Architect.renderPreviews('f-previews'));
     document.getElementById('f-doc-input').onchange = (e) => window.Architect.handleFiles(e.target.files, () => window.Architect.renderPreviews('f-previews'));
+    
+    window.Architect.renderPreviews('f-previews');
+};
+
+window.triggerToolFixWebImport = () => {
+    window.Architect.triggerWebImport('fix-tool-prompt', window.fixWithAI);
 };
 
 window.executeToolFix = async () => {
@@ -434,10 +455,18 @@ window.createNewTool = () => {
 window.buildToolWithAI = () => {
     const template = document.getElementById('ai-tool-builder-template');
     window.showModal("Architect Tool with AI", template.innerHTML);
-    document.getElementById('build-tool-prompt').value = window.Architect.prompt;
+    
+    const promptEl = document.getElementById('build-tool-prompt');
+    if (promptEl) promptEl.value = window.Architect.prompt;
+    
     document.getElementById('m-img-input').onchange = (e) => window.Architect.handleFiles(e.target.files, () => window.Architect.renderPreviews('m-previews'));
     document.getElementById('m-doc-input').onchange = (e) => window.Architect.handleFiles(e.target.files, () => window.Architect.renderPreviews('m-previews'));
+    
     window.Architect.renderPreviews('m-previews');
+};
+
+window.triggerToolBuildWebImport = () => {
+    window.Architect.triggerWebImport('build-tool-prompt', window.buildToolWithAI);
 };
 
 window.executeToolBuild = () => {

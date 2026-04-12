@@ -47,6 +47,7 @@
                 <div class="flex justify-between items-center p-4 border-b border-white/10 flex-shrink-0 bg-black/20">
                     <h3 class="text-white font-bold text-sm tracking-tight" id="current-filename"></h3>
                     <div class="flex items-center gap-2">
+                        <button id="btn-edit-ai" onclick="editSkillWithAI()" class="text-[10px] font-black bg-purple-600/20 hover:bg-purple-600/40 px-3 py-1.5 rounded text-purple-300 uppercase border border-purple-500/30">✨ Edit with AI</button>
                         <button id="btn-copy-raw" class="text-[10px] text-gray-500 hover:text-white px-2 py-0.5 rounded border border-white/10 uppercase font-bold">Copy Raw</button>
                         <button id="btn-edit" onclick="toggleEditMode()" class="text-[10px] font-bold bg-white/5 hover:bg-white/10 px-3 py-1.5 rounded text-indigo-400 uppercase">Edit</button>
                         <div class="h-4 w-px bg-white/10 mx-2"></div>
@@ -71,7 +72,34 @@
     </div>
 </div>
 
-<!-- Template for AI Builder -->
+<!-- Templates for AI Builder & Editor -->
+<template id="ai-editor-modal-template">
+    <div class="space-y-4">
+        <div class="p-3 bg-indigo-500/10 border border-indigo-500/30 rounded-lg">
+            <h4 class="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-1">Skill Architect Editor</h4>
+            <p class="text-[11px] text-gray-400 leading-relaxed">Provide instructions to refine the current skill. You can attach references below to guide the AI.</p>
+        </div>
+        <textarea id="edit-skill-prompt" class="w-full h-32 p-3 bg-black/40 border border-white/10 rounded-xl text-sm text-white focus:border-indigo-500 outline-none" placeholder="e.g. Add a section about error handling, or refine the trigger phrases..."></textarea>
+        
+        <div class="flex flex-col gap-2">
+            <span class="text-[10px] font-black text-gray-500 uppercase tracking-widest px-1">Attached Context</span>
+            <div id="e-previews" class="flex flex-wrap gap-2 min-h-[32px] p-2 bg-black/20 border border-white/5 rounded-lg"></div>
+        </div>
+
+        <div class="flex gap-2">
+            <button type="button" onclick="document.getElementById('e-img-input').click()" class="flex items-center gap-2 text-[10px] font-bold py-2 px-3 bg-white/5 rounded-lg border border-white/10 hover:bg-white/10">📷 Images</button>
+            <button type="button" onclick="document.getElementById('e-doc-input').click()" class="flex items-center gap-2 text-[10px] font-bold py-2 px-3 bg-white/5 rounded-lg border border-white/10 hover:bg-white/10">📄 Docs</button>
+            <button type="button" onclick="window.triggerSkillEditorWebImport()" class="flex items-center gap-2 text-[10px] font-bold py-2 px-3 bg-indigo-600/20 text-indigo-300 rounded-lg border border-indigo-500/30 hover:bg-indigo-600/30">🌍 Web Import</button>
+        </div>
+        
+        <input type="file" id="e-img-input" class="hidden" multiple accept="image/*">
+        <input type="file" id="e-doc-input" class="hidden" multiple accept=".txt,.md,.pdf,.csv">
+
+        <div id="edit-skill-status" class="hidden bg-black/60 border border-white/10 rounded-lg p-3 h-24 overflow-y-auto font-mono text-[10px] text-gray-400 space-y-1"></div>
+        <button onclick="window.executeSkillEdit()" id="skill-edit-run-btn" class="w-full py-3 bg-indigo-600 hover:bg-indigo-500 rounded-xl font-black text-xs uppercase tracking-widest transition-all">Refine Skill</button>
+    </div>
+</template>
+
 <template id="ai-builder-modal-template">
     <div class="space-y-4">
         <textarea id="build-skill-prompt" class="w-full h-40 p-3 bg-black/40 border border-white/10 rounded-xl text-sm text-white focus:border-indigo-500 outline-none transition-colors" placeholder="Describe the skill you want to build..."></textarea>
@@ -146,6 +174,52 @@ window.executeSkillBuild = () => {
             loadSkills().then(() => openSkill(data.filename));
         }
     );
+};
+
+// --- AI Skill Editor logic ---
+window.editSkillWithAI = () => {
+    const template = document.getElementById('ai-editor-modal-template');
+    window.showModal("Edit Skill with AI Architect", template.innerHTML);
+    
+    window.Architect.reset(); // Clear context for new edit session
+    
+    document.getElementById('e-img-input').onchange = (e) => window.Architect.handleFiles(e.target.files, () => window.Architect.renderPreviews('e-previews'));
+    document.getElementById('e-doc-input').onchange = (e) => window.Architect.handleFiles(e.target.files, () => window.Architect.renderPreviews('e-previews'));
+};
+
+window.triggerSkillEditorWebImport = () => {
+    window.Architect.triggerWebImport('edit-skill-prompt', window.editSkillWithAI);
+};
+
+window.executeSkillEdit = () => {
+    const statusBox = document.getElementById('edit-skill-status');
+    const btn = document.getElementById('skill-edit-run-btn');
+    const prompt = document.getElementById('edit-skill-prompt').value;
+    const currentCode = document.getElementById('markdown-editor').value;
+
+    if (!prompt.trim()) return alert("Please provide instructions for the AI.");
+
+    btn.disabled = true;
+    statusBox.classList.remove('hidden');
+    statusBox.innerHTML = '<div>[System] Communicating with Architect...</div>';
+
+    const formData = window.Architect.prepareFormData('edit-skill-prompt');
+    formData.append("current_content", currentCode);
+    formData.append("csrf_token", "{{ csrf_token }}");
+
+    fetch("{{ url_for('api_edit_skill') }}", { method: 'POST', body: formData })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                document.getElementById('markdown-editor').value = data.edited_content;
+                displaySkill(data.edited_content);
+                setEditorMode(false);
+                document.getElementById('modal-close-btn').click();
+            } else {
+                alert(data.error);
+            }
+        })
+        .finally(() => btn.disabled = false);
 };
 
 // --- Standard CRUD Logic ---

@@ -57,23 +57,40 @@ def init_tool_library() -> None:
 
 def tool_search_papers(args: dict):
     '''
-    Search for scientific papers on ArXiv.
+    Search for scientific papers on ArXiv with optional date filtering.
     
     Args:
         args: dict with keys:
-            - query (str): Scientific keywords or paper ID
-            - count (int, optional): Number of papers to fetch
+            - query (str): Scientific keywords or topics
+            - count (int, optional): Number of papers to fetch (default: 3)
+            - year_start (int, optional): Start year for filtering (inclusive)
+            - year_end (int, optional): End year for filtering (inclusive)
     '''
     import arxiv
     try:
+        query = args.get('query', '')
+        # Build ArXiv advanced query syntax if years are provided
+        if args.get('year_start') or args.get('year_end'):
+            start = args.get('year_start', 1800)
+            end = args.get('year_end', 2100)
+            # ArXiv uses YYYYMMDDHHMMSS format for dates
+            query = f"({query}) AND submittedDate:[{start}01010000 TO {end}12312359]"
+
         client = arxiv.Client()
-        search = arxiv.Search(query=args.get('query'), max_results=args.get('count', 3))
+        search = arxiv.Search(
+            query=query, 
+            max_results=args.get('count', 3),
+            sort_by=arxiv.SortCriterion.Relevance
+        )
+        
         results = []
         for res in client.results(search):
-            results.append(f"[{res.entry_id}] {res.title}\\nAbstract: {res.summary[:500]}...")
-        return "\\n\\n".join(results) if results else "No papers found."
+            date_str = res.published.strftime('%Y-%m-%d')
+            results.append(f"--- {res.title} ({date_str}) ---\\nURL: {res.entry_id}\\nAbstract: {res.summary[:500]}...")
+        
+        return "\\n\\n".join(results) if results else f"No papers found for: {query}"
     except Exception as e:
-        return f"Error: {str(e)}"
+        return f"ArXiv Error: {str(e)}"
 """
     }
 ]
@@ -114,6 +131,7 @@ class ToolsManager:
         return meta
 
     @staticmethod
+    @staticmethod
     def get_tool_definitions(content: str) -> List[Dict[str, Any]]:
         """Parses docstrings using AST to build OpenAI-compatible tool definitions."""
         tools = []
@@ -122,18 +140,26 @@ class ToolsManager:
             for node in tree.body:
                 if isinstance(node, ast.FunctionDef) and node.name.startswith("tool_"):
                     docstring = ast.get_docstring(node) or "No description provided."
+                    
                     params = {"type": "object", "properties": {}, "required": []}
                     
-                    arg_matches = re.finditer(r'-\s+([\w_]+)\s*\(([\w_]+)\):\s*(.*)', docstring)
+                    # ENHANCED PARSER: Handle arbitrary indentation and 'optional' flags
+                    # Matches: [any space] - [name] ([type], [optional]): [desc]
+                    arg_matches = re.finditer(r'^\s*-\s+([\w_]+)\s*\(([\w_]+)(?:,\s*optional)?\):\s*(.*)', docstring, re.MULTILINE | re.IGNORECASE)
+                    
                     for m in arg_matches:
                         name, p_type, desc = m.groups()
                         p_type_map = {"str": "string", "int": "integer", "float": "number", "bool": "boolean", "dict": "object", "list": "array"}
+                        
                         params["properties"][name] = {
                             "type": p_type_map.get(p_type.lower(), "string"),
                             "description": desc.strip()
                         }
-                        params["required"].append(name)
+                        # If the docstring explicitly says "required" or doesn't mention "optional", add to required list
+                        if "optional" not in m.group(0).lower():
+                            params["required"].append(name)
 
+                    # If no specific args found, assume a generic 'query' for compatibility
                     if not params["properties"]:
                         params["properties"]["args"] = {"type": "object", "description": "Arguments for the tool"}
 

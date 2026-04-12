@@ -13,6 +13,7 @@ from app.api.v1.routes.proxy import _resolve_target, _reverse_proxy
 from app.core import knowledge_importer as kit
 from app.core.skills_manager import SkillsManager
 from app.crud import server_crud
+import re
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -123,6 +124,68 @@ async def api_build_personality(
     except Exception as e:
         logger.error(f"Persona Build Failed: {e}")
         event_manager.emit(ProxyEvent("error", build_id, "Persona Builder", "Local", admin_user.username, error_message=str(e)))
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@router.post("/api/personalities/edit", name="api_edit_personality")
+async def api_edit_personality(
+    request: Request,
+    prompt: str = Form(...),
+    current_content: str = Form(...),
+    csrf_token: str = Form(...),
+    files: Optional[List[UploadFile]] = File(None),
+    db: AsyncSession = Depends(get_db),
+    admin_user = Depends(require_admin_user)
+):
+    """Refines an existing personality using the Management Agent."""
+    from app.api.v1.dependencies import get_csrf_token
+    import secrets
+
+    stored_token = await get_csrf_token(request)
+    if not stored_token or not secrets.compare_digest(csrf_token, stored_token):
+        raise HTTPException(status_code=403, detail="CSRF token mismatch")
+
+    app_settings = request.app.state.settings
+    target_agent = app_settings.admin_agent_name
+    if not target_agent:
+        return JSONResponse({"error": "No Management Agent set in Settings."}, status_code=503)
+
+    file_context = ""
+    valid_files = [f for f in files if f and f.filename] if files else []
+    if valid_files:
+        file_context = await kit.extract_local_file_content(valid_files)
+
+    instruction = (
+        "You are a Senior AI Persona Sculptor. Your task is to EDIT an existing Lollms Personality (.md) based on user requirements.\n\n"
+        "STRICT CONSTRAINTS:\n"
+        "1. Preserve the Identity and Behaviour section structure.\n"
+        "2. Improve the persona based on instructions and external context.\n"
+        "3. Output ONLY the raw .md content.\n"
+        "4. No chat, no preamble, no markdown code fences around the entire output."
+    )
+
+    user_payload = (
+        f"INSTRUCTIONS:\n{prompt}\n\n"
+        f"CURRENT PERSONA SOUL:\n{current_content}\n\n"
+    )
+    if file_context:
+        user_payload += f"REFERENCE MATERIALS:\n{file_context}"
+
+    try:
+        req_id = f"sys_edit_persona_{secrets.token_hex(4)}"
+        real_model, msgs = await _resolve_target(db, target_agent, [{"role": "user", "content": user_payload}])
+        msgs.insert(0, {"role": "system", "content": instruction})
+        
+        servers = await server_crud.get_servers_with_model(db, real_model)
+        if not servers: return JSONResponse({"error": "Backend offline"}, status_code=503)
+
+        resp, _ = await _reverse_proxy(request, "chat", servers, json.dumps({"model": real_model, "messages": msgs, "stream": False}).encode(), is_subrequest=True, request_id=req_id, model=real_model, sender=admin_user.username)
+        
+        if hasattr(resp, 'body'):
+            data = json.loads(resp.body.decode())
+            edited_text = re.sub(r'^```markdown\s*|```$', '', data.get("message", {}).get("content", ""), flags=re.MULTILINE).strip()
+            return {"success": True, "edited_content": edited_text}
+    except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
         p_id = meta.get("name", f"persona_{secrets.token_hex(4)}")
         filename = f"{p_id}.md"

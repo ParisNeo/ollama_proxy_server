@@ -47,6 +47,7 @@
                         <span id="p-name" class="text-[10px] bg-fuchsia-500/20 text-fuchsia-300 px-2 py-0.5 rounded font-black uppercase"></span>
                     </div>
                     <div class="flex items-center gap-2">
+                        <button id="btn-edit-ai" onclick="editPersonaWithAI()" class="text-[10px] font-black bg-purple-600/20 hover:bg-purple-600/40 px-3 py-1.5 rounded text-purple-300 uppercase border border-purple-500/30">✨ Refine with AI</button>
                         <button id="btn-edit" onclick="toggleEditMode()" class="text-[10px] font-bold bg-white/5 hover:bg-white/10 px-3 py-1.5 rounded text-fuchsia-400 uppercase">Edit</button>
                         <button onclick="exportFile()" class="text-[10px] font-bold bg-white/5 hover:bg-white/10 px-3 py-1.5 rounded text-gray-300 uppercase">Export</button>
                         <button onclick="deletePersonality()" class="text-[10px] font-bold bg-red-900/20 hover:bg-red-900/40 px-3 py-1.5 rounded text-red-400 uppercase">Delete</button>
@@ -70,7 +71,34 @@
     </div>
 </div>
 
-<!-- Template for AI Persona Builder (Shared logic with skills builder) -->
+<!-- Templates for AI Persona Builder & Editor -->
+<template id="ai-persona-editor-template">
+    <div class="space-y-4">
+        <div class="p-3 bg-fuchsia-500/10 border border-fuchsia-500/30 rounded-lg">
+            <h4 class="text-[10px] font-black text-fuchsia-400 uppercase tracking-widest mb-1">Soul Sculptor Editor</h4>
+            <p class="text-[11px] text-gray-400 leading-relaxed">Provide refinement instructions for this persona. You can attach references or images below.</p>
+        </div>
+        <textarea id="edit-persona-prompt" class="w-full h-32 p-3 bg-black/40 border border-white/10 rounded-xl text-sm text-white focus:border-fuchsia-500 outline-none" placeholder="e.g. Make them more cynical, or add a specific memory about my server settings..."></textarea>
+        
+        <div class="flex flex-col gap-2">
+            <span class="text-[10px] font-black text-gray-500 uppercase tracking-widest px-1">Attached Context</span>
+            <div id="fe-previews" class="flex flex-wrap gap-2 min-h-[32px] p-2 bg-black/20 border border-white/5 rounded-lg"></div>
+        </div>
+
+        <div class="flex gap-2">
+            <button type="button" onclick="document.getElementById('fe-img-input').click()" class="flex items-center gap-2 text-[10px] font-bold py-2 px-3 bg-white/5 rounded-lg border border-white/10 hover:bg-white/10">📷 Images</button>
+            <button type="button" onclick="document.getElementById('fe-doc-input').click()" class="flex items-center gap-2 text-[10px] font-bold py-2 px-3 bg-white/5 rounded-lg border border-white/10 hover:bg-white/10">📄 Docs</button>
+            <button type="button" onclick="window.triggerPersonaEditorWebImport()" class="flex items-center gap-2 text-[10px] font-bold py-2 px-3 bg-indigo-600/20 text-indigo-300 rounded-lg border border-indigo-500/30 hover:bg-indigo-600/30">🌍 Web Import</button>
+        </div>
+        
+        <input type="file" id="fe-img-input" class="hidden" multiple accept="image/*">
+        <input type="file" id="fe-doc-input" class="hidden" multiple accept=".txt,.md,.pdf,.csv">
+
+        <div id="edit-persona-status" class="hidden bg-black/60 border border-white/10 rounded-lg p-3 h-24 overflow-y-auto font-mono text-[10px] text-gray-400 space-y-1"></div>
+        <button onclick="window.executePersonaEdit()" id="persona-edit-run-btn" class="w-full py-3 bg-fuchsia-600 hover:bg-fuchsia-500 rounded-xl font-black text-xs uppercase tracking-widest transition-all">Apply Sculpting</button>
+    </div>
+</template>
+
 <template id="ai-persona-builder-template">
     <div class="space-y-4">
         <textarea id="build-persona-prompt" class="w-full h-40 p-3 bg-black/40 border border-white/10 rounded-xl text-sm text-white focus:border-fuchsia-500 outline-none transition-colors" placeholder="Describe the personality you want to create (e.g. 'A strict Victorian detective who specializes in logic')..."></textarea>
@@ -116,13 +144,12 @@
         const contentBody = document.getElementById('p-content-body');
         const metaGrid = document.getElementById('p-meta-grid');
         
-        // Use regex to find frontmatter
-        const match = raw.match(/^---\n([\s\S]*?)\n---/);
+        // Robust frontmatter detection (handles \r\n and whitespace)
+        const match = raw.match(/^---\r?\n([\s\S]*?)\r?\n---/);
         
         if (match) {
             try {
                 const meta = jsyaml.load(match[1]);
-                // Mirror the Skills metadata grid style exactly
                 metaGrid.innerHTML = Object.entries(meta).map(([k, v]) => `
                     <div class="flex items-start">
                         <div class="w-32 text-[10px] uppercase text-gray-500 font-black tracking-widest pt-0.5">${k}</div>
@@ -130,18 +157,17 @@
                     </div>
                 `).join('');
                 
-                // Render the remaining body content
                 const bodyContent = raw.slice(match[0].length).trim();
                 contentBody.innerHTML = marked.parse(bodyContent);
             } catch(e) { 
-                metaGrid.innerHTML = `<div class="text-red-400 text-xs font-mono">YAML Format Error: ${e.message}</div>`; 
+                metaGrid.innerHTML = `<div class="p-2 bg-red-900/20 border border-red-500/30 text-red-400 text-xs font-mono rounded">YAML Error: ${e.message}</div>`; 
+                contentBody.innerHTML = marked.parse(raw);
             }
         } else {
             metaGrid.innerHTML = "";
             contentBody.innerHTML = marked.parse(raw);
         }
 
-        // Apply image polishing to the body
         contentBody.querySelectorAll('img').forEach(img => {
             img.className = "rounded-lg shadow-2xl my-6 border border-white/10 max-w-full";
         });
@@ -154,18 +180,22 @@
     }
 
     function renderList() {
-        document.getElementById('p-list').innerHTML = personalities.map(p => `
-            <div class="p-3 bg-white/5 rounded-lg mb-2 border border-white/5 flex items-center justify-between group">
-                <button onclick="edit('${p.filename}')" class="text-left flex-grow truncate min-w-0">
-                    <div class="font-bold text-fuchsia-400 text-xs hover:text-fuchsia-300">${p.name}</div>
-                    <div class="text-[9px] text-gray-500 truncate">${p.description}</div>
+        const listEl = document.getElementById('p-list');
+        listEl.innerHTML = personalities.map(p => `
+            <div class="w-full text-left p-3 rounded-lg hover:bg-white/5 group border-b border-white/5 transition-all mb-1 flex items-center justify-between ${activeFile === p.filename ? 'bg-fuchsia-500/10 border-l-2 border-l-fuchsia-500' : ''}">
+                <button onclick="openPersonality('${p.filename}')" class="flex-grow text-left min-w-0 flex items-center gap-3">
+                    <span class="text-lg flex-shrink-0">${p.icon || '🎭'}</span>
+                    <div class="min-w-0">
+                        <div class="text-xs font-bold text-white group-hover:text-fuchsia-400 truncate">${p.name}</div>
+                        <div class="text-[9px] text-gray-500 group-hover:text-gray-300 line-clamp-1 leading-tight">${p.description}</div>
+                    </div>
                 </button>
-                <div class="flex items-center opacity-0 group-hover:opacity-100 transition-opacity">
-                    <button onclick="renamePersonality('${p.filename}', '${p.name}')" class="p-1 text-gray-500 hover:text-indigo-400" title="Rename">
-                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.5L15.232 5.232z"></path></svg>
+                <div class="flex items-center opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0 ml-2">
+                    <button onclick="renamePersonality('${p.filename}', '${p.name}')" class="p-1 text-gray-500 hover:text-indigo-400" title="Rename File">
+                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.5L15.232 5.232z"></path></svg>
                     </button>
-                    <button onclick="deletePersonality('${p.filename}')" class="p-1 text-gray-500 hover:text-red-400" title="Delete">
-                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                    <button onclick="deletePersonality('${p.filename}')" class="p-1 text-gray-500 hover:text-red-400" title="Delete Persona">
+                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
                     </button>
                 </div>
             </div>
@@ -208,9 +238,55 @@
             'build-persona-status', 
             'persona-build-run-btn',
             (data) => {
-                loadPersonalities().then(() => edit(data.filename));
+                loadPersonalities().then(() => openPersonality(data.filename));
             }
         );
+    };
+
+    // --- AI Persona Editor logic ---
+    window.editPersonaWithAI = () => {
+        const template = document.getElementById('ai-persona-editor-template');
+        window.showModal("Refine Personality with AI", template.innerHTML);
+        
+        window.Architect.reset();
+        
+        document.getElementById('fe-img-input').onchange = (e) => window.Architect.handleFiles(e.target.files, () => window.Architect.renderPreviews('fe-previews'));
+        document.getElementById('fe-doc-input').onchange = (e) => window.Architect.handleFiles(e.target.files, () => window.Architect.renderPreviews('fe-previews'));
+    };
+
+    window.triggerPersonaEditorWebImport = () => {
+        window.Architect.triggerWebImport('edit-persona-prompt', window.editPersonaWithAI);
+    };
+
+    window.executePersonaEdit = () => {
+        const statusBox = document.getElementById('edit-persona-status');
+        const btn = document.getElementById('persona-edit-run-btn');
+        const prompt = document.getElementById('edit-persona-prompt').value;
+        const currentContent = document.getElementById('p-textarea').value;
+
+        if (!prompt.trim()) return alert("Instructions required.");
+
+        btn.disabled = true;
+        statusBox.classList.remove('hidden');
+        statusBox.innerHTML = '<div>[System] Sculpting Persona soul...</div>';
+
+        const formData = window.Architect.prepareFormData('edit-persona-prompt');
+        formData.append("current_content", currentContent);
+        formData.append("csrf_token", "{{ csrf_token }}");
+
+        fetch("{{ url_for('api_edit_personality') }}", { method: 'POST', body: formData })
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) {
+                    document.getElementById('p-textarea').value = data.edited_content;
+                    displayPersonality(data.edited_content);
+                    setEditorMode(false);
+                    document.getElementById('modal-close-btn').click();
+                } else {
+                    alert(data.error);
+                }
+            })
+            .finally(() => btn.disabled = false);
     };
 
     // SSE Listener for Status updates (Robust Filter)
@@ -232,7 +308,7 @@
         }
     };
 
-    function edit(filename) {
+    window.openPersonality = (filename) => {
         activeFile = filename;
         const p = personalities.find(x => x.filename === filename);
         if(!p) return;
@@ -247,24 +323,31 @@
         
         displayPersonality(p.raw);
         setEditorMode(false);
-    }
+        renderList();
+    };
 
     function setEditorMode(editMode) {
         isEditMode = editMode;
+        const btn = document.getElementById('btn-edit');
         document.getElementById('p-textarea').classList.toggle('hidden', !isEditMode);
         document.getElementById('p-preview').classList.toggle('hidden', isEditMode);
         document.getElementById('btn-save').classList.toggle('hidden', !isEditMode);
-        if(!isEditMode) document.getElementById('p-preview').innerHTML = marked.parse(document.getElementById('p-textarea').value);
+        if (btn) btn.innerText = isEditMode ? 'Preview' : 'Edit';
     }
 
     async function savePersonality() {
+        const content = document.getElementById('p-textarea').value;
         const formData = new FormData();
         formData.append("filename", activeFile);
-        formData.append("content", document.getElementById('p-textarea').value);
+        formData.append("content", content);
         formData.append("csrf_token", "{{ csrf_token }}");
-        await fetch("{{ url_for('api_save_personality') }}", { method: "POST", body: formData });
-        setEditorMode(false);
-        loadPersonalities();
+        
+        const resp = await fetch("{{ url_for('api_save_personality') }}", { method: "POST", body: formData });
+        if (resp.ok) {
+            displayPersonality(content);
+            setEditorMode(false);
+            await loadPersonalities();
+        }
     }
     
     window.renamePersonality = async (filename, oldName) => {
@@ -278,9 +361,12 @@
         formData.append("content", newContent);
         formData.append("csrf_token", "{{ csrf_token }}");
         
-        await fetch("{{ url_for('api_save_personality') }}", { method: "POST", body: formData });
-        if (newName !== oldName) await fetch(`/admin/api/personalities/${filename}`, { method: "DELETE", headers:{"X-CSRF-Token":"{{ csrf_token }}"}});
-        loadPersonalities();
+        const resp = await fetch("{{ url_for('api_save_personality') }}", { method: "POST", body: formData });
+        if (resp.ok) {
+            if (newName !== oldName) await fetch(`/admin/api/personalities/${filename}`, { method: "DELETE", headers:{"X-CSRF-Token":"{{ csrf_token }}"}});
+            await loadPersonalities();
+            window.openPersonality(newName.toLowerCase().replace(/[^a-z0-9\-]/g, '-') + '.md');
+        }
     };
 
     window.deletePersonality = async (filename) => {
