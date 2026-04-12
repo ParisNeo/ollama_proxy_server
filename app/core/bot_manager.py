@@ -60,7 +60,14 @@ class BotManager:
         
         async with AsyncSessionLocal() as db:
             req_id = f"bot_{platform_name}_{secrets.token_hex(4)}"
-            resolution = await _resolve_target(db, target_workflow, [{"role": "user", "content": user_text}], sender=f"Bot:{platform_name}")
+            # Pass dummy_request to provide system context (settings, http_client) to the workflow engine
+            resolution = await _resolve_target(
+                db, 
+                target_workflow, 
+                [{"role": "user", "content": user_text}], 
+                request=self.app.state.dummy_request, 
+                sender=f"Bot:{platform_name}"
+            )
             real_model, final_msgs = resolution
             
             from app.crud import server_crud

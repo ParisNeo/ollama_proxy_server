@@ -63,7 +63,9 @@ setup_logging(settings.LOG_LEVEL)
 logger = logging.getLogger(__name__)
 os.environ.setdefault("PASSLIB_DISABLE_WARNINGS", "1")
 
+# Global locks to prevent multiple starts when running on dual ports
 _db_initialized = False
+_bots_initialized = False
 async def init_db():
     """
     Creates all database tables based on the SQLAlchemy models.
@@ -247,11 +249,27 @@ async def lifespan(app: FastAPI):
     
     # Dummy request for internal sub-calls
     from starlette.requests import Request as StarletteRequest
-    app.state.dummy_request = StarletteRequest({"type":"http", "method":"POST", "headers":[], "app": app})
+    app.state.dummy_request = StarletteRequest({
+        "type": "http",
+        "method": "POST",
+        "path": "/internal-bot-proxy",
+        "headers": [],
+        "app": app,
+        "query_string": b"",
+        "client": ("127.0.0.1", 0),
+        "server": ("127.0.0.1", 8080),
+    })
 
     import asyncio
-    # Start background bots
-    asyncio.create_task(app.state.bot_manager.start_all_active_bots())
+    # --- BOT SINGLETON STARTUP ---
+    # We only start the bots once, even if the Hub is listening on multiple ports.
+    global _bots_initialized
+    if not _bots_initialized:
+        logger.info("Initializing Bot Orchestration Manager...")
+        asyncio.create_task(app.state.bot_manager.start_all_active_bots())
+        _bots_initialized = True
+    else:
+        logger.debug("Bot Manager already running in this process; skipping duplicate startup.")
     
     refresh_task = asyncio.create_task(periodic_model_refresh(app))
     app.state.refresh_task = refresh_task

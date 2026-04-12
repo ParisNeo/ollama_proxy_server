@@ -171,7 +171,12 @@ class WorkflowEngine:
         props = node.get("properties", {})
 
         # --- DEBUG MODE TRACING ---
-        if self.request.app.state.settings.enable_debug_mode:
+        # Defensive check: ensure request and app exist (bots/background tasks might have None)
+        enable_debug = False
+        if self.request and hasattr(self.request, 'app'):
+            enable_debug = self.request.app.state.settings.enable_debug_mode
+
+        if enable_debug:
             node_title = node.get("title") or ntype.split("/")[-1].upper()
             logger.info(f"DEBUG: Executing Graph Node [{node_title}] (ID: {node['id']})")
             event_manager.emit(ProxyEvent(
