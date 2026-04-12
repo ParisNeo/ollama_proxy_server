@@ -1,0 +1,21 @@
+{
+  "name": "MoE Brainstorming Panel",
+  "description": "Parallel expert polling with synthesis. Includes real-time status tags and optional intermediate result viewing.",
+  "graph": {
+    "last_node_id": 5,
+    "last_link_id": 4,
+    "nodes": [
+      { "id": 1, "type": "hub/input", "pos": [50, 200], "outputs": [{ "name": "Messages", "links": [1] }] },
+      { "id": 2, "type": "hub/model", "pos": [400, 50], "outputs": [{ "name": "Expert", "links": [2] }], "properties": { "model": "llama3.1" } },
+      { "id": 3, "type": "hub/model", "pos": [400, 350], "outputs": [{ "name": "Expert", "links": [3] }], "properties": { "model": "mistral-small" } },
+      { "id": 4, "type": "hub/moe", "pos": [850, 200], "inputs": [{ "name": "User Context", "link": 1 }, { "name": "Expert 1", "link": 2 }, { "name": "Expert 2", "link": 3 }], "outputs": [{ "name": "Final Output", "links": [4] }], "properties": { "orchestrator": "deepseek-r1", "show_intermediate": true, "send_status": true, "system_prompt": "Combine the creative ideas from Llama and the logic from Mistral into a single balanced response." } },
+      { "id": 5, "type": "hub/output", "pos": [1300, 200], "inputs": [{ "name": "Source", "link": 4 }] }
+    ],
+    "links": [
+      [1, 1, 0, 4, 0, "messages"],
+      [2, 2, 0, 4, 1, "expert"],
+      [3, 3, 0, 4, 2, "expert"],
+      [4, 4, 0, 5, 0, "string"]
+    ]
+  }
+}

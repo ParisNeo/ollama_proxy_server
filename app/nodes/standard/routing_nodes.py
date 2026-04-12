@@ -125,8 +125,8 @@ LiteGraph.registerNodeType("hub/selector", NodeSelector);
 
 class MOENode(BaseNode):
     node_type = "hub/moe"
-    node_title = "Advanced MoE"
-    node_category = "Logic & Routing"
+    node_title = "Mixture of Experts"
+    node_category = "Serving & Cognition"
     node_icon = "✨"
     
     @classmethod
@@ -135,61 +135,111 @@ class MOENode(BaseNode):
 function NodeMoE() {
     this.addInput("User Context", "messages");
     this.addInput("Expert 1", "expert,string");
-    this.addOutput("Synthesized", "string");
-    this.properties = { orchestrator: "auto", system_prompt: "Synthesize the provided expert views into a cohesive final response." };
-    this.addWidget("combo", "Orchestrator", this.properties.orchestrator, (v) => { this.properties.orchestrator = v; pushHistoryState(); }, { values: window.available_models || ["auto"] });
+    this.addOutput("Final Output", "string");
+    
+    this.properties = { 
+        orchestrator: "auto", 
+        show_intermediate: true,
+        send_status: true,
+        system_prompt: "You are the Lead Synthesis Architect. Review the following panel of expert responses and provide a unified, high-quality final answer that incorporates the best insights from all experts."
+    };
+    
+    this.mWidget = this.addWidget("combo", "Orchestrator", this.properties.orchestrator, (v) => { this.properties.orchestrator = v; }, { values: ["auto"].concat(window.available_models) });
+    this.addWidget("toggle", "Intermediate Content", this.properties.show_intermediate, (v) => { this.properties.show_intermediate = v; });
+    this.addWidget("toggle", "Processing Status", this.properties.send_status, (v) => { this.properties.send_status = v; });
+    
     this.addWidget("button", "+ Add Expert Slot", null, () => {
-        this.addInput("Expert " + this.inputs.length, "expert,string");
+        this.addInput("Expert " + (this.inputs.length), "expert,string");
         this.size = this.computeSize();
     });
-    this.addWidget("button", "ℹ️ Documentation", null, () => { showNodeHelp(this.type); });
+
     this.title = "✨ MIXTURE OF EXPERTS";
+    this.color = "#7c3aed";
+    this.bgcolor = "#4c1d95";
+    this.size = [320, 160];
     this.serialize_widgets = true;
-    this.size = this.computeSize();
 }
+NodeMoE.prototype.onConfigure = function() {
+    if(this.mWidget) this.mWidget.value = this.properties.orchestrator;
+};
 LiteGraph.registerNodeType("hub/moe", NodeMoE);
 """
 
     async def execute(self, engine, node: Dict[str, Any], output_slot_idx: int) -> Any:
+        import asyncio
+        import json
+        from app.core.events import event_manager, ProxyEvent
+        from app.crud import server_crud
+
         props = node.get("properties", {})
-        history = await engine._resolve_input(node, 0) or []
+        history = await engine._resolve_input(node, 0) or engine.initial_messages
         
         expert_tasks, expert_names = [], []
-        
-        # Collect experts from dynamic inputs
+        status_lines = []
+
+        # 1. Identify and setup Expert calls
         for i in range(1, len(node.get("inputs", []))):
             inp = node["inputs"][i]
-            if inp.get("name") == "Settings" or not inp.get("link"): continue
+            if not inp.get("link"): continue
             
             link = engine.links.get(inp["link"])
-            src_name = engine.nodes[link[1]].get("properties", {}).get("model", f"Expert {i}") if link and link[1] in engine.nodes else f"Expert {i}"
+            # Try to resolve a friendly name for the expert
+            src_node = engine.nodes.get(link[1])
+            src_name = src_node.get("properties", {}).get("model", f"Expert {i}") if src_node else f"Expert {i}"
+            
             expert_names.append(src_name)
+            status_lines.append(f"- {src_name} is thinking...")
             expert_tasks.append(engine.execute_cognitive_path(inp["link"], history))
                 
-        if not expert_tasks: return "No experts connected."
-        
-        if props.get("send_status_update"):
-            event_manager.emit(ProxyEvent("active", engine.request_id, "MoE Block", "Gateway", engine.sender, error_message=f"Engaging: {', '.join(expert_names)}..."))
+        if not expert_tasks: return "Error: No experts connected to MoE node."
 
-        # Run experts in parallel
+        # 2. Parallel Execution & Status Emitting
+        processing_block = ""
+        if props.get("send_status"):
+            processing_block = "<processing>\n" + "\n".join(status_lines) + "\n</processing>\n\n"
+            # Emit live telemetry
+            event_manager.emit(ProxyEvent(
+                "active", engine.request_id, "Parallel Brainstorm", "MoE Engine", 
+                engine.sender, error_message=f"Polling {len(expert_tasks)} experts..."
+            ))
+
         responses = await asyncio.gather(*expert_tasks, return_exceptions=True)
+        
         panel_data = ""
         for i, resp in enumerate(responses):
+            name = expert_names[i]
             val = str(resp) if not isinstance(resp, Exception) else f"Error: {str(resp)}"
-            panel_data += f"### EXPERT {i+1} FEEDBACK:\\n{val}\\n\\n"
+            panel_data += f"### EXPERT: {name}\n{val}\n\n"
+
+        # 3. Final Synthesis
+        status_lines.append("- Finalizing answer...")
+        if props.get("send_status"):
+             processing_block = "<processing>\n" + "\n".join(status_lines) + "\n</processing>\n\n"
 
         orchestrator_model = props.get("orchestrator", "auto")
         final_messages = list(history) if isinstance(history, list) else [{"role": "user", "content": str(history)}]
         
-        # Synthesis Prompt
-        final_messages.append({"role": "user", "content": f"### EXPERT PANEL OUTPUTS\\n{panel_data}\\n\\n### SYNTHESIS MANDATE\\n{props.get('system_prompt', '')}"})
+        # Inject context for synthesis
+        final_messages.append({"role": "user", "content": f"### EXPERT PANEL FEEDBACK:\n{panel_data}\n\n### MANDATE:\n{props.get('system_prompt')}"})
         
         servers = await server_crud.get_servers_with_model(engine.db, orchestrator_model)
-        if not servers: return f"[Error] Orchestrator '{orchestrator_model}' offline."
+        if not servers: return f"{processing_block}[Error: Orchestrator model '{orchestrator_model}' offline]"
+
+        resp_obj, _ = await engine.reverse_proxy_fn(
+            engine.request, "chat", servers, 
+            json.dumps({"model": orchestrator_model, "messages": final_messages, "stream": False}).encode(), 
+            is_subrequest=True, sender="moe-orchestrator"
+        )
         
-        payload = {"model": orchestrator_model, "messages": final_messages, "stream": False}
-        resp_obj, _ = await engine.reverse_proxy_fn(engine.request, "chat", servers, json.dumps(payload).encode(), is_subrequest=True, sender="graph-moe")
-        
+        final_answer = ""
         if hasattr(resp_obj, 'body'):
-            return json.loads(resp_obj.body.decode()).get("message", {}).get("content", "Error: Empty")
-        return "Synthesis Error: No response."
+            data = json.loads(resp_obj.body.decode())
+            final_answer = data.get("message", {}).get("content", "Error: Empty response.")
+        
+        # 4. Construct Final String
+        output = processing_block
+        if props.get("show_intermediate"):
+            output += "## Intermediate Expert Insights\n" + panel_data + "\n---\n"
+        
+        output += "## Final Answer\n" + final_answer
+        return output

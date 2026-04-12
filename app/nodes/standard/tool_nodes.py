@@ -106,20 +106,56 @@ class MCPConfigNode(BaseNode):
         return """
 function NodeMCP() {
     this.addOutput("MCP", "mcp");
-    this.properties = { name: "Local RAG", url: "http://localhost:3010", type: "sse" };
+    this.properties = { 
+        name: "Google Knowledge", 
+        url: "https://developerknowledge.googleapis.com/mcp", 
+        type: "sse",
+        auth_type: "api_key",
+        auth_token: "",
+        headers_json: "{}"
+    };
+    
     this.addWidget("text", "Name", this.properties.name, (v) => { this.properties.name = v; this.title = "🔌 MCP: " + v.toUpperCase(); });
-    this.addWidget("text", "URL/Command", this.properties.url, (v) => { this.properties.url = v; });
-    this.addWidget("combo", "Type", this.properties.type, (v) => { this.properties.type = v; }, { values: ["sse", "stdio"] });
+    this.addWidget("text", "Endpoint URL", this.properties.url, (v) => { this.properties.url = v; });
+    
+    this.addWidget("combo", "Auth Type", this.properties.auth_type, (v) => { this.properties.auth_type = v; }, { values: ["none", "api_key", "bearer"] });
+    this.addWidget("text", "Credentials/Key", this.properties.auth_token, (v) => { this.properties.auth_token = v; });
+    
+    this.addWidget("text", "Extra Headers (JSON)", this.properties.headers_json, (v) => { this.properties.headers_json = v; });
+
     this.addWidget("button", "ℹ️ Documentation", null, () => { showNodeHelp(this.type); });
+    
     this.title = "🔌 MCP: " + this.properties.name.toUpperCase();
     this.color = "#7c3aed";
     this.bgcolor = "#4c1d95";
     this.serialize_widgets = true;
-    this.size = this.computeSize();
+    this.size = [350, 180];
 }
 LiteGraph.registerNodeType("hub/mcp", NodeMCP);
 """
 
     async def execute(self, engine, node: Dict[str, Any], output_slot_idx: int) -> Any:
         props = node.get("properties", {})
-        return {"type": "mcp", "name": props.get("name"), "config": {"url": props.get("url"), "type": props.get("type")}}
+        
+        headers = {}
+        try:
+            if props.get("headers_json"):
+                headers = json.loads(props["headers_json"])
+        except: pass
+
+        token = props.get("auth_token", "")
+        if props.get("auth_type") == "api_key":
+            headers["x-goog-api-key"] = token # Standard Google MCP header
+            headers["Authorization"] = f"Bearer {token}" # Fallback
+        elif props.get("auth_type") == "bearer":
+            headers["Authorization"] = f"Bearer {token}"
+
+        return {
+            "type": "mcp", 
+            "name": props.get("name"), 
+            "config": {
+                "url": props.get("url"), 
+                "type": "sse",
+                "headers": headers
+            }
+        }

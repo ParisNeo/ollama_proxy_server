@@ -1,0 +1,47 @@
+{
+  "name": "Google Developer Knowledge Agent",
+  "description": "An autonomous agent grounded by the Google Developer Knowledge MCP. It can search official Google APIs, Best Practices, and Documentation.",
+  "graph": {
+    "last_node_id": 4,
+    "last_link_id": 4,
+    "nodes": [
+      { 
+        "id": 1, "type": "hub/input", "pos": [50, 50], 
+        "outputs": [{ "name": "Messages", "links": [1] }, { "name": "Settings", "links": [2] }] 
+      },
+      { 
+        "id": 2, "type": "hub/mcp", "pos": [50, 300], 
+        "outputs": [{ "name": "MCP", "links": [3] }], 
+        "properties": { 
+          "name": "Google Knowledge", 
+          "url": "https://developerknowledge.googleapis.com/mcp", 
+          "auth_type": "api_key",
+          "auth_token": "YOUR_GOOGLE_API_KEY_HERE"
+        } 
+      },
+      { 
+        "id": 3, "type": "hub/agent", "pos": [550, 50], 
+        "inputs": [
+          { "name": "In Messages", "link": 1 }, 
+          { "name": "Settings", "link": 2 }, 
+          { "name": "Tool 1", "link": 3 }
+        ], 
+        "outputs": [{ "name": "Final Answer", "links": [4] }], 
+        "properties": { 
+          "max_turns": 5, 
+          "model": "deepseek-r1",
+          "agent_instruction": "You are a Google Developer Expert. Use the 'search_documents' tool from the Google Knowledge MCP to provide verified technical answers. Do not guess API signatures."
+        } 
+      },
+      { 
+        "id": 4, "type": "hub/output", "pos": [1050, 50], "inputs": [{ "name": "Content", "link": 4 }] 
+      }
+    ],
+    "links": [
+      [1, 1, 0, 3, 0, "messages"],
+      [2, 1, 1, 3, 1, "object"],
+      [3, 2, 0, 3, 2, "mcp"],
+      [4, 3, 0, 4, 0, "string"]
+    ]
+  }
+}

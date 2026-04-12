@@ -252,15 +252,37 @@ LiteGraph.registerNodeType("hub/agent", NodeAgent);
                     fn = call.get("function", {})
                     t_name = fn.get("name")
                     t_args = fn.get("arguments", {})
+                    if isinstance(t_args, str):
+                        try: t_args = json.loads(t_args)
+                        except: pass
                     
                     event_manager.emit(ProxyEvent(
                         "active", engine.request_id, "Tool Execution", t_name, engine.sender,
-                        error_message=f"Executing tool: {t_name}..."
+                        error_message=f"Calling: {t_name}..."
                     ))
                     
-                    # Logic: Execute the tool and append result
-                    # In this hub version, we simulate the tool execution or route to MCP
-                    result_str = f"[Tool {t_name} executed successfully with results...]"
+                    # Resolve which provider handles this tool
+                    result_str = "[Tool Error: Not Found]"
+                    
+                    # 1. Check if it matches a connected MCP
+                    for t_item in tools:
+                        if isinstance(t_item, dict) and t_item.get("type") == "mcp":
+                            mcp_cfg = t_item["config"]
+                            # Use httpx to call the remote MCP endpoint
+                            async with httpx.AsyncClient(headers=mcp_cfg.get("headers", {})) as client:
+                                try:
+                                    # Standard MCP HTTP POST for tool calling
+                                    # Note: Real MCP/SSE involves persistent session, this is a stateless bridge
+                                    mcp_url = f"{mcp_cfg['url'].rstrip('/')}/tools/call"
+                                    mcp_resp = await client.post(mcp_url, json={"name": t_name, "arguments": t_args}, timeout=30.0)
+                                    if mcp_resp.status_code == 200:
+                                        result_str = str(mcp_resp.json().get("content", "Success"))
+                                    else:
+                                        result_str = f"[MCP Error {mcp_resp.status_code}]"
+                                except Exception as e:
+                                    result_str = f"[MCP Exception: {str(e)}]"
+
+                    # 2. Check if it matches a local library tool (future expansion)
                     
                     scratchpad.append({
                         "role": "tool",
@@ -268,7 +290,6 @@ LiteGraph.registerNodeType("hub/agent", NodeAgent);
                         "content": result_str
                     })
                 
-                # Continue loop to let agent process tool results
                 continue
             
             # --- PHASE C: Final Answer ---

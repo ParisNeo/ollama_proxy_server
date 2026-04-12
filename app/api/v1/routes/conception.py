@@ -3,7 +3,7 @@ import logging
 from pathlib import Path
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, Request, HTTPException, status, Form
+from fastapi import APIRouter, Depends, Request, HTTPException, status, Form, File, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -135,55 +135,136 @@ async def delete_workflow(
 async def api_build_workflow(
     request: Request,
     prompt: str = Form(...),
+    csrf_token: str = Form(...),
+    files: Optional[List[UploadFile]] = File(None),
     db: AsyncSession = Depends(get_db),
     admin_user: User = Depends(require_admin_user)
 ):
-    """Generates a workflow JSON from a user prompt using the Hub Agent."""
+    """Generates a workflow JSON from a user prompt, files, and web context using the Hub Agent."""
     from app.core.skills_manager import SkillsManager
     from app.api.v1.routes.proxy import _resolve_target, _reverse_proxy
+    from app.core import knowledge_importer as kit
+    from app.core.events import event_manager, ProxyEvent
     import secrets
+
+    # CSRF check
+    from app.api.v1.dependencies import get_csrf_token
+    stored_token = await get_csrf_token(request)
+    if not stored_token or not secrets.compare_digest(csrf_token, stored_token):
+        raise HTTPException(status_code=403, detail="CSRF token mismatch")
 
     app_settings = request.app.state.settings
     target_agent = app_settings.admin_agent_name
     if not target_agent:
         return JSONResponse({"error": "No Management Agent set in Settings."}, status_code=503)
 
-    # Load Architect Knowledge
-    skill = next((s for s in SkillsManager.get_all_skills() if s["name"] == "workflow-architect"), None)
-    architect_instruction = skill["raw"] if skill else "Generate LiteGraph JSON."
+    build_id = f"sys_build_graph_{secrets.token_hex(4)}"
+    event_manager.emit(ProxyEvent("received", build_id, "Graph Architect", "Local", admin_user.username, error_message="Initializing AI Architect..."))
 
-    system_prompt = (
-        f"{architect_instruction}\n\n"
-        "TASK: Build a LoLLMs Hub Workflow based on the user request. "
-        "Output ONLY valid JSON. Ensure all links connect correctly. "
-        "Increment node IDs starting from 1."
+    # 1. Extract context from uploaded files
+    file_context = ""
+    valid_files = [f for f in files if f and f.filename] if files else []
+    if valid_files:
+        event_manager.emit(ProxyEvent("active", build_id, "Graph Architect", "Local", admin_user.username, error_message=f"Processing {len(valid_files)} reference files..."))
+        file_context = await kit.extract_local_file_content(valid_files)
+
+    # 2. Ground the AI in the specific Hub Node Schema and SLOT MAP
+    # LLMs need explicit indices to connect wires correctly in LiteGraph
+    node_schema_text = """
+### NODE SLOT REGISTRY (0-INDEXED) ###
+- hub/input: 
+    Outputs: [0: Messages (array), 1: Settings (obj), 2: Input (str)]
+- hub/output: 
+    Inputs: [0: Source (msg/str)]
+- hub/llm_chat: 
+    Inputs: [0: Messages, 1: Settings, 2: Model Override, 3+: Tools]
+    Outputs: [0: Content (str)]
+- hub/llm_instruct:
+    Inputs: [0: Prompt (str)]
+    Outputs: [0: Response (str)]
+- hub/autorouter:
+    Inputs: [0: User Context (msgs), 1+: Expert Paths]
+    Outputs: [0: Route Output (str)]
+- hub/model:
+    Outputs: [0: Expert (obj)]
+- hub/system_modifier:
+    Inputs: [0: Messages, 1: System Prompt (str)]
+    Outputs: [0: Updated Messages]
+- hub/datastore:
+    Inputs: [0: Query (str)]
+    Outputs: [0: Context (str)]
+- hub/web_search:
+    Inputs: [0: Query (str)]
+    Outputs: [0: Results (str)]
+- hub/composer:
+    Inputs: [0: A (str), 1: B (str)]
+    Outputs: [0: Merged (str)]
+    """
+
+    instruction = (
+        "You are a Senior LoLLMs System Architect. You design cognitive graphs using LiteGraph JSON.\n\n"
+        f"{node_schema_text}\n\n"
+        "### JSON FORMAT RULES ###\n"
+        "1. Output a single JSON object with 'nodes' and 'links' keys.\n"
+        "2. Node: {\"id\": int, \"type\": \"hub/...\", \"pos\": [x, y], \"properties\": {}}\n"
+        "3. Link: [link_id, origin_node_id, origin_output_slot, target_node_id, target_input_slot, \"type_name\"]\n"
+        "4. CRITICAL: Slot numbers are 0-indexed based on the Registry above.\n"
+        "5. Flow must be logical: input -> [logic/rag/llm] -> output.\n"
+        "6. Output ONLY raw JSON. No markdown backticks. No conversational filler."
     )
 
+    user_payload = f"USER REQUEST: {prompt}\n\n"
+    if file_context:
+        user_payload += f"TECHNICAL SPECIFICATIONS / CONTEXT:\n{file_context}"
+
     try:
-        # Resolve and Proxy call
-        req_id = f"sys_graph_{secrets.token_hex(4)}"
-        real_model, msgs = await _resolve_target(db, target_agent, [{"role": "user", "content": prompt}])
+        event_manager.emit(ProxyEvent("active", build_id, "Graph Architect", target_agent, admin_user.username, error_message="Generating Cognitive Graph..."))
         
-        # Inject our expert instructions
-        msgs.insert(0, {"role": "system", "content": system_prompt})
+        real_model, msgs = await _resolve_target(db, target_agent, [{"role": "user", "content": user_payload}])
+        msgs.insert(0, {"role": "system", "content": instruction})
         
         servers = await server_crud.get_servers_with_model(db, real_model)
         if not servers: return JSONResponse({"error": "Backend offline"}, status_code=503)
 
-        resp, _ = await _reverse_proxy(request, "chat", servers, json.dumps({"model": real_model, "messages": msgs, "stream": False}).encode(), is_subrequest=True, request_id=req_id, model=real_model, sender=admin_user.username)
+        resp, _ = await _reverse_proxy(request, "chat", servers, json.dumps({"model": real_model, "messages": msgs, "stream": False}).encode(), is_subrequest=True, request_id=build_id, model=real_model, sender=admin_user.username)
         
         if hasattr(resp, 'body'):
             data = json.loads(resp.body.decode())
             raw_output = data.get("message", {}).get("content", "").strip()
             
-            # Clean possible markdown fences
-            clean_json = re.sub(r'^```json\s*|```$', '', raw_output, flags=re.MULTILINE).strip()
+            # --- ROBUST JSON EXTRACTION & SANITIZATION ---
+            # 1. Remove markdown code fences if they exist
+            clean_json = re.sub(r'```(?:json)?\s*([\s\S]*?)```', r'\1', raw_output).strip()
             
-            # Validate JSON before returning
-            parsed = json.loads(clean_json)
+            # 2. Heuristic: Find the actual start and end of the JSON object
+            start_idx = clean_json.find('{')
+            end_idx = clean_json.rfind('}')
+            
+            if start_idx == -1 or end_idx == -1:
+                logger.error(f"AI Architect: No JSON object found in output: {raw_output[:200]}...")
+                raise ValueError("The AI generated a response but no valid JSON structure was detected.")
+                
+            clean_json = clean_json[start_idx:end_idx + 1]
+            
+            # 3. Handle 'Invalid control character' issues (unescaped newlines in strings)
+            # We replace literal newlines and tabs within the string that aren't properly escaped
+            # while preserving valid JSON syntax.
+            try:
+                # We use strict=False to allow some control characters (like newlines)
+                # inside strings if the model was lazy, though this is only supported 
+                # in newer Python versions or specific parsers.
+                parsed = json.loads(clean_json, strict=False)
+            except json.JSONDecodeError as jde:
+                logger.warning(f"Initial JSON parse failed: {jde}. Attempting aggressive sanitization...")
+                # Last resort: Remove actual control characters (0-31) except space
+                sanitized = "".join(ch if ord(ch) >= 32 else " " for ch in clean_json)
+                parsed = json.loads(sanitized)
+
+            event_manager.emit(ProxyEvent("completed", build_id, "Graph Architect", "Local", admin_user.username, error_message="Graph Deployed successfully!"))
             return {"success": True, "graph": parsed}
     except Exception as e:
         logger.error(f"Graph Generation Failed: {e}")
+        event_manager.emit(ProxyEvent("error", build_id, "Graph Architect", "Local", admin_user.username, error_message=str(e)))
         return JSONResponse({"error": str(e)}, status_code=500)
 
 @router.post("/conception/templates/save", name="admin_save_template")
