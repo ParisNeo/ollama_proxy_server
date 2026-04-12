@@ -104,44 +104,126 @@
     <script>
         const PLATFORM_GUIDE = {
             telegram: {
-                title: "TELEGRAM SETUP",
+                title: "TELEGRAM BOT MASTERCLASS",
                 content: `
-                    <p>1. Open <a href="https://t.me/botfather" class="text-indigo-400 underline">@BotFather</a> on Telegram.</p>
-                    <p>2. Send <b>/newbot</b> and follow steps to get your <b>API Token</b>.</p>
-                    <p>3. Paste the token into the "Primary Access Token" field.</p>
-                    <div class="p-2 bg-indigo-500/10 border border-indigo-500/20 rounded mt-2">
-                        <b>Pro Tip:</b> Use <i>/setprivacy</i> to "Disabled" if you want the bot to read all messages in groups.
+                    <div class="space-y-6">
+                        <section>
+                            <h4 class="text-white font-bold mb-2">🔑 Step 1: Create your Identity</h4>
+                            <p>1. Search for <a href="https://t.me/botfather" class="text-indigo-400 underline" target="_blank">@BotFather</a> in your Telegram app.</p>
+                            <p>2. Start a chat and send <b>/newbot</b>.</p>
+                            <p>3. Follow the prompts to set a name and a username ending in 'bot'.</p>
+                            <p>4. Copy the <b>HTTP API Token</b> provided.</p>
+                        </section>
+
+                        <section>
+                            <h4 class="text-white font-bold mb-2">⚙️ Step 2: Critical Settings</h4>
+                            <p>1. To use the bot in groups, send <b>/setprivacy</b> to BotFather.</p>
+                            <p>2. Select your bot and set it to <b>Disabled</b>. This allows LoLLMs to "hear" every message.</p>
+                            <p>3. Send <b>/setjoingroups</b> and ensure it is <b>Enabled</b>.</p>
+                        </section>
+
+                        <section class="bg-indigo-500/10 p-3 rounded-lg border border-indigo-500/30">
+                            <h4 class="text-white font-bold mb-2">📱 Step 3: Install & Chat</h4>
+                            <p>Download the official app to chat with your AI on the go:</p>
+                            <div class="flex gap-4 mt-2">
+                                <a href="https://apps.apple.com/app/telegram-messenger/id682253849" class="text-xs text-indigo-300 underline" target="_blank">iOS App Store</a>
+                                <a href="https://play.google.com/store/apps/details?id=org.telegram.messenger" class="text-xs text-indigo-300 underline" target="_blank">Google Play</a>
+                            </div>
+                        </section>
                     </div>
                 `
             },
             discord: {
-                title: "DISCORD SETUP",
+                title: "DISCORD ARCHITECT GUIDE",
                 content: `
-                    <p>1. Go to <a href="https://discord.com/developers/applications" class="text-indigo-400 underline">Discord Dev Portal</a>.</p>
-                    <p>2. Create application → Bot section.</p>
-                    <p>3. Enable <b>MESSAGE CONTENT INTENT</b> (Critical!).</p>
-                    <p>4. Reset/Copy the <b>Bot Token</b>.</p>
-                    <p>5. Invite bot via OAuth2 URL Generator (scopes: bot, message.read).</p>
+                    <div class="space-y-6">
+                        <section>
+                            <h4 class="text-white font-bold mb-2">🔑 Step 1: Gateway Portal</h4>
+                            <p>1. Go to the <a href="https://discord.com/developers/applications" class="text-indigo-400 underline" target="_blank">Discord Developer Portal</a>.</p>
+                            <p>2. Click <b>New Application</b> and give it a name.</p>
+                            <p>3. Navigate to the <b>Bot</b> tab in the sidebar.</p>
+                            <p>4. Click <b>Reset Token</b> to reveal and copy your <b>Bot Token</b>.</p>
+                        </section>
+
+                        <section>
+                            <h4 class="text-white font-bold mb-2">⚙️ Step 2: Permissions (Vital)</h4>
+                            <p>1. Scroll down in the Bot tab to <b>Privileged Gateway Intents</b>.</p>
+                            <p>2. Enable <b>MESSAGE CONTENT INTENT</b>. Without this, the AI will be deaf.</p>
+                            <p>3. Go to <b>OAuth2 → URL Generator</b>.</p>
+                            <p>4. Check <b>bot</b> and <b>Administrator</b> (or specific read/write permissions).</p>
+                            <p>5. Copy the generated URL and paste it into your browser to invite the bot to your server.</p>
+                        </section>
+
+                        <section class="bg-indigo-500/10 p-3 rounded-lg border border-indigo-500/30">
+                            <h4 class="text-white font-bold mb-2">📱 Step 3: Mobile Experience</h4>
+                            <p>Add your AI to your pocket for instant logic support:</p>
+                            <div class="flex gap-4 mt-2">
+                                <a href="https://apps.apple.com/app/discord-chat-talk-hangout/id985746746" class="text-xs text-indigo-300 underline" target="_blank">iOS App Store</a>
+                                <a href="https://play.google.com/store/apps/details?id=com.discord" class="text-xs text-indigo-300 underline" target="_blank">Google Play</a>
+                            </div>
+                        </section>
+                    </div>
                 `
             },
             slack: {
-                title: "SLACK SOCKET MODE",
+                title: "SLACK ENTERPRISE DEPLOYMENT",
                 content: `
-                    <p>1. Create App on <a href="https://api.slack.com/apps" class="text-indigo-400 underline">Slack API</a>.</p>
-                    <p>2. Enable <b>Socket Mode</b>.</p>
-                    <p>3. Copy <b>App-Level Token</b> (starts with <i>xapp-</i>) and put in Extra Fields.</p>
-                    <p>4. Copy <b>Bot User OAuth Token</b> (starts with <i>xoxb-</i>) and put in Primary Token.</p>
-                    <p>5. Add <i>message.channels</i> to Event Subscriptions.</p>
+                    <div class="space-y-6">
+                        <section>
+                            <h4 class="text-white font-bold mb-2">🔑 Step 1: App Creation</h4>
+                            <p>1. Open the <a href="https://api.slack.com/apps" class="text-indigo-400 underline" target="_blank">Slack API Dashboard</a>.</p>
+                            <p>2. Click <b>Create New App</b> → <b>From Scratch</b>.</p>
+                            <p>3. Go to <b>Settings → Basic Information</b>.</p>
+                            <p>4. Scroll to <b>App-Level Tokens</b>, create one with <b>connections:write</b> scope, and paste it into "App-Level Token".</p>
+                        </section>
+
+                        <section>
+                            <h4 class="text-white font-bold mb-2">⚙️ Step 2: Socket Mode & Scopes</h4>
+                            <p>1. Go to <b>Settings → Socket Mode</b> and enable it.</p>
+                            <p>2. Go to <b>Features → OAuth & Permissions</b>.</p>
+                            <p>3. Add <b>chat:write</b> and <b>app_mentions:read</b> to Bot Token Scopes.</p>
+                            <p>4. Scroll up and <b>Install to Workspace</b> to get your <b>Bot User OAuth Token</b> (xoxb-...).</p>
+                            <p>5. Go to <b>Features → Event Subscriptions</b>, enable, and add <b>message.channels</b> under bot events.</p>
+                        </section>
+
+                        <section class="bg-indigo-500/10 p-3 rounded-lg border border-indigo-500/30">
+                            <h4 class="text-white font-bold mb-2">📱 Step 3: Work Anywhere</h4>
+                            <p>Install Slack to access your workflows from mobile:</p>
+                            <div class="flex gap-4 mt-2">
+                                <a href="https://apps.apple.com/app/slack/id618783545" class="text-xs text-indigo-300 underline" target="_blank">iOS App Store</a>
+                                <a href="https://play.google.com/store/apps/details?id=com.Slack" class="text-xs text-indigo-300 underline" target="_blank">Google Play</a>
+                            </div>
+                        </section>
+                    </div>
                 `
             },
             whatsapp: {
-                title: "WHATSAPP CLOUD",
+                title: "WHATSAPP CLOUD SETUP",
                 content: `
-                    <p>1. Create App on <a href="https://developers.facebook.com" class="text-indigo-400 underline">Meta for Developers</a>.</p>
-                    <p>2. Add <b>WhatsApp</b> product.</p>
-                    <p>3. Get <b>Temporary Access Token</b> and <b>Phone Number ID</b> from Getting Started.</p>
-                    <div class="p-2 bg-amber-500/10 border border-amber-500/20 rounded mt-2 text-amber-300">
-                        <b>Warning:</b> WhatsApp requires a public URL (https) for webhooks. LoLLMs Hub must be reachable from Meta's servers.
+                    <div class="space-y-6">
+                        <section>
+                            <h4 class="text-white font-bold mb-2">🔑 Step 1: Meta Portal</h4>
+                            <p>1. Register at <a href="https://developers.facebook.com" class="text-indigo-400 underline" target="_blank">Meta for Developers</a>.</p>
+                            <p>2. Create a <b>Business</b> App Type.</p>
+                            <p>3. Add the <b>WhatsApp</b> product to your app.</p>
+                            <p>4. Go to <b>Getting Started</b> to find your <b>Phone Number ID</b> and <b>Temporary Access Token</b>.</p>
+                        </section>
+
+                        <section>
+                            <h4 class="text-white font-bold mb-2">⚠️ Step 2: Webhook Connectivity</h4>
+                            <p>1. WhatsApp requires an <b>HTTPS</b> callback URL.</p>
+                            <p>2. If you are behind a NAT, use a tool like <b>ngrok</b> or <b>Cloudflare Tunnel</b> to expose your LoLLMs Hub port (8080).</p>
+                            <p>3. Point Meta's Webhook URL to: <code>https://your-public-url.com/api/bot/whatsapp/webhook</code></p>
+                        </section>
+
+                        <section class="bg-indigo-500/10 p-3 rounded-lg border border-indigo-500/30">
+                            <h4 class="text-white font-bold mb-2">📱 Step 3: Mobile Access</h4>
+                            <p>Use the standard WhatsApp messenger to talk to your bot:</p>
+                            <div class="flex gap-4 mt-2">
+                                <a href="https://apps.apple.com/app/whatsapp-messenger/id310633997" class="text-xs text-indigo-300 underline" target="_blank">iOS App Store</a>
+                                <a href="https://play.google.com/store/apps/details?id=com.whatsapp" class="text-xs text-indigo-300 underline" target="_blank">Google Play</a>
+                            </div>
+                        </section>
                     </div>
                 `
             }
