@@ -881,19 +881,24 @@ SUPPORTED ANNOTATION SCHEMAS:
         container.dataset.rawContent = rawContent;
 
         // Split content by special tags, keeping the tags as delimiters. This is more robust.
-        const parts = contentString.split(/(<think>[\s\S]*?<\/think>|<think>[\s\S]*|<annotate>[\s\S]*?<\/annotate>)/g);
+        const parts = contentString.split(/(<think>[\s\S]*?<\/think>|<think>[\s\S]*|<processing>[\s\S]*?<\/processing>|<processing>[\s\S]*|<annotate>[\s\S]*?<\/annotate>)/g);
         
         let finalHtml = '';
         for (const part of parts) {
             if (!part) continue;
 
-            if (part.startsWith('<think>')) {
-                if (part.endsWith('</think>')) { // Closed block
-                    const thinkContent = part.slice(7, -8);
-                    finalHtml += `<details class="think-block"><summary>Thoughts</summary><div>${marked.parse(thinkContent.trim())}</div></details>`;
+            if (part.startsWith('<think>') || part.startsWith('<processing>')) {
+                const isThink = part.startsWith('<think>');
+                const tagLen = isThink ? 7 : 12;
+                const endTag = isThink ? '</think>' : '</processing>';
+                const summaryTitle = isThink ? 'Thoughts' : 'Processing Status';
+
+                if (part.endsWith(endTag)) { // Closed block
+                    const blockContent = part.slice(tagLen, -endTag.length);
+                    finalHtml += `<details class="think-block"><summary>${summaryTitle}</summary><div>${marked.parse(blockContent.trim())}</div></details>`;
                 } else { // Unclosed (streaming) block
-                    const thinkContent = part.slice(7);
-                    finalHtml += `<details class="think-block" open><summary class="flex items-center gap-2">Thinking <svg class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg></summary><div>${marked.parse(thinkContent.trim())}</div></details>`;
+                    const blockContent = part.slice(tagLen);
+                    finalHtml += `<details class="think-block" open><summary class="flex items-center gap-2">${summaryTitle} <svg class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg></summary><div>${marked.parse(blockContent.trim())}</div></details>`;
                 }
             } else if (part.startsWith('<annotate>')) {
                 const annotationJson = part.slice(10, -11);

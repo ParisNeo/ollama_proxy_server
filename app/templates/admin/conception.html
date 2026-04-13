@@ -281,15 +281,14 @@
                     <button onclick="window.openNodeSculptor()" class="w-full py-2 bg-purple-600/20 text-purple-400 border border-purple-500/30 rounded-lg text-[10px] font-black uppercase tracking-widest hover:bg-purple-600/40 transition-all">✨ AI Node Sculptor</button>
                 </div>
             </div>
-            <!-- Single Unified Editor -->
+            <!-- Dual Editor (Tabs) -->
             <div class="flex-1 flex flex-col bg-[#0a0a0f]">
-                <div class="p-2 bg-emerald-500/10 text-emerald-400 text-[10px] font-black uppercase px-4 border-b border-white/5 flex justify-between">
-                    <span>Unified Node Logic (Python)</span>
-                    <span class="text-gray-400 font-normal">Embed JS UI inside the get_frontend_js() method</span>
+                <div class="flex bg-black/40 border-b border-white/10 px-4 gap-4">
+                    <button onclick="switchStudioTab('py')" id="studio-tab-py" class="py-2 px-4 text-[10px] font-black uppercase border-b-2 border-emerald-500 text-emerald-400">🐍 Python Logic</button>
+                    <button onclick="switchStudioTab('js')" id="studio-tab-js" class="py-2 px-4 text-[10px] font-black uppercase border-b-2 border-transparent text-gray-500">📜 JavaScript UI</button>
                 </div>
                 <div id="cm-py-container" class="flex-grow"></div>
-                <!-- JS container hidden but kept for legacy script compatibility -->
-                <div id="cm-js-container" class="hidden"></div>
+                <div id="cm-js-container" class="flex-grow hidden"></div>
             </div>
         </div>
     </div>
@@ -1227,9 +1226,6 @@
     let jsEditor, pyEditor;
 
     function initEditors() {
-        // Mock JS editor for compatibility
-        jsEditor = { getValue: () => "", setValue: () => "", setSize: () => "" };
-        
         pyEditor = CodeMirror(document.getElementById("cm-py-container"), {
             mode: "python",
             theme: "monokai",
@@ -1238,7 +1234,14 @@
             matchBrackets: true
         });
 
-        // Stretch CodeMirror to fill container
+        jsEditor = CodeMirror(document.getElementById("cm-js-container"), {
+            mode: "javascript",
+            theme: "monokai",
+            lineNumbers: true,
+            indentUnit: 4,
+            matchBrackets: true
+        });
+
         const fixSize = () => {
             jsEditor.setSize("100%", "100%");
             pyEditor.setSize("100%", "100%");
@@ -1247,56 +1250,47 @@
         window.addEventListener("resize", fixSize);
     }
 
-    // --- Node Studio Functions ---
+    window.switchStudioTab = (lang) => {
+        const pyCont = document.getElementById('cm-py-container');
+        const jsCont = document.getElementById('cm-js-container');
+        const pyTab = document.getElementById('studio-tab-py');
+        const jsTab = document.getElementById('studio-tab-js');
+
+        if (lang === 'py') {
+            pyCont.classList.remove('hidden'); jsCont.classList.add('hidden');
+            pyTab.classList.replace('border-transparent', 'border-emerald-500');
+            pyTab.classList.replace('text-gray-500', 'text-emerald-400');
+            jsTab.classList.replace('border-emerald-500', 'border-transparent');
+            jsTab.classList.replace('text-emerald-400', 'text-gray-500');
+            pyEditor.refresh();
+        } else {
+            pyCont.classList.add('hidden'); jsCont.classList.remove('hidden');
+            jsTab.classList.replace('border-transparent', 'border-emerald-500');
+            jsTab.classList.replace('text-gray-500', 'text-emerald-400');
+            pyTab.classList.replace('border-emerald-500', 'border-transparent');
+            pyTab.classList.replace('text-emerald-400', 'text-gray-500');
+            jsEditor.refresh();
+        }
+    };
+
     window.initNewNode = () => {
-        if (!confirm("Start a fresh node? Current unsaved editor content will be cleared.")) return;
+        if (!confirm("Clear editors for a fresh node pair?")) return;
         
-        pyEditor.setValue(`from typing import Dict, Any
-from app.nodes.base import BaseNode
-
-class MyUnifiedNode(BaseNode):
-    node_type = "custom/my_unique_id"
-    node_title = "My Unified Node"
-    node_category = "Custom Blocks"
-    node_icon = "🚀"
-
-    @classmethod
-    def get_frontend_js(cls) -> str:
-        return """
-function MyNodeUI() {
-    this.addInput("Input", "string");
-    this.addOutput("Output", "string");
-    this.properties = { prefix: "Hello" };
-    this.addWidget("text", "Prefix", "Hello", (v) => { this.properties.prefix = v; });
-    this.title = "MY UNIFIED NODE";
-    this.size = this.computeSize();
-}
-LiteGraph.registerNodeType("custom/my_unique_id", MyNodeUI);
-"""
-
-    async def execute(self, engine, node: Dict[str, Any], output_slot_idx: int) -> Any:
-        # Example of dynamic dependency installation
-        import pipmaster as pm
-        pm.ensure_packages(["requests"], verbose=True)
+        pyEditor.setValue(`from typing import Dict, Any\nfrom app.nodes.base import BaseNode\n\nclass MyNewNode(BaseNode):\n    node_type = "custom/my_node"\n    node_title = "My New Node"\n    node_category = "Custom"\n\n    async def execute(self, engine, node: Dict[str, Any], output_slot_idx: int) -> Any:\n        return "Hello from Python"`);
         
-        val = await engine._resolve_input(node, 0)
-        prefix = node['properties'].get('prefix', 'Hi')
-        return f"{prefix} {val}"
-`);
+        jsEditor.setValue(`function MyNodeUI() {\n    this.addInput("In", "string");\n    this.addOutput("Out", "string");\n    this.title = "MY NEW NODE";\n    this.size = this.computeSize();\n}\nLiteGraph.registerNodeType("custom/my_node", MyNodeUI);`);
     };
 
     window.saveNode = async () => {
         const py = pyEditor.getValue();
+        const js = jsEditor.getValue();
         
-        if (!py.trim() || !py.includes("get_frontend_js")) {
-            return alert("Invalid Node: Ensure you have a class inheriting from BaseNode and a get_frontend_js method.");
-        }
+        if (!py.trim() || !js.trim()) return alert("Both Python logic and JS UI are required.");
         
-        const classNameMatch = py.match(/class\s+(\w+)\(BaseNode\)/);
-        if (!classNameMatch) return alert("Could not find a class inheriting from BaseNode.");
+        const typeMatch = js.match(/registerNodeType\("([^"]+)"/);
+        if (!typeMatch) return alert("JS code must call registerNodeType and define a unique ID.");
         
-        const className = classNameMatch[1];
-        const fileName = className.toLowerCase().replace(/node$/, "") + "_node";
+        const fileName = typeMatch[1].split('/').pop() + "_node";
 
         try {
             const resp = await fetch("/admin/node-builder/save", {
@@ -1304,8 +1298,8 @@ LiteGraph.registerNodeType("custom/my_unique_id", MyNodeUI);
                 headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': '{{ csrf_token }}' },
                 body: JSON.stringify({ 
                     name: fileName, 
-                    class_name: className,
-                    py_code: py 
+                    py_code: py,
+                    js_code: js
                 })
             });
             

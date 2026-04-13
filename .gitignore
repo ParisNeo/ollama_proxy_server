@@ -112,3 +112,4 @@ app/static/uploads/
 # Lollms vscoder files
 .lollms
 *.db
+*.log

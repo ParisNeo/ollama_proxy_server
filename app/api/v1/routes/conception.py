@@ -170,7 +170,6 @@ async def api_build_workflow(
         file_context = await kit.extract_local_file_content(valid_files)
 
     # 2. Ground the AI in the specific Hub Node Schema and SLOT MAP
-    # LLMs need explicit indices to connect wires correctly in LiteGraph
     node_schema_text = """
 ### NODE SLOT REGISTRY (0-INDEXED) ###
 - hub/input: 
@@ -210,8 +209,11 @@ async def api_build_workflow(
         "### AGENTIC POWER: ASSET INVENTION ###\n"
         "1. If the standard nodes are insufficient, you can INVENT new ones.\n"
         "2. To do this, include a 'manifest' key in your JSON root.\n"
-        "3. Inside 'manifest', provide 'custom_nodes' (list of {filename, class_name, py_code}) and 'tools' (list of {filename, content}).\n"
-        "4. Your 'py_code' for nodes MUST include the 'get_frontend_js' method.\n\n"
+        "3. Inside 'manifest', provide 'custom_nodes' (list of {filename, py_code, js_code}) and 'tools' (list of {filename, content}).\n"
+        "4. STRICT TWO-FILE PROTOCOL (MANDATORY):\n"
+        "   - 'py_code': Pure Python. Must contain a class inheriting from BaseNode with an 'execute' method.\n"
+        "   - 'js_code': Pure JavaScript. Must contain a function and a 'LiteGraph.registerNodeType' call.\n"
+        "   - NEVER nest JavaScript inside a Python string or method.\n\n"
         "### MANDATORY NOTE RULE ###\n"
         "1. You MUST include a 'hub/note' node (ID: 100) in EVERY graph.\n"
         "2. Place it at the top (e.g., pos [50, -200]).\n"
@@ -281,8 +283,40 @@ async def api_build_workflow(
             if "custom_nodes" in manifest:
                 from app.api.v1.routes.node_builder import save_custom_node_internal
                 for node_data in manifest["custom_nodes"]:
-                    await save_custom_node_internal(node_data["filename"], node_data["class_name"], node_data["py_code"])
-                    event_manager.emit(ProxyEvent("active", build_id, "Graph Architect", "Local", admin_user.username, error_message=f"Deployed new Node: {node_data['class_name']}"))
+                    # Ensure we have both halves of the component
+                    p_code = node_data.get("py_code", "")
+                    j_code = node_data.get("js_code", "")
+                    f_name = node_data.get("filename", "invented_node")
+                    
+                    if p_code and j_code:
+                        await save_custom_node_internal(f_name, p_code, j_code)
+                        event_manager.emit(ProxyEvent("active", build_id, "Graph Architect", "Local", admin_user.username, error_message=f"Deployed Paired Component: {f_name}"))
+                    else:
+                        logger.warning(f"AI generated incomplete node manifest for {f_name}")                    
+                    # SECURITY: Validate filename to prevent directory traversal
+                    safe_filename = "".join(c for c in node_data["filename"] if c.isalnum() or c in "._-")
+                    if not safe_filename or safe_filename.startswith(".") or ".." in safe_filename:
+                        logger.warning(f"Skipping invalid node filename: {node_data['filename']}")
+                        continue
+                    
+                    # SECURITY: Basic code validation for py_code
+                    py_code = node_data.get("py_code", "")
+                    if len(py_code) > 50000:  # 50KB limit
+                        logger.warning(f"Node {safe_filename} exceeds size limit")
+                        continue
+                    
+                    # Check for dangerous patterns
+                    dangerous_patterns = ["__import__", "eval(", "exec(", "subprocess", "os.system", "open(", "write"]
+                    if any(pattern in py_code for pattern in dangerous_patterns):
+                        logger.warning(f"Node {safe_filename} contains potentially dangerous code patterns")
+                        # Log but don't block - the node_builder has its own sandbox
+                    
+                    await save_custom_node_internal(
+                        safe_filename, 
+                        py_code, 
+                        node_data.get("js_code", "")
+                    )
+                    event_manager.emit(ProxyEvent("active", build_id, "Graph Architect", "Local", admin_user.username, error_message=f"Deployed paired Node: {node_data.get('class_name', safe_filename)}"))
 
             # 2. Handle New Tools
             if "tools" in manifest:

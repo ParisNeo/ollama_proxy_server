@@ -1,1 +1,1 @@
-# Custom user-defined nodes initialization
+# Package initialized

@@ -1,1 +1,1 @@
-# Standard nodes initialization
+# Package initialized

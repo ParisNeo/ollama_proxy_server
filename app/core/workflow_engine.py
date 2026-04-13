@@ -135,11 +135,16 @@ class WorkflowEngine:
             
             if isinstance(source_data, dict) and source_data.get("type") == "expert_bundle":
                 # --- HYDRATE EXPERT BUNDLE ---
-                m_target = source_data["model"]
+                m_target = source_data.get("model", "auto")
                 
-                # Combine Persona + Skills into one high-quality system prompt
-                p_part = f"## Identity\n{source_data['personality']}" if source_data.get('personality') else ""
-                s_part = "\n\n## Expert Capabilities\n" + "\n\n".join(source_data['skills']) if source_data.get('skills') else ""
+                # Extract components safely
+                personality = source_data.get('personality', '')
+                skills = source_data.get('skills', [])
+                
+                # Build strings safely
+                p_part = f"## Identity\n{personality}" if personality else ""
+                s_part = "\n\n## Expert Capabilities\n" + "\n\n".join(skills) if skills else ""
+                
                 persona_injection = (p_part + s_part).strip()
                 
                 tools_to_attach = source_data.get("tools", [])

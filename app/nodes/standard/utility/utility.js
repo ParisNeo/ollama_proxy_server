@@ -1,17 +1,5 @@
-from typing import Dict, Any
-from app.nodes.base import BaseNode
-
-class NoteNode(BaseNode):
-    node_type = "hub/note"
-    node_title = "Markdown Note"
-    node_category = "Utility"
-    node_icon = "📝"
-
-    @classmethod
-    def get_frontend_js(cls) -> str:
-        return """
 function NodeNote() {
-    this.properties = { content: "# Project Instruction\\nAdd details about this graph here..." };
+    this.properties = { content: "# Project Instruction\nAdd details about this graph here..." };
     
     this.addWidget("button", "Edit Markdown", null, () => {
         const modalBody = `
@@ -48,16 +36,16 @@ NodeNote.prototype.onPropertyChanged = function(name, value) {
     return true;
 };
 
-// Logic to resize the node based on text lines
 NodeNote.prototype.fitToContent = function() {
     const width = this.size[0] || 450;
     const padding = 20;
     const maxWidth = width - (padding * 2);
     
-    const content = (this.properties.content || "").replace(/\\n/g, "\\n");
-    const lines = content.split("\\n");
+    // FIX: Convert escaped newlines back to actual line breaks
+    const content = (this.properties.content || "").replace(/\\n/g, "\n");
+    const lines = content.split("\n");
     
-    let totalHeight = 100; // Corrected base offset for header + widget
+    let totalHeight = 110; // Base offset for header + Edit button + padding
     
     const canvas = document.createElement("canvas");
     const ctx = canvas.getContext("2d");
@@ -96,8 +84,9 @@ NodeNote.prototype.onDrawForeground = function(ctx) {
     const maxWidth = this.size[0] - (padding * 2);
     let y = 100;
 
-    const content = (this.properties.content || "").replace(/\\n/g, "\\n");
-    const lines = content.split("\\n");
+    // FIX: Convert escaped newlines back to actual line breaks for drawing
+    const content = (this.properties.content || "").replace(/\\n/g, "\n");
+    const lines = content.split("\n");
 
     lines.forEach(line => {
         let fontSize = 14;
@@ -135,9 +124,9 @@ NodeNote.prototype.onAdded = function() {
     this.fitToContent();
 };
 
-LiteGraph.registerNodeType("hub/note", NodeNote);
-"""
+NodeNote.title = "📝 NOTE";
+NodeNote.prototype.onConfigure = function() {
+    if (!this.title || this.title === "NodeNote") this.title = "📝 NOTE";
+};
 
-    async def execute(self, engine, node: Dict[str, Any], output_slot_idx: int) -> Any:
-        # Notes are visual only, but can pass their content if connected
-        return node["properties"].get("content", "")
+LiteGraph.registerNodeType("hub/note", NodeNote);

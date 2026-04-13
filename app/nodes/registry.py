@@ -5,6 +5,7 @@ import logging
 import sys
 from typing import Dict, Type
 from app.nodes.base import BaseNode
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -27,12 +28,35 @@ class NodeRegistry:
         
     @classmethod
     def get_all_js(cls) -> str:
+        """Collects JS from paired .js files and legacy class methods."""
         if not cls._loaded: cls.load_all()
         js_codes = []
+        
+        # 1. Scan directories RECURSIVELY for physical .js files
+        import app.nodes.standard
+        import app.nodes.custom
+        from pathlib import Path
+
+        for package in [app.nodes.standard, app.nodes.custom]:
+            pkg_path = Path(package.__path__[0])
+            for js_file in pkg_path.rglob("*.js"):
+                try:
+                    js_codes.append(js_file.read_text(encoding="utf-8"))
+                except Exception as e:
+                    logger.error(f"Failed to read JS file {js_file}: {e}")
+
+        # 2. Fallback: Check if any loaded class still uses the legacy method
         for n_cls in cls._nodes.values():
-            js = n_cls.get_frontend_js()
-            if js:
-                js_codes.append(js)
+            try:
+                # Only add if it's not a default empty implementation
+                js = n_cls.get_frontend_js()
+                if js and "LiteGraph.registerNodeType" in js:
+                    # To prevent double registration if both exist, 
+                    # we only add if this specific string isn't already in our collection
+                    if not any(js[:50] in existing for existing in js_codes):
+                        js_codes.append(js)
+            except: pass
+
         return "\n\n".join(js_codes)
 
     @classmethod
@@ -52,24 +76,31 @@ class NodeRegistry:
     def load_all(cls):
         if cls._loaded: return
         cls._loaded = True
+        cls._nodes = {}
         
-        try:
-            import app.nodes.standard
-            import app.nodes.standard.utility_nodes # Explicitly include new file
-            import app.nodes.custom
+        base_pkg = Path("app/nodes")
+        # Recursively find all python files in standard and custom
+        for py_path in base_pkg.rglob("*.py"):
+            if py_path.name == "__init__.py":
+                continue
             
-            for package in [app.nodes.standard, app.nodes.custom]:
-                for _, module_name, _ in pkgutil.iter_modules(package.__path__, package.__name__ + "."):
-                    try:
-                        # Force reload to ensure code changes in standard nodes are reflected
-                        if module_name in sys.modules:
-                            importlib.reload(sys.modules[module_name])
-                        mod = importlib.import_module(module_name)
-                        for attr_name in dir(mod):
-                            attr = getattr(mod, attr_name)
-                            if inspect.isclass(attr) and issubclass(attr, BaseNode) and attr is not BaseNode:
-                                cls.register(attr)
-                    except Exception as e:
-                        logger.error(f"Failed to load node module {module_name}: {e}")
-        except Exception as e:
-            logger.error(f"Error discovering node packages: {e}")
+            # Skip if file is inside a template folder or other non-node directory
+            if "templates" in py_path.parts:
+                continue
+
+            # Convert Path to dot-notation for import
+            # e.g., app/nodes/standard/io/io.py -> app.nodes.standard.io.io
+            module_name = ".".join(py_path.with_suffix("").parts)
+            
+            try:
+                if module_name in sys.modules:
+                    importlib.reload(sys.modules[module_name])
+                mod = importlib.import_module(module_name)
+                for attr_name in dir(mod):
+                    attr = getattr(mod, attr_name)
+                    # Register classes that inherit from BaseNode
+                    if inspect.isclass(attr) and issubclass(attr, BaseNode) and attr is not BaseNode:
+                        cls.register(attr)
+            except Exception as e:
+                logger.error(f"Registry load failure for {module_name}: {e}")
+
