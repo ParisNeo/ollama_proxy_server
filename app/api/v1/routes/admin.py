@@ -2431,7 +2431,10 @@ async def toggle_instance(instance_id: int, request: Request, db: AsyncSession =
     if not inst:
         raise HTTPException(status_code=404, detail="Instance not found")
 
-    if supervisor.is_running(instance_id):
+    # Check instance state using supervisor's get_instance_state method
+    state, pid = await supervisor.get_instance_state(inst)
+    
+    if state == "running" or state == "started":
         await supervisor.stop_instance(instance_id)
         flash(request, f"Instance '{inst.name}' stopped.")
     else:
