@@ -1,0 +1,97 @@
+{
+  "name": "Agentic Web Researcher",
+  "description": "Autonomous agent loop combined with a personality soul and real-time web search capabilities.",
+  "graph": {
+    "last_node_id": 7,
+    "last_link_id": 6,
+    "nodes": [
+      {
+        "id": 100,
+        "type": "hub/note",
+        "pos": [50, 40],
+        "size": [450, 200],
+        "properties": {
+          "content": "# Agent Implementation\n\nThis template uses an **Agent** to process input with a selected personality. The Agent replaces the LLM Chat node for autonomous decision-making and tool use."
+        }
+      },
+      {
+        "id": 1,
+        "type": "hub/input",
+        "pos": [50, 360],
+        "outputs": [
+          { "name": "Messages", "type": "messages", "links": [1] },
+          { "name": "Settings", "type": "object", "links": [2] },
+          { "name": "Input", "type": "string", "links": null }
+        ]
+      },
+      {
+        "id": 2,
+        "type": "hub/personality",
+        "pos": [50, 540],
+        "properties": { "name": "parisneo" },
+        "outputs": [
+          { "name": "System Prompt", "type": "string", "links": [3] }
+        ]
+      },
+      {
+        "id": 3,
+        "type": "hub/tool_selector",
+        "pos": [50, 700],
+        "properties": {
+          "library": "web_search.py",
+          "function": "[ALL FUNCTIONS]"
+        },
+        "outputs": [
+          { "name": "Tool Schema", "type": "tool", "links": [4] }
+        ]
+      },
+      {
+        "id": 4,
+        "type": "hub/system_modifier",
+        "pos": [360, 200],
+        "properties": { "replace_all": true },
+        "inputs": [
+          { "name": "Messages", "type": "messages", "link": 1 },
+          { "name": "System Prompt", "type": "string", "link": 3 }
+        ],
+        "outputs": [
+          { "name": "Updated Messages", "type": "messages", "links": [5] }
+        ]
+      },
+      {
+        "id": 5,
+        "type": "hub/agent",
+        "pos": [750, 360],
+        "properties": {
+          "model": "auto",
+          "max_turns": 10
+        },
+        "inputs": [
+          { "name": "In Messages", "type": "messages", "link": 5 },
+          { "name": "Settings", "type": "object", "link": 2 },
+          { "name": "Tool 2", "type": "tool,mcp", "link": 4 }
+        ],
+        "outputs": [
+          { "name": "Final Answer", "type": "string", "links": [6] },
+          { "name": "Out Messages", "type": "messages", "links": null }
+        ]
+      },
+      {
+        "id": 6,
+        "type": "hub/output",
+        "pos": [1150, 360],
+        "inputs": [
+          { "name": "Source", "type": "messages,string", "link": 6 }
+        ]
+      }
+    ],
+    "links": [
+      [1, 1, 0, 4, 0, "messages"],
+      [2, 1, 1, 5, 1, "object"],
+      [3, 2, 0, 4, 1, "string"],
+      [4, 3, 0, 5, 2, "tool"],
+      [5, 4, 0, 5, 0, "messages"],
+      [6, 5, 0, 6, 0, "string"]
+    ]
+  }
+}
