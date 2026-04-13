@@ -123,7 +123,25 @@ class InstanceSupervisor:
                 creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if is_win else 0
             )
             self.processes[instance.id] = proc
+            
+            # Wait for the instance to actually start listening on the port
+            # This prevents the UI from showing "OFFLINE" immediately after starting
+            for attempt in range(30):  # Wait up to 30 seconds
+                await asyncio.sleep(1)
+                if await self._is_ollama_responding(instance.port):
+                    logger.info(f"Instance '{instance.name}' is ready on port {instance.port}")
+                    return True
+                if proc.poll() is not None:
+                    # Process exited prematurely
+                    logger.error(f"Instance '{instance.name}' process exited unexpectedly")
+                    if instance.id in self.processes:
+                        del self.processes[instance.id]
+                    return False
+            
+            # Timeout reached but process still running - assume it's starting up
+            logger.warning(f"Instance '{instance.name}' started but not responding within 30s (likely loading large model)")
             return True
+            
         except Exception as e:
             logger.error(f"Failed to launch {instance.backend_type} binary: {e}")
             return False
