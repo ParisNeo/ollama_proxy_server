@@ -25,8 +25,23 @@ function NodeAutoRouter() {
 
 NodeAutoRouter.title = "🚦 SMART ROUTER";
 
-// Helper to generate model options from global list
-const generateModelOptions = (selected) => {
+// Helper: Get models currently selected in the pool (the first list)
+const getCurrentPool = () => {
+    return Array.from(document.querySelectorAll('.model-entry')).map(sel => sel.value).filter(v => v);
+};
+
+// Helper: Refresh all target dropdowns in the rules section
+const syncRuleDropdowns = () => {
+    const pool = getCurrentPool();
+    document.querySelectorAll('.rule-target').forEach(select => {
+        const currentVal = select.value;
+        select.innerHTML = pool.map(m => `<option value="${m}" ${m === currentVal ? 'selected' : ''}>${m}</option>`).join('');
+        // If currentVal is no longer in pool, it defaults to first item
+    });
+};
+
+// Helper to generate model options from global list (used for Pool setup)
+const generateGlobalModelOptions = (selected) => {
     const models = window.available_models || ["auto"];
     return models.map(m => `<option value="${m}" ${m === selected ? 'selected' : ''}>${m}</option>`).join('');
 };
@@ -34,7 +49,6 @@ const generateModelOptions = (selected) => {
 // Custom Wizard for Configuration
 window.openRouterWizard = (node) => {
     const p = node.properties;
-    const modelOptions = generateModelOptions();
     
     let html = `
         <div class="space-y-6 text-left max-h-[75vh] overflow-y-auto custom-scrollbar pr-2">
@@ -44,10 +58,10 @@ window.openRouterWizard = (node) => {
                 <div id="model-pool" class="space-y-2">
                     ${(p.candidate_models || []).map((m, i) => `
                         <div class="flex gap-2">
-                            <select class="model-entry flex-grow bg-black/40 border border-white/10 rounded px-2 py-1 text-xs">
-                                ${generateModelOptions(m)}
+                            <select onchange="syncRuleDropdowns()" class="model-entry flex-grow bg-black/40 border border-white/10 rounded px-2 py-1 text-xs">
+                                ${generateGlobalModelOptions(m)}
                             </select>
-                            <button onclick="this.parentElement.remove()" class="text-red-400">&times;</button>
+                            <button onclick="this.parentElement.remove(); syncRuleDropdowns();" class="text-red-400">&times;</button>
                         </div>
                     `).join('')}
                 </div>
@@ -59,7 +73,9 @@ window.openRouterWizard = (node) => {
                 <div id="rules-view" class="${p.mode === 'rules' ? '' : 'hidden'} space-y-4">
                     <p class="text-[10px] text-gray-500 mb-2">Rules are checked in order. First match wins.</p>
                     <div id="rules-list" class="space-y-2">
-                        ${(p.rules || []).map((r, i) => `
+                        ${(p.rules || []).map((r, i) => {
+                            const pool = p.candidate_models || [];
+                            return `
                             <div class="rule-group p-3 bg-white/5 rounded-lg border border-white/5 space-y-2">
                                 <div class="flex justify-between items-center">
                                     <span class="text-[10px] font-bold text-gray-400">RULE #${i+1}</span>
@@ -77,11 +93,11 @@ window.openRouterWizard = (node) => {
                                 <div class="flex items-center gap-2 pt-1">
                                     <span class="text-[9px] uppercase text-gray-600 font-bold">Target Model:</span>
                                     <select class="rule-target text-[10px] bg-indigo-500/10 border border-indigo-500/20 rounded px-2 flex-grow">
-                                        ${generateModelOptions(r.target)}
+                                        ${pool.map(m => `<option value="${m}" ${m === r.target ? 'selected' : ''}>${m}</option>`).join('')}
                                     </select>
                                 </div>
                             </div>
-                        `).join('')}
+                        `}).join('')}
                     </div>
                     <button onclick="addRuleToWizard()" class="text-[10px] text-emerald-400 font-bold uppercase">+ Add Firewall Rule</button>
                 </div>
@@ -108,15 +124,17 @@ window.addModelToPool = () => {
     const div = document.createElement('div');
     div.className = "flex gap-2";
     div.innerHTML = `
-        <select class="model-entry flex-grow bg-black/40 border border-white/10 rounded px-2 py-1 text-xs">
-            ${generateModelOptions()}
+        <select onchange="syncRuleDropdowns()" class="model-entry flex-grow bg-black/40 border border-white/10 rounded px-2 py-1 text-xs">
+            ${generateGlobalModelOptions()}
         </select>
-        <button onclick="this.parentElement.remove()" class="text-red-400">&times;</button>
+        <button onclick="this.parentElement.remove(); syncRuleDropdowns();" class="text-red-400">&times;</button>
     `;
     document.getElementById('model-pool').appendChild(div);
+    syncRuleDropdowns();
 };
 
 window.addRuleToWizard = () => {
+    const pool = getCurrentPool();
     const div = document.createElement('div');
     div.className = "rule-group p-3 bg-white/5 rounded-lg border border-white/5 space-y-2";
     div.innerHTML = `
@@ -136,7 +154,7 @@ window.addRuleToWizard = () => {
         <div class="flex items-center gap-2 pt-1">
             <span class="text-[9px] uppercase text-gray-600 font-bold">Target Model:</span>
             <select class="rule-target text-[10px] bg-indigo-500/10 border border-indigo-500/20 rounded px-2 flex-grow">
-                ${generateModelOptions()}
+                ${pool.map(m => `<option value="${m}">${m}</option>`).join('')}
             </select>
         </div>
     `;
