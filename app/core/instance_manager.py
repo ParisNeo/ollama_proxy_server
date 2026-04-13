@@ -249,11 +249,11 @@ class InstanceSupervisor:
                     p = psutil.Process(pid)
                     p_name = p.name().lower()
                     # Catch Windows 'ollama app.exe' and Linux/Mac 'ollama'
-                    if "ollama" in p_name and self._is_ollama_responding(port):
+                    if "ollama" in p_name and await self._is_ollama_responding(port):
                         discovered.append({"port": port, "pid": pid, "name": p.name()})
                 except (psutil.NoSuchProcess, psutil.AccessDenied):
                     # Fallback to pure socket probe
-                    if self._is_ollama_responding(port):
+                    if await self._is_ollama_responding(port):
                         discovered.append({"port": port, "pid": "Unknown", "name": "System Ollama"})
         return discovered
 
