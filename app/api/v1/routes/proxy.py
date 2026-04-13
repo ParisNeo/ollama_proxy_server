@@ -19,6 +19,7 @@ from app.schema.settings import AppSettingsModel
 import secrets
 from app.core.encryption import decrypt_data
 from app.core.workflow_engine import WorkflowEngine
+from app.core.memory_manager import CognitiveMemoryManager
 from app.core.vllm_translator import (
     translate_ollama_to_vllm_chat,
     translate_ollama_to_vllm_embeddings,
@@ -708,6 +709,15 @@ def _wrap_response_for_token_tracking(
 
                 # Process for token tracking (after yielding to not block)
                 buffer += chunk_text
+
+                # Intercept memory tags to process in background
+                # We use the accumulated buffer in the streaming wrapper
+                if "</memory>" in buffer:
+                    # Capture current buffer for background processing
+                    # Use a copy to avoid race conditions with the buffer clear logic
+                    tag_payload = str(buffer)
+                    # Use api_key.user_id instead of raw ID
+                    asyncio.create_task(CognitiveMemoryManager.process_tags(db, api_key.user_id, model, tag_payload))
                 
                 # Process complete lines
                 lines = buffer.split('\n')
@@ -2575,6 +2585,20 @@ async def proxy_ollama(
         
         # 4. Re-encode the optimized body
         body_bytes = json.dumps(body).encode('utf-8')
+
+    # --- COGNITIVE MEMORY INJECTION ---
+    memory_context = await CognitiveMemoryManager.get_memory_context(db, api_key.user_id, model_name)
+    if "messages" in body:
+        # Find system message or inject new one
+        sys_msg = next((m for m in body["messages"] if m["role"] == "system"), None)
+        if sys_msg:
+            sys_msg["content"] = f"{memory_context}\n\n{sys_msg['content']}"
+        else:
+            body["messages"].insert(0, {"role": "system", "content": memory_context})
+        body_bytes = json.dumps(body).encode('utf-8')
+
+    # Trigger maintenance from previous session idle time
+    asyncio.create_task(CognitiveMemoryManager.reorganize_memories(db, api_key.user_id, model_name))
 
     # 4. Telemetry
 

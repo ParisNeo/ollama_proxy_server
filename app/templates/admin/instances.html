@@ -73,6 +73,22 @@
         </div>
     </div>
 
+    <!-- HF Hub Downloader Modal Trigger -->
+    <div class="card-style border-l-4 border-sky-500 bg-sky-500/5 mb-8">
+        <div class="flex flex-col md:flex-row justify-between items-center gap-4">
+            <div class="flex items-center gap-3">
+                <div class="p-2 bg-sky-600 rounded-lg">
+                    <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                </div>
+                <div>
+                    <h2 class="text-lg font-bold">Integrated Model Downloader</h2>
+                    <p class="text-xs text-gray-400">Search Hugging Face and download GGUF or Safetensors directly to your server.</p>
+                </div>
+            </div>
+            <button onclick="openHFDownloader()" class="bg-sky-600 hover:bg-sky-500 px-6 py-2 rounded-xl font-black text-xs uppercase tracking-widest text-white shadow-lg transition-all">Open HF Hub Browser</button>
+        </div>
+    </div>
+
     <div class="card-style">
         <h2 class="card-header text-xl font-bold mb-4">Deploy New Instance</h2>
         <form action="{{ url_for('admin_add_instance') }}" method="post" class="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -98,8 +114,11 @@
                 <input type="text" name="gpu_ids" placeholder="0" class="w-full p-2 rounded bg-black/20 border border-white/10">
             </div>
             <div class="md:col-span-2">
-                <label id="path_label" class="block text-xs text-gray-400 uppercase font-bold">Custom Models Folder (Optional)</label>
-                <input type="text" id="model_path_input" name="model_path" placeholder="/data/ollama/models" class="w-full p-2 rounded bg-black/20 border border-white/10">
+                <label id="path_label" class="block text-xs text-gray-400 uppercase font-bold">Model File / Folder Path</label>
+                <div class="flex gap-2">
+                    <input type="text" id="model_path_input" name="model_path" placeholder="/data/ollama/models" class="flex-grow p-2 rounded bg-black/20 border border-white/10">
+                    <button type="button" onclick="browseLocalModels()" class="px-3 bg-white/5 border border-white/10 rounded-lg text-xs hover:bg-white/10" title="Auto-fill from default directory">📁</button>
+                </div>
             </div>
             <div>
                 <label class="block text-xs text-gray-400 uppercase font-bold">Keep Alive</label>
@@ -248,12 +267,119 @@
         }
     }
 
+    window.browseLocalModels = () => {
+        alert("Tip: If you downloaded a model via HF Hub, it is stored in: {{ request.app.state.settings.default_models_path }}/[repo_name]");
+    };
+
+    window.openHFDownloader = () => {
+        const modalBody = `
+            <div class="space-y-6 text-left" id="hf-downloader-root">
+                <div>
+                    <label class="block text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">Search Models</label>
+                    <div class="flex gap-2">
+                        <input type="text" id="hf-search-q" placeholder="e.g. Llama-3.2-GGUF" class="flex-grow p-2.5 bg-black/40 border border-white/10 rounded-xl text-sm outline-none focus:border-sky-500">
+                        <button onclick="searchHF()" class="bg-sky-600 px-6 py-2 rounded-xl text-xs font-black uppercase">Search</button>
+                    </div>
+                </div>
+
+                <div id="hf-results" class="space-y-2 max-h-60 overflow-y-auto custom-scrollbar"></div>
+                
+                <div id="hf-file-selection" class="hidden space-y-4 pt-4 border-t border-white/10">
+                    <div class="flex justify-between items-center">
+                        <h4 class="text-[10px] font-black text-indigo-400 uppercase tracking-widest">Select Files from Repository</h4>
+                        <span id="selected-repo-label" class="text-[9px] font-mono text-gray-500"></span>
+                    </div>
+                    <div id="hf-file-list" class="space-y-1 max-h-48 overflow-y-auto custom-scrollbar p-2 bg-black/40 rounded-lg"></div>
+                    
+                    <div class="flex justify-end gap-3">
+                        <button onclick="document.getElementById('hf-file-selection').classList.add('hidden')" class="px-4 py-2 text-xs font-bold text-gray-500">Back</button>
+                        <button id="hf-start-dl-btn" onclick="startHFDownload()" class="bg-green-600 px-8 py-2 rounded-xl text-xs font-black uppercase shadow-lg shadow-green-900/20">Start Download</button>
+                    </div>
+                </div>
+            </div>
+        `;
+        window.showModal("Hugging Face Hub Browser", modalBody);
+    };
+
+    window.searchHF = async () => {
+        const q = document.getElementById('hf-search-q').value;
+        const res = document.getElementById('hf-results');
+        res.innerHTML = '<div class="text-center py-8 animate-pulse text-sky-400 font-bold">Scanning HF Hub...</div>';
+        
+        try {
+            const resp = await fetch(`/admin/hf/search?q=${encodeURIComponent(q)}`);
+            const data = await resp.json();
+            res.innerHTML = data.map(m => `
+                <button onclick="selectHFRepo('${m.id}')" class="w-full text-left p-3 rounded-lg bg-white/5 border border-white/5 hover:border-sky-500/50 hover:bg-white/10 transition-all flex justify-between items-center group">
+                    <div>
+                        <div class="text-xs font-bold text-white group-hover:text-sky-400">${m.id}</div>
+                        <div class="text-[9px] text-gray-500 uppercase font-black">${m.pipeline_tag} • ${m.downloads.toLocaleString()} DLs</div>
+                    </div>
+                    <span class="text-sky-500 opacity-0 group-hover:opacity-100">→</span>
+                </button>
+            `).join('');
+        } catch(e) { res.innerHTML = `<div class="text-red-400 text-xs">${e.message}</div>`; }
+    };
+
+    let currentHFRepo = null;
+    window.selectHFRepo = async (repoId) => {
+        currentHFRepo = repoId;
+        const list = document.getElementById('hf-file-list');
+        document.getElementById('hf-file-selection').classList.remove('hidden');
+        document.getElementById('selected-repo-label').innerText = repoId;
+        list.innerHTML = '<div class="p-4 text-center animate-pulse text-indigo-400">Fetching file manifest...</div>';
+        
+        try {
+            const resp = await fetch(`/admin/hf/files?repo_id=${encodeURIComponent(repoId)}`);
+            const data = await resp.json();
+            
+            list.innerHTML = data.files.map(f => {
+                const isSharded = f.includes("-of-");
+                return `
+                <label class="flex items-center gap-3 p-2 rounded hover:bg-white/5 cursor-pointer">
+                    <input type="checkbox" name="hf_files" value="${f}" class="rounded text-sky-600 bg-black border-white/20">
+                    <div class="flex flex-col">
+                        <span class="text-[11px] font-mono ${f.endsWith('.gguf') ? 'text-amber-400 font-bold' : 'text-gray-300'}">${f}</span>
+                        ${isSharded ? '<span class="text-[8px] text-indigo-400 font-black uppercase">Shard Component</span>' : ''}
+                    </div>
+                </label>`;
+            }).join('');
+        } catch(e) { list.innerHTML = `<div class="text-red-400 text-xs">${e.message}</div>`; }
+    };
+
+    window.startHFDownload = async () => {
+        const checked = Array.from(document.querySelectorAll('input[name="hf_files"]:checked')).map(c => c.value);
+        if (checked.length === 0) return alert("Select at least one file.");
+        
+        const btn = document.getElementById('hf-start-dl-btn');
+        btn.disabled = true;
+        btn.innerText = "QUEUEING...";
+
+        try {
+            const resp = await fetch("/admin/hf/download", {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': '{{ csrf_token }}' },
+                body: JSON.stringify({ repo_id: currentHFRepo, filenames: checked })
+            });
+            const data = await resp.json();
+            if (data.success) {
+                document.getElementById('modal-close-btn').click();
+                taskPanel.classList.remove('hidden');
+                logToConsole(`Initiating background download for ${currentHFRepo}...`, "text-sky-400 font-bold");
+            } else {
+                alert(data.error);
+                btn.disabled = false;
+                btn.innerText = "Start Download";
+            }
+        } catch(e) { alert(e.message); btn.disabled = false; }
+    };
+
     // Connect to SSE for real-time logs
     const sysEvtSource = new EventSource("{{ url_for('sse_events') }}");
     sysEvtSource.onmessage = (e) => {
         const msg = JSON.parse(e.data);
         // We filter for "sys_" request IDs used in our updated instance_manager.py
-        if (msg.id && msg.id.startsWith('sys_')) {
+        if (msg.id && (msg.id.startsWith('sys_') || msg.id.startsWith('sys_hf_'))) {
             taskPanel.classList.remove('hidden');
             
             let color = 'text-indigo-200';

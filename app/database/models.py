@@ -211,6 +211,30 @@ class VirtualAgent(Base):
     mcp_servers = Column(JSON, nullable=True)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
+class MemoryEntry(Base):
+    __tablename__ = "agent_memories"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    agent_name = Column(String, nullable=False, index=True)
+    category = Column(String, nullable=False, index=True)
+    title = Column(String, nullable=False)
+    content = Column(String, nullable=False)
+    importance = Column(Integer, default=50) # 0-100
+    last_accessed = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+class MemoryEntry(Base):
+    __tablename__ = "memory_entries"
+    id = Column(Integer, primary_key=True, index=True)
+    user_identifier = Column(String, nullable=False, index=True)
+    agent_name = Column(String, nullable=False, index=True)
+    category = Column(String, nullable=False, index=True)
+    title = Column(String, nullable=False)
+    content = Column(String, nullable=False)
+    importance = Column(Integer, default=50)
+    last_accessed = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
 class UserToolData(Base):
     __tablename__ = "user_tool_data"
     id = Column(Integer, primary_key=True, index=True)

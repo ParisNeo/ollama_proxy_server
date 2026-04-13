@@ -2347,6 +2347,58 @@ async def update_binaries_endpoint(request: Request, background_tasks: Backgroun
     background_tasks.add_task(task_wrapper)
     return JSONResponse({"success": True, "message": "Binary Hub update check started."})
 
+@router.get("/hf/search", name="admin_hf_search")
+async def hf_search(q: str = Query(...), admin_user: User = Depends(require_admin_user)):
+    """Search for models on Hugging Face."""
+    import pipmaster as pm
+    pm.ensure_packages(["huggingface_hub"], verbose=True)
+    from huggingface_hub import HfApi
+    api = HfApi()
+    try:
+        models = api.list_models(search=q, limit=10, sort="downloads", direction=-1)
+        return [{"id": m.id, "downloads": m.downloads, "pipeline_tag": getattr(m, 'pipeline_tag', 'unknown')} for m in models]
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+@router.get("/hf/files", name="admin_hf_files")
+async def hf_files(repo_id: str = Query(...), admin_user: User = Depends(require_admin_user)):
+    """List files in a HF repo, filtering for GGUF and Safetensors."""
+    import pipmaster as pm
+    pm.ensure_packages(["huggingface_hub"], verbose=True)
+    from huggingface_hub import HfApi
+    api = HfApi()
+    try:
+        files = api.list_repo_files(repo_id=repo_id)
+        # Sort files: GGUFs first, then Safetensors
+        important = [f for f in files if f.endswith(".gguf") or f.endswith(".safetensors") or "config.json" in f]
+        return {"repo_id": repo_id, "files": important}
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+@router.post("/hf/download", name="admin_hf_download", dependencies=[Depends(validate_csrf_token_header)])
+async def hf_download(request: Request, background_tasks: BackgroundTasks, admin_user: User = Depends(require_admin_user)):
+    """Triggers a background model download."""
+    data = await request.json()
+    repo_id = data.get("repo_id")
+    filenames = data.get("filenames") # List of files
+    
+    if not repo_id or not filenames:
+        return JSONResponse({"error": "Missing repo_id or filenames"}, status_code=400)
+    
+    app_settings = request.app.state.settings
+    # Resolve full path relative to app root
+    base_dir = Path(app_settings.default_models_path)
+    if not base_dir.is_absolute():
+        base_dir = Path.cwd() / base_dir
+    
+    # Create subfolder for repo
+    repo_folder = base_dir / repo_id.replace("/", "--")
+    
+    task_id = f"sys_hf_{secrets.token_hex(4)}"
+    background_tasks.add_task(supervisor.download_hf_model, repo_id, filenames, str(repo_folder), task_id, admin_user.username)
+    
+    return {"success": True, "task_id": task_id, "message": f"Download task {task_id} queued."}
+
 @router.post("/instances/adopt", name="admin_adopt_instance", dependencies=[Depends(validate_csrf_token)])
 async def adopt_instance(
     request: Request, 

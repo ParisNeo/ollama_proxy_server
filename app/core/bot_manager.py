@@ -16,6 +16,7 @@ class BotManager:
         self.app = app
         self.active_tasks: Dict[int, asyncio.Task] = {}
         self._shutdown = False
+        self.chat_histories: Dict[str, List[Dict[str, str]]] = {}
 
     async def start_all_active_bots(self):
         """Initial check and start of bots marked as active."""
@@ -55,35 +56,81 @@ class BotManager:
 
     async def _process_bot_request(self, user_text, username, platform_name, target_workflow):
         """Shared logic to route bot messages through the workflow engine."""
-        import json, secrets
+        import json, secrets, re, copy
         from app.api.v1.routes.proxy import _resolve_target, _reverse_proxy
+        from app.core.memory_manager import CognitiveMemoryManager
         
         async with AsyncSessionLocal() as db:
             req_id = f"bot_{platform_name}_{secrets.token_hex(4)}"
-            # Pass dummy_request to provide system context (settings, http_client) to the workflow engine
-            resolution = await _resolve_target(
-                db, 
-                target_workflow, 
-                [{"role": "user", "content": user_text}], 
-                request=self.app.state.dummy_request, 
-                sender=f"Bot:{platform_name}"
-            )
-            real_model, final_msgs = resolution
+            user_identifier = f"{platform_name}_{username}"
             
-            from app.crud import server_crud
-            servers = await server_crud.get_servers_with_model(db, real_model)
-            if not servers: return "❌ Error: Compute nodes offline."
+            # 1. Update Short-Term Rolling Memory
+            if user_identifier not in self.chat_histories:
+                self.chat_histories[user_identifier] = []
+                
+            self.chat_histories[user_identifier].append({"role": "user", "content": user_text})
+            if len(self.chat_histories[user_identifier]) > 10:
+                self.chat_histories[user_identifier] = self.chat_histories[user_identifier][-10:]
+            
+            # 2. Fetch Long-Term Cognitive Memory
+            memory_context = await CognitiveMemoryManager.get_memory_context(db, user_identifier, target_workflow)
+            asyncio.create_task(CognitiveMemoryManager.reorganize_memories(db, user_identifier, target_workflow))
 
-            resp, _ = await _reverse_proxy(
-                self.app.state.dummy_request, "chat", servers, 
-                json.dumps({"model": real_model, "messages": final_msgs, "stream": False}).encode(),
-                is_subrequest=True, request_id=req_id, model=target_workflow, sender=username
-            )
-            
-            if hasattr(resp, 'body'):
-                data = json.loads(resp.body.decode())
-                return data.get("message", {}).get("content", "Empty response.")
-        return "⚠️ Error: Request failed."
+            # 3. Inject Memory directly into the current prompt to bypass Workflow overwrites
+            messages = copy.deepcopy(self.chat_histories[user_identifier])
+            messages[-1]["content"] = f"{memory_context}\n\nUSER MESSAGE:\n{user_text}"
+
+            if self.app.state.settings.enable_debug_mode:
+                logger.info(f"[DEBUG] BOT INPUT INJECTION:\n{messages[-1]['content']}")
+
+            # 4. Agentic Retrieval Loop
+            for turn in range(3):
+                resolution = await _resolve_target(
+                    db, 
+                    target_workflow, 
+                    messages, 
+                    request=self.app.state.dummy_request, 
+                    sender=username  # Crucial: pass actual username for template substitution
+                )
+                real_model, final_msgs = resolution
+                
+                from app.crud import server_crud
+                servers = await server_crud.get_servers_with_model(db, real_model)
+                if not servers: return "❌ Error: Compute nodes offline."
+
+                resp, _ = await _reverse_proxy(
+                    self.app.state.dummy_request, "chat", servers, 
+                    json.dumps({"model": real_model, "messages": final_msgs, "stream": False}).encode(),
+                    is_subrequest=True, request_id=req_id, model=target_workflow, sender=username
+                )
+                
+                if hasattr(resp, 'body'):
+                    data = json.loads(resp.body.decode())
+                    raw_response = data.get("message", {}).get("content", "Empty response.")
+                    
+                    if self.app.state.settings.enable_debug_mode:
+                        logger.info(f"[DEBUG] BOT RAW RESPONSE (Turn {turn}):\n{raw_response}")
+                    
+                    clean_response = await CognitiveMemoryManager.process_tags(db, user_identifier, target_workflow, raw_response)
+                    
+                    # Handle internal memory search requests
+                    search_match = re.search(r'<memory_search\s+category=["\']([^"\']+)["\']\s*(?:/>|></memory_search>)', raw_response)
+                    if search_match:
+                        category = search_match.group(1)
+                        search_results = await CognitiveMemoryManager.search_category(db, user_identifier, target_workflow, category)
+                        messages.append({"role": "assistant", "content": raw_response})
+                        messages.append({"role": "user", "content": f"SYSTEM MEMORY RESULTS FOR '{category}':\n{search_results}\n\nNow, continue answering or perform memory operations."})
+                        continue
+                    
+                    if not clean_response.strip():
+                        clean_response = "Memory updated."
+                    
+                    # Save final output to pure history
+                    self.chat_histories[user_identifier].append({"role": "assistant", "content": clean_response})
+                    return clean_response
+                else:
+                    return "⚠️ Error: Request failed."
+            return "⚠️ Error: Too many memory turns."
 
     async def _run_discord_bot(self, config: BotConfig, token: str):
         pm.ensure_packages(["discord.py"], verbose=True)

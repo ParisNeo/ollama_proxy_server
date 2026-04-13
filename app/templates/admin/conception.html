@@ -1488,6 +1488,17 @@
     window.executeGraphBuild = (mode = 'build') => {
         const endpoint = mode === 'edit' ? "{{ url_for('admin_api_edit_workflow') }}" : "{{ url_for('admin_api_build_workflow') }}";
         
+        const originalPrepare = window.Architect.prepareFormData;
+
+        // CRITICAL FIX: Override preparation logic BEFORE calling executeBuild
+        if (mode === 'edit') {
+            window.Architect.prepareFormData = function(id) {
+                const fd = originalPrepare.call(this, id);
+                fd.append("current_graph", JSON.stringify(graph.serialize()));
+                return fd;
+            };
+        }
+        
         window.Architect.executeBuild(
             'build-graph-prompt', 
             endpoint, 
@@ -1507,18 +1518,14 @@
                 if (mode === 'build') {
                     document.getElementById('workflow-name').value = "AI Generated Flow";
                 }
+                
+                // Restore original state
+                window.Architect.prepareFormData = originalPrepare;
             }
-        );
-
-        // If editing, inject current state via the form data hook
-        if (mode === 'edit') {
-            const originalPrepare = window.Architect.prepareFormData;
-            window.Architect.prepareFormData = function(id) {
-                const fd = originalPrepare.call(this, id);
-                fd.append("current_graph", JSON.stringify(graph.serialize()));
-                return fd;
-            };
-        }
+        ).catch(() => {
+            // Restore on error
+            window.Architect.prepareFormData = originalPrepare;
+        });
     };
 
     // --- AI NODE SCULPTOR ---

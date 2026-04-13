@@ -42,6 +42,9 @@ class AppSettingsModel(BaseModel):
     denied_ips: str = ""
 
     model_update_interval_minutes: int = 10
+
+    # Model Storage
+    default_models_path: str = Field(default="models", description="Default directory where HF models will be downloaded.")
     
     # Logging & Retention
     log_max_size_mb: int = 10

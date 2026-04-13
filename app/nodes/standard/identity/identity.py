@@ -13,8 +13,16 @@ class ExpertSelectorNode(BaseNode):
         props = node.get("properties", {})
         persona_text = ""
         if props.get("personality"):
+            import datetime
             p = next((x for x in PersonalityManager.get_all_personalities() if x["name"] == props["personality"]), None)
-            if p: persona_text = re.sub(r'^---\n.*?\n---\n', '', p["raw"], flags=re.DOTALL).strip()
+            if p: 
+                raw_text = re.sub(r'^---\n.*?\n---\n', '', p["raw"], flags=re.DOTALL).strip()
+                raw_text = raw_text.replace("{{user_name}}", engine.sender)
+                raw_text = raw_text.replace("{{display_name}}", props["personality"])
+                now = datetime.datetime.now()
+                raw_text = raw_text.replace("{{date}}", now.strftime("%Y-%m-%d"))
+                raw_text = raw_text.replace("{{time}}", now.strftime("%H:%M:%S"))
+                persona_text = raw_text
 
         # Ensure we pass the name for the engine to know which persona to resolve
         return {
@@ -35,9 +43,22 @@ class PersonalityNode(BaseNode):
 
     async def execute(self, engine, node, output_slot_idx):
         from app.core.personalities_manager import PersonalityManager
+        import datetime
         p_name = node["properties"].get("name")
         p = next((x for x in PersonalityManager.get_all_personalities() if x["name"] == p_name), None)
-        return re.sub(r'^---\n.*?\n---\n', '', p["raw"], flags=re.DOTALL).strip() if p else ""
+        if not p: return ""
+        
+        raw_text = re.sub(r'^---\n.*?\n---\n', '', p["raw"], flags=re.DOTALL).strip()
+        
+        # Template Variable Substitution
+        raw_text = raw_text.replace("{{user_name}}", engine.sender)
+        raw_text = raw_text.replace("{{display_name}}", p_name)
+        
+        now = datetime.datetime.now()
+        raw_text = raw_text.replace("{{date}}", now.strftime("%Y-%m-%d"))
+        raw_text = raw_text.replace("{{time}}", now.strftime("%H:%M:%S"))
+        
+        return raw_text
 
 class SkillNode(BaseNode):
     node_type = "hub/skill"

@@ -12,6 +12,7 @@ import pipmaster as pm
 from typing import Dict, Optional, List, Tuple
 from pathlib import Path
 from app.core.binary_manager import LLAMACPP_DIR
+import pipmaster as pm
 
 logger = logging.getLogger(__name__)
 
@@ -254,5 +255,41 @@ class InstanceSupervisor:
                     if self._is_ollama_responding(port):
                         discovered.append({"port": port, "pid": "Unknown", "name": "System Ollama"})
         return discovered
+
+    async def download_hf_model(self, repo_id: str, filenames: List[str], local_dir: str, task_id: str, sender: str):
+        """Background task to download one or more files from a HF repo."""
+        from app.core.events import event_manager, ProxyEvent
+        pm.ensure_packages(["huggingface_hub"], verbose=True)
+        from huggingface_hub import hf_hub_download
+        
+        dest_path = Path(local_dir)
+        dest_path.mkdir(parents=True, exist_ok=True)
+        
+        event_manager.emit(ProxyEvent("active", task_id, repo_id, "HF-Hub", sender, error_message=f"Starting download of {len(filenames)} file(s)..."))
+        
+        try:
+            for i, filename in enumerate(filenames):
+                event_manager.emit(ProxyEvent("active", task_id, repo_id, "HF-Hub", sender, error_message=f"Downloading [{i+1}/{len(filenames)}]: {filename}"))
+                
+                # We use a simple callback to track progress if needed, 
+                # but hf_hub_download is blocking. run_in_threadpool handles the event loop.
+                def _download():
+                    return hf_hub_download(
+                        repo_id=repo_id,
+                        filename=filename,
+                        local_dir=str(dest_path),
+                        local_dir_use_symlinks=False
+                    )
+                
+                from fastapi.concurrency import run_in_threadpool
+                await run_in_threadpool(_download)
+            
+            final_path = str((dest_path / filenames[0]).absolute())
+            event_manager.emit(ProxyEvent("completed", task_id, repo_id, "HF-Hub", sender, error_message=f"Success! Model saved to: {final_path}"))
+            return final_path
+        except Exception as e:
+            logger.error(f"HF Download Failed: {e}")
+            event_manager.emit(ProxyEvent("error", task_id, repo_id, "HF-Hub", sender, error_message=f"Download failed: {str(e)}"))
+            raise
 
 supervisor = InstanceSupervisor()

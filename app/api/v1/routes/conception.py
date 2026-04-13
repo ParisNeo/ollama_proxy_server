@@ -406,7 +406,16 @@ async def api_edit_workflow(
         if hasattr(resp, 'body'):
             data = json.loads(resp.body.decode())
             raw_output = data.get("message", {}).get("content", "").strip()
-            clean_json = re.sub(r'^```json\s*|```$', '', raw_output, flags=re.MULTILINE).strip()
+            
+            # --- ROBUST JSON EXTRACTION ---
+            clean_json = re.sub(r'```(?:json)?\s*([\s\S]*?)```', r'\1', raw_output).strip()
+            start_idx = clean_json.find('{')
+            end_idx = clean_json.rfind('}')
+            
+            if start_idx == -1 or end_idx == -1:
+                raise ValueError("The AI generated a response but no valid JSON structure was detected.")
+                
+            clean_json = clean_json[start_idx:end_idx + 1]
             parsed = json.loads(clean_json, strict=False)
             
             event_manager.emit(ProxyEvent("completed", build_id, "Graph Architect", "Local", admin_user.username, error_message="Graph updated successfully!"))

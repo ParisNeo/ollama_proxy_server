@@ -188,6 +188,11 @@
                     <label for="model_update_interval_minutes" class="block text-sm font-medium text-current">Model Refresh Interval (minutes)</label>
                     <input type="number" name="model_update_interval_minutes" id="model_update_interval_minutes" value="{{ settings.model_update_interval_minutes }}" class="mt-1 block w-full px-3 py-2 rounded-md shadow-sm focus:outline-none focus:ring-[var(--color-primary-500)] focus:border-[var(--color-primary-500)]">
                 </div>
+                <div class="md:col-span-2">
+                    <label for="default_models_path" class="block text-sm font-medium text-current">Default Models Storage Path</label>
+                    <input type="text" name="default_models_path" id="default_models_path" value="{{ settings.default_models_path }}" class="mt-1 block w-full px-3 py-2 rounded-md shadow-sm border border-white/10 bg-black/20 focus:border-sky-500">
+                    <p class="mt-1 text-[10px] text-gray-500 italic">Relative to app root or absolute path. HF models will be downloaded here.</p>
+                </div>
             </div>
         </div>
 
