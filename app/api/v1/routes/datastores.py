@@ -85,7 +85,7 @@ async def admin_add_datastore(
     
     # Special handling for OpenAI vectorizer: if no URL is provided, default to Hub Proxy
     if vectorizer_name == "openai" and not vectorizer_base_url:
-        target_url = f"http://127.0.0.1:{settings.PROXY_PORT}"
+        target_url = f"http://127.0.0.1:{settings.OPENAI_PROXY_PORT}"
         logger.info(f"Datastore '{name}': OpenAI vectorizer selected with no URL. Defaulting to Hub Proxy.")
     else:
         target_url = vectorizer_base_url.strip() if vectorizer_base_url else f"http://127.0.0.1:{settings.PROXY_PORT}"
