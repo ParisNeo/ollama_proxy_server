@@ -3,4 +3,4 @@ Add the possibility to use a javascript embedding.
 - Provide cdn code from the service.
 - the app can call the cdn and instantiate its own chat ui
 # Important
-## local ollama access for vectorization (build a special key for the vectorizer)
+## local ollama access for vectorization (build a special key for the vectorizer and upgrade safe_store to support keys in ollama)
