@@ -35,6 +35,8 @@ class InstanceSupervisor:
         pid_on_port = self._get_pid_on_port(instance.port)
         if pid_on_port:
             # 3. Verify if it's actually an Ollama instance
+            # FIX: _is_ollama_responding is async, so we must await it.
+            # However, _get_pid_on_port is synchronous.
             if await self._is_ollama_responding(instance.port):
                 return "SYSTEM", pid_on_port
             return "CONFLICT", pid_on_port
@@ -66,7 +68,7 @@ class InstanceSupervisor:
         return await run_in_threadpool(probe)
 
     async def start_instance(self, instance):
-        state, _ = self.get_instance_state(instance)
+        state, _ = await self.get_instance_state(instance)
         if state in ("RUNNING", "SYSTEM", "CONFLICT"):
             logger.warning(f"Cannot start instance {instance.name}: Port {instance.port} is {state}")
             return False
@@ -122,7 +124,25 @@ class InstanceSupervisor:
                 creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if is_win else 0
             )
             self.processes[instance.id] = proc
+            
+            # Wait for the instance to actually start listening on the port
+            # This prevents the UI from showing "OFFLINE" immediately after starting
+            for attempt in range(30):  # Wait up to 30 seconds
+                await asyncio.sleep(1)
+                if await self._is_ollama_responding(instance.port):
+                    logger.info(f"Instance '{instance.name}' is ready on port {instance.port}")
+                    return True
+                if proc.poll() is not None:
+                    # Process exited prematurely
+                    logger.error(f"Instance '{instance.name}' process exited unexpectedly")
+                    if instance.id in self.processes:
+                        del self.processes[instance.id]
+                    return False
+            
+            # Timeout reached but process still running - assume it's starting up
+            logger.warning(f"Instance '{instance.name}' started but not responding within 30s (likely loading large model)")
             return True
+            
         except Exception as e:
             logger.error(f"Failed to launch {instance.backend_type} binary: {e}")
             return False
@@ -248,11 +268,11 @@ class InstanceSupervisor:
                     p = psutil.Process(pid)
                     p_name = p.name().lower()
                     # Catch Windows 'ollama app.exe' and Linux/Mac 'ollama'
-                    if "ollama" in p_name and self._is_ollama_responding(port):
+                    if "ollama" in p_name and await self._is_ollama_responding(port):
                         discovered.append({"port": port, "pid": pid, "name": p.name()})
                 except (psutil.NoSuchProcess, psutil.AccessDenied):
                     # Fallback to pure socket probe
-                    if self._is_ollama_responding(port):
+                    if await self._is_ollama_responding(port):
                         discovered.append({"port": port, "pid": "Unknown", "name": "System Ollama"})
         return discovered
 
