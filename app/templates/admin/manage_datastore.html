@@ -4,9 +4,18 @@
 
 {% block content %}
 <input type="hidden" id="ds-id-hidden" value="{{ datastore.id }}">
+<!-- Vis Network for Knowledge Graph -->
+<script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+
 <div class="space-y-8">
-    <div class="flex justify-start">
+    <div class="flex justify-between items-center">
         <a href="{{ url_for('admin_datastores') }}" class="text-[var(--color-primary-500)] hover:text-[var(--color-primary-700)]">&larr; Back to Data Stores</a>
+        
+        <!-- Tab Switches -->
+        <div class="flex bg-black/40 p-1 rounded-xl border border-white/10">
+            <button onclick="switchDSTab('files')" id="tab-btn-files" class="px-6 py-2 rounded-lg text-xs font-black uppercase transition-all bg-indigo-600 text-white">🗄️ File Manager</button>
+            <button onclick="switchDSTab('graph')" id="tab-btn-graph" class="px-6 py-2 rounded-lg text-xs font-black uppercase transition-all text-gray-500 hover:text-white">🕸️ Knowledge Graph</button>
+        </div>
     </div>
 
     <!-- Live Progress Console -->
@@ -23,7 +32,31 @@
         </div>
     </div>
 
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+    <!-- VIEW: FILE MANAGER -->
+    <div id="ds-view-files" class="space-y-8">
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        <!-- Search/Test Interface -->
+        <div class="lg:col-span-1">
+            <div class="card-style border-indigo-500/30 bg-indigo-500/5 h-full">
+                <h2 class="card-header text-xl font-bold mb-4 flex items-center gap-2">
+                    <svg class="w-5 h-5 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+                    Semantic Search Test
+                </h2>
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">Query</label>
+                        <input type="text" id="test-query-input" placeholder="Enter a concept to search..." class="w-full p-2.5 rounded-lg bg-black/40 border border-white/10 text-sm outline-none focus:border-indigo-500">
+                    </div>
+                    <button onclick="runSemanticTest()" id="test-query-btn" class="w-full py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg font-black text-[10px] uppercase tracking-widest transition-all">Execute Probe</button>
+                    
+                    <div id="test-results-container" class="hidden space-y-3 mt-4 max-h-[400px] overflow-y-auto custom-scrollbar pr-2">
+                        <!-- Results injected here -->
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="lg:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-8">
         <!-- Single File Upload -->
         <div class="card-style">
             <h2 class="card-header text-xl font-bold mb-4">Upload Document</h2>
@@ -67,9 +100,18 @@
         </div>
     </div>
 
-    <div class="card-style">
-        <h2 class="card-header text-xl font-bold mb-4">Indexed Documents</h2>
-        <div class="overflow-x-auto">
+        </div>
+
+        <div class="card-style">
+            <h2 class="card-header text-xl font-bold mb-4">Indexed Documents</h2>
+        <div class="overflow-x-auto min-h-[300px] relative">
+            <!-- Spinner -->
+            <div id="docs-loading-spinner" class="absolute inset-0 bg-black/40 backdrop-blur-sm z-10 flex flex-col items-center justify-center gap-3">
+                <div class="w-12 h-12 border-4 border-teal-500/20 border-t-teal-500 rounded-full animate-spin"></div>
+                <span class="text-xs font-black text-teal-400 uppercase tracking-widest animate-pulse">Initializing SafeStore Engine...</span>
+                <p class="text-[10px] text-gray-500">Loading vectorizer and database connections</p>
+            </div>
+
             <table class="w-full text-left">
                 <thead>
                     <tr class="text-gray-500 text-xs uppercase border-b border-white/10">
@@ -78,37 +120,111 @@
                         <th class="p-3 text-right">Actions</th>
                     </tr>
                 </thead>
-                <tbody class="divide-y divide-white/5">
-                    {% for doc in documents %}
-                    <tr class="hover:bg-white/5 transition-colors">
-                        <td class="p-3 text-sm text-gray-300 font-mono break-all">{{ doc.file_path }}</td>
-                        <td class="p-3 text-sm text-gray-400 font-bold">{{ doc.chunk_count }}</td>
-                        <td class="p-3 text-right">
-                            <form action="{{ url_for('admin_delete_datastore_doc', ds_id=datastore.id) }}" method="post" class="m-0" onsubmit="return confirm('Delete this document from the index?');">
-                                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                                <input type="hidden" name="file_path" value="{{ doc.file_path }}">
-                                <button type="submit" class="text-red-400 hover:text-red-300 font-bold text-xs uppercase">Delete</button>
-                            </form>
-                        </td>
-                    </tr>
-                    {% else %}
-                    <tr>
-                        <td colspan="2" class="p-8 text-center text-gray-500 italic">No documents indexed in this store yet.</td>
-                    </tr>
-                    {% endfor %}
+                <tbody id="docs-tbody" class="divide-y divide-white/5">
+                    <!-- Populated via boot AJAX -->
                 </tbody>
             </table>
         </div>
     </div>
 </div>
+
 <script>
     (function() {
-        const dsId = document.getElementById('ds-id-hidden').value;
+        // Use a locally scoped variable and check for existing value
+        let currentDsId = document.getElementById('ds-id-hidden').value;
+        let network = null;
+
+        window.switchDSTab = (tab) => {
+            const fileView = document.getElementById('ds-view-files');
+            const graphView = document.getElementById('ds-view-graph');
+            const fileBtn = document.getElementById('tab-btn-files');
+            const graphBtn = document.getElementById('tab-btn-graph');
+
+            if (tab === 'files') {
+                fileView.classList.remove('hidden');
+                graphView.classList.add('hidden');
+                fileBtn.className = "px-6 py-2 rounded-lg text-xs font-black uppercase transition-all bg-indigo-600 text-white";
+                graphBtn.className = "px-6 py-2 rounded-lg text-xs font-black uppercase transition-all text-gray-500 hover:text-white";
+            } else {
+                fileView.classList.add('hidden');
+                graphView.classList.remove('hidden');
+                graphBtn.className = "px-6 py-2 rounded-lg text-xs font-black uppercase transition-all bg-fuchsia-600 text-white";
+                fileBtn.className = "px-6 py-2 rounded-lg text-xs font-black uppercase transition-all text-gray-500 hover:text-white";
+                refreshGraph();
+            }
+        };
+
+        window.refreshGraph = async () => {
+            const container = document.getElementById('kg-viz-container');
+            const emptyState = document.getElementById('kg-empty-state');
+            
+            try {
+                const resp = await fetch(`/admin/datastores/${currentDsId}/graph_data`);
+                const data = await resp.json();
+                
+                if (!data.nodes || data.nodes.length === 0) {
+                    emptyState.classList.remove('hidden');
+                    return;
+                }
+                
+                emptyState.classList.add('hidden');
+
+                // Map data to vis-network format
+                const nodes = data.nodes.map(n => ({
+                    id: n.id,
+                    label: n.label,
+                    group: n.type,
+                    title: `Type: ${n.type}\nProps: ${JSON.stringify(n.properties)}`
+                }));
+
+                const edges = data.edges;
+
+                const options = {
+                    nodes: {
+                        shape: 'dot',
+                        size: 16,
+                        font: { size: 12, color: '#ffffff' },
+                        borderWidth: 2,
+                        shadow: true
+                    },
+                    edges: {
+                        width: 2,
+                        color: { inherit: 'from' },
+                        smooth: { type: 'continuous' },
+                        arrows: { to: { enabled: true, scaleFactor: 0.5 } },
+                        font: { size: 10, align: 'top', color: '#888' }
+                    },
+                    physics: {
+                        forceAtlas2Based: {
+                            gravitationalConstant: -26,
+                            centralGravity: 0.005,
+                            springLength: 230,
+                            springConstant: 0.18
+                        },
+                        maxVelocity: 146,
+                        solver: 'forceAtlas2Based',
+                        timestep: 0.35,
+                        stabilization: { iterations: 150 }
+                    },
+                    groups: {
+                        Person: { color: { background: '#f472b6', border: '#db2777' } },
+                        Organization: { color: { background: '#60a5fa', border: '#2563eb' } },
+                        Concept: { color: { background: '#a78bfa', border: '#7c3aed' } }
+                    }
+                };
+
+                if (network) network.destroy();
+                network = new vis.Network(container, { nodes, edges }, options);
+                
+            } catch(e) {
+                console.error("Graph visualization error:", e);
+            }
+        };
         const consoleEl = document.getElementById('ds-console');
         const containerEl = document.getElementById('ds-console-container');
 
         window.viewDocument = async function(filePath) {
-            const url = `/admin/datastores/${dsId}/view_doc?file_path=${encodeURIComponent(filePath)}`;
+            const url = `/admin/datastores/${currentDsId}/view_doc?file_path=${encodeURIComponent(filePath)}`;
             window.showModal("Loading Document...", '<div class="p-10 text-center animate-pulse text-teal-500 font-bold">Reconstructing text from chunks...</div>');
             try {
                 const resp = await fetch(url);
@@ -144,7 +260,7 @@
         const evtSource = new EventSource("{{ url_for('sse_events') }}");
         evtSource.onmessage = (e) => {
             const msg = JSON.parse(e.data);
-            if (msg.id === `sys_ds_${dsId}`) {
+            if (msg.id === `sys_ds_${currentDsId}` || msg.id === `sys_ds_graph_${currentDsId}`) {
                 let color = (msg.type === 'error') ? 'text-red-400 font-bold' : (msg.type === 'completed' ? 'text-green-400 font-bold' : 'text-teal-200');
                 if (msg.error) logToConsole(msg.error, color);
                 if (msg.type === 'completed' && (msg.error.toLowerCase().includes("finish") || msg.error.toLowerCase().includes("index"))) {
@@ -152,6 +268,109 @@
                 }
             }
         };
-    })();
+        // --- Semantic Test Logic ---
+        window.runSemanticTest = async () => {
+            const query = document.getElementById('test-query-input').value;
+            const btn = document.getElementById('test-query-btn');
+            const resBox = document.getElementById('test-results-container');
+            
+            if (!query) return;
+            
+            btn.disabled = true;
+            btn.innerText = "QUERYING...";
+            resBox.classList.remove('hidden');
+            resBox.innerHTML = '<div class="p-4 text-center text-[10px] text-indigo-400 animate-pulse font-bold">Scanning vector space...</div>';
+
+            try {
+                const formData = new FormData();
+                formData.append('query', query);
+                formData.append('csrf_token', "{{ csrf_token }}");
+                
+                const resp = await fetch(`/admin/datastores/${currentDsId}/test_query`, { method: 'POST', body: formData });
+                const data = await resp.json();
+                
+                if (data.results && data.results.length > 0) {
+                    resBox.innerHTML = data.results.map(r => `
+                        <div class="bg-black/40 border border-white/5 p-3 rounded-lg">
+                            <div class="flex justify-between items-center mb-2">
+                                <span class="text-[9px] font-black px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400">${r.score}% Match</span>
+                                <span class="text-[9px] text-gray-600 truncate max-w-[150px]">${r.source}</span>
+                            </div>
+                            <p class="text-[11px] text-gray-300 leading-relaxed">${r.text}</p>
+                        </div>
+                    `).join('');
+                } else {
+                    resBox.innerHTML = '<div class="p-4 text-center text-xs text-gray-500 italic">No relevant chunks found.</div>';
+                }
+            } catch(e) {
+                resBox.innerHTML = `<div class="p-2 text-red-400 text-[10px]">Error: ${e.message}</div>`;
+            } finally {
+                btn.disabled = false;
+                btn.innerText = "Execute Probe";
+            }
+        };
+
+        // --- ASYNC ENGINE BOOT ---
+        async function bootEngine() {
+            const spinner = document.getElementById('docs-loading-spinner');
+            const tbody = document.getElementById('docs-tbody');
+            const csrfToken = "{{ csrf_token }}";
+
+            try {
+                const resp = await fetch(`/admin/datastores/${currentDsId}/boot`, {
+                    method: 'POST',
+                    headers: { 'X-CSRF-Token': csrfToken }
+                });
+                const data = await resp.json();
+
+                if (data.success) {
+                    renderDocuments(data.documents);
+                } else {
+                    tbody.innerHTML = `<tr><td colspan="3" class="p-10 text-center text-red-400">Failed to load engine: ${data.error}</td></tr>`;
+                }
+            } catch (e) {
+                tbody.innerHTML = `<tr><td colspan="3" class="p-10 text-center text-red-400">Connection Error during boot.</td></tr>`;
+            } finally {
+                if (spinner) spinner.classList.add('hidden');
+            }
+        }
+
+        function renderDocuments(docs) {
+            const tbody = document.getElementById('docs-tbody');
+            if (!docs || docs.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="3" class="p-10 text-center text-gray-500 italic">No documents indexed in this store yet.</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = docs.map(doc => {
+                // Escape quotes for the data attribute
+                const safePath = doc.file_path.replace(/"/g, '&quot;');
+                
+                return `
+                <tr>
+                    <td class="p-3 text-xs font-mono text-indigo-300 truncate max-w-md" title="${doc.file_path}">${doc.file_path}</td>
+                    <td class="p-3 text-xs text-gray-400">${doc.chunk_count || 'N/A'}</td>
+                    <td class="p-3 text-right">
+                        <div class="flex justify-end gap-3">
+                            <button 
+                                onclick="viewDocument(this.dataset.path)" 
+                                data-path="${safePath}" 
+                                class="text-indigo-400 font-bold text-xs uppercase hover:text-indigo-300">
+                                View
+                            </button>
+                            <form action="/admin/datastores/${currentDsId}/delete_doc" method="post" onsubmit="return confirm('Delete chunks for this file?');" class="m-0">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                <input type="hidden" name="file_path" value="${safePath}">
+                                <button type="submit" class="text-red-400 font-bold text-xs uppercase hover:text-red-300">Delete</button>
+                            </form>
+                        </div>
+                    </td>
+                </tr>
+            `;
+            }).join('');
+        }
+
+        bootEngine();
+    })();    
 </script>
 {% endblock %}

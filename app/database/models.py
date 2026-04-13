@@ -211,19 +211,18 @@ class VirtualAgent(Base):
     mcp_servers = Column(JSON, nullable=True)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
-
-class DataStore(Base):
-    __tablename__ = "data_stores"
+class UserToolData(Base):
+    __tablename__ = "user_tool_data"
     id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, unique=True, index=True, nullable=False)
-    description = Column(String, nullable=True)
-    db_path = Column(String, nullable=False)
-    vectorizer_name = Column(String, default="tfidf")
-    vectorizer_config = Column(JSON, nullable=True)
-    chunking_strategy = Column(String, default="recursive")
-    chunk_size = Column(Integer, default=512)
-    chunk_overlap = Column(Integer, default=50)
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    library_name = Column(String, nullable=False, index=True)
+    key = Column(String, nullable=False, index=True)
+    value = Column(JSON, nullable=False)
+    is_persistent = Column(Boolean, default=True)
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+
+    __table_args__ = (UniqueConstraint("user_id", "library_name", "key", name="uq_user_tool_key"),)
+
 
 class BotConfig(Base):
     __tablename__ = "bot_configs"

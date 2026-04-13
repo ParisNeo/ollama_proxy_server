@@ -5,6 +5,7 @@
     "last_node_id": 7,
     "last_link_id": 8,
     "nodes": [
+      { "id": 100, "type": "hub/note", "pos": [450, -180], "properties": { "content": "# Live Web RAG\\n1. **Search**: Query Wikipedia or Google.\\n2. **Compose**: Merge live results with the chat history.\\n3. **Answer**: The AI answers based on real-time internet data." } },
       { "id": 1, "type": "hub/input", "pos": [50, 50], "outputs": [{ "name": "Messages", "links": [1, 7] }, { "name": "Settings", "links": [8] }, { "name": "Input", "links": [2] }] },
       { "id": 2, "type": "hub/web_search", "pos": [450, 400], "inputs": [{ "name": "Query", "link": 2 }], "outputs": [{ "name": "Results", "links": [3] }], "properties": { "service": "wikipedia", "max_results": 3 } },
       { "id": 4, "type": "hub/system_composer", "pos": [450, 50], "inputs": [{ "name": "Persona", "link": null }, { "name": "Skill 1", "link": null }, { "name": "RAG Context", "link": 3 }], "outputs": [{ "name": "System String", "links": [4] }] },

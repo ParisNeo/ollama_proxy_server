@@ -131,5 +131,57 @@
             </table>
         </div>
     </div>
+
+    <!-- VIEW: KNOWLEDGE GRAPH -->
+    <div id="ds-view-graph" class="hidden space-y-8 h-full flex flex-col">
+        <div class="grid grid-cols-1 lg:grid-cols-4 gap-8">
+            <!-- Sidebar: Ontology Editor -->
+            <div class="lg:col-span-1 space-y-6">
+                <div class="card-style border-fuchsia-500/20 bg-fuchsia-500/5">
+                    <h3 class="text-sm font-black text-fuchsia-400 uppercase tracking-widest mb-4 flex items-center gap-2">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 4a2 2 0 114 0v1a1 1 0 001 1h3a1 1 0 011 1v3a1 1 0 01-1 1h-1a2 2 0 100 4h1a1 1 0 011 1v3a1 1 0 01-1 1h-3a1 1 0 01-1-1v-1a2 2 0 10-4 0v1a1 1 0 01-1 1H7a1 1 0 01-1-1v-3a1 1 0 00-1-1H4a2 2 0 110-4h1a1 1 0 001-1V7a1 1 0 011-1h3a1 1 0 001-1V4z"></path></svg>
+                        Extraction Ontology
+                    </h3>
+                    <p class="text-[10px] text-gray-500 mb-4 leading-relaxed">Define the nodes and relationships the AI should look for during indexing.</p>
+                    
+                    <form action="{{ url_for('admin_build_datastore_graph', ds_id=datastore.id) }}" method="post" class="space-y-4">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                        <textarea name="ontology_json" rows="12" class="w-full bg-black/60 border border-white/10 rounded-lg p-3 font-mono text-[10px] text-fuchsia-300 outline-none focus:border-fuchsia-500">
+{
+  "nodes": {
+    "Concept": {"description": "A high-level idea or technology"},
+    "Person": {"description": "A named individual"},
+    "Organization": {"description": "A company or group"}
+  },
+  "relationships": {
+    "RELATED_TO": {"description": "General connection"},
+    "WORKS_FOR": {"description": "Employment", "source": "Person", "target": "Organization"}
+  }
+}</textarea>
+                        <button type="submit" class="w-full py-3 bg-fuchsia-600 hover:bg-fuchsia-500 text-white font-black text-xs uppercase tracking-widest rounded-xl shadow-lg transition-all">
+                            Build Graph via AI
+                        </button>
+                    </form>
+                </div>
+            </div>
+
+            <!-- Main: Visualization Stage -->
+            <div class="lg:col-span-3 flex flex-col min-h-[600px]">
+                <div class="card-style flex-grow p-0 overflow-hidden relative border-indigo-500/20 bg-black">
+                    <div class="absolute top-4 left-4 z-10 flex gap-2">
+                        <button onclick="refreshGraph()" class="bg-indigo-600/80 hover:bg-indigo-600 text-white p-2 rounded-lg" title="Refresh Visualization">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+                        </button>
+                    </div>
+                    <div id="kg-viz-container" class="w-full h-full min-h-[600px]"></div>
+                    
+                    <div id="kg-empty-state" class="absolute inset-0 flex flex-col items-center justify-center bg-black/60 backdrop-blur-sm">
+                        <p class="text-gray-500 italic mb-4">No knowledge graph data extracted yet.</p>
+                        <button onclick="refreshGraph()" class="text-xs font-bold text-indigo-400 hover:underline uppercase tracking-tighter">Scan Database Now</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
 </div>
 {% endblock %}

@@ -55,6 +55,7 @@ class NodeRegistry:
         
         try:
             import app.nodes.standard
+            import app.nodes.standard.utility_nodes # Explicitly include new file
             import app.nodes.custom
             
             for package in [app.nodes.standard, app.nodes.custom]:

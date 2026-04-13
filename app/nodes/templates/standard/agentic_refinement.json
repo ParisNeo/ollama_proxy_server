@@ -5,6 +5,7 @@
     "last_node_id": 10,
     "last_link_id": 12,
     "nodes": [
+      { "id": 100, "type": "hub/note", "pos": [450, -150], "properties": { "content": "# Self-Correction Loop\\n- **Agent 1**: Creates the initial draft.\\n- **Composer**: Re-frames the output as a refinement task.\\n- **Agent 2**: Polishes and fixes the draft." } },
       { "id": 1, "type": "hub/input", "pos": [50, 50], "outputs": [{ "name": "Messages", "links": [1] }, { "name": "Settings", "links": [2] }] },
       { "id": 2, "type": "hub/llm_chat", "pos": [450, 50], "inputs": [{ "name": "Messages", "link": 1 }, { "name": "Settings", "link": 2 }], "outputs": [{ "name": "Content", "links": [3] }], "properties": { "model": "auto", "title": "Drafting Agent" } },
       { "id": 3, "type": "hub/composer", "pos": [450, 300], "inputs": [{ "name": "A", "link": 3 }], "outputs": [{ "name": "Merged", "links": [4] }], "properties": { "template": "Review the following draft and provide improvements:\n\n{A}" } },

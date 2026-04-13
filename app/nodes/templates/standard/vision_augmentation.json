@@ -5,6 +5,7 @@
     "last_node_id": 4,
     "last_link_id": 4,
     "nodes": [
+      { "id": 100, "type": "hub/note", "pos": [450, -150], "properties": { "content": "## Image Hydration Strategy\\nThe **Vision Hydrator** node detects images in user messages and offloads them to a VLM (like LLaVA). It replaces raw pixels with text descriptions, allowing text-only models to 'see' through description." } },
       { "id": 1, "type": "hub/input", "pos": [50, 50], "outputs": [{ "name": "Messages", "links": [1] }, { "name": "Settings", "links": [3] }] },
       { "id": 2, "type": "hub/vision", "pos": [450, 50], "inputs": [{ "name": "In Messages", "link": 1 }], "outputs": [{ "name": "Out Messages", "links": [2] }], "properties": { "vlm": "auto" } },
       { "id": 3, "type": "hub/llm_chat", "pos": [850, 50], "inputs": [{ "name": "Messages", "link": 2 }, { "name": "Settings", "link": 3 }], "outputs": [{ "name": "Content", "links": [4] }], "properties": { "model": "auto" } },

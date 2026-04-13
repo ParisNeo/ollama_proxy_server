@@ -13,13 +13,14 @@ from app.nodes.registry import NodeRegistry
 logger = logging.getLogger(__name__)
 
 class WorkflowEngine:
-    def __init__(self, db, request: Request, request_id: str, sender: str, name: str, graph_data: Dict[str, Any], depth: int, reverse_proxy_fn, resolve_target_fn):
+    def __init__(self, db, request: Request, request_id: str, sender: str, name: str, graph_data: Dict[str, Any], depth: int, reverse_proxy_fn, resolve_target_fn, call_stack: List[str] = None):
         self.db = db
         self.request = request
         self.request_id = request_id
         self.sender = sender
         self.name = name
         self.depth = depth
+        self.call_stack = call_stack or []
         self.nodes = {n["id"]: n for n in graph_data.get("nodes", [])}
         self.memo = {}
         
@@ -51,26 +52,21 @@ class WorkflowEngine:
             if link:
                 src_node = self.nodes.get(link[1])
                 # --- LATENCY FIX: Terminal LLM Passthrough ---
-                # If the last node before Output is an LLM, don't execute it here (which is blocking).
-                # Instead, resolve all its inputs and return them to the proxy for a streaming call.
                 if src_node and src_node["type"] in ("hub/llm_chat", "hub/llm_instruct", "hub/model"):
                     props = src_node.get("properties", {})
                     target_model = str(props.get("model", "auto")).strip()
                     
-                    # Resolve inputs for the LLM node
                     val = await self._resolve_input_by_name(src_node, "Messages")
                     if val is None: val = await self._resolve_input_by_name(src_node, "Prompt")
                     if val is None: val = await self._resolve_input(src_node, 0)
                     
                     resolved_messages = val if isinstance(val, list) else [{"role": "user", "content": str(val)}]
 
-                    # Handle dynamic settings (Temperature, etc)
                     settings = await self._resolve_input_by_name(src_node, "Settings")
                     if settings is None: settings = await self._resolve_input(src_node, 1)
                     if isinstance(settings, dict) and self.request:
                         self.request.state.graph_temperature = settings.get("temperature")
 
-                    # Handle Tools
                     final_tools = []
                     for inp_idx, inp in enumerate(src_node.get("inputs", [])):
                         if inp.get("name", "").startswith("Tool"):
@@ -82,8 +78,11 @@ class WorkflowEngine:
                     if final_tools and self.request:
                         self.request.state.graph_tools = final_tools
 
-                    # Recursively resolve the model name (in case of Agents/Routers)
-                    return await self.resolve_target_fn(self.db, target_model, resolved_messages, self.depth + 1, self.request, self.request_id, self.sender)
+                    # Recursively resolve with current call stack
+                    return await self.resolve_target_fn(
+                        self.db, target_model, resolved_messages, self.depth + 1, 
+                        self.request, self.request_id, self.sender, call_stack=self.call_stack
+                    )
 
                 # For static outputs (Composers, Datastores), resolve normally
                 final_val = await self.resolve_node_output(link[1], link[2])
@@ -118,53 +117,76 @@ class WorkflowEngine:
         return result
 
     async def execute_cognitive_path(self, link_id_or_name: Any, history: Any) -> str:
+        """
+        Executes an isolated AI call for a specific path in the graph.
+        Handles both raw model strings and structured Expert Bundles.
+        """
+        m_target = "auto"
+        persona_injection = ""
+        tools_to_attach = []
+        inference_options = {}
+
         if isinstance(link_id_or_name, int):
             link = self.links.get(link_id_or_name)
             if not link: return ""
-            src_node = self.nodes.get(link[1])
-            if not src_node: return ""
             
-            if src_node["type"] == "hub/model":
-                bundle = await self.resolve_node_output(link[1], link[2])
-                if isinstance(bundle, dict) and bundle.get("type") == "expert_bundle":
-                    m_target = bundle["model"]
-                    p_part = f"## Identity\n{bundle['persona']}" if bundle.get('persona') else ""
-                    s_part = "\n\n## Expert Skills\n" + "\n\n".join(bundle['skills']) if bundle.get('skills') else ""
-                    persona_injection = p_part + s_part
-                    inference_options = {"temperature": bundle["temperature"]} if bundle.get("temperature") is not None else {}
-                else: return ""
-            elif src_node["type"] not in ("hub/llm_chat", "hub/llm_instruct"):
-                return str(await self.resolve_node_output(link[1], link[2]))
+            # Resolve the source data (might be a string or a bundle dict)
+            source_data = await self.resolve_node_output(link[1], link[2])
+            
+            if isinstance(source_data, dict) and source_data.get("type") == "expert_bundle":
+                # --- HYDRATE EXPERT BUNDLE ---
+                m_target = source_data["model"]
+                
+                # Combine Persona + Skills into one high-quality system prompt
+                p_part = f"## Identity\n{source_data['personality']}" if source_data.get('personality') else ""
+                s_part = "\n\n## Expert Capabilities\n" + "\n\n".join(source_data['skills']) if source_data.get('skills') else ""
+                persona_injection = (p_part + s_part).strip()
+                
+                tools_to_attach = source_data.get("tools", [])
+                if source_data.get("temperature") is not None:
+                    inference_options["temperature"] = source_data["temperature"]
             else:
-                m_target = src_node.get("properties", {}).get("model", "auto")
-                persona_injection = ""
-                inference_options = {}
+                # Legacy / String path
+                m_target = str(source_data or "auto")
         else:
             m_target = str(link_id_or_name)
-            persona_injection = ""
-            inference_options = {}
 
+        # 1. Prepare Conversation History
         hydrated_history = list(history) if isinstance(history, list) else [{"role": "user", "content": str(history)}]
+        
+        # 2. Inject Persona if provided
         if persona_injection:
+            # Strip previous system prompts to ensure the Expert's specific soul takes precedence
             hydrated_history = [m for m in hydrated_history if m.get("role") != "system"]
             hydrated_history.insert(0, {"role": "system", "content": persona_injection})
 
+        # 3. Resolve Workflows (Recursive)
         from app.database.models import Workflow
         wf_check = await self.db.execute(select(Workflow).filter(Workflow.name == m_target, Workflow.is_active == True))
         if wf_check.scalars().first():
-            res_model, res_msgs = await self.resolve_target_fn(self.db, m_target, hydrated_history, self.depth+1, self.request, self.request_id, self.sender)
-            servers = await server_crud.get_servers_with_model(self.db, res_model)
-            if not servers: return f"[Error] Sub-workflow '{res_model}' offline."
-            resp, _ = await self.reverse_proxy_fn(self.request, "chat", servers, json.dumps({"model": res_model, "messages": res_msgs, "stream": False}).encode(), is_subrequest=True)
-            return json.loads(resp.body.decode()).get("message", {}).get("content", "") if hasattr(resp, 'body') else ""
+            res_model, res_msgs = await self.resolve_target_fn(self.db, m_target, hydrated_history, self.depth+1, self.request, self.request_id, self.sender, call_stack=self.call_stack)
+            m_target = res_model
+            hydrated_history = res_msgs
 
+        # 4. Execute Backend Call
         servers = await server_crud.get_servers_with_model(self.db, m_target)
-        if not servers: return f"[Error] Expert '{m_target}' offline."
+        if not servers: return f"[Error] Expert Model '{m_target}' is currently offline."
         
-        payload = {"model": m_target, "messages": hydrated_history, "stream": False}
-        if inference_options: payload["options"] = inference_options
-        resp, _ = await self.reverse_proxy_fn(self.request, "chat", servers, json.dumps(payload).encode(), is_subrequest=True, sender="graph-moe-expert")
-        return json.loads(resp.body.decode()).get("message", {}).get("content", "") if hasattr(resp, 'body') else ""
+        payload = {
+            "model": m_target, 
+            "messages": hydrated_history, 
+            "stream": False,
+            "tools": tools_to_attach,
+            "options": inference_options
+        }
+        
+        resp, _ = await self.reverse_proxy_fn(self.request, "chat", servers, json.dumps(payload).encode(), is_subrequest=True, sender="graph-expert-path")
+        
+        if hasattr(resp, 'body'):
+            data = json.loads(resp.body.decode())
+            return data.get("message", {}).get("content", "Empty response.")
+        
+        return ""
 
     async def _evaluate_node(self, node: Dict[str, Any], output_slot_idx: int) -> Any:
         ntype = node["type"]

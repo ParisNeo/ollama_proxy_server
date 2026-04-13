@@ -5,6 +5,7 @@
     "last_node_id": 5,
     "last_link_id": 5,
     "nodes": [
+      { "id": 100, "type": "hub/note", "pos": [450, -180], "properties": { "content": "# Persona Implementation\\nThis template uses the **Personality Selector** to choose a specific 'Soul'. The **System Modifier** then replaces any default instructions with the chosen personality before the call." } },
       { "id": 1, "type": "hub/input", "pos": [50, 50], "outputs": [{ "name": "Messages", "links": [1] }, { "name": "Settings", "links": [5] }] },
       { "id": 2, "type": "hub/personality", "pos": [50, 350], "outputs": [{ "name": "System Prompt", "links": [2] }], "properties": { "name": "Standard Assistant" } },
       { "id": 3, "type": "hub/system_modifier", "pos": [450, 50], "inputs": [{ "name": "Messages", "link": 1 }, { "name": "System Prompt", "link": 2 }], "outputs": [{ "name": "Updated Messages", "links": [3] }], "properties": { "replace_all": true } },

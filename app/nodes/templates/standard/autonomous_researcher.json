@@ -5,6 +5,7 @@
     "last_node_id": 10,
     "last_link_id": 10,
     "nodes": [
+      { "id": 100, "type": "hub/note", "pos": [550, -150], "properties": { "content": "# Agentic Loop (ReAct)\\nThe **Autonomous Agent** node will 'loop' internally. It thinks, chooses a tool, observes the result, and repeats until the research goal is met." } },
       { "id": 1, "type": "hub/input", "pos": [50, 50], "outputs": [{ "name": "Messages", "links": [1] }, { "name": "Settings", "links": [2] }] },
       { "id": 2, "type": "hub/tool_selector", "pos": [50, 300], "outputs": [{ "name": "Tool Schema", "links": [3] }], "properties": { "library": "wikipedia_search.py", "function": "tool_search_wikipedia" } },
       { "id": 3, "type": "hub/agent", "pos": [550, 50], "inputs": [{ "name": "In Messages", "link": 1 }, { "name": "Settings", "link": 2 }, { "name": "Tool 1", "link": 3 }], "outputs": [{ "name": "Final Answer", "links": [4] }], "properties": { "max_turns": 10, "model": "auto" } },

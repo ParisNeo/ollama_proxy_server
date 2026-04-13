@@ -291,6 +291,37 @@
             </div>
         </div>
             
+        <!-- Portable Tools & Multi-User Persistence Section -->
+        <div id="tool-portability" class="card-style scroll-mt-20 border-l-4 border-sky-500">
+            <h2 class="card-header text-2xl font-bold mb-6 pb-2">🛠️ Portable Tools & User Persistence</h2>
+            <div class="space-y-6 text-current">
+                <p>LoLLMs Hub follows the <b>Standard Host Interface</b> protocol. This allows tools developed here to run unchanged in the LoLLMs PyQt app or the WebUI.</p>
+                
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div class="p-4 bg-white/5 rounded-lg border border-white/10">
+                        <h4 class="font-bold text-sky-400 mb-2">The 'lollms' Parameter</h4>
+                        <p class="text-sm">To access user-specific data, add <code>lollms</code> to your function signature. The Hub will automatically inject the host interface.</p>
+                        <pre class="text-[10px] mt-2 bg-black/40 p-2 rounded">def tool_my_logic(args, lollms=None):
+    if lollms:
+        username = lollms.user['username']</pre>
+                    </div>
+                    <div class="p-4 bg-white/5 rounded-lg border border-white/10">
+                        <h4 class="font-bold text-sky-400 mb-2">Persistence API</h4>
+                        <p class="text-sm">Never use <code>open()</code> for state. Use the host methods to ensure data is isolated by user and tool library.</p>
+                        <ul class="text-xs space-y-1 mt-2 list-disc list-inside">
+                            <li><code>lollms.set(key, val, persistent=True)</code></li>
+                            <li><code>lollms.get(key, default)</code></li>
+                            <li><code>lollms.delete(key)</code></li>
+                        </ul>
+                    </div>
+                </div>
+
+                <div class="mt-4 p-3 rounded-md text-sm warning-box">
+                    <strong>Portability Mandate:</strong> Do <u>not</u> import any files from the <code>app/</code> directory. Use <code>pipmaster</code> for external libraries and the <code>lollms</code> object for everything else.
+                </div>
+            </div>
+        </div>
+
         <!-- Skills & Personalities Section -->
         <div id="skills-personalities" class="card-style scroll-mt-20">
             <h2 class="card-header text-2xl font-bold mb-6 pb-2">🧠 Skills & Personalities</h2>
@@ -453,6 +484,7 @@ print(response.json())
                         <li><a href="#statistics" class="toc-link">Usage Statistics</a></li>
                         <li><a href="#security" class="toc-link">Security Features</a></li>
                         <li><a href="#examples" class="toc-link">Usage Examples</a></li>
+                        <li><a href="#tool-portability" class="toc-link">Portable Tools (Standard)</a></li>
                         <li><a href="#skills-personalities" class="toc-link">Skills & Personalities</a></li>
                         <li><a href="#redis-setup" class="toc-link">Redis Setup</a></li>
                         <li><a href="#home-hub" class="toc-link">Home AI Hub</a></li>

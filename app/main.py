@@ -313,11 +313,11 @@ async def add_security_headers(request: Request, call_next):
     response.headers["X-Frame-Options"] = "DENY"
     csp_policy = (
         "default-src 'self'; "
-        "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.tailwindcss.com https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; "
+        "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.tailwindcss.com https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://unpkg.com; "
         "style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; "
         "font-src 'self' data:; "
         "img-src 'self' https: data:; "
-        "connect-src 'self'; "
+        "connect-src 'self' https://unpkg.com; "
         "object-src 'none'; "
         "base-uri 'self'; "
         "form-action 'self';"
@@ -435,7 +435,11 @@ if __name__ == "__main__":
             configs.append(uvicorn.Config("app.main:app", host="0.0.0.0", port=app_settings.openai_port, 
                                          ssl_keyfile=ssl_keyfile, ssl_certfile=ssl_certfile, log_config=None))
 
-        servers = [uvicorn.Server(cfg) for cfg in configs]
+        try:
+            servers = [uvicorn.Server(cfg) for cfg in configs]
+        except Exception as e:
+            logger.error(f"Failed to initialize servers: {e}")
+            return
 
         # Patch first server for banner
         original_startup = servers[0].startup

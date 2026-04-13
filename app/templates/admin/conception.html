@@ -276,7 +276,10 @@
             <div class="w-64 border-r border-white/10 p-4 space-y-4 overflow-y-auto custom-scrollbar">
                 <h3 class="text-[10px] font-black text-gray-500 uppercase tracking-widest">Your Custom Nodes</h3>
                 <div id="custom-nodes-list" class="space-y-1"></div>
-                <button onclick="initNewNode()" class="w-full py-2 border border-dashed border-white/20 rounded-lg text-[10px] font-bold text-gray-500 hover:border-indigo-500 hover:text-indigo-400">+ New Node Type</button>
+                <div class="flex flex-col gap-2">
+                    <button onclick="initNewNode()" class="w-full py-2 border border-dashed border-white/20 rounded-lg text-[10px] font-bold text-gray-500 hover:border-indigo-500 hover:text-indigo-400">+ Manual New Node</button>
+                    <button onclick="window.openNodeSculptor()" class="w-full py-2 bg-purple-600/20 text-purple-400 border border-purple-500/30 rounded-lg text-[10px] font-black uppercase tracking-widest hover:bg-purple-600/40 transition-all">✨ AI Node Sculptor</button>
+                </div>
             </div>
             <!-- Single Unified Editor -->
             <div class="flex-1 flex flex-col bg-[#0a0a0f]">
@@ -290,6 +293,20 @@
             </div>
         </div>
     </div>
+
+    <!-- AI Node Sculptor Template -->
+    <template id="ai-node-sculptor-template">
+        <div class="space-y-4">
+            <div class="p-3 bg-purple-500/10 border border-purple-500/30 rounded-lg">
+                <h4 class="text-[10px] font-black text-purple-400 uppercase tracking-widest mb-1">AI Node Sculptor</h4>
+                <p class="text-[11px] text-gray-400 leading-relaxed">Describe a specialized node you need (e.g. "A node that connects to the Spotify API and returns the current track"). The AI will generate both the Python execution logic and the LiteGraph UI.</p>
+            </div>
+            <textarea id="build-node-prompt" class="w-full h-32 p-3 bg-black/40 border border-white/10 rounded-xl text-sm text-white focus:border-purple-500 outline-none" placeholder="Describe the node behavior and inputs/outputs..."></textarea>
+            {% include 'partials/_file_upload.html' %}
+            <div id="build-node-status" class="hidden bg-black/60 border border-white/10 rounded-lg p-3 h-24 overflow-y-auto font-mono text-[10px] text-gray-400 space-y-1 custom-scrollbar"></div>
+            <button onclick="window.executeNodeBuild()" id="node-build-run-btn" class="w-full py-3 bg-purple-600 hover:bg-purple-500 rounded-xl font-black text-xs uppercase tracking-widest transition-all">Sculpt Node Class</button>
+        </div>
+    </template>
 
     <!-- AI Build Modal Template (Global Scope) -->
     <template id="ai-graph-builder-template">
@@ -349,9 +366,9 @@
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16m-7 6h7"></path></svg>
                     Auto Layout
                 </button>
-                <button onclick="window.openGraphArchitect()" class="bg-purple-600/20 hover:bg-purple-600/40 border border-purple-500/30 px-4 py-2 rounded-xl font-black text-xs uppercase tracking-widest text-purple-300 transition-all flex items-center gap-2">
+                <button onclick="window.openGraphArchitect('edit')" class="bg-purple-600/20 hover:bg-purple-600/40 border border-purple-500/30 px-4 py-2 rounded-xl font-black text-xs uppercase tracking-widest text-purple-300 transition-all flex items-center gap-2">
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
-                    AI Architect
+                    Update with AI
                 </button>
                 <button onclick="testInPlayground()" class="bg-emerald-600 hover:bg-emerald-500 px-6 py-2 rounded-xl font-black text-xs uppercase tracking-widest text-white shadow-lg shadow-emerald-500/20 transition-all flex items-center gap-2">
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
@@ -1123,7 +1140,13 @@
         // Robustness: ensure data is an object
         let graphData = data;
         if (typeof data === 'string') {
-            try { graphData = JSON.parse(data); } catch(e) { console.error("Failed to parse graph data string", e); }
+            try { 
+                graphData = JSON.parse(data); 
+            } catch(e) { 
+                console.error("Failed to parse graph data string", e); 
+                isRestoring = false;
+                return;
+            }
         }
 
         // 1. Clear current state to prevent merging/collision
@@ -1131,25 +1154,28 @@
 
         try {
             // 2. Load the new data
-            if (!graphData.nodes) graphData.nodes = [];
-            graph.configure(graphData);
-
-            // 3. Auto-layout on load to prevent overlapping/crumbled views
-            rearrangeNodes();
-
+            if (graphData && graphData.nodes) {
+                graph.configure(graphData);
+                // 3. Auto-layout on load to prevent overlapping/crumbled views
+                if (typeof window.rearrangeNodes === 'function') {
+                    window.rearrangeNodes();
+                }
+            }
         } catch (err) {
             console.error("LiteGraph configuration failed:", err);
-        }
-        
-        document.getElementById('workflow-name').value = name || "";
-        isRestoring = false;
-        
-        // 3. Reset history stack for the newly loaded graph
-        historyStack = [JSON.stringify(graph.serialize())];
-        historyIndex = 0;
+        } finally {
+            document.getElementById('workflow-name').value = name || "";
+            isRestoring = false;
+            
+            // 4. Reset history stack for the newly loaded graph
+            if (graph) {
+                historyStack = [JSON.stringify(graph.serialize())];
+                historyIndex = 0;
+            }
 
-        // 4. Force UI sync
-        if (canvas) canvas.setDirty(true, true);
+            // 5. Force UI sync
+            if (canvas) canvas.setDirty(true, true);
+        }
     }
 
     // Initialize an empty state on load
@@ -1171,9 +1197,10 @@
                 alert("Failed to delete: " + (err.detail || "Server error"));
             }
         } catch (e) {
+            console.error("Delete request error:", e);
             alert("Connection error: " + e.message);
         }
-    }
+    };
 
     window.testInPlayground = async () => {
         const name = document.getElementById('workflow-name').value;
@@ -1355,33 +1382,42 @@ LiteGraph.registerNodeType("custom/my_unique_id", MyNodeUI);
     window.rearrangeNodes = function() {
         if (!graph || graph._nodes.length === 0) return;
 
-        const nodes = graph._nodes;
+        const allNodes = graph._nodes;
+        // Filter out notes for separate placement
+        const noteNodes = allNodes.filter(n => n.type === "hub/note");
+        const logicNodes = allNodes.filter(n => n.type !== "hub/note");
+        
         const levels = new Map();
-        const spacingX = 550; // Extra width for wide nodes
+        const spacingX = 550;
         const spacingY = 60;
         const startX = 80;
-        const startY = 80;
+        
+        // 1. Separate Layer: Notes at the very top
+        let currentNoteY = 50;
+        noteNodes.forEach(note => {
+            note.pos[0] = startX;
+            note.pos[1] = currentNoteY;
+            currentNoteY += note.size[1] + 40;
+        });
 
-        // 1. Initialize all nodes to level 0
-        nodes.forEach(n => levels.set(n.id, 0));
+        // Calculate offset for logic nodes to start below notes
+        const logicStartY = noteNodes.length > 0 ? currentNoteY + 40 : 80;
 
-        // 2. Iterative Leveling (Longest Path)
-        // Ensures node level = max(parent_level) + 1
+        // 2. Logic Layer: Standard Longest Path Leveling
+        logicNodes.forEach(n => levels.set(n.id, 0));
+
         let changed = true;
         let iterations = 0;
-        const maxIterations = nodes.length * 2;
+        const maxIterations = logicNodes.length * 2;
 
         while (changed && iterations < maxIterations) {
             changed = false;
             iterations++;
-            
-            // Check every link in the graph
             Object.values(graph.links).forEach(link => {
                 if (!link) return;
                 const origin = graph.getNodeById(link.origin_id);
                 const target = graph.getNodeById(link.target_id);
-                
-                if (origin && target) {
+                if (origin && target && origin.type !== "hub/note" && target.type !== "hub/note") {
                     const minTargetLevel = levels.get(origin.id) + 1;
                     if (levels.get(target.id) < minTargetLevel) {
                         levels.set(target.id, minTargetLevel);
@@ -1391,34 +1427,23 @@ LiteGraph.registerNodeType("custom/my_unique_id", MyNodeUI);
             });
         }
 
-        // 3. Group nodes by their calculated levels
         const levelGroups = {};
-        nodes.forEach(node => {
+        logicNodes.forEach(node => {
             const lv = levels.get(node.id);
             if (!levelGroups[lv]) levelGroups[lv] = [];
             levelGroups[lv].push(node);
         });
 
-        // 4. Position nodes in a grid
         Object.keys(levelGroups).sort((a, b) => a - b).forEach(lv => {
-            let currentY = startY;
-            const column = levelGroups[lv];
-            
-            column.forEach(node => {
-                // Ensure size is fresh for vertical calculation
-                node.size = node.computeSize();
-                const nodeWidth = node.size[0];
-                const nodeHeight = node.size[1];
-
-                // Set position: X based on level, Y stacked with spacing
+            let currentY = logicStartY;
+            levelGroups[lv].forEach(node => {
                 node.pos[0] = startX + (lv * spacingX);
                 node.pos[1] = currentY;
-
-                currentY += nodeHeight + spacingY;
+                currentY += node.size[1] + spacingY;
             });
         });
 
-        // 5. Update UI
+        // 3. Update UI
         if (canvas) {
             canvas.setDirty(true, true);
             // Center the view on the new layout
@@ -1433,15 +1458,19 @@ LiteGraph.registerNodeType("custom/my_unique_id", MyNodeUI);
     };
 
     // --- AI GRAPH ARCHITECT (Robust Definition) ---
-    window.openGraphArchitect = () => {
-        console.log("Dispatching AI Architect...");
+    window.openGraphArchitect = (mode = 'build') => {
+        console.log(`Dispatching AI Architect (${mode})...`);
         const template = document.getElementById('ai-graph-builder-template');
-        if (!template) {
-            console.error("Critical: ai-graph-builder-template missing.");
-            return alert("UI Error: Components missing. Refresh page.");
-        }
         
-        window.showModal("Build Workflow with AI Architect", template.innerHTML);
+        const title = mode === 'edit' ? "Refine Workflow with AI" : "Build Workflow with AI Architect";
+        window.showModal(title, template.innerHTML);
+
+        // Update the button for the specific mode
+        const runBtn = document.getElementById('graph-build-run-btn');
+        if (mode === 'edit') {
+            runBtn.innerText = "Apply AI Refinement";
+            runBtn.onclick = () => window.executeGraphBuild('edit');
+        }
         
         // Ensure inputs are bound after modal content is injected into DOM
         setTimeout(() => {
@@ -1462,14 +1491,16 @@ LiteGraph.registerNodeType("custom/my_unique_id", MyNodeUI);
         window.Architect.triggerWebImport('build-graph-prompt', window.openGraphArchitect);
     };
 
-    window.executeGraphBuild = () => {
+    window.executeGraphBuild = (mode = 'build') => {
+        const endpoint = mode === 'edit' ? "{{ url_for('admin_api_edit_workflow') }}" : "{{ url_for('admin_api_build_workflow') }}";
+        
         window.Architect.executeBuild(
             'build-graph-prompt', 
-            "{{ url_for('admin_api_build_workflow') }}", 
+            endpoint, 
             'build-graph-status', 
             'graph-build-run-btn',
             (data) => {
-                // Switch to designer if we were in library
+                // Switch view
                 document.getElementById('library-view').classList.add('hidden');
                 document.getElementById('designer-view').classList.remove('hidden');
                 setTimeout(() => { if(window.resizeCanvas) window.resizeCanvas(); }, 100);
@@ -1477,9 +1508,48 @@ LiteGraph.registerNodeType("custom/my_unique_id", MyNodeUI);
                 clearGraph();
                 graph.configure(data.graph);
                 
-                // Polish the result
+                // Polish
                 rearrangeNodes();
-                document.getElementById('workflow-name').value = "AI Generated Flow";
+                if (mode === 'build') {
+                    document.getElementById('workflow-name').value = "AI Generated Flow";
+                }
+            }
+        );
+
+        // If editing, inject current state via the form data hook
+        if (mode === 'edit') {
+            const originalPrepare = window.Architect.prepareFormData;
+            window.Architect.prepareFormData = function(id) {
+                const fd = originalPrepare.call(this, id);
+                fd.append("current_graph", JSON.stringify(graph.serialize()));
+                return fd;
+            };
+        }
+    };
+
+    // --- AI NODE SCULPTOR ---
+    window.openNodeSculptor = () => {
+        const template = document.getElementById('ai-node-sculptor-template');
+        window.showModal("Sculpt New Node with AI", template.innerHTML);
+        
+        // Bind UI inputs for Architect module
+        setTimeout(() => {
+            document.getElementById('m-img-input').onchange = (e) => window.Architect.handleFiles(e.target.files, () => window.Architect.renderPreviews('m-previews'));
+            document.getElementById('m-doc-input').onchange = (e) => window.Architect.handleFiles(e.target.files, () => window.Architect.renderPreviews('m-previews'));
+        }, 100);
+    };
+
+    window.executeNodeBuild = () => {
+        window.Architect.executeBuild(
+            'build-node-prompt',
+            "{{ url_for('admin_api_save_custom_node') }}?mode=ai_sculpt",
+            'build-node-status',
+            'node-build-run-btn',
+            (data) => {
+                alert(data.message);
+                loadCustomNodes();
+                // Optionally load the generated code into the editor
+                if (data.filename) loadNode(data.filename.replace('.py', ''));
             }
         );
     };

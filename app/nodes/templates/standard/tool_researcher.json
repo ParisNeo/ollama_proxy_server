@@ -5,6 +5,7 @@
     "last_node_id": 5,
     "last_link_id": 4,
     "nodes": [
+      { "id": 100, "type": "hub/note", "pos": [50, -150], "properties": { "content": "# Deterministic Tool Use\\nThis flow connects a specific Python tool to a Chat node. Use this when you want the AI to have access to a tool but remain in a standard conversational mode." } },
       { "id": 1, "type": "hub/input", "pos": [50, 50], "outputs": [{ "name": "Messages", "links": [1] }, { "name": "Settings", "links": [2] }] },
       { "id": 2, "type": "hub/tool_selector", "pos": [50, 300], "outputs": [{ "name": "Tool Schema", "links": [3] }], "properties": { "library": "wikipedia_search.py", "function": "tool_search_wikipedia" } },
       { "id": 3, "type": "hub/system_modifier", "pos": [450, 50], "inputs": [{ "name": "Messages", "link": 1 }], "outputs": [{ "name": "Updated Messages", "links": [4] }], "properties": { "replace_all": false, "system_prompt": "You are a research expert. Use your search tool whenever you need up-to-date information." } },

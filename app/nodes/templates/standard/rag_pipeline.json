@@ -5,6 +5,7 @@
     "last_node_id": 7,
     "last_link_id": 8,
     "nodes": [
+      { "id": 100, "type": "hub/note", "pos": [50, -180], "properties": { "content": "# RAG Pipeline Logic\\n1. **Extract**: Convert chat history to search query.\\n2. **Retrieve**: Scan Datastore for context.\\n3. **Compose**: Merge persona instructions with retrieved text.\\n4. **Generate**: Ask the AI to answer using ONLY the context." } },
       { "id": 1, "type": "hub/input", "pos": [50, 50], "outputs": [{ "name": "Messages", "links": [1, 7] }, { "name": "Settings", "links": [8] }] },
       { "id": 2, "type": "hub/extract_text", "pos": [50, 400], "inputs": [{ "name": "Messages", "link": 1 }], "outputs": [{ "name": "Text", "links": [2] }] },
       { "id": 3, "type": "hub/datastore", "pos": [450, 400], "inputs": [{ "name": "Query", "link": 2 }], "outputs": [{ "name": "Context", "links": [3] }], "properties": { "top_k": 3, "datastore": "" } },

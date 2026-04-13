@@ -589,6 +589,13 @@ async def run_all_migrations(engine: AsyncEngine) -> None:
                 "mcp_servers": "JSON",
                 "is_active": "BOOLEAN DEFAULT 1 NOT NULL",
             },
+            "user_tool_data": {
+                "user_id": "INTEGER NOT NULL",
+                "library_name": "VARCHAR NOT NULL",
+                "key": "VARCHAR NOT NULL",
+                "value": "JSON NOT NULL",
+                "is_persistent": "BOOLEAN DEFAULT 1"
+            },
             "vision_augmenters": {
                 "name": "VARCHAR NOT NULL",
                 "text_model": "VARCHAR NOT NULL",

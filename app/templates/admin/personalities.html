@@ -47,6 +47,11 @@
                         <span id="p-name" class="text-[10px] bg-fuchsia-500/20 text-fuchsia-300 px-2 py-0.5 rounded font-black uppercase"></span>
                     </div>
                     <div class="flex items-center gap-2">
+                        <div class="flex bg-white/5 rounded-lg p-0.5 mr-2">
+                            <button id="btn-undo" onclick="document.getElementById('p-textarea').focus(); document.execCommand('undo');" class="p-1.5 hover:bg-white/10 rounded text-gray-400 hover:text-white transition-all" title="Undo">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"></path></svg>
+                            </button>
+                        </div>
                         <button id="btn-edit-ai" onclick="editPersonaWithAI()" class="text-[10px] font-black bg-purple-600/20 hover:bg-purple-600/40 px-3 py-1.5 rounded text-purple-300 uppercase border border-purple-500/30">✨ Refine with AI</button>
                         <button id="btn-edit" onclick="toggleEditMode()" class="text-[10px] font-bold bg-white/5 hover:bg-white/10 px-3 py-1.5 rounded text-fuchsia-400 uppercase">Edit</button>
                         <button onclick="exportFile()" class="text-[10px] font-bold bg-white/5 hover:bg-white/10 px-3 py-1.5 rounded text-gray-300 uppercase">Export</button>

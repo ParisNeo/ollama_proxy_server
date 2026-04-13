@@ -43,6 +43,14 @@
                         <span id="t-lib-name" class="text-[10px] bg-sky-500/20 text-sky-300 px-2 py-0.5 rounded font-black uppercase"></span>
                     </div>
                     <div class="flex items-center gap-2">
+                        <div class="flex bg-white/5 rounded-lg p-0.5 mr-2">
+                            <button onclick="editor.undo()" class="p-1.5 hover:bg-white/10 rounded text-gray-400 hover:text-white transition-all" title="Undo (Ctrl+Z)">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"></path></svg>
+                            </button>
+                            <button onclick="editor.redo()" class="p-1.5 hover:bg-white/10 rounded text-gray-400 hover:text-white transition-all" title="Redo (Ctrl+Y)">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 10h-10a8 8 0 00-8 8v2M21 10l-6 6m6-6l-6-6"></path></svg>
+                            </button>
+                        </div>
                         <button onclick="initToolLibrary()" class="text-[10px] font-bold bg-white/5 hover:bg-indigo-600/20 text-indigo-400 px-3 py-1.5 rounded border border-indigo-500/20 uppercase transition-all">Init Deps</button>
                         <button id="btn-save" onclick="saveCurrentTool()" class="text-[10px] font-black bg-sky-600 hover:bg-sky-500 px-4 py-1.5 rounded text-white uppercase tracking-widest">Save & Deploy</button>
                         <button onclick="deleteCurrentTool()" class="text-[10px] font-bold text-red-400 hover:text-red-300 uppercase">Delete</button>
@@ -102,6 +110,10 @@
         <input type="file" id="m-doc-input" class="hidden" multiple accept=".txt,.md,.pdf,.csv">
 
         <div id="build-tool-status" class="hidden bg-black/60 border border-white/10 rounded-lg p-3 h-24 overflow-y-auto font-mono text-[10px] text-gray-400 space-y-1"></div>
+        <label class="flex items-center gap-2 cursor-pointer group px-1">
+            <input type="checkbox" id="shl-build-tool" class="h-4 w-4 rounded text-sky-600 bg-black/40 border-white/10">
+            <span class="text-[10px] font-black text-gray-500 uppercase tracking-widest group-hover:text-sky-400 transition-colors">Verify Code & Auto-Fix Bugs</span>
+        </label>
         <button onclick="window.executeToolBuild()" id="tool-build-run-btn" class="w-full py-3 bg-indigo-600 hover:bg-indigo-500 rounded-xl font-black text-xs uppercase tracking-widest transition-all">Generate Implementation</button>
     </div>
 </template>
@@ -143,6 +155,8 @@
 let currentFile = null;
 let allTools = [];
 let editor = null;
+let testAbortController = null;
+let isTesting = false;
 
 document.addEventListener('DOMContentLoaded', () => {
     loadTools();
@@ -308,14 +322,28 @@ window.initToolLibrary = async () => {
 };
 
 window.runTest = async () => {
+    const btn = document.getElementById('btn-test');
+    
+    // --- STOP LOGIC ---
+    if (isTesting && testAbortController) {
+        testAbortController.abort();
+        return;
+    }
+
     const prompt = document.getElementById('test-prompt').value;
     const out = document.getElementById('console-output');
-    const btn = document.getElementById('btn-test');
 
     if (!prompt.trim()) return alert("Enter a test prompt.");
 
-    btn.disabled = true;
-    out.innerHTML = ""; // Clear console
+    // --- START LOGIC ---
+    isTesting = true;
+    testAbortController = new AbortController();
+    
+    btn.innerHTML = `<svg class="animate-spin -ml-1 mr-2 h-4 w-4 text-white inline" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg> STOP`;
+    btn.classList.replace('bg-indigo-600', 'bg-red-600');
+    btn.classList.replace('hover:bg-indigo-500', 'hover:bg-red-500');
+
+    out.innerHTML = ""; 
     logToConsole(`🚀 [DISPATCH] Initiating AI Test Request: "${prompt}"`, 'text-indigo-400 font-bold');
 
     const formData = new FormData();
@@ -324,7 +352,11 @@ window.runTest = async () => {
     formData.append("csrf_token", "{{ csrf_token }}");
 
     try {
-        const resp = await fetch("{{ url_for('api_test_tool') }}", { method: 'POST', body: formData });
+        const resp = await fetch("{{ url_for('api_test_tool') }}", { 
+            method: 'POST', 
+            body: formData,
+            signal: testAbortController.signal
+        });
         const data = await resp.json();
         
         if (data.success) {
@@ -337,9 +369,14 @@ window.runTest = async () => {
                     const fn = ex.call.function;
                     logToConsole(`\n🛠️  [EXECUTE #${i+1}] Calling ${fn.name}(${JSON.stringify(fn.arguments)})`, 'text-amber-400 font-black');
                     
-                    const isError = typeof ex.output === 'string' && (ex.output.includes('CRASH') || ex.output.includes('Error:'));
+                    const isError = (typeof ex.output === 'object' && ex.output.error) || (typeof ex.output === 'string' && ex.output.includes('Error:'));
                     const outColor = isError ? 'text-red-400 bg-red-950/20 p-2 rounded border border-red-500/30' : 'text-emerald-400';
                     
+                    if (ex.logs) {
+                        logToConsole(`📖 [INTERNAL LOGS]:`, 'text-indigo-500 font-bold');
+                        logToConsole(ex.logs, 'text-indigo-300 text-[10px] bg-white/5 p-2 rounded');
+                    }
+
                     logToConsole(`📥 [RESULT]:`, 'text-gray-500 underline');
                     logToConsole(typeof ex.output === 'object' ? JSON.stringify(ex.output, null, 2) : ex.output, outColor);
                 });
@@ -350,8 +387,19 @@ window.runTest = async () => {
             logToConsole("🛑 [SYSTEM ERROR]:", 'text-red-500 font-black');
             logToConsole(data.error, 'text-red-300');
         }
-    } catch(e) { logToConsole("💥 [NETWORK ERROR]: " + e.message, 'text-red-500'); }
-    finally { btn.disabled = false; }
+    } catch(e) { 
+        if (e.name === 'AbortError') {
+            logToConsole("🛑 [CANCELLED]: User stopped execution.", 'text-amber-500 italic');
+        } else {
+            logToConsole("💥 [NETWORK ERROR]: " + e.message, 'text-red-500'); 
+        }
+    } finally { 
+        isTesting = false;
+        testAbortController = null;
+        btn.innerHTML = `Execute Test Call`;
+        btn.classList.replace('bg-red-600', 'bg-indigo-600');
+        btn.classList.replace('hover:bg-red-500', 'hover:bg-indigo-500');
+    }
 };
 
 window.fixWithAI = () => {
@@ -371,40 +419,32 @@ window.triggerToolFixWebImport = () => {
     window.Architect.triggerWebImport('fix-tool-prompt', window.fixWithAI);
 };
 
-window.executeToolFix = async () => {
+window.executeToolFix = () => {
     const consoleOutput = document.getElementById('console-output').innerText;
-    const btn = document.getElementById('tool-fix-run-btn');
-    const statusBox = document.getElementById('fix-tool-status');
-    const promptEl = document.getElementById('fix-tool-prompt');
     
-    btn.disabled = true;
-    statusBox.classList.remove('hidden');
-    statusBox.innerHTML = '<div>[System] Preparing repair payload...</div>';
-
-    // Build form data manually to include the console log
-    const formData = window.Architect.prepareFormData('fix-tool-prompt');
-    formData.append("filename", currentFile);
-    formData.append("error_log", consoleOutput);
-    formData.append("csrf_token", "{{ csrf_token }}");
-
-    logToConsole(">>> Initializing AI-driven logic repair...", 'text-purple-400 animate-pulse');
-
-    try {
-        const resp = await fetch("{{ url_for('api_fix_tool') }}", { method: 'POST', body: formData });
-        const data = await resp.json();
-        if (data.success) {
-            editor.setValue(data.fixed_code);
-            logToConsole("✅ [REPAIR APPLIED]: The source code has been updated based on AI recommendations. Please Review and Save.", 'text-fuchsia-400 font-bold');
-            document.getElementById('modal-close-btn').click();
-        } else {
-            logToConsole("❌ [FIX FAILED]: " + (data.error || "Unknown Error"), 'text-red-400');
-            statusBox.innerHTML += `<div class="text-red-400">[Error] ${data.error}</div>`;
+    window.Architect.executeBuild(
+        'fix-tool-prompt',
+        "{{ url_for('api_fix_tool') }}",
+        'fix-tool-status',
+        'tool-fix-run-btn',
+        (data) => {
+            if (data.fixed_code) {
+                // Use replaceRange to preserve history for undo
+                const totalLines = editor.lineCount();
+                editor.replaceRange(data.fixed_code, {line: 0, ch: 0}, {line: totalLines});
+                logToConsole("✅ [REPAIR APPLIED]: Logic updated. Review and Save.", 'text-fuchsia-400 font-bold');
+            }
         }
-    } catch(e) { 
-        logToConsole("Error: " + e.message, 'text-red-400'); 
-    } finally {
-        btn.disabled = false;
-    }
+    );
+    
+    // Inject the console log into the prompt context via the form data override
+    const originalPrepare = window.Architect.prepareFormData;
+    window.Architect.prepareFormData = function(id) {
+        const fd = originalPrepare.call(this, id);
+        fd.append("filename", currentFile);
+        fd.append("error_log", consoleOutput);
+        return fd;
+    };
 };
 
 function logToConsole(text, colorClass) {

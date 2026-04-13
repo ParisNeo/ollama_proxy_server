@@ -621,14 +621,16 @@
                 openModal();
             };
             
-            // --- SHARED ARCHITECT MODULE (Skills & Personas) ---
+            // --- SHARED ARCHITECT MODULE (Skills, Personalities, Tools, Graphs) ---
             window.Architect = {
                 context: [],
                 prompt: "",
+                activeController: null,
                 
                 reset: function() {
                     this.context = [];
                     this.prompt = "";
+                    this.activeController = null;
                 },
 
                 handleFiles: function(files, renderCallback) {
@@ -668,6 +670,12 @@
                     const el = document.getElementById(promptId);
                     let fullPrompt = el ? el.value : "";
                     
+                    // Capture Self-Healing Toggle (if exists in current modal)
+                    const shlToggle = document.querySelector('input[id^="shl-"]');
+                    if (shlToggle) {
+                        formData.append("activate_self_healing", shlToggle.checked);
+                    }
+
                     this.context.forEach(it => {
                         if (it.type === 'file') formData.append("files", it.data);
                         else fullPrompt += `\n\nSOURCE ${it.name}:\n${it.content}`;
@@ -682,63 +690,80 @@
                     const statusBox = document.getElementById(statusBoxId);
                     const promptEl = document.getElementById(promptId);
                     
+                    // --- STOP LOGIC ---
+                    if (this.activeController) {
+                        this.activeController.abort();
+                        return;
+                    }
+
                     if (!btn || !statusBox || !promptEl) {
-                        console.error("Architect Error: DOM elements missing.", {btn, statusBox, promptEl});
-                        alert("Architect Error: UI components not found. Please refresh.");
+                        console.error("Architect Error: DOM elements missing.");
                         return;
                     }
 
                     if (!promptEl.value.trim()) {
-                        alert("Please enter a description or prompt for the AI Architect.");
+                        alert("Please enter a description for the Architect.");
                         return;
                     }
 
-                    btn.disabled = true; 
+                    // --- START LOGIC ---
+                    this.activeController = new AbortController();
                     const originalText = btn.innerText;
-                    btn.innerText = "PROCESSING...";
+                    const originalBg = btn.className;
+
+                    // Transition to Stop State
+                    btn.innerHTML = `
+                        <svg class="animate-spin -ml-1 mr-2 h-4 w-4 text-white inline" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg> 
+                        STOP GENERATION
+                    `;
+                    btn.className = "w-full py-3 bg-red-600 hover:bg-red-500 rounded-xl font-black text-xs uppercase tracking-widest text-white transition-all";
+
                     statusBox.classList.remove('hidden');
-                    statusBox.innerHTML = '<div>[System] Handshaking with Architect...</div>';
+                    statusBox.innerHTML = '<div>[System] Handshaking with AI Host...</div>';
 
                     const formData = this.prepareFormData(promptId);
                     
-                    // Defensively retrieve CSRF token from anywhere in the document
+                    // Retrieve CSRF token
                     let csrfToken = "";
                     const csrfEl = document.querySelector('input[name="csrf_token"]');
-                    if (csrfEl) {
-                        csrfToken = csrfEl.value;
-                    } else {
-                        // Fallback: search for any 64-char hex string in hidden inputs (last resort)
-                        const allHidden = document.querySelectorAll('input[type="hidden"]');
-                        for(let h of allHidden) if(h.value.length === 64) { csrfToken = h.value; break; }
-                    }
+                    if (csrfEl) csrfToken = csrfEl.value;
 
                     if (!csrfToken) {
-                        console.error("Architect: Critical Security Failure. CSRF token missing.");
-                        alert("Security error: Session token missing. Please reload the page.");
-                        btn.disabled = false;
+                        alert("Security error: Session token missing. Please reload.");
+                        this.activeController = null;
                         btn.innerText = originalText;
+                        btn.className = originalBg;
                         return;
                     }
 
                     formData.append("csrf_token", csrfToken);
 
                     try {
-                        const resp = await fetch(endpoint, { method: 'POST', body: formData });
+                        const resp = await fetch(endpoint, { 
+                            method: 'POST', 
+                            body: formData,
+                            signal: this.activeController.signal
+                        });
                         const data = await resp.json();
+                        
                         if (data.success) {
                             successCallback(data);
                             document.getElementById('modal-close-btn').click();
                         } else {
-                            const errMsg = data.error || "Generation failed.";
+                            const errMsg = data.error || "Operation failed.";
                             statusBox.innerHTML += `<div class="text-red-400 font-bold">[Error] ${errMsg}</div>`;
-                            alert(errMsg);
                         }
                     } catch(e) { 
-                        console.error(e);
-                        alert("Connection error during generation."); 
+                        if (e.name === 'AbortError') {
+                            statusBox.innerHTML += `<div class="text-amber-500 italic">[System] Generation cancelled by user.</div>`;
+                        } else {
+                            console.error(e);
+                            statusBox.innerHTML += `<div class="text-red-400 font-bold">[Network Error] ${e.message}</div>`;
+                        }
                     } finally { 
-                        btn.disabled = false; 
-                        btn.innerText = originalText; 
+                        this.activeController = null;
+                        btn.innerText = originalText;
+                        btn.className = originalBg;
                     }
                 }
             };

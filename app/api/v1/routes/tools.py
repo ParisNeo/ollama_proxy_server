@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, Request, Form, File, UploadFile, HTTPExc
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.ext.asyncio import AsyncSession
-
+import asyncio
 from app.database.session import get_db
 from app.database.models import User
 from app.api.v1.dependencies import get_csrf_token, validate_csrf_token
@@ -103,38 +103,97 @@ async def api_init_tool(filename: str = Form(...), admin_user: User = Depends(re
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
-async def _execute_tool_call_local(code: str, call: dict) -> Any:
-    """Helper to execute a function from a raw string using provided arguments."""
+def execute_tool_universally(code: str, fn_name: str, args: Any, user: User, library_name: str):
+    """
+    The LoLLMs Standard Executor with Debug Logging & Auto-Unwrapping.
+    Injects 'lollms' host interface and captures stdout/logging.
+    """
     import importlib.util
-    import sys
     import tempfile
+    import inspect
+    import os
+    import sys
+    import logging
+    import io
+    from contextlib import redirect_stdout
+    from app.core.lollms_system import LollmsSystem
+    from fastapi.concurrency import run_in_threadpool
 
-    fn_name = call.get("function", {}).get("name")
-    args = call.get("function", {}).get("arguments", {})
-    if isinstance(args, str):
-        try: args = json.loads(args)
-        except: pass
+    # --- AUTO-UNWRAP NESTED ARGS ---
+    # Fixes the bug where models send {"args": {...}}
+    final_args = args
+    if isinstance(args, dict):
+        if len(args) == 1 and "args" in args:
+            final_args = args["args"]
+        elif len(args) == 1 and "arguments" in args:
+            final_args = args["arguments"]
 
-    # 1. Write to temp file to import as module
+    # --- LOG CAPTURE SETUP ---
+    log_capture = io.StringIO()
+    handler = logging.StreamHandler(log_capture)
+    handler.setFormatter(logging.Formatter('[LOG] %(message)s'))
+    root_logger = logging.getLogger()
+    root_logger.addHandler(handler)
+    
+    execution_logs = ""
+    result = None
+
     with tempfile.NamedTemporaryFile(suffix=".py", delete=False, mode='w', encoding='utf-8') as f:
         f.write(code)
         temp_path = f.name
 
     try:
-        spec = importlib.util.spec_from_file_location("test_tool_lib", temp_path)
+        spec = importlib.util.spec_from_file_location("lollms_portable_tool", temp_path)
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         
-        if hasattr(module, fn_name):
-            func = getattr(module, fn_name)
-            # Execute in threadpool to prevent blocking the event loop
-            return await run_in_threadpool(func, args)
-        return f"Error: Function {fn_name} not found in code."
-    except Exception as e:
-        import traceback
-        return f"CRASH DURING EXECUTION:\n{str(e)}\n\nTRACEBACK:\n{traceback.format_exc()}"
+        func = getattr(module, fn_name, None)
+        if not func:
+            return f"Error: {fn_name} not found."
+
+        lollms_sys = LollmsSystem(user, library_name)
+        
+        # Determine if we should inject the host interface
+        sig = inspect.signature(func)
+        params = {}
+        if 'lollms' in sig.parameters:
+            params['lollms'] = lollms_sys
+
+        # Standard execution wrapper with stdout capture
+        async def _run():
+            with redirect_stdout(log_capture):
+                if inspect.iscoroutinefunction(func):
+                    return await func(final_args, **params)
+                else:
+                    return await run_in_threadpool(func, final_args, **params)
+
+        try:
+            result = asyncio.run(_run())
+        except Exception as e:
+            import traceback
+            print(f"CRASH IN TOOL: {str(e)}")
+            print(traceback.format_exc())
+            result = {"error": str(e), "type": "runtime_exception"}
+        
+        # Cleanup logging
+        root_logger.removeHandler(handler)
+        execution_logs = log_capture.getvalue()
+        
+        return result, execution_logs
+
     finally:
         if os.path.exists(temp_path): os.remove(temp_path)
+
+async def _execute_tool_call_local(code: str, call: dict, user: User, library_name: str) -> Any:
+    """Refactored to use the universal executor."""
+    fn_name = call.get("function", {}).get("name")
+    args = call.get("function", {}).get("arguments", {})
+    if isinstance(args, str):
+        try: args = json.loads(args)
+        except: pass
+    
+    return await run_in_threadpool(execute_tool_universally, code, fn_name, args, user, library_name)
+
 
 @router.post("/api/tools/test", name="api_test_tool")
 async def api_test_tool(
@@ -159,12 +218,39 @@ async def api_test_tool(
     target_agent = app_settings.admin_agent_name
     if not target_agent: return JSONResponse({"error": "No Management Agent set."}, status_code=503)
 
+    # --- PROTOCOL ENFORCEMENT ---
+    # Define a strict instruction to prevent the AI from nesting arguments
+    protocol_instruction = (
+        "### TOOL CALLING PROTOCOL (STRICT) ###\n"
+        "1. When calling a tool, provide arguments EXACTLY as defined in the 'parameters' schema.\n"
+        "2. DO NOT wrap arguments in a nested 'args' or 'arguments' key.\n"
+        "3. EXAMPLE:\n"
+        "   - WRONG: {\"args\": {\"income\": 50000}}\n"
+        "   - CORRECT: {\"income\": 50000}\n"
+        "4. Follow the user's instructions while adhering to this data format."
+    )
+
     try:
         # PHASE 1: Get Tool Call from AI
-        real_model, msgs = await _resolve_target(db, target_agent, [{"role": "user", "content": user_prompt}])
+        # Resolve to physical model
+        resolution = await _resolve_target(db, target_agent, [{"role": "user", "content": user_prompt}])
+        real_model, msgs = resolution
+
+        # Inject Protocol Enforcement as the very first system instruction
+        msgs.insert(0, {"role": "system", "content": protocol_instruction})
+
         servers = await server_crud.get_servers_with_model(db, real_model)
+        if not servers: return JSONResponse({"error": "No backend servers found for the test agent."}, status_code=503)
         
-        resp, _ = await _reverse_proxy(request, "chat", servers, json.dumps({"model": real_model, "messages": msgs, "tools": tool_defs, "stream": False}).encode(), is_subrequest=True)
+        # Build payload with strict tool definitions
+        payload = {
+            "model": real_model, 
+            "messages": msgs, 
+            "tools": tool_defs, 
+            "stream": False
+        }
+
+        resp, _ = await _reverse_proxy(request, "chat", servers, json.dumps(payload).encode(), is_subrequest=True)
         
         if not hasattr(resp, 'body'): return JSONResponse({"error": "Empty response from AI"}, status_code=500)
         
@@ -172,14 +258,16 @@ async def api_test_tool(
         ai_msg = ai_data.get("message", {})
         tool_calls = ai_msg.get("tool_calls", [])
 
-        # PHASE 2: Execute found tool calls
+        # PHASE 2: Execute found tool calls with User awareness and Log Capture
         execution_results = []
         if tool_calls:
             for call in tool_calls:
-                result = await _execute_tool_call_local(content, call)
+                # _execute_tool_call_local now returns (result, logs)
+                result, logs = await _execute_tool_call_local(content, call, admin_user, filename)
                 execution_results.append({
                     "call": call,
-                    "output": result
+                    "output": result,
+                    "logs": logs
                 })
 
         return {
@@ -217,8 +305,10 @@ async def api_fix_tool(
         file_context = await kit.extract_local_file_content(valid_files)
 
     instruction = (
-        "You are a Senior AI Debugger. Review the tool implementation, the console output/error, and user instructions. "
-        "Rewrite the code to fix the bugs or implement the requested features. "
+        "You are a Senior AI Debugger. Review the tool implementation, the console output/error, and user instructions.\n\n"
+        "CRITICAL: Ensure every tool function starts with the prefix 'tool_'. \n"
+        "If a function is named 'tax_calculator', rename it to 'tool_tax_calculator'.\n\n"
+        "Rewrite the code to fix the bugs or implement requested features. "
         "Output ONLY the updated raw Python code for the entire file. Start with the library variables. No chat."
     )
 
@@ -254,6 +344,7 @@ async def api_build_tool(
     request: Request,
     prompt: str = Form(...),
     csrf_token: str = Form(...),
+    activate_self_healing: bool = Form(False),
     files: List[UploadFile] = File(default=[]),
     db: AsyncSession = Depends(get_db),
     admin_user = Depends(require_admin_user)
@@ -274,22 +365,28 @@ async def api_build_tool(
         file_context = await kit.extract_local_file_content(valid_files)
 
     strict_instruction = (
-        "You are an AI Software Engineer. You output raw Python code for a LoLLMs Tool Library.\n\n"
-        "MANDATORY FILE STRUCTURE:\n"
+        "You are an AI Software Engineer specializing in LoLLMs Portable Tools. You output raw Python code.\n\n"
+        "### NAMING CONVENTION (CRITICAL) ###\n"
+        "1. Every function intended to be used as a tool MUST start with the prefix 'tool_'.\n"
+        "2. EXAMPLE: 'def tool_calculate_tax(args, lollms=None):' is CORRECT. 'def calculate_tax(...):' is WRONG.\n"
+        "3. If you fail to use the 'tool_' prefix, the system will not find your code.\n\n"
+        "### PORTABILITY STANDARD (MANDATORY) ###\n"
+        "1. ZERO INTERNAL IMPORTS: Never import 'app...', 'core...', or any file from the host application. The code must be self-contained.\n"
+        "2. HOST INTERFACE: If a tool requires per-user persistence or user info, it MUST accept an optional 'lollms' parameter.\n"
+        "3. PERSISTENCE: Use 'lollms.set(key, value, persistent=True)' and 'lollms.get(key, default)' for state.\n\n"
+        "### FILE STRUCTURE ###\n"
         "TOOL_LIBRARY_NAME = '...'\n"
         "TOOL_LIBRARY_DESC = '...'\n"
         "TOOL_LIBRARY_ICON = '...'\n\n"
         "def init_tool_library() -> None:\n"
-        "    '''Initialize dependencies using pipmaster'''\n"
         "    import pipmaster as pm\n"
-        "    # pm.ensure_packages({'package_name':'the version == or >= or <= etc..'})\n\n"
-        "def tool_[name](args):\n"
-        "    '''Docstrings must include Args and Returns sections'''\n\n"
-        "STRICT RULES:\n"
+        "    # pm.ensure_packages({...})\n\n"
+        "def tool_example_name(args, lollms=None):\n"
+        "    '''Detailed docstring describing Args and Returns'''\n\n"
+        "### STRICT RULES ###\n"
         "1. Output raw code ONLY. No markdown fences.\n"
-        "2. No chat or explanations.\n"
-        "3. Ensure all functions are prefixed with 'tool_'.\n"
-        "4. Use error handling (try/except) inside tools."
+        "2. No chatter. Start directly with the variable declarations.\n"
+        "3. Functions without 'lollms' in the signature are considered stateless."
     )
 
     user_request = f"TASK: Build a tool library for: {prompt}"
@@ -320,9 +417,35 @@ async def api_build_tool(
         filename = f"{lib_id}.py"
         
         ToolsManager.save_tool(filename, clean_code)
-        
-        event_manager.emit(ProxyEvent("completed", build_id, "Tool Architect", "Local", admin_user.username, error_message="Deployment Successful!"))
-        return {"success": True, "filename": filename, "content": raw_code}
+
+        # --- SELF-HEALING LOOP ---
+        if activate_self_healing:
+            event_manager.emit(ProxyEvent("active", build_id, "Self-Healing", "Local", admin_user.username, error_message="Running sanity checks on generated code..."))
+            
+            # Step 1: Attempt to initialize (catches pipmaster failures / syntax errors)
+            init_res = await api_init_tool(filename, admin_user)
+            if isinstance(init_res, JSONResponse) and init_res.status_code != 200:
+                error_body = json.loads(init_res.body.decode())
+                err_msg = error_body.get('error', 'Initialization failed')
+                
+                event_manager.emit(ProxyEvent("active", build_id, "Self-Healing", target_agent, admin_user.username, error_message=f"Bugs detected. Launching Repair Mission..."))
+                
+                # Perform the fix (Recursive AI call)
+                fix_res = await api_fix_tool(
+                    request, filename, error_log=err_msg, prompt="Please fix the initialization error.",
+                    csrf_token=csrf_token, db=db, admin_user=admin_user
+                )
+                
+                if isinstance(fix_res, dict) and fix_res.get("success"):
+                    clean_code = fix_res["fixed_code"]
+                    ToolsManager.save_tool(filename, clean_code)
+                    event_manager.emit(ProxyEvent("active", build_id, "Self-Healing", "Local", admin_user.username, error_message="Repair successful. Finalizing deployment."))
+                else:
+                    event_manager.emit(ProxyEvent("error", build_id, "Self-Healing", "Local", admin_user.username, error_message="Self-healing failed to resolve the issue."))
+                    return fix_res
+
+        event_manager.emit(ProxyEvent("completed", build_id, "Tool Architect", "Local", admin_user.username, error_message="Deployment Successful (Verified)!"))
+        return {"success": True, "filename": filename, "content": clean_code}
     except Exception as e:
         logger.error(f"Tool Build Failed: {e}")
         event_manager.emit(ProxyEvent("error", build_id, "Tool Architect", "Local", admin_user.username, error_message=str(e)))

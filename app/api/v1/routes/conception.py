@@ -136,6 +136,7 @@ async def api_build_workflow(
     request: Request,
     prompt: str = Form(...),
     csrf_token: str = Form(...),
+    activate_self_healing: bool = Form(False),
     files: Optional[List[UploadFile]] = File(None),
     db: AsyncSession = Depends(get_db),
     admin_user: User = Depends(require_admin_user)
@@ -199,11 +200,22 @@ async def api_build_workflow(
 - hub/composer:
     Inputs: [0: A (str), 1: B (str)]
     Outputs: [0: Merged (str)]
+- hub/note:
+    Properties: {"content": "Markdown text"}
     """
 
     instruction = (
         "You are a Senior LoLLMs System Architect. You design cognitive graphs using LiteGraph JSON.\n\n"
         f"{node_schema_text}\n\n"
+        "### AGENTIC POWER: ASSET INVENTION ###\n"
+        "1. If the standard nodes are insufficient, you can INVENT new ones.\n"
+        "2. To do this, include a 'manifest' key in your JSON root.\n"
+        "3. Inside 'manifest', provide 'custom_nodes' (list of {filename, class_name, py_code}) and 'tools' (list of {filename, content}).\n"
+        "4. Your 'py_code' for nodes MUST include the 'get_frontend_js' method.\n\n"
+        "### MANDATORY NOTE RULE ###\n"
+        "1. You MUST include a 'hub/note' node (ID: 100) in EVERY graph.\n"
+        "2. Place it at the top (e.g., pos [50, -200]).\n"
+        "3. The content MUST be a detailed Markdown guide explaining how the workflow functions, the logic of the connections, and what each part does.\n\n"
         "### JSON FORMAT RULES ###\n"
         "1. Output a single JSON object with 'nodes' and 'links' keys.\n"
         "2. Node: {\"id\": int, \"type\": \"hub/...\", \"pos\": [x, y], \"properties\": {}}\n"
@@ -260,7 +272,110 @@ async def api_build_workflow(
                 sanitized = "".join(ch if ord(ch) >= 32 else " " for ch in clean_json)
                 parsed = json.loads(sanitized)
 
-            event_manager.emit(ProxyEvent("completed", build_id, "Graph Architect", "Local", admin_user.username, error_message="Graph Deployed successfully!"))
+            # --- AGENTIC MULTI-ASSET DEPLOYMENT ---
+            # The AI can now return a 'manifest' containing new nodes, tools, or personas
+            # it invented to satisfy the workflow requirement.
+            manifest = parsed.get("manifest", {})
+            
+            # 1. Handle New Custom Nodes
+            if "custom_nodes" in manifest:
+                from app.api.v1.routes.node_builder import save_custom_node_internal
+                for node_data in manifest["custom_nodes"]:
+                    await save_custom_node_internal(node_data["filename"], node_data["class_name"], node_data["py_code"])
+                    event_manager.emit(ProxyEvent("active", build_id, "Graph Architect", "Local", admin_user.username, error_message=f"Deployed new Node: {node_data['class_name']}"))
+
+            # 2. Handle New Tools
+            if "tools" in manifest:
+                from app.core.tools_manager import ToolsManager
+                for tool in manifest["tools"]:
+                    ToolsManager.save_tool(tool["filename"], tool["content"])
+                    event_manager.emit(ProxyEvent("active", build_id, "Graph Architect", "Local", admin_user.username, error_message=f"Deployed new Toolset: {tool['filename']}"))
+
+            # --- SELF-HEALING FOR WORKFLOWS ---
+            final_graph = parsed.get("graph", parsed)
+            if activate_self_healing:
+                event_manager.emit(ProxyEvent("active", build_id, "Self-Healing", "Local", admin_user.username, error_message="Validating Graph topology..."))
+                
+                # Validation Logic: Ensure output node exists and has a link
+                nodes = final_graph.get("nodes", [])
+                links = final_graph.get("links", [])
+                has_output = any(n.get("type") == "hub/output" for n in nodes)
+                
+                if not has_output or not links:
+                    event_manager.emit(ProxyEvent("active", build_id, "Self-Healing", target_agent, admin_user.username, error_message="Invalid Graph topology. Regenerating..."))
+                    # Trigger a one-time automatic retry with more specific instructions
+                    retry_res = await api_build_workflow(request, f"RETRY: The previous graph was invalid. {prompt}", csrf_token, False, files, db, admin_user)
+                    return retry_res
+
+            event_manager.emit(ProxyEvent("completed", build_id, "Graph Architect", "Local", admin_user.username, error_message="Workflow deployed (Verified)!"))
+            return {"success": True, "graph": final_graph, "has_new_assets": len(manifest) > 0}
+    except Exception as e:
+        logger.error(f"Graph Generation Failed: {e}")
+        event_manager.emit(ProxyEvent("error", build_id, "Graph Architect", "Local", admin_user.username, error_message=str(e)))
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@router.post("/conception/edit", name="admin_api_edit_workflow")
+async def api_edit_workflow(
+    request: Request,
+    prompt: str = Form(...),
+    current_graph: str = Form(...),
+    csrf_token: str = Form(...),
+    files: Optional[List[UploadFile]] = File(None),
+    db: AsyncSession = Depends(get_db),
+    admin_user: User = Depends(require_admin_user)
+):
+    """Refines an existing graph based on user instructions using the Hub Agent."""
+    from app.api.v1.routes.proxy import _resolve_target, _reverse_proxy
+    from app.core import knowledge_importer as kit
+    from app.core.events import event_manager, ProxyEvent
+    import secrets
+
+    app_settings = request.app.state.settings
+    target_agent = app_settings.admin_agent_name
+    if not target_agent:
+        return JSONResponse({"error": "No Management Agent set."}, status_code=503)
+
+    build_id = f"sys_build_graph_{secrets.token_hex(4)}"
+    event_manager.emit(ProxyEvent("received", build_id, "Graph Architect", "Local", admin_user.username, error_message="Analyzing existing graph..."))
+
+    file_context = ""
+    valid_files = [f for f in files if f and f.filename] if files else []
+    if valid_files:
+        file_context = await kit.extract_local_file_content(valid_files)
+
+    instruction = (
+        "You are a Senior System Architect. You are EDITING an existing LiteGraph workflow.\n\n"
+        "### CONSTRAINTS ###\n"
+        "1. Update the 'nodes' and 'links' to reflect user requested changes.\n"
+        "2. UPDATED RULE: You MUST update the 'hub/note' (ID 100) to reflect the new logic.\n"
+        "3. Ensure the JSON is valid and connections remain intact.\n"
+        "4. Output ONLY the raw JSON object. No chat."
+    )
+
+    user_payload = (
+        f"INSTRUCTIONS: {prompt}\n\n"
+        f"CURRENT GRAPH JSON:\n{current_graph}\n\n"
+    )
+    if file_context:
+        user_payload += f"ADDITIONAL CONTEXT:\n{file_context}"
+
+    try:
+        real_model, msgs = await _resolve_target(db, target_agent, [{"role": "user", "content": user_payload}])
+        msgs.insert(0, {"role": "system", "content": instruction})
+        
+        servers = await server_crud.get_servers_with_model(db, real_model)
+        if not servers: return JSONResponse({"error": "Backend offline"}, status_code=503)
+
+        resp, _ = await _reverse_proxy(request, "chat", servers, json.dumps({"model": real_model, "messages": msgs, "stream": False}).encode(), is_subrequest=True, request_id=build_id, model=real_model, sender=admin_user.username)
+        
+        if hasattr(resp, 'body'):
+            data = json.loads(resp.body.decode())
+            raw_output = data.get("message", {}).get("content", "").strip()
+            clean_json = re.sub(r'^```json\s*|```$', '', raw_output, flags=re.MULTILINE).strip()
+            parsed = json.loads(clean_json, strict=False)
+            
+            event_manager.emit(ProxyEvent("completed", build_id, "Graph Architect", "Local", admin_user.username, error_message="Graph updated successfully!"))
             return {"success": True, "graph": parsed}
     except Exception as e:
         logger.error(f"Graph Generation Failed: {e}")

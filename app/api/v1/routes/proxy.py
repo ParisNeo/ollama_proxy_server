@@ -1543,9 +1543,29 @@ class WorkflowEngine:
             updated["temperature"] = props.get("temperature", 0.7)
             return updated
 
-async def _resolve_target(db: AsyncSession, name: str, messages: List[Dict[str, Any]], depth: int = 0, request: Request = None, request_id: str = None, sender: str = "system") -> Tuple[str, List[Dict[str, Any]]]:
-    """Recursively resolves a name into a physical model + final message list."""
-    if depth > 10: return name, messages # Circular protection
+async def _resolve_target(db: AsyncSession, name: str, messages: List[Dict[str, Any]], depth: int = 0, request: Request = None, request_id: str = None, sender: str = "system", call_stack: List[str] = None) -> Tuple[str, List[Dict[str, Any]]]:
+    """
+    Recursively resolves a name into a physical model + final message list.
+    Now includes logical recursion protection.
+    """
+    if call_stack is None:
+        call_stack = []
+
+    # 0. Recursion Protection
+    if name in call_stack:
+        stack_str = " -> ".join(call_stack + [name])
+        err_msg = f"Circular Dependency Detected: {stack_str}. A model cannot call itself recursively."
+        logger.error(err_msg)
+        if request_id:
+            from app.core.events import event_manager, ProxyEvent
+            event_manager.emit(ProxyEvent("error", request_id, name, "Orchestrator", sender, error_message=err_msg))
+        raise HTTPException(status_code=status.HTTP_508_LOOP_DETECTED, detail=err_msg)
+
+    if depth > 10:
+        return name, messages
+
+    # Add current name to stack for this path
+    new_stack = call_stack + [name]
 
     from app.database.models import VirtualAgent, SmartRouter, Workflow
     
@@ -1559,7 +1579,8 @@ async def _resolve_target(db: AsyncSession, name: str, messages: List[Dict[str, 
         from app.core.workflow_engine import WorkflowEngine as CoreWorkflowEngine
         engine = CoreWorkflowEngine(
             db, request, request_id, sender, name, workflow.graph_data, depth,
-            reverse_proxy_fn=_reverse_proxy, resolve_target_fn=_resolve_target
+            reverse_proxy_fn=_reverse_proxy, resolve_target_fn=_resolve_target,
+            call_stack=new_stack
         )
         return await engine.execute(messages)
 
@@ -1578,7 +1599,7 @@ async def _resolve_target(db: AsyncSession, name: str, messages: List[Dict[str, 
         updated_messages = [m for m in updated_messages if m.get("role") != "system"]
         updated_messages.insert(0, {"role": "system", "content": agent.system_prompt})
 
-        return await _resolve_target(db, agent.base_model, updated_messages, depth + 1, request=request, request_id=request_id, sender=sender)
+        return await _resolve_target(db, agent.base_model, updated_messages, depth + 1, request=request, request_id=request_id, sender=sender, call_stack=new_stack)
 
     # 2. Resolve Smart Router (formerly Pool)
     router_res = await db.execute(select(SmartRouter).filter(SmartRouter.name == name, SmartRouter.is_active == True))
@@ -1589,7 +1610,7 @@ async def _resolve_target(db: AsyncSession, name: str, messages: List[Dict[str, 
             request.state.enforce_strict_context = True
         # Fallback to the first target in the router for recursive resolution
         chosen_target = router.targets[0] if router.targets else name
-        return await _resolve_target(db, chosen_target, messages, depth + 1, request=request, request_id=request_id, sender=sender)
+        return await _resolve_target(db, chosen_target, messages, depth + 1, request=request, request_id=request_id, sender=sender, call_stack=new_stack)
 
     # 3. Fallback: It's a raw model name
     if name == "auto":

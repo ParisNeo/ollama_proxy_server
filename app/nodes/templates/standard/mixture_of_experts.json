@@ -5,10 +5,11 @@
     "last_node_id": 6,
     "last_link_id": 5,
     "nodes": [
-      { "id": 1, "type": "hub/input", "pos": [50, 250], "outputs": [{ "name": "Messages", "links": [1] }] },
-      { "id": 2, "type": "hub/model", "pos": [450, 50], "outputs": [{ "name": "Expert", "links": [2] }], "properties": { "model": "auto" } },
-      { "id": 3, "type": "hub/model", "pos": [450, 250], "outputs": [{ "name": "Expert", "links": [3] }], "properties": { "model": "auto" } },
-      { "id": 4, "type": "hub/model", "pos": [450, 450], "outputs": [{ "name": "Expert", "links": [4] }], "properties": { "model": "auto" } },
+      { "id": 100, "type": "hub/note", "pos": [50, 20], "properties": { "content": "# Advanced MoE Architect\\nThis flow uses **Expert Builders** to pair models with personalities before parallel polling. Synthesis is handled by the Orchestrator." } },
+      { "id": 1, "type": "hub/input", "pos": [50, 300], "outputs": [{ "name": "Messages", "links": [1] }] },
+      { "id": 2, "type": "hub/expert", "pos": [450, 50], "outputs": [{ "name": "Expert", "links": [2] }], "properties": { "model": "llama3.1", "personality": "Expert Code Reviewer" } },
+      { "id": 3, "type": "hub/expert", "pos": [450, 300], "outputs": [{ "name": "Expert", "links": [3] }], "properties": { "model": "mistral-small", "personality": "Standard Assistant" } },
+      { "id": 4, "type": "hub/expert", "pos": [450, 550], "outputs": [{ "name": "Expert", "links": [4] }], "properties": { "model": "phi-4", "personality": "Claude XML Reasoning" } },
       { "id": 5, "type": "hub/moe", "pos": [900, 250], "inputs": [{ "name": "User Context", "link": 1 }, { "name": "Expert 1", "link": 2 }, { "name": "Expert 2", "link": 3 }, { "name": "Expert 3", "link": 4 }], "outputs": [{ "name": "Synthesized", "links": [5] }], "properties": { "orchestrator": "auto", "system_prompt": "Combine the ideas from the 3 experts into a single high-quality response." } },
       { "id": 6, "type": "hub/output", "pos": [1350, 250], "inputs": [{ "name": "Content", "link": 5 }] }
     ],

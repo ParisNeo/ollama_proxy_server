@@ -13,6 +13,7 @@ from app.database.session import get_db
 from app.database.models import User, DataStore
 from app.api.v1.routes.admin import require_admin_user, get_template_context, templates, flash
 from app.api.v1.dependencies import validate_csrf_token
+from app.core.events import event_manager, ProxyEvent
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -142,67 +143,50 @@ async def admin_delete_datastore(ds_id: int, request: Request, db: AsyncSession 
 
 @router.get("/datastores/{ds_id}/manage", response_class=HTMLResponse, name="admin_manage_datastore")
 async def admin_manage_datastore(ds_id: int, request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
+    """Fast route: Returns the UI skeleton immediately."""
     from app.api.v1.dependencies import get_csrf_token
-    try:
-        ds = await db.get(DataStore, ds_id)
-    except Exception as db_err:
-        logger.error(f"Database error fetching datastore {ds_id}: {db_err}")
-        flash(request, "Failed to retrieve datastore from database. Try resetting the DB.", "error")
+    ds = await db.get(DataStore, ds_id)
+    if not ds:
+        flash(request, "Datastore not found.", "error")
         return RedirectResponse(url=request.url_for("admin_datastores"), status_code=303)
 
-    if not ds:
-        flash(request, f"Datastore ID {ds_id} not found.", "error")
-        return RedirectResponse(url=request.url_for("admin_datastores"), status_code=303)
-    
-    def _get_docs():
+    context = get_template_context(request)
+    context["datastore"] = ds
+    context["csrf_token"] = await get_csrf_token(request)
+    return templates.TemplateResponse("admin/manage_datastore.html", context)
+
+@router.post("/datastores/{ds_id}/boot", name="admin_boot_datastore")
+async def admin_boot_datastore(ds_id: int, request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
+    """Slow route: Handles SafeStore initialization and returns document list."""
+    ds = await db.get(DataStore, ds_id)
+    if not ds: return JSONResponse({"error": "Not found"}, status_code=404)
+
+    def _initialize_and_list():
         import pipmaster as pm
         pm.ensure_packages(["safe-store"])
         from safe_store import SafeStore
         
-        if not os.path.exists(ds.db_path):
-            return []
-            
-        try:
-            # Consistent mapping
-            v_key = VECTORIZER_MAP.get(ds.vectorizer_name, "tfidf")
-            
-            # Create store instance with same config as ingestion
-            s = SafeStore(
-                db_path=ds.db_path, 
-                vectorizer_name=v_key, 
-                vectorizer_config=ds.vectorizer_config or {},
-                chunking_strategy=ds.chunking_strategy,
-                chunk_size=ds.chunk_size,
-                chunk_overlap=ds.chunk_overlap
-            )
-            
-            with s:
-                # Try multiple naming conventions used by safe-store versions
-                docs = []
-                if hasattr(s, "get_documents"): 
-                    docs = s.get_documents()
-                elif hasattr(s, "list_documents"): 
-                    docs = s.list_documents()
-                
-                # Double-check the structure. If it's a list of strings, convert to dicts
-                if docs and isinstance(docs[0], str):
-                    return [{"file_path": d, "chunk_count": "N/A"} for d in docs]
-                return docs
-        except Exception as e:
-            logger.error(f"SafeStore _get_docs error for store {ds.name}: {e}", exc_info=True)
-            return [{"file_path": f"Internal Error: {str(e)[:50]}", "chunk_count": 0}]
-            
+        v_key = VECTORIZER_MAP.get(ds.vectorizer_name, "tfidf")
+        # Loading the store here triggers vectorizer load if needed
+        s = SafeStore(
+            db_path=ds.db_path, 
+            vectorizer_name=v_key, 
+            vectorizer_config=ds.vectorizer_config or {}
+        )
+        
+        with s:
+            docs = s.list_documents() if hasattr(s, "list_documents") else s.get_documents()
+            # Normalize list of strings to objects
+            if docs and isinstance(docs[0], str):
+                return [{"file_path": d, "chunk_count": "N/A"} for d in docs]
+            return docs
+
     try:
-        docs = await run_in_threadpool(_get_docs)
+        docs = await run_in_threadpool(_initialize_and_list)
+        return {"success": True, "documents": docs}
     except Exception as e:
-        logger.error(f"Threadpool error in datastore manage: {e}")
-        docs = []
-    
-    context = get_template_context(request)
-    context["datastore"] = ds
-    context["documents"] = docs
-    context["csrf_token"] = await get_csrf_token(request)
-    return templates.TemplateResponse("admin/manage_datastore.html", context)
+        logger.error(f"Boot error for store {ds.name}: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
 
 async def _get_file_ai_metadata(request: Request, db: AsyncSession, content: str, agent_name: str, sender: str) -> str:
     """Uses the management agent to generate a summary for cohesion."""
@@ -237,7 +221,7 @@ async def _ingest_document_logic(request, db, ds, file_path, use_ai, admin_user)
     from app.core.events import event_manager, ProxyEvent
     from safe_store import SafeStore
     
-    task_id = f"sys_ds_{ds.id}"
+    task_id = f"sys_ds_{ds.id}" # Matches the frontend EventSource listener
     fname = os.path.basename(file_path)
     
     v_key = VECTORIZER_MAP.get(ds.vectorizer_name, "st")
@@ -310,28 +294,6 @@ async def admin_upload_datastore(
             
     return RedirectResponse(url=request.url_for("admin_manage_datastore", ds_id=ds.id), status_code=303)
 
-@router.get("/datastores/{ds_id}/view_doc", name="admin_view_datastore_doc")
-async def admin_view_datastore_doc(ds_id: int, file_path: str, request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
-    ds = await db.get(DataStore, ds_id)
-    if not ds: raise HTTPException(status_code=404)
-    
-    def _read_doc():
-        import pipmaster as pm
-        pm.ensure_packages(["safe-store"])
-        from safe_store import SafeStore
-        v_key = VECTORIZER_MAP.get(ds.vectorizer_name, ds.vectorizer_name)
-        s = SafeStore(db_path=ds.db_path, vectorizer_name=v_key, vectorizer_config=ds.vectorizer_config or {})
-        with s:
-            if hasattr(s, "reconstruct_document_text"):
-                return s.reconstruct_document_text(file_path)
-            return "Reconstruction not supported by this safe-store version."
-                
-    try:
-        content = await run_in_threadpool(_read_doc)
-        return {"content": content, "file_path": file_path}
-    except Exception as e:
-        logger.error(f"View doc error: {e}")
-        return JSONResponse({"error": str(e)}, status_code=500)
 
 @router.post("/datastores/{ds_id}/add_folder", name="admin_add_folder_datastore", dependencies=[Depends(validate_csrf_token)])
 async def admin_add_folder_datastore(
@@ -350,29 +312,6 @@ async def admin_add_folder_datastore(
         flash(request, "Folder does not exist or is not a directory.", "error")
         return RedirectResponse(url=request.url_for("admin_manage_datastore", ds_id=ds.id), status_code=303)
 
-@router.get("/datastores/{ds_id}/view_doc", name="admin_view_datastore_doc")
-async def admin_view_datastore_doc(ds_id: int, file_path: str, request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
-    ds = await db.get(DataStore, ds_id)
-    if not ds: raise HTTPException(status_code=404)
-    
-    def _read_doc():
-        import pipmaster as pm
-        pm.ensure_packages(["safe-store"])
-        from safe_store import SafeStore
-        v_key = VECTORIZER_MAP.get(ds.vectorizer_name, ds.vectorizer_name)
-        s = SafeStore(db_path=ds.db_path, vectorizer_name=v_key, vectorizer_config=ds.vectorizer_config or {})
-        with s:
-            if hasattr(s, "reconstruct_document_text"):
-                return s.reconstruct_document_text(file_path)
-            return "Reconstruction not supported by this safe-store version."
-                
-    try:
-        content = await run_in_threadpool(_read_doc)
-        return {"content": content, "file_path": file_path}
-    except Exception as e:
-        logger.error(f"View doc error: {e}")
-        return JSONResponse({"error": str(e)}, status_code=500)
-
     ext_list = [e.strip().lower() for e in extensions.split(",") if e.strip()]
     
     async def _folder_task():
@@ -383,34 +322,151 @@ async def admin_view_datastore_doc(ds_id: int, file_path: str, request: Request,
                     files_to_process.append(os.path.join(root, f))
         
         for f_path in files_to_process:
-            await _ingest_document_logic(request, db, ds, f_path, use_ai_metadata, admin_user)
+            # We must use run_in_threadpool because the ingest logic is sync-heavy
+            await run_in_threadpool(lambda: asyncio.run(_ingest_document_logic(request, db, ds, f_path, use_ai_metadata, admin_user)))
 
-    await run_in_threadpool(lambda: asyncio.run(_folder_task()))
-    flash(request, f"Folder indexing task complete.", "success")
+    # Start background task wrapper
+    asyncio.create_task(_folder_task())
+    flash(request, "Background folder indexing task started. Check console for progress.", "info")
     return RedirectResponse(url=request.url_for("admin_manage_datastore", ds_id=ds.id), status_code=303)
 
-@router.get("/datastores/{ds_id}/view_doc", name="admin_view_datastore_doc")
-async def admin_view_datastore_doc(ds_id: int, file_path: str, request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
+
+@router.post("/datastores/{ds_id}/test_query", name="admin_test_query_datastore")
+async def admin_test_query_datastore(
+    ds_id: int, 
+    query: str = Form(...),
+    top_k: int = Form(5),
+    db: AsyncSession = Depends(get_db), 
+    admin_user: User = Depends(require_admin_user)
+):
     ds = await db.get(DataStore, ds_id)
     if not ds: raise HTTPException(status_code=404)
     
-    def _read_doc():
-        import pipmaster as pm
-        pm.ensure_packages(["safe-store"])
+    def _query():
         from safe_store import SafeStore
         v_key = VECTORIZER_MAP.get(ds.vectorizer_name, ds.vectorizer_name)
         s = SafeStore(db_path=ds.db_path, vectorizer_name=v_key, vectorizer_config=ds.vectorizer_config or {})
         with s:
-            if hasattr(s, "reconstruct_document_text"):
-                return s.reconstruct_document_text(file_path)
-            return "Reconstruction not supported by this safe-store version."
-                
+            return s.query(query, top_k=top_k)
+            
     try:
-        content = await run_in_threadpool(_read_doc)
-        return {"content": content, "file_path": file_path}
+        results = await run_in_threadpool(_query)
+        # Format results for the UI
+        formatted = []
+        for r in results:
+            formatted.append({
+                "text": r.get("chunk_text"),
+                "score": round(r.get("similarity", 0) * 100, 1),
+                "source": r.get("document_title")
+            })
+        return {"results": formatted}
     except Exception as e:
-        logger.error(f"View doc error: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@router.post("/datastores/{ds_id}/build_graph", name="admin_build_datastore_graph", dependencies=[Depends(validate_csrf_token)])
+async def admin_build_datastore_graph(
+    ds_id: int, 
+    request: Request, 
+    ontology_json: str = Form(...),
+    db: AsyncSession = Depends(get_db),
+    admin_user: User = Depends(require_admin_user)
+):
+    ds = await db.get(DataStore, ds_id)
+    if not ds: raise HTTPException(status_code=404)
+
+    # 1. Setup LLM Bridge
+    app_settings = request.app.state.settings
+    target_agent = app_settings.admin_agent_name
+    if not target_agent:
+        flash(request, "No Management Agent set in Settings. Needed for graph extraction.", "error")
+        return RedirectResponse(url=request.url_for("admin_manage_datastore", ds_id=ds.id), status_code=303)
+
+    from app.api.v1.routes.proxy import _resolve_target, _reverse_proxy
+
+    async def hub_llm_callback(prompt: str) -> str:
+        """Bridge between safe_store extraction prompts and Hub LLM nodes."""
+        try:
+            # Create a simple chat-style message list
+            msgs = [{"role": "user", "content": prompt}]
+            resolution = await _resolve_target(db, target_agent, msgs, sender="graph-builder")
+            real_model, final_msgs = resolution
+            
+            servers = await server_crud.get_servers_with_model(db, real_model)
+            if not servers: return "{}" # Failed to find compute
+
+            # Execute via internal proxy
+            resp, _ = await _reverse_proxy(
+                request, "chat", servers, 
+                json.dumps({"model": real_model, "messages": final_msgs, "stream": False}).encode(),
+                is_subrequest=True, sender="graph-builder"
+            )
+            
+            if hasattr(resp, 'body'):
+                data = json.loads(resp.body.decode())
+                return data.get("message", {}).get("content", "{}")
+        except Exception as e:
+            logger.error(f"Graph LLM Bridge error: {e}")
+        return "{}"
+
+    # 2. Start Extraction Task
+    def _run_graph_build():
+        import pipmaster as pm
+        pm.ensure_packages(["safe-store"])
+        from safe_store import SafeStore, GraphStore
+        
+        v_key = VECTORIZER_MAP.get(ds.vectorizer_name, "tfidf")
+        s = SafeStore(db_path=ds.db_path, vectorizer_name=v_key, vectorizer_config=ds.vectorizer_config or {})
+        
+        try:
+            ontology = json.loads(ontology_json)
+        except:
+            ontology = None # Fallback to default
+
+        # Create GraphStore
+        # We use a sync wrapper for the async callback since GraphStore is sync-heavy
+        sync_callback = lambda p: asyncio.run(hub_llm_callback(p))
+        
+        graph = GraphStore(store=s, llm_executor_callback=sync_callback, ontology=ontology)
+        
+        task_id = f"sys_ds_graph_{ds.id}"
+        event_manager.emit(ProxyEvent("active", task_id, "Graph Engine", "Local", admin_user.username, error_message="Scanning documents for entities..."))
+        
+        # Build the graph
+        graph.build_graph_for_all_documents()
+        
+        event_manager.emit(ProxyEvent("completed", task_id, "Graph Engine", "Local", admin_user.username, error_message="Knowledge Graph build complete!"))
+
+    asyncio.create_task(run_in_threadpool(_run_graph_build))
+    flash(request, "Graph extraction started in background. Monitor the Live Flow or wait for the tab to refresh.", "info")
+    return RedirectResponse(url=request.url_for("admin_manage_datastore", ds_id=ds.id), status_code=303)
+
+@router.get("/datastores/{ds_id}/graph_data", name="admin_get_datastore_graph")
+async def admin_get_datastore_graph(ds_id: int, db: AsyncSession = Depends(get_db)):
+    ds = await db.get(DataStore, ds_id)
+    if not ds: raise HTTPException(status_code=404)
+    
+    def _fetch_data():
+        import sqlite3
+        conn = sqlite3.connect(ds.db_path)
+        c = conn.cursor()
+        
+        # safe_store standard graph tables
+        try:
+            c.execute("SELECT id, label, type, properties FROM nodes")
+            nodes = [{"id": r[0], "label": r[1], "type": r[2], "properties": json.loads(r[3])} for r in c.fetchall()]
+            
+            c.execute("SELECT source_id, target_id, type FROM relationships")
+            edges = [{"from": r[0], "to": r[1], "label": r[2]} for r in c.fetchall()]
+            
+            conn.close()
+            return {"nodes": nodes, "edges": edges}
+        except:
+            conn.close()
+            return {"nodes": [], "edges": []}
+
+    data = await run_in_threadpool(_fetch_data)
+    return data
 
 @router.post("/datastores/{ds_id}/delete_doc", name="admin_delete_datastore_doc", dependencies=[Depends(validate_csrf_token)])
 async def admin_delete_datastore_doc(ds_id: int, request: Request, file_path: str = Form(...), db: AsyncSession = Depends(get_db)):

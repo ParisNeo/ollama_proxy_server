@@ -265,6 +265,24 @@ LiteGraph.registerNodeType("hub/agent", NodeAgent);
                     result_str = "[Tool Error: Not Found]"
                     
                     # 1. Check if it matches a connected MCP
+                    # 1. Check if it matches a connected Local Tool Library
+                    # This enables per-user persistence from ANY client call (Discord/Mobile)
+                    for t_item in tools:
+                        if isinstance(t_item, dict) and t_item.get("library"):
+                            from app.core.tools_manager import ToolsManager
+                            from app.api.v1.routes.tools import _execute_tool_call_local
+                            
+                            lib_name = t_item["library"]
+                            all_tools = ToolsManager.get_all_tools()
+                            lib = next((t for t in all_tools if t["filename"] == lib_name), None)
+                            
+                            if lib:
+                                result_str = await _execute_tool_call_local(
+                                    lib["raw"], call, api_key.user, lib_name
+                                )
+                                break
+
+                    # 2. Check if it matches a connected MCP
                     for t_item in tools:
                         if isinstance(t_item, dict) and t_item.get("type") == "mcp":
                             mcp_cfg = t_item["config"]

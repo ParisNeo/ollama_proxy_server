@@ -369,6 +369,15 @@ select { cursor: pointer; transition: all 0.2s ease; }
     overflow: hidden;
 }
 
+/* --- Global Animations --- */
+.animate-spin {
+    animation: spin 1s linear infinite;
+}
+@keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
 /* --- Global Scrollbar Styling --- */
 ::-webkit-scrollbar {
     width: 8px;
