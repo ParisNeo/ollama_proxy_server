@@ -699,8 +699,23 @@ async def admin_manage_server_models(
     if not server:
         raise HTTPException(status_code=404, detail="Server not found")
 
+    # Check if there's a query parameter for datastore, otherwise pass None
+    # This allows the template to conditionally show the knowledge graph section
+    from urllib.parse import parse_qs
+    query_params = parse_qs(request.url.query)
+    ds_id = query_params.get("ds_id", [None])[0]
+    
+    datastore = None
+    if ds_id:
+        try:
+            from app.database.models import DataStore
+            datastore = await db.get(DataStore, int(ds_id))
+        except (ValueError, TypeError):
+            datastore = None
+
     context = get_template_context(request)
     context["server"] = server
+    context["datastore"] = datastore
     context["csrf_token"] = await get_csrf_token(request)
     return templates.TemplateResponse("admin/manage_server.html", context)
 
