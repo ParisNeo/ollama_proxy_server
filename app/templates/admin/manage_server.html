@@ -132,7 +132,8 @@
         </div>
     </div>
 
-    <!-- VIEW: KNOWLEDGE GRAPH -->
+    <!-- VIEW: KNOWLEDGE GRAPH (Only if datastore is provided) -->
+    {% if datastore %}
     <div id="ds-view-graph" class="hidden space-y-8 h-full flex flex-col">
         <div class="grid grid-cols-1 lg:grid-cols-4 gap-8">
             <!-- Sidebar: Ontology Editor -->
@@ -183,5 +184,6 @@
             </div>
         </div>
     </div>
+    {% endif %}
 </div>
 {% endblock %}
