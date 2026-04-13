@@ -34,6 +34,8 @@ class InstanceSupervisor:
         pid_on_port = self._get_pid_on_port(instance.port)
         if pid_on_port:
             # 3. Verify if it's actually an Ollama instance
+            # FIX: _is_ollama_responding is async, so we must await it.
+            # However, _get_pid_on_port is synchronous.
             if await self._is_ollama_responding(instance.port):
                 return "SYSTEM", pid_on_port
             return "CONFLICT", pid_on_port
@@ -65,7 +67,7 @@ class InstanceSupervisor:
         return await run_in_threadpool(probe)
 
     async def start_instance(self, instance):
-        state, _ = self.get_instance_state(instance)
+        state, _ = await self.get_instance_state(instance)
         if state in ("RUNNING", "SYSTEM", "CONFLICT"):
             logger.warning(f"Cannot start instance {instance.name}: Port {instance.port} is {state}")
             return False
