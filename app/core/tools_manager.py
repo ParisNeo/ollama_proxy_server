@@ -126,6 +126,8 @@ class ToolsManager:
                                 meta["description"] = ast.literal_eval(node.value)
                             elif target.id == "TOOL_LIBRARY_ICON":
                                 meta["icon"] = ast.literal_eval(node.value)
+                            elif target.id == "TOOL_SETTINGS_METADATA":
+                                meta["settings_metadata"] = ast.literal_eval(node.value)
         except Exception:
             pass
         return meta

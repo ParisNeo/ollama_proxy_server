@@ -138,6 +138,7 @@ async def _send_backend_request(
     headers: dict,
     query_params,
     body_bytes: bytes,
+    redis_client: Optional[any] = None,
     request_id: Optional[str] = None,
     model: str = "unknown",
     sender: str = "anon"
@@ -175,7 +176,12 @@ async def _send_backend_request(
         content=body_bytes
     )
 
+    load_key = f"server_load:{server.id}"
     try:
+        if redis_client:
+            await redis_client.incr(load_key)
+            await redis_client.expire(load_key, 300) # Safety expire if worker crashes
+
         if request_id:
             event_manager.emit(ProxyEvent(
                 event_type="assigned", request_id=request_id, 
@@ -394,10 +400,32 @@ async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer
         request.app.state.backend_server_index = 0
         logger.info("Initialized backend_server_index to 0")
     
-    current_index = request.app.state.backend_server_index % max(1, len(candidate_servers))
-    request.app.state.backend_server_index = (current_index + 1) % max(1, len(candidate_servers))
+    # --- INTELLIGENT LOAD BALANCING (Parallelism Aware) ---
+    redis_client = request.app.state.redis
+    best_server = None
     
-    logger.info(f"Round-robin: current_index={current_index}, next_index will be {request.app.state.backend_server_index}, candidate_count={len(candidate_servers)}")
+    if redis_client:
+        server_scores = []
+        for s in candidate_servers:
+            # Fetch current active requests for this server from Redis
+            active_key = f"server_load:{s.id}"
+            active_count = await redis_client.get(active_key)
+            active_count = int(active_count) if active_count else 0
+            
+            # Score = Available Slots (Higher is better)
+            available_slots = s.max_parallel_queries - active_count
+            server_scores.append((available_slots, s))
+            logger.info(f"Server '{s.name}' Load: {active_count}/{s.max_parallel_queries} (Slots: {available_slots})")
+        
+        # Sort by most available slots first
+        server_scores.sort(key=lambda x: x[0], reverse=True)
+        candidate_servers = [x[1] for x in server_scores]
+        best_server = candidate_servers[0]
+    else:
+        # Fallback to simple round-robin if Redis is unavailable
+        current_index = request.app.state.backend_server_index % max(1, len(candidate_servers))
+        request.app.state.backend_server_index = (current_index + 1) % max(1, len(candidate_servers))
+        best_server = candidate_servers[current_index]
 
     # Retrieve model metadata to determine physical context limit for clamping
     from app.crud.model_metadata_crud import get_metadata_by_model_name
@@ -412,11 +440,8 @@ async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer
 
     servers_tried = []
 
-    for server_attempt in range(len(candidate_servers)):
-        safe_index = (current_index + server_attempt) % len(candidate_servers)
-        chosen_server = candidate_servers[safe_index]
-        
-        logger.info(f"Server attempt {server_attempt + 1}/{len(candidate_servers)}: selected '{chosen_server.name}' at index {safe_index} (Limit: {model_limit})")
+    for server_attempt, chosen_server in enumerate(candidate_servers):
+        logger.info(f"Server attempt {server_attempt + 1}/{len(candidate_servers)}: selected '{chosen_server.name}' (Limit: {model_limit})")
 
         servers_tried.append(chosen_server.name)
 
@@ -464,6 +489,7 @@ async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer
                 headers=headers,
                 query_params=request.query_params,
                 body_bytes=local_body_bytes,
+                redis_client=redis_client,
                 request_id=request_id,
                 model=model
             )

@@ -90,13 +90,32 @@ class BotManager:
                     target_workflow, 
                     messages, 
                     request=self.app.state.dummy_request, 
-                    sender=username  # Crucial: pass actual username for template substitution
+                    sender=username
                 )
                 real_model, final_msgs = resolution
+
+                # --- STATIC RESULT INTERCEPTION ---
+                # If the workflow produced a result (e.g. from an AGENT or COMPOSER node),
+                # return it immediately.
+                if real_model == "__result__":
+                    final_content = final_msgs[-1]["content"] if final_msgs else "Empty workflow result."
+                    
+                    # Log the output for debugging
+                    if self.app.state.settings.enable_debug_mode:
+                        logger.info(f"[DEBUG] BOT WORKFLOW RESULT:\n{final_content}")
+                    
+                    # Process memory tags from the result
+                    clean_res = await CognitiveMemoryManager.process_tags(db, user_identifier, target_workflow, final_content)
+                    
+                    # Save to short-term history
+                    self.chat_histories[user_identifier].append({"role": "assistant", "content": clean_res})
+                    return clean_res
                 
                 from app.crud import server_crud
                 servers = await server_crud.get_servers_with_model(db, real_model)
-                if not servers: return "❌ Error: Compute nodes offline."
+                if not servers: 
+                    logger.error(f"Bot check failed: No servers found for resolved model '{real_model}'")
+                    return f"❌ Error: Compute nodes offline for '{real_model}'."
 
                 resp, _ = await _reverse_proxy(
                     self.app.state.dummy_request, "chat", servers, 
@@ -141,12 +160,37 @@ class BotManager:
         intents.message_content = True
         client = discord.Client(intents=intents)
 
+        def split_message(text, limit=1900):
+            """Splits a string into chunks, preferably at newlines."""
+            if len(text) <= limit:
+                return [text]
+            
+            chunks = []
+            while len(text) > limit:
+                # Find the last newline within the limit to avoid breaking formatting
+                split_idx = text.rfind('\n', 0, limit)
+                if split_idx == -1:
+                    # No newline found, force split at the limit
+                    split_idx = limit
+                
+                chunks.append(text[:split_idx].strip())
+                text = text[split_idx:].strip()
+            
+            if text:
+                chunks.append(text)
+            return chunks
+
         @client.event
         async def on_message(message):
             if message.author == client.user: return
             async with message.channel.typing():
                 response = await self._process_bot_request(message.content, message.author.name, "discord", config.target_workflow)
-                await message.reply(response)
+                
+                # CHUNKING LOGIC: Prevent Discord API 'Content too long' errors
+                message_parts = split_message(response)
+                for part in message_parts:
+                    if part:
+                        await message.reply(part)
 
         try:
             await client.start(token)

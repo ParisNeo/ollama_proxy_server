@@ -24,9 +24,21 @@
                 <input type="url" name="url" id="url" required value="{{ server.url }}" class="mt-1 block w-full px-3 py-2 rounded-md shadow-sm">
             </div>
 
-            <div>
-                <label for="server_type" class="block text-sm font-medium">Server Type</label>
-                <select name="server_type" id="server_type" class="mt-1 block w-full px-3 py-2 rounded-md shadow-sm">
+            <div class="grid grid-cols-2 gap-4">
+                <div>
+                    <label for="server_type" class="block text-sm font-medium">Server Type</label>
+                    <select name="server_type" id="server_type" class="mt-1 block w-full px-3 py-2 rounded-md shadow-sm">
+                        <option value="ollama" {% if server.server_type == 'ollama' %}selected{% endif %}>Ollama</option>
+                        <option value="vllm" {% if server.server_type == 'vllm' %}selected{% endif %}>vLLM (OpenAI-Compatible)</option>
+                        <option value="cloud" {% if server.server_type == 'cloud' %}selected{% endif %}>Ollama Cloud</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="max_parallel" class="block text-sm font-medium">Max Parallel Queries</label>
+                    <input type="number" name="max_parallel_queries" id="max_parallel" value="{{ server.max_parallel_queries }}" min="1" class="mt-1 block w-full px-3 py-2 rounded-md shadow-sm">
+                </div>
+            </div>
+            <div class="hidden">
                     <option value="ollama" {% if server.server_type == 'ollama' %}selected{% endif %}>Ollama</option>
                     <option value="vllm" {% if server.server_type == 'vllm' %}selected{% endif %}>vLLM (OpenAI-Compatible)</option>
                     <option value="cloud" {% if server.server_type == 'cloud' %}selected{% endif %}>Ollama Cloud</option>

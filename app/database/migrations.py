@@ -526,6 +526,7 @@ async def run_all_migrations(engine: AsyncEngine) -> None:
         table_schemas = {
             "ollama_servers": {
                 "available_models": "JSON",
+                "max_parallel_queries": "INTEGER DEFAULT 1 NOT NULL",
                 "allowed_models": "JSON",
                 "models_last_updated": "DATETIME",
                 "last_error": "VARCHAR",

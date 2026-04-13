@@ -28,7 +28,8 @@ class CognitiveMemoryManager:
             context += "#### [TIER 1: WORKING MEMORY]\n"
             context += "The following facts are currently 'Hot'. They MUST influence your personality and knowledge:\n"
             for e in immediate:
-                context += f"- [{e.category}] {e.title}: {e.content} (Importance: {e.importance}%)\n"
+                status = "(Already Reinforced)" if e.importance >= 100 else f"(Importance: {e.importance}%)"
+                context += f"- [{e.category}] {e.title}: {e.content} {status}\n"
         else:
             context += "####[TIER 1: WORKING MEMORY]\nNo active memories.\n"
         
@@ -50,7 +51,7 @@ class CognitiveMemoryManager:
         context += "- <memory operation='regrade' category='...' title='...' importance='100'></memory> (to reinforce used memory)\n"
         context += "\nIf you need to recall details from a 'LONG-TERM HANDLE' category, output this exact tag instead of an answer, and the system will reply with the contents:\n"
         context += "- <memory_search category='category_name'/>\n"
-        context += "\nCRITICAL: Always reinforce memories you use by regrading them to 100 importance. If the system prompt uses unpopulated variables like {{user_name}}, IGNORE THEM. Rely entirely on your Working Memory above.\n"
+        context += "\nCRITICAL: Reinforce memories you use by regrading them to 100. If a memory is marked '(Already Reinforced)', do NOT output a regrade tag for it. If the system prompt uses unpopulated variables like {{user_name}}, IGNORE THEM. Rely entirely on your Working Memory above.\n"
         return context
 
     @staticmethod
@@ -74,7 +75,11 @@ class CognitiveMemoryManager:
                 elif op == "alter":
                     await db.execute(update(MemoryEntry).filter_by(user_identifier=user_identifier, agent_name=agent_name, title=title).values(content=content, importance=imp, category=cat, last_accessed=datetime.datetime.utcnow()))
                 elif op == "regrade":
-                    await db.execute(update(MemoryEntry).filter_by(user_identifier=user_identifier, agent_name=agent_name, title=title).values(importance=imp, last_accessed=datetime.datetime.utcnow()))
+                    # Only update if the importance is actually different to save DB cycles
+                    existing_q = await db.execute(select(MemoryEntry.importance).filter_by(user_identifier=user_identifier, agent_name=agent_name, title=title))
+                    existing_imp = existing_q.scalar()
+                    if existing_imp != imp:
+                        await db.execute(update(MemoryEntry).filter_by(user_identifier=user_identifier, agent_name=agent_name, title=title).values(importance=imp, last_accessed=datetime.datetime.utcnow()))
                 elif op == "remove":
                     await db.execute(delete(MemoryEntry).filter_by(user_identifier=user_identifier, agent_name=agent_name, title=title))
             except Exception as e:

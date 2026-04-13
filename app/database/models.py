@@ -78,6 +78,7 @@ class OllamaServer(Base):
     server_type = Column(String, nullable=False, default="ollama", server_default="ollama")
     encrypted_api_key = Column(String, nullable=True)
     is_active = Column(Boolean, default=True)
+    max_parallel_queries = Column(Integer, default=1, nullable=False)
     available_models = Column(JSON, nullable=True)
     allowed_models = Column(JSON, nullable=True) # Whitelist of model names
     models_last_updated = Column(DateTime, nullable=True)

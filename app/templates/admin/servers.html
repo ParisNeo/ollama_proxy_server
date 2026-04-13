@@ -27,6 +27,10 @@
                         <option value="vllm">vLLM (OpenAI-Compatible)</option>
                     </select>
                 </div>
+                <div>
+                    <label for="max_parallel" class="block text-sm font-medium text-current">Max Parallelism</label>
+                    <input type="number" name="max_parallel_queries" id="max_parallel" value="1" min="1" class="mt-1 block w-full px-3 py-2 rounded-md shadow-sm">
+                </div>
                  <div class="md:col-span-1">
                     <label for="api_key" class="block text-sm font-medium text-current">API Key (Optional)</label>
                     <input type="password" name="api_key" id="api_key" placeholder="Leave blank if not needed" class="mt-1 block w-full px-3 py-2 rounded-md shadow-sm">

@@ -6,6 +6,7 @@ class ServerBase(BaseModel):
     name: str
     url: AnyHttpUrl
     server_type: Literal["ollama", "vllm", "cloud"] = "ollama"
+    max_parallel_queries: int = Field(default=1, ge=1)
 
 class ServerCreate(ServerBase):
     api_key: Optional[str] = Field(None, description="Optional API key for connecting to the server.")

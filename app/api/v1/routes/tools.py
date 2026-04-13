@@ -151,7 +151,10 @@ def execute_tool_universally(code: str, fn_name: str, args: Any, user: User, lib
         if not func:
             return f"Error: {fn_name} not found."
 
-        lollms_sys = LollmsSystem(user, library_name)
+        # Fetch stored settings for this specific tool library and user
+        # In a real impl, we'd query UserToolData where is_persistent=True
+        # For this example, we initialize the host system with the settings context
+        lollms_sys = LollmsSystem(user, library_name, settings_override=getattr(user, 'tool_settings', {}).get(library_name))
         
         # Determine if we should inject the host interface
         sig = inspect.signature(func)

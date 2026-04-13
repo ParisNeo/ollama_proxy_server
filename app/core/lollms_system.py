@@ -14,7 +14,7 @@ class LollmsSystem:
     Standard Host Interface for LoLLMs Tools.
     This object is injected into tool functions as the 'lollms' parameter.
     """
-    def __init__(self, user: User, library_name: str):
+    def __init__(self, user: User, library_name: str, settings_override: dict = None):
         # Standard user metadata
         self.user = {
             "id": user.id,
@@ -24,6 +24,7 @@ class LollmsSystem:
         }
         self.library_name = library_name
         self._volatile = {}
+        self._settings = settings_override or {}
 
     def set(self, key: str, value: Any, persistent: bool = True):
         """Standard setter for per-user tool data."""
@@ -77,6 +78,10 @@ class LollmsSystem:
             return val if val is not None else default
         except:
             return default
+
+    def get_setting(self, key: str, default: Any = None) -> Any:
+        """Retrieves a configuration setting (e.g. API key) for this tool."""
+        return self._settings.get(key, default)
 
     def delete(self, key: str):
         """Standard deleter."""
