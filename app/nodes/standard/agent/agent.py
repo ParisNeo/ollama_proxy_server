@@ -20,7 +20,16 @@ class AgentReasonerNode(BaseNode):
         tools = []
         for i in range(2, len(node.get("inputs", []))):
             t_data = await engine._resolve_input(node, i)
-            if t_data: tools.extend(t_data if isinstance(t_data, list) else [t_data])
+            if t_data:
+                if isinstance(t_data, dict) and t_data.get("type") == "mcp_bundle":
+                    # Extract tools from the MCP manifest
+                    mcp_tools = t_data.get("tools", [])
+                    for mt in mcp_tools:
+                        mt["is_mcp"] = True
+                        mt["mcp_client"] = t_data["client"]
+                    tools.extend(mcp_tools)
+                else:
+                    tools.extend(t_data if isinstance(t_data, list) else [t_data])
 
         for turn in range(1, max_turns + 1):
             real_model, turn_msgs = await engine.resolve_target_fn(engine.db, model, scratchpad, engine.depth + 1, engine.request, engine.request_id, engine.sender)

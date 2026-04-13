@@ -1,0 +1,88 @@
+{
+  "name": "LoLLMs Bot Agent",
+  "description": "A versatile system agent capable of managing its own workspace and executing code via LoLLMs Bot Tools.",
+  "graph": {
+    "last_node_id": 10,
+    "last_link_id": 10,
+    "nodes": [
+      {
+        "id": 100,
+        "type": "hub/note",
+        "pos": [450, -220],
+        "size": [500, 150],
+        "properties": {
+          "content": "# LoLLMs Bot Runtime\n- **CONTEXTUAL MEMORY**: The bot uses its working memory to track state.\n- **SYSTEM ACCESS**: Files and commands are scoped to the `/workspace` directory.\n- **SELF-CORRECTION**: If a command fails, the bot analyzes the trace to adjust its next move."
+        }
+      },
+      {
+        "id": 1,
+        "type": "hub/input",
+        "pos": [50, 50],
+        "outputs": [
+          { "name": "Messages", "type": "messages", "links": [1] },
+          { "name": "Settings", "type": "object", "links": [2] }
+        ]
+      },
+      {
+        "id": 2,
+        "type": "hub/tool_selector",
+        "pos": [50, 300],
+        "properties": {
+          "library": "lollms_bot_tools.py",
+          "function": "[ALL FUNCTIONS]"
+        },
+        "outputs": [
+          { "name": "Tool Schema", "type": "tool", "links": [3] }
+        ]
+      },
+      {
+        "id": 3,
+        "type": "hub/system_modifier",
+        "pos": [450, 50],
+        "properties": {
+          "replace_all": true,
+          "system_prompt": "You are the LoLLMs Bot Agent. Your primary workspace is the './workspace' folder. \n\n### PROTOCOLS:\n1. **ANALYZE**: Determine if the request requires file manipulation or code execution.\n2. **PLAN**: State the necessary steps clearly.\n3. **EXECUTE**: Call the appropriate tool from LoLLMs Bot Tools. Only execute one major step at a time.\n4. **OBSERVE**: Use the tool output to verify success or diagnose errors.\n\nYou are a helpful, technically proficient, and security-conscious system bot."
+        },
+        "inputs": [
+          { "name": "Messages", "type": "messages", "link": 1 },
+          { "name": "System Prompt", "type": "string", "link": null }
+        ],
+        "outputs": [
+          { "name": "Updated Messages", "type": "messages", "links": [4] }
+        ]
+      },
+      {
+        "id": 4,
+        "type": "hub/agent",
+        "pos": [850, 50],
+        "properties": {
+          "model": "auto",
+          "max_turns": 10
+        },
+        "inputs": [
+          { "name": "In Messages", "type": "messages", "link": 4 },
+          { "name": "Settings", "type": "object", "link": 2 },
+          { "name": "Tool 1", "type": "tool,mcp", "link": 3 }
+        ],
+        "outputs": [
+          { "name": "Final Answer", "type": "string", "links": [5] }
+        ]
+      },
+      {
+        "id": 5,
+        "type": "hub/output",
+        "pos": [1250, 50],
+        "inputs": [
+          { "name": "Source", "type": "messages,string", "link": 5 }
+        ]
+      }
+    ],
+    "links": [
+      [1, 1, 0, 3, 0, "messages"],
+      [2, 1, 1, 4, 1, "object"],
+      [3, 2, 0, 4, 2, "tool"],
+      [4, 3, 0, 4, 0, "messages"],
+      [5, 4, 0, 5, 0, "string"]
+    ]
+  }
+}

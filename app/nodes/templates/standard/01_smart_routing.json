@@ -1,0 +1,22 @@
+{
+  "name": "Smart Model Router",
+  "description": "Routes user requests to different models based on intent via a single processed pipeline.",
+  "graph": {
+    "last_node_id": 5,
+    "last_link_id": 4,
+    "nodes": [
+      { "id": 100, "type": "hub/note", "pos": [350, -180], "properties": { "content": "# Pro-Grade Routing\nThis workflow uses the **Smart Router** to determine the model name based on rules (e.g. keywords) or AI intent. The result is passed to the **Model Override** slot of the Chat node." } },
+      { "id": 1, "type": "hub/input", "pos": [50, 50], "outputs": [{ "name": "Messages", "links": [1, 2] }, { "name": "Settings", "links": [3] }] },
+      { "id": 2, "type": "hub/autorouter", "pos": [50, 300], "inputs": [{ "name": "Messages", "link": 1 }], "outputs": [{ "name": "Model Name", "links": [4] }], "properties": { "mode": "rules", "rules": [{"type": "keyword", "value": "code", "target": "codellama"}] } },
+      { "id": 3, "type": "hub/llm_chat", "pos": [450, 50], "inputs": [{ "name": "Messages", "link": 2 }, { "name": "Settings", "link": 3 }, { "name": "Model Override", "link": 4 }], "outputs": [{ "name": "Content", "links": [5] }], "properties": { "model": "auto" } },
+      { "id": 4, "type": "hub/output", "pos": [850, 50], "inputs": [{ "name": "Source", "link": 5 }] }
+    ],
+    "links": [
+      [1, 1, 0, 2, 0, "messages"],
+      [2, 1, 0, 3, 0, "messages"],
+      [3, 1, 1, 3, 1, "object"],
+      [4, 2, 0, 3, 2, "string"],
+      [5, 3, 0, 4, 0, "string"]
+    ]
+  }
+}

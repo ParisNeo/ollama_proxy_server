@@ -183,14 +183,39 @@ class BotManager:
         @client.event
         async def on_message(message):
             if message.author == client.user: return
-            async with message.channel.typing():
+            
+            # --- PERMISSION SAFETY: TYPING INDICATOR ---
+            # We manually enter/exit the typing context to handle Forbidden errors gracefully
+            typing_active = False
+            try:
+                # Use a dummy context or check permissions if possible
+                # But a try/except on __aenter__ is the most reliable "Self-Healing" path
+                typing_ctx = message.channel.typing()
+                await typing_ctx.__aenter__()
+                typing_active = True
+            except discord.errors.Forbidden:
+                logger.warning(f"Bot lacks 'Send Messages' or 'Read History' in {message.channel}. Continuing without typing indicator.")
+            except Exception as e:
+                logger.error(f"Unexpected error in typing indicator: {e}")
+
+            try:
                 response = await self._process_bot_request(message.content, message.author.name, "discord", config.target_workflow)
                 
                 # CHUNKING LOGIC: Prevent Discord API 'Content too long' errors
                 message_parts = split_message(response)
                 for part in message_parts:
                     if part:
-                        await message.reply(part)
+                        try:
+                            await message.reply(part)
+                        except discord.errors.Forbidden:
+                            logger.error(f"CRITICAL: Failed to reply to {message.author}. Check bot permissions in this channel.")
+                            break 
+            finally:
+                if typing_active:
+                    try:
+                        await typing_ctx.__aexit__(None, None, None)
+                    except:
+                        pass
 
         try:
             await client.start(token)

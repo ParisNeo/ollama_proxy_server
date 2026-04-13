@@ -471,24 +471,16 @@ print(response.json())
                 <h3 class="card-header text-lg font-bold mb-4">On this page</h3>
                 <nav>
                     <ul class="space-y-2">
-                        <li><a href="#getting-started" class="toc-link">Getting Started</a></li>
-                        <li><a href="#dashboard" class="toc-link">The Dashboard</a></li>
-                        <li><a href="#server-management" class="toc-link">Server Management</a></li>
-                        <li><a href="#instance-manager" class="toc-link">Local Instance Manager</a></li>
-                        <li><a href="#live-flow" class="toc-link">Live System Flow</a></li>
-                        <li><a href="#user-management" class="toc-link">User Management</a></li>
-                        <li><a href="#workflow-architect" class="toc-link">Workflow Architect</a></li>
-                        <li><a href="#playgrounds" class="toc-link">Playgrounds</a></li>
-                        <li><a href="#virtual-agents" class="toc-link">Virtual Agents</a></li>
-                        <li><a href="#model-routing" class="toc-link">Orchestrators & Routers</a></li>
-                        <li><a href="#statistics" class="toc-link">Usage Statistics</a></li>
-                        <li><a href="#security" class="toc-link">Security Features</a></li>
-                        <li><a href="#examples" class="toc-link">Usage Examples</a></li>
-                        <li><a href="#tool-portability" class="toc-link">Portable Tools (Standard)</a></li>
-                        <li><a href="#skills-personalities" class="toc-link">Skills & Personalities</a></li>
-                        <li><a href="#redis-setup" class="toc-link">Redis Setup</a></li>
-                        <li><a href="#home-hub" class="toc-link">Home AI Hub</a></li>
-                        <li><a href="#credits" class="toc-link">Credits</a></li>
+                        <li><a href="#pillars-of-power" class="toc-link">Pillars of Power</a></li>
+                        <li><a href="#smart-routing-the-auto-intelligence" class="toc-link">Smart Routing</a></li>
+                        <li><a href="#tiered-cognitive-memory-continuity" class="toc-link">Cognitive Memory</a></li>
+                        <li><a href="#lollms-bot-agent-physical-capability" class="toc-link">Bot Agent (ReAct)</a></li>
+                        <li><a href="#ensemble-orchestration-moe" class="toc-link">Ensembles (MoE)</a></li>
+                        <li><a href="#mcp-model-context-protocol" class="toc-link">MCP Integration</a></li>
+                        <li><a href="#the-infrastructure-layer" class="toc-link">Infrastructure</a></li>
+                        <li><a href="#workflow-architect-conception" class="toc-link">Workflow Architect</a></li>
+                        <li><a href="#security-performance" class="toc-link">Security & Performance</a></li>
+                        <li><a href="#community-credits" class="toc-link">Credits</a></li>
                     </ul>
                 </nav>
             </div>
@@ -503,15 +495,84 @@ document.addEventListener('DOMContentLoaded', () => {
     // Parse Markdown
     const content = document.getElementById('markdown-body');
     const mdContent = `
-## 🚀 Getting Started: Your Workflow
-1. **Configure Servers:** Go to the [Server Management]({{ url_for('admin_servers') }}) page.
-2. **Create a User:** Navigate to [User Management]({{ url_for('admin_users') }}).
-3. **Generate an API Key:** Create keys on the user details page.
-4. **Copy the Key:** Copy it immediately; it won't be shown again.
-5. **Use the Key:** Use as a Bearer token in your Authorization header.
+# 🧊 LoLLMs Hub Fortress: The Agentic OS
 
-## 🖥️ The Dashboard: Your Monitoring Hub
-The main dashboard provides a real-time, auto-updating overview...
+Welcome to the command center of your AI infrastructure. LoLLMs Hub is no longer just a proxy—it is a **secure agentic runtime** designed to orchestrate complex cognitive tasks across disparate hardware.
+
+---
+
+## 🚀 Pillars of Power
+
+### 1. Smart Routing: The "auto" Intelligence
+LoLLMs Hub acts as a traffic controller. When you request the \`auto\` model, the Hub analyzes your intent:
+- **Code Detection**: Automatically routes to your best coding models.
+- **Vision detection**: Hands images off to VLMs first.
+- **Context Awareness**: Picks a model with a context window large enough for your history.
+- **Priority Logic**: Respects administrative weights set in the [Models Manager]({{ url_for('admin_models_manager') }}).
+
+### 2. Tiered Cognitive Memory (Continuity)
+The Hub features a persistent, importance-based memory system that allows bots to "grow" over time:
+- **Tier 1: Working Memory**: High-importance facts (>25%) injected directly into the system prompt for immediate awareness.
+- **Tier 2: Long-Term Handles**: Faded memories (<25%) presented as "handles." The AI can use the \`hub/memory_browser\` node or the \`<memory_search>\` tag to "remember" details.
+- **Maintenance**: Memories decay by 2% every 4 hours of idle time, ensuring only the most relevant facts stay in Tier 1.
+
+### 3. LoLLMs Bot Agent (Physical Capability)
+The **LoLLMs Bot Agent** workflow transforms a standard model into a ReAct-capable operator:
+- **Workspace Isolation**: All file operations are scoped to the \`/workspace\` directory for safety.
+- **Plan-Act-Observe**: The bot uses a serial execution loop. It plans a move, executes a tool (read/write/command), observes the result, and self-corrects if it finds an error.
+- **Tool Composition**: Use the [Tools Library]({{ url_for('admin_tools') }}) to build your own Python primitives.
+
+### 4. Ensemble Orchestration (MoE)
+Build your own **Mixture of Experts** via the [Ensembles]({{ url_for('admin_ensembles_page') }}) UI:
+- **Parallel Polling**: Query multiple agents (e.g., a Lawyer, a Coder, and a Critic) simultaneously.
+- **Synthesis**: A Master model reviews all inputs to provide a single, unified truth.
+- **Monologue Mode**: See the internal "thoughts" of each expert before the final answer is shown.
+
+### 5. MCP (Model Context Protocol)
+Connect to the global ecosystem of tools using the \`hub/mcp\` node:
+- **Universal Discovery**: Automatically import tools from remote SSE servers or local Stdio commands.
+- **Standardization**: Use Brave Search, Google Maps, or local Filesystems without writing a single line of code.
+
+---
+
+## 🏗️ The Infrastructure Layer
+
+### [Server Management]({{ url_for('admin_servers') }})
+Manage multiple backend clusters. Mix **Ollama**, **vLLM**, and **llama.cpp** nodes. The Hub handles the translation between OpenAI and Ollama protocols automatically.
+
+### [Local Instance Manager]({{ url_for('admin_instances') }})
+Supervise separate processes directly on your host machine.
+- **GPU Pinning**: Launch one instance per GPU via \`CUDA_VISIBLE_DEVICES\`.
+- **Engine Selection**: Toggle between Ollama (multi-model) and Llama.cpp (lightweight GGUF).
+- **HF Downloader**: Search Hugging Face and download GGUFs directly to your server directory.
+
+### [Workflow Architect (Conception)]({{ url_for('admin_conception') }})
+A visual, no-code IDE for building cognitive graphs. 
+- **Modular Nodes**: Drag-and-drop RAG, Search, Logic, and LLM blocks.
+- **AI Architect**: Click "Build with AI" to have the Hub Agent generate a complex LiteGraph JSON from a text description.
+
+---
+
+## 🛡️ Security & Performance
+
+### [User & Key Management]({{ url_for('admin_users') }})
+- **AES-256 Encryption**: All external tokens (HF, MCP, Bots) are encrypted at rest.
+- **Rate Limiting**: Integrated Redis support for per-key throughput control.
+- **IP Firewall**: Restrict access to specific subnets or individual IPs.
+
+### Live Telemetry
+Monitor the **Live System Flow** to see particles representing your requests moving through the pipeline in real-time. Hover over active particles to see **TTFT** (Time to First Token) and **TPS** (Tokens Per Second).
+
+---
+
+## 👨‍💻 Community & Credits
+LoLLMs Hub is built with ❤️ by **ParisNeo** and the open-source community. It leverages the power of:
+- **FastAPI** (High-performance API)
+- **LiteGraph.js** (Visual logic)
+- **SafeStore** (Vector & Graph RAG)
+- **PipMaster** (Self-healing dependencies)
+
+Visit the project on [GitHub](https://github.com/ParisNeo/lollms_hub) to contribute!
     `.trim();
     
     content.innerHTML = marked.parse(mdContent);

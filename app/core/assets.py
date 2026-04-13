@@ -18,13 +18,14 @@ REQUIRED_ASSETS = {
 }
 
 VENDOR_DIR = Path("app/static/vendor")
+MANIFEST_PATH = VENDOR_DIR / ".vendor_manifest.json"
 
-async def ensure_local_assets():
+async def ensure_local_assets(force_refresh: bool = False):
     VENDOR_DIR.mkdir(parents=True, exist_ok=True)
     async with httpx.AsyncClient(follow_redirects=True) as client:
         for filename, url in REQUIRED_ASSETS.items():
             target_path = VENDOR_DIR / filename
-            if not target_path.exists():
+            if not target_path.exists() or force_refresh:
                 logger.info(f"Downloading vendor asset: {filename}...")
                 resp = await client.get(url)
                 resp.raise_for_status()

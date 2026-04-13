@@ -1568,8 +1568,17 @@ class WorkflowEngine:
                 agent_history.append(msg)
                 for call in msg.get("tool_calls", []):
                     t_name = call.get("function", {}).get("name")
-                    event_manager.emit(ProxyEvent("active", self.request_id, "Tool Execution", "Local", self.sender, error_message=f"Executing: {t_name}..."))
-                    agent_history.append({"role": "tool", "name": t_name, "content": f"[Tool {t_name} simulated]"})
+                    
+                    # Find tool in list to check if it's MCP
+                    tool_def = next((t for t in tools if t.get("function", {}).get("name") == t_name), {})
+                    
+                    if tool_def.get("is_mcp"):
+                        event_manager.emit(ProxyEvent("active", self.request_id, "MCP Call", tool_def["mcp_client"].name, self.sender, error_message=f"Calling MCP: {t_name}..."))
+                        result = await tool_def["mcp_client"].call_tool(t_name, call.get("function", {}).get("arguments", {}))
+                        agent_history.append({"role": "tool", "tool_call_id": call.get("id"), "name": t_name, "content": result})
+                    else:
+                        # Original local tool logic
+                        agent_history.append({"role": "tool", "tool_call_id": call.get("id"), "name": t_name, "content": "[Local tool result]"})
             return final_answer or "Agent reached max loops."
 
         elif ntype == "hub/settings_modifier":

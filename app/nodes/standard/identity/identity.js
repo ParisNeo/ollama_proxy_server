@@ -61,6 +61,52 @@ NodePersonality.prototype.onConfigure = function(config) {
 };
 LiteGraph.registerNodeType("hub/personality", NodePersonality);
 
+function NodeMCP() {
+    this.addOutput("MCP", "mcp");
+    this.properties = { 
+        name: "Custom", 
+        transport_type: "sse", 
+        url: "",
+        command: "",
+        headers: {}
+    };
+
+    const mcp_presets = {
+        "Custom": { transport_type: "sse", url: "" },
+        "Brave Search": { transport_type: "sse", url: "http://localhost:3001" },
+        "Google Maps": { transport_type: "sse", url: "http://localhost:3003" },
+        "Filesystem": { transport_type: "stdio", command: "npx @modelcontextprotocol/server-filesystem /data" },
+        "Memory": { transport_type: "sse", url: "http://localhost:3004" }
+    };
+
+    this.presetWidget = this.addWidget("combo", "MCP Preset", this.properties.name, (v) => {
+        this.properties.name = v;
+        if (mcp_presets[v]) {
+            this.properties.transport_type = mcp_presets[v].transport_type;
+            this.properties.url = mcp_presets[v].url || "";
+            this.properties.command = mcp_presets[v].command || "";
+            
+            // Sync other widgets
+            this.typeWidget.value = this.properties.transport_type;
+            this.urlWidget.value = this.properties.transport_type === 'sse' ? this.properties.url : this.properties.command;
+        }
+    }, { values: Object.keys(mcp_presets) });
+
+    this.typeWidget = this.addWidget("combo", "Transport", this.properties.transport_type, (v) => { 
+        this.properties.transport_type = v; 
+    }, { values: ["sse", "stdio"] });
+
+    this.urlWidget = this.addWidget("text", "Endpoint", "", (v) => { 
+        if (this.properties.transport_type === 'sse') this.properties.url = v;
+        else this.properties.command = v;
+    });
+
+    this.title = "🔌 MCP CONNECTOR";
+    this.color = "#a855f7";
+    this.size = [280, 120];
+}
+LiteGraph.registerNodeType("hub/mcp", NodeMCP);
+
 function NodeSkill() {
     this.addOutput("Skill Content", "string");
     this.properties = { name: "" };

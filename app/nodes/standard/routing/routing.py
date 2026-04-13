@@ -6,19 +6,72 @@ from app.nodes.base import BaseNode
 
 class AutoRouterNode(BaseNode):
     node_type = "hub/autorouter"
-    node_title = "Auto Router"
+    node_title = "Smart Router"
     node_category = "Logic & Routing"
-    node_icon = "🔀"
+    node_icon = "🚦"
 
     async def execute(self, engine, node: Dict[str, Any], output_slot_idx: int) -> Any:
-        history = await engine._resolve_input(node, 0) or []
-        last_msg = history[-1] if history else {}
-        user_text = (last_msg.get("content", "") if isinstance(last_msg.get("content"), str) else "").lower()
+        msgs = await engine._resolve_input(node, 0) or engine.initial_messages
+        props = node.get("properties", {})
+        mode = props.get("mode", "rules")
         
-        selected_slot = 1 # Default fallback
-        if node["inputs"][selected_slot].get("link"):
-            return await engine.execute_cognitive_path(node["inputs"][selected_slot]["link"], history)
-        return "Router selection failed."
+        if not msgs: return props.get("default_model", "auto")
+        
+        last_msg = msgs[-1]
+        text = last_msg.get("content", "")
+        if isinstance(text, list):
+            text = " ".join([p.get("text", "") for p in text if p.get("type") == "text"])
+        
+        # --- MODE 1: Deterministic Firewall Rules ---
+        if mode == "rules":
+            for rule in props.get("rules", []):
+                r_type = rule.get("type")
+                r_val = rule.get("value")
+                target = rule.get("target")
+                
+                match = False
+                if r_type == "keyword": match = str(r_val).lower() in text.lower()
+                elif r_type == "regex": match = bool(re.search(str(r_val), text, re.I))
+                elif r_type == "min_len": match = len(text) >= int(r_val or 0)
+                elif r_type == "max_len": match = len(text) <= int(r_val or 0)
+                
+                if match:
+                    logger.info(f"Router Firewall Match: {r_type}='{r_val}' -> {target}")
+                    return target
+
+        # --- MODE 2: Semantic LLM Classifier ---
+        else:
+            classifier = props.get("classifier_model", "auto")
+            pool = props.get("candidate_models", ["auto"])
+            
+            prompt = (
+                f"Analyze the following user message. Based on the intent, which model from this list is best suited to handle it?\n"
+                f"MODELS: {', '.join(pool)}\n\n"
+                f"USER MESSAGE: \"{text[:500]}\"\n\n"
+                f"STRICT: Output ONLY the name of the chosen model. No explanation."
+            )
+            
+            try:
+                from app.crud import server_crud
+                import json
+                
+                servers = await server_crud.get_servers_with_model(engine.db, classifier)
+                if servers:
+                    payload = {"model": classifier, "messages": [{"role": "user", "content": prompt}], "stream": False}
+                    resp, _ = await engine.reverse_proxy_fn(engine.request, "chat", servers, json.dumps(payload).encode(), is_subrequest=True, sender="router-classifier")
+                    
+                    if hasattr(resp, 'body'):
+                        data = json.loads(resp.body.decode())
+                        choice = data.get("message", {}).get("content", "").strip()
+                        # Verify the AI didn't hallucinate a name not in the pool
+                        if choice in pool:
+                            logger.info(f"Router Semantic Match: Classifier chose {choice}")
+                            return choice
+            except Exception as e:
+                logger.error(f"Router Classifier Error: {e}")
+
+        # Final Fallback
+        return props.get("default_model", "auto")
 
 class MOENode(BaseNode):
     node_type = "hub/moe"
