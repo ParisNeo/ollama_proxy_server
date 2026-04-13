@@ -82,7 +82,13 @@ async def admin_add_datastore(
     
     # --- URL & HOST MAPPING ---
     # SafeStore uses 'host' for Ollama and 'base_url' for others.
-    target_url = vectorizer_base_url.strip() if vectorizer_base_url else f"http://127.0.0.1:{settings.PROXY_PORT}"
+    
+    # Special handling for OpenAI vectorizer: if no URL is provided, default to Hub Proxy
+    if vectorizer_name == "openai" and not vectorizer_base_url:
+        target_url = f"http://127.0.0.1:{settings.PROXY_PORT}"
+        logger.info(f"Datastore '{name}': OpenAI vectorizer selected with no URL. Defaulting to Hub Proxy.")
+    else:
+        target_url = vectorizer_base_url.strip() if vectorizer_base_url else f"http://127.0.0.1:{settings.PROXY_PORT}"
     
     if vectorizer_name == "ollama":
         v_config["host"] = target_url
@@ -93,11 +99,18 @@ async def admin_add_datastore(
     if vectorizer_api_key:
         v_config["api_key"] = vectorizer_api_key
     else:
-        # If pointing to self (localhost/127.0.0.1), inject the Hub System Key internally
+        # If pointing to self (localhost/127.0.0.1) or explicitly OpenAI without key, inject the Hub System Key
         url_str = target_url.lower()
-        if "localhost" in url_str or "127.0.0.1" in url_str:
-            v_config["api_key"] = request.app.state.system_key
-            logger.info(f"Datastore '{name}': Local Hub detected. Injecting 'store_manager' system key.")
+        is_local = "localhost" in url_str or "127.0.0.1" in url_str
+        
+        if is_local or vectorizer_name == "openai":
+            # Attempt to get system key, fallback gracefully if not available
+            system_key = getattr(request.app.state, 'system_key', None)
+            if system_key:
+                v_config["api_key"] = system_key
+                logger.info(f"Datastore '{name}': Injecting Hub System Key for local/OpenAI proxy usage.")
+            else:
+                logger.warning(f"Datastore '{name}': OpenAI vectorizer selected but system_key not found in app state. Request may fail without an API key.")
     
     ds = DataStore(
         name=name,
