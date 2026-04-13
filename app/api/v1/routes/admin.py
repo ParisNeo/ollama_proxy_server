@@ -2463,7 +2463,7 @@ async def delete_instance(instance_id: int, request: Request, db: AsyncSession =
     if not inst:
         raise HTTPException(status_code=404, detail="Instance not found")
         
-    if supervisor.is_running(instance_id):
+    if instance_id in supervisor.processes:
         await supervisor.stop_instance(instance_id)
         
     await db.delete(inst)
