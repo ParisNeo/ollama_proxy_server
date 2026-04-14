@@ -1108,20 +1108,20 @@ async def admin_update_model_metadata(
 
 @router.get("/settings", response_class=HTMLResponse, name="admin_settings")
 async def admin_settings_form(request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
-    from app.database.models import VirtualAgent
+    from app.database.models import Workflow
     context = get_template_context(request)
     
-    # SECURITY & CONSISTENCY FIX: Always fetch fresh settings from DB for the form.
-    # This prevents the UI from showing stale data if a different Gunicorn worker handled the last update.
     db_settings_obj = await settings_crud.get_app_settings(db)
     if db_settings_obj:
         app_settings = AppSettingsModel.model_validate(db_settings_obj.settings_data)
     else:
         app_settings = request.app.state.settings
     
-    # Get list of agents for the management dropdown
-    res = await db.execute(select(VirtualAgent.name))
-    context["agent_names"] = res.scalars().all()
+    # NEW LOGIC: Clear old agents. Management Agent should be a Model or a Workflow.
+    models = await server_crud.get_all_available_model_names(db)
+    workflows = (await db.execute(select(Workflow.name).filter(Workflow.is_active == True))).scalars().all()
+    
+    context["agent_names"] = sorted(list(set(models + list(workflows))))
     
     context["settings"] = app_settings
     context["themes"] = app_settings.available_themes

@@ -43,11 +43,22 @@ def translate_ollama_to_vllm_chat(ollama_payload: Dict[str, Any]) -> Dict[str, A
     messages = ollama_payload.get("messages", [])
     
     # Check for and handle Chain-of-Thought prompt for vLLM
-    final_messages = []
+    final_messages =[]
     
-    is_thinking_on = ollama_payload.get("think") is True
+    # "think" could be True, False, or a string like "low"
+    think_param = ollama_payload.get("think")
+    is_thinking_on = think_param is True or isinstance(think_param, str)
+    is_thinking_off = think_param is False
 
-    # Inject CoT prompt if thinking is enabled for a non-native model
+    # Pass explicit disable flags for native vLLM reasoning models
+    # vLLM is fragmented: Qwen3 uses enable_thinking, GLM4.5 uses thinking: {type: "disabled"}
+    if is_thinking_off:
+        vllm_payload["enable_thinking"] = False
+        vllm_payload["thinking"] = {"type": "disabled"}
+        # Some OpenAI-compatible server frameworks check chat_template_kwargs
+        vllm_payload.setdefault("extra_body", {})["chat_template_kwargs"] = {"enable_thinking": False, "thinking": False}
+
+    # Inject CoT prompt if thinking is explicitly enabled (useful for non-native models)
     if is_thinking_on:
         has_system_prompt = False
         for message in messages:

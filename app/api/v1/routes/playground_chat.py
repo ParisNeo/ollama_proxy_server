@@ -184,8 +184,8 @@ async def admin_playground_stream(
                 "messages": messages,
                 "stream": True,
             }
-            if think_option is True:
-                ollama_payload["think"] = True
+            if think_option is not None:
+                ollama_payload["think"] = think_option
             
             payload = translate_ollama_to_vllm_chat(ollama_payload)
             
@@ -216,14 +216,18 @@ async def admin_playground_stream(
             chat_url = f"{target_server.url.rstrip('/')}/api/chat"
             payload = {"model": model_name, "messages": messages, "stream": True}
 
-            if think_option:
+            if think_option is not None:
                 model_name_lower = model_name.lower()
-                supported_think_models = ["qwen", "gpt-oss", "deepseek"]
+                # Expand supported list to catch glm, qwq, etc.
+                supported_think_models =["qwen", "gpt-oss", "deepseek", "glm", "qwq", "phi-4"]
 
                 if any(keyword in model_name_lower for keyword in supported_think_models):
                     payload["think"] = think_option
-                else:
+                elif think_option is True:
                     logger.warning(f"Frontend requested thinking for '{model_name}', but it's not in the known support list. Ignoring 'think' parameter.")
+                elif think_option is False:
+                    # Pass False anyway, as it might be a new reasoning model that defaults to True
+                    payload["think"] = False
 
             from app.crud.server_crud import _get_auth_headers
             headers = _get_auth_headers(target_server)

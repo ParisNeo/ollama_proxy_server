@@ -28,8 +28,9 @@
 <div class="flex h-full w-full bg-[#0a0a0f] rounded-lg overflow-hidden border border-white/10 shadow-2xl">
     <!-- Chat History Sidebar -->
     <div id="chat-history-sidebar" class="w-64 border-r border-white/10 flex-col bg-black/40 hidden md:flex flex-shrink-0">
-        <div class="p-4 border-b border-white/10">
+        <div class="p-4 border-b border-white/10 space-y-2">
             <button id="new-chat-btn" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg font-black tracking-widest text-xs uppercase transition-colors shadow-lg shadow-indigo-500/20">+ New Chat</button>
+            <button onclick="if(confirm('Clear all local chat history?')){localStorage.removeItem(HISTORY_STORAGE_KEY); window.location.reload();}" class="w-full bg-white/5 hover:bg-red-900/20 text-gray-500 hover:text-red-400 py-1.5 rounded-lg text-[10px] font-bold uppercase transition-all border border-transparent hover:border-red-500/30">Purge Local Cache</button>
         </div>
         <div id="chat-history-list" class="flex-1 overflow-y-auto custom-scrollbar p-2 space-y-1">
             <!-- History items injected here -->
@@ -218,8 +219,27 @@ document.addEventListener('DOMContentLoaded', () => {
     let currentChatId = null;
 
     function saveHistory() {
-        localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(chatHistory));
-        renderHistoryList();
+        try {
+            localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(chatHistory));
+            renderHistoryList();
+        } catch (e) {
+            if (e.name === 'QuotaExceededError' || e.name === 'NS_ERROR_DOM_QUOTA_REACHED') {
+                console.warn("LocalStorage quota exceeded. Pruning oldest chats...");
+                
+                // 1. If we have more than 1 chat, remove the oldest one and retry
+                if (chatHistory.length > 1) {
+                    chatHistory.pop(); // Remove the last (oldest) item
+                    saveHistory();     // Recursive retry
+                } else {
+                    // 2. If even a single chat is too big (likely due to too many images), 
+                    // we must inform the user and stop the crash.
+                    console.error("Critical: Single chat session exceeds browser storage limits.");
+                    alert("Storage Limit Reached: This conversation is too large to save locally (likely due to high-resolution images). Previous chats have been cleared to make room, but you may need to clear this chat or use fewer images to continue saving history.");
+                }
+            } else {
+                console.error("LocalStorage Save Error:", e);
+            }
+        }
     }
 
     window.createNewChat = () => {
@@ -732,11 +752,16 @@ SUPPORTED ANNOTATION SCHEMAS:
         };
 
         let thinkOption = null;
-        if (!thinkingToggleContainer.classList.contains('hidden') && isThinkingMode) {
-            if (!thinkingLevelContainer.classList.contains('hidden')) {
-                thinkOption = thinkingLevelSelect.value;
+        if (!thinkingToggleContainer.classList.contains('hidden')) {
+            if (isThinkingMode) {
+                if (!thinkingLevelContainer.classList.contains('hidden')) {
+                    thinkOption = thinkingLevelSelect.value;
+                } else {
+                    thinkOption = true;
+                }
             } else {
-                thinkOption = true;
+                // Explicitly send false to disable native auto-thinking features
+                thinkOption = false;
             }
         }
         if (thinkOption !== null) {
@@ -1434,7 +1459,8 @@ SUPPORTED ANNOTATION SCHEMAS:
     }
     
     function updateThinkingControls() {
-        const simpleThinkModels = ['qwen', 'deepseek'];
+        // Expand the list to match the backend updates
+        const simpleThinkModels =['qwen', 'deepseek', 'glm', 'qwq', 'phi-4'];
         const gptOssKeyword = 'gpt-oss';
         const selectedModel = modelSelector.value.toLowerCase();
 

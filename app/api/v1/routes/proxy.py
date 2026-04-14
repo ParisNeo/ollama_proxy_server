@@ -2423,98 +2423,10 @@ async def proxy_ollama(
         model_name = chosen_model_name
         body["model"] = model_name
 
-    # 2. Handle Smart Router (Pool) Resolution
-    from app.database.models import SmartRouter
-    pool_check = await db.execute(select(SmartRouter).filter(SmartRouter.name == model_name))
-    router_obj = pool_check.scalars().first()
-    if router_obj:
-        model_name = await _select_from_pool(db, model_name, body, request, sender=api_key.user.username)
-        if not model_name:
-            raise HTTPException(status_code=503, detail="Router has no available targets.")
-        body["model"] = model_name
-
+    # 2. Resolve Workflow / Graph Tools
+    # Legacy VirtualAgents, Routers, Ensembles, and Vision Augmenters have been removed.
+    # Everything now passes through the recursive Workflow Engine.
     requested_model_name = model_name
-
-    # 3. Handle Vision Augmenter Pipeline
-    try:
-        from app.database.models import VisionAugmenter
-        aug_check = await db.execute(select(VisionAugmenter).filter(VisionAugmenter.name == model_name))
-        augmenter = aug_check.scalars().first()
-        if augmenter:
-            logger.info(f"[VisionAugmenter] Pipeline triggered for '{model_name}'. Analyzing payload for images...")
-            is_chat_mode = "messages" in body
-            has_images = "images" in body and body["images"]
-            
-            if not has_images and is_chat_mode:
-                for msg in body.get("messages",[]):
-                    if msg.get("images"):
-                        has_images = True
-                        break
-                    content = msg.get("content")
-                    if isinstance(content, list):
-                        for part in content:
-                            if part.get("type") == "image_url":
-                                has_images = True
-                                break
-
-            if has_images:
-                logger.info(f"[VisionAugmenter] Images detected. Offloading to VLM: '{augmenter.vision_model}'")
-                event_manager.emit(ProxyEvent("assigned", req_id + "_v", augmenter.vision_model, "vision-augmenter", api_key.user.username, request_type="VISION"))
-                
-                extracted_images =[]
-                if body.get("images"):
-                    extracted_images.extend(body["images"])
-                    del body["images"]
-                
-                user_query = body.get("prompt", "")
-                if is_chat_mode:
-                    for msg in body.get("messages", []):
-                        if msg.get("images"):
-                            extracted_images.extend(msg["images"])
-                            del msg["images"]
-                        
-                        content = msg.get("content")
-                        if isinstance(content, list):
-                            text_parts =[]
-                            for part in content:
-                                if part.get("type") == "image_url":
-                                    url = part.get("image_url", {}).get("url", "")
-                                    if url.startswith("data:"):
-                                        extracted_images.append(url.split(",", 1)[1])
-                                    else:
-                                        extracted_images.append(url)
-                                elif part.get("type") == "text":
-                                    text_parts.append(part.get("text", ""))
-                            msg["content"] = " ".join(text_parts)
-                            
-                        if msg.get("role") == "user":
-                            user_query = msg.get("content", "")
-
-                # Get description
-                image_descriptions = await _extract_image_descriptions(
-                    request, db, augmenter.vision_model, extracted_images[:10], user_query, request.app.state.http_client, sender=api_key.user.username
-                )
-                
-                # Replace the images with the descriptions
-                if is_chat_mode:
-                    for i in range(len(body["messages"]) - 1, -1, -1):
-                        msg = body["messages"][i]
-                        if msg.get("role") == "user":
-                            msg["content"] = f"### CONTEXTUAL IMAGE ANALYSIS:\n{image_descriptions}\n\n### USER QUERY:\n{msg.get('content', '')}"
-                            break
-                else:
-                    body["prompt"] = f"### CONTEXTUAL IMAGE ANALYSIS:\n{image_descriptions}\n\n### USER QUERY:\n{body.get('prompt', '')}"
-
-                logger.info(f"[VisionAugmenter] VLM analysis complete. Routing cleaned prompt to: '{augmenter.text_model}'")
-            
-            # Continue pipeline with the text model
-            model_name = augmenter.text_model
-            body["model"] = model_name
-    except Exception as e:
-        logger.error(f"VisionAugmenter error: {e}", exc_info=True)
-
-
-    # 3.5 Resolve Workflow / VirtualAgent / Graph Tools
     if model_name and isinstance(body, dict):
         is_chat_mode = "messages" in body
         input_msgs = body.get("messages",[]) if is_chat_mode else [{"role": "user", "content": body.get("prompt", "")}]
@@ -2593,14 +2505,20 @@ async def proxy_ollama(
         meta = await model_metadata_crud.get_metadata_by_model_name(db, model_name)
         ui_allows_thinking = meta.supports_thinking if meta else False
         
-        # 2. Only act if the client EXPLICITLY requested thinking
+        # 2. Only act if the client EXPLICITLY provided the thinking parameter
         if "think" in body:
-            if ui_allows_thinking:
+            think_val = body.get("think")
+            
+            # If they explicitly want to turn it off, always allow that (to suppress default reasoning)
+            if think_val is False:
+                pass # Leave it in the payload so the backend disables it
+                
+            elif ui_allows_thinking:
                 # Normal path: Translation for special models like gpt-oss
-                if "gpt-oss" in model_name.lower() and body.get("think") is True:
+                if "gpt-oss" in model_name.lower() and think_val is True:
                     body["think"] = "medium"
             else:
-                # Warning path: Client asked, but Hub UI is configured to block it
+                # Warning path: Client asked to enable thinking, but Hub UI blocks it
                 warning_msg = (
                     f"⚠️ Client requested 'think: true' for {model_name}, but 'Think (CoT)' "
                     f"is DISABLED in Models Manager. Parameter stripped to prevent error."
@@ -2659,30 +2577,7 @@ async def proxy_ollama(
         prompt_tokens=p_tokens
     ))
 
-    # Detect Pool
-    from app.database.models import SmartRouter
-    pool_check = await db.execute(select(SmartRouter).filter(SmartRouter.name == model_name))
-    if pool_check.scalars().first():
-        resolved_model = await _select_from_pool(db, model_name, body, request, sender=api_key.user.username)
-        # Pool already sets enforce_strict_context
-        if resolved_model:
-            model_name = resolved_model
-            body["model"] = model_name
-            body_bytes = json.dumps(body).encode('utf-8')
-        else:
-            event_manager.emit(ProxyEvent("error", req_id, model_name, "none", api_key.user.username, error_message="Pool empty"))
-            raise HTTPException(status_code=503, detail=f"Model Pool '{model_name}' has no available models.")
-
-    # Detect Bundle (Ensemble) or Chain (Swarm)
-    from app.database.models import EnsembleOrchestrator, ChainOrchestrator
-    
-    bundle_check = await db.execute(select(EnsembleOrchestrator).filter(EnsembleOrchestrator.name == model_name))
-    if bundle_check.scalars().first():
-        return await _handle_bundle_request(db, request, model_name, body, api_key, req_id)
-
-    chain_check = await db.execute(select(ChainOrchestrator).filter(ChainOrchestrator.name == model_name))
-    if chain_check.scalars().first():
-        return await _handle_chain_request(db, request, model_name, body, api_key, req_id)
+    # Legacy Pool, Ensemble, and Chain checks removed.
 
     try:
         logger.info(f"proxy_ollama: Received {len(servers)} server(s) from get_active_servers dependency: {[s.name for s in servers]}")
