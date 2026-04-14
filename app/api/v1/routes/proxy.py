@@ -27,6 +27,8 @@ from app.core.vllm_translator import (
     vllm_stream_to_ollama_stream
 )
 
+from ascii_colors import trace_exception
+
 logger = logging.getLogger(__name__)
 router = APIRouter(dependencies=[Depends(ip_filter), Depends(rate_limiter)])
 
@@ -2682,7 +2684,10 @@ async def proxy_ollama(
     if chain_check.scalars().first():
         return await _handle_chain_request(db, request, model_name, body, api_key, req_id)
 
-    logger.info(f"proxy_ollama: Received {len(servers)} server(s) from get_active_servers dependency: {[s.name for s in servers]}")
+    try:
+        logger.info(f"proxy_ollama: Received {len(servers)} server(s) from get_active_servers dependency: {[s.name for s in servers]}")
+    except Exception as ex:
+        trace_exception(ex)
     
     candidate_servers = servers
     if model_name:
