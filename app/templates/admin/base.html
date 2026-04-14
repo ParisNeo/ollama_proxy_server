@@ -54,15 +54,15 @@
                 <nav class="mt-4 pb-12 overflow-y-auto max-h-[calc(100vh-16rem)]">
                     <!-- GROUP: CORE -->
                     <div class="sidebar-group-label">Core System</div>
-                    <a href="{{ url_for('admin_dashboard') }}" class="flex items-center px-4 py-3 whitespace-nowrap {% if 'dashboard' in request.url.path %}active{% endif %}">
+                    <a id="nav-dashboard" href="{{ url_for('admin_dashboard') }}" class="flex items-center px-4 py-3 whitespace-nowrap {% if 'dashboard' in request.url.path %}active{% endif %}">
                         <svg class="w-6 h-6 mr-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 8v8m-4-5v5m-4-2v2m-2 4h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
                         Dashboard
                     </a>
-                    <a href="{{ url_for('admin_users') }}" class="flex items-center px-4 py-3 whitespace-nowrap {% if 'users' in request.url.path %}active{% endif %}">
+                    <a id="nav-users" href="{{ url_for('admin_users') }}" class="flex items-center px-4 py-3 whitespace-nowrap {% if 'users' in request.url.path %}active{% endif %}">
                         <svg class="w-6 h-6 mr-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M15 21a6 6 0 00-9-5.197M15 21a6 6 0 00-9-5.197"></path></svg>
                         User Management
                     </a>
-                    <a href="{{ url_for('admin_settings') }}" class="flex items-center px-4 py-3 whitespace-nowrap {% if 'settings' in request.url.path %}active{% endif %}">
+                    <a id="nav-settings" href="{{ url_for('admin_settings') }}" class="flex items-center px-4 py-3 whitespace-nowrap {% if 'settings' in request.url.path %}active{% endif %}">
                         <svg class="w-6 h-6 mr-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
                         Settings
                     </a>
@@ -74,7 +74,7 @@
                     {% endif %}
 
                     <!-- GROUP: INFRASTRUCTURE -->
-                    <div class="sidebar-group-label">Infrastructure</div>
+                    <div id="label-infra" class="sidebar-group-label">Infrastructure</div>
                     <a href="{{ url_for('admin_servers') }}" class="flex items-center px-4 py-3 whitespace-nowrap {% if 'servers' in request.url.path %}active{% endif %}">
                         <svg class="w-6 h-6 mr-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2-2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01"></path></svg>
                         Server Management
@@ -85,7 +85,7 @@
                     </a>
 
                     <!-- GROUP: ORCHESTRATION -->
-                    <div class="sidebar-group-label">Intelligence Layer</div>
+                    <div id="label-intel" class="sidebar-group-label">Intelligence Layer</div>
                     <a href="{{ url_for('admin_models_manager') }}" class="flex items-center px-4 py-3 whitespace-nowrap {% if 'models-manager' in request.url.path %}active{% endif %}">
                         <svg class="w-6 h-6 mr-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 18.657A8 8 0 016.343 7.343S7 9 9 10c0-2 .5-5 2.986-7.014A8.003 8.003 0 0122 12c0 3.771-2.5 7-6.343 6.657zM2 6a8 8 0 1111.314 11.314L2 6z"></path></svg>
                         Models Manager
@@ -113,11 +113,11 @@
 
                     <!-- GROUP: LABS -->
                     <div class="sidebar-group-label">AI Playground</div>
-                    <a href="{{ url_for('admin_playground') }}" class="flex items-center px-4 py-3 whitespace-nowrap {% if 'playground' in request.url.path and 'embedding' not in request.url.path %}active{% endif %}">
+                    <a id="nav-playground" href="{{ url_for('admin_playground') }}" class="flex items-center px-4 py-3 whitespace-nowrap {% if 'playground' in request.url.path and 'embedding' not in request.url.path %}active{% endif %}">
                         <svg class="w-6 h-6 mr-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path></svg>
                         Chat Playground
                     </a>
-                    <a href="{{ url_for('admin_embedding_playground') }}" class="flex items-center px-4 py-3 whitespace-nowrap {% if 'embedding-playground' in request.url.path %}active{% endif %}">
+                    <a id="nav-embedding" href="{{ url_for('admin_embedding_playground') }}" class="flex items-center px-4 py-3 whitespace-nowrap {% if 'embedding-playground' in request.url.path %}active{% endif %}">
                         <svg class="w-6 h-6 mr-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 14v6m-3-3h6M3 10h2a2 2 0 012 2v2a2 2 0 01-2 2H3v-6zm0 6h2a2 2 0 002-2v-2a2 2 0 00-2-2H3v6zm6 0h2a2 2 0 002-2v-2a2 2 0 00-2-2H9v6z"></path></svg>
                         Embedding Benchmark
                     </a>
@@ -139,7 +139,7 @@
 
                     <!-- GROUP: INFO -->
                     <div class="sidebar-group-label">Support</div>
-                    <a href="{{ url_for('admin_help') }}" class="flex items-center px-4 py-3 whitespace-nowrap {% if 'help' in request.url.path %}active{% endif %}">
+                    <a id="nav-help" href="{{ url_for('admin_help') }}" class="flex items-center px-4 py-3 whitespace-nowrap {% if 'help' in request.url.path %}active{% endif %}">
                         <svg class="w-6 h-6 mr-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.79 4 4 0 2.21-1.79 4-4 4-1.742 0-3.223-.835-3.772-2M12 18.5v.01M12 5.5v.01"></path></svg>
                         Help & Credits
                     </a>
@@ -203,6 +203,27 @@
                      color: white; font-size: 11px; display: inline-flex; align-items: center; justify-content: center; 
                      font-weight: bold; margin-left: 6px; }
     </style>
+
+    <!-- Wizard Structure -->
+    <div id="wizard-overlay" class="fixed inset-0 bg-black/60 backdrop-blur-md z-[200] hidden transition-opacity duration-500"></div>
+    <div id="wizard-bubble" class="fixed z-[220] hidden w-80 bg-[#0a0a0f]/95 backdrop-blur-xl border-2 border-indigo-500 rounded-2xl shadow-[0_0_50px_rgba(0,0,0,0.9)] p-5 transition-all duration-300">
+        <div class="flex items-center gap-3 mb-3">
+            <div class="h-8 w-8 rounded-full bg-indigo-600 flex items-center justify-center text-white text-xs font-black">L</div>
+            <span class="text-xs font-black uppercase tracking-widest text-indigo-400">Hub Architect</span>
+        </div>
+        <div id="wizard-text" class="text-sm text-gray-300 leading-relaxed mb-4"></div>
+        <div class="flex justify-between items-center pt-2 border-t border-white/10">
+            <button id="wizard-skip" class="text-[10px] font-bold text-gray-500 hover:text-white uppercase">Skip Tour</button>
+            <div class="flex gap-2">
+                <button id="wizard-prev" class="px-3 py-1 bg-white/5 hover:bg-white/10 rounded text-[10px] font-bold text-gray-400 hidden">Back</button>
+                <button id="wizard-next" class="px-4 py-1 bg-indigo-600 hover:bg-indigo-500 rounded text-[10px] font-black uppercase text-white shadow-lg">Next Step</button>
+            </div>
+        </div>
+        <label class="flex items-center gap-2 cursor-pointer mt-3 pt-2 border-t border-white/5">
+            <input type="checkbox" id="wizard-never" class="h-3 w-3 rounded text-indigo-600 bg-black/40 border-white/10">
+            <span class="text-[9px] font-bold text-gray-500 uppercase tracking-tighter">Don't show this again</span>
+        </label>
+    </div>
 
     <!-- Modal Structure -->
     <div id="modal-backdrop" class="fixed inset-0 bg-black bg-opacity-70 z-50 hidden"></div>
@@ -767,6 +788,140 @@
                     }
                 }
             };
+
+            // --- FIRST TIME WIZARD LOGIC ---
+            const WIZARD_STEPS = [
+                {
+                    target: null,
+                    text: "Welcome to the <b>Fortress</b>, Architect. I am Lollms. I'll show you how to orchestrate your AI cluster."
+                },
+                {% if bootstrap_settings.ADMIN_PASSWORD == "changeme" %}
+                {
+                    target: '#nav-settings',
+                    is_security: true,
+                    text: "<span class='text-red-400 font-black'>⚠️ SECURITY ALERT</span><br>Your admin password is set to the default! <b>Change it immediately</b> in Settings to secure your Fortress."
+                },
+                {% endif %}
+                {
+                    target: '#nav-dashboard',
+                    text: "The <b>Dashboard</b> is your mission control. Monitor system health, GPU VRAM usage, and our live carbon footprint."
+                },
+                {
+                    target: '#label-infra',
+                    text: "<b>Infrastructure</b> is where you connect the limbs. Add Ollama or vLLM servers, and manage local GPU processes."
+                },
+                {
+                    target: '#label-intel',
+                    text: "This is the <b>Intelligence Layer</b>. Here you define 'auto' routing logic, build cognitive graphs, and manage per-user memories."
+                },
+                {
+                    target: '#nav-playground',
+                    text: "Ready to test? Use the <b>Chat Playground</b> to interact with your cluster using images, docs, and real-time telemetry."
+                },
+                {
+                    target: '#nav-help',
+                    text: "Finally, check the <b>Multi-User Manuals</b> in Help to learn about absolute data isolation and tool persistence. Good luck."
+                }
+            ];
+
+            let currentStep = 0;
+            const overlay = document.getElementById('wizard-overlay');
+            const bubble = document.getElementById('wizard-bubble');
+            const text = document.getElementById('wizard-text');
+            const nextBtn = document.getElementById('wizard-next');
+            const prevBtn = document.getElementById('wizard-prev');
+            const skipBtn = document.getElementById('wizard-skip');
+
+            window.startWizard = () => {
+                currentStep = 0;
+                localStorage.removeItem('hub_wizard_complete');
+                showStep(0);
+            };
+
+            function showStep(idx) {
+                const step = WIZARD_STEPS[idx];
+                if (!step) return endWizard();
+
+                overlay.classList.remove('hidden');
+                bubble.classList.remove('hidden');
+                text.innerHTML = step.text;
+                
+                // Toggle navigation buttons
+                prevBtn.classList.toggle('hidden', idx === 0);
+                nextBtn.innerText = idx === WIZARD_STEPS.length - 1 ? "ENTER FORTRESS" : "NEXT STEP";
+
+                // Cleanup previous highlights
+                document.querySelectorAll('.wizard-highlight-zone').forEach(el => {
+                    el.classList.remove('wizard-highlight-zone', 'z-[210]', 'relative', 'bg-indigo-500/10');
+                    el.style.zIndex = "";
+                });
+                
+                if (step.target) {
+                    const targetEl = document.querySelector(step.target);
+                    
+                    if (targetEl) {
+                        // AUTO-SCROLL: Ensure element is visible before highlighting
+                        targetEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+                        // Delay positioning until scroll is nearly finished for accurate rect calculation
+                        setTimeout(() => {
+                            targetEl.classList.add('wizard-highlight-zone', 'bg-indigo-500/10');
+                            targetEl.style.zIndex = "210";
+                            targetEl.style.position = "relative";
+
+                            const rect = targetEl.getBoundingClientRect();
+                            const buffer = 25;
+                            const windowWidth = window.innerWidth;
+                            const windowHeight = window.innerHeight;
+
+                            // Security step styling
+                            bubble.style.borderColor = step.is_security ? "#ef4444" : "#6366f1";
+
+                            // Smart positioning
+                            let top = rect.top;
+                            if (top < 80) top = 80; 
+                            if (top + 280 > windowHeight) top = windowHeight - 320;
+
+                            let left = rect.right + buffer;
+                            if (left + 320 > windowWidth) {
+                                left = rect.left - 320 - buffer;
+                            }
+
+                            bubble.style.transform = "none";
+                            bubble.style.top = `${top}px`;
+                            bubble.style.left = `${left}px`;
+                        }, 300);
+                    }
+                } else {
+                    bubble.style.top = "40%";
+                    bubble.style.left = "50%";
+                    bubble.style.transform = "translate(-50%, -50%)";
+                }
+            }
+
+            function endWizard() {
+                overlay.classList.add('hidden');
+                bubble.classList.add('hidden');
+                document.querySelectorAll('.wizard-highlight-zone').forEach(el => {
+                    el.classList.remove('wizard-highlight-zone', 'z-[210]', 'relative', 'bg-indigo-500/10');
+                    el.style.zIndex = "";
+                });
+                
+                // Only mark as complete if the user finishes OR checks "never show again"
+                if (document.getElementById('wizard-never').checked || currentStep >= WIZARD_STEPS.length - 1) {
+                    localStorage.setItem('hub_wizard_complete', 'true');
+                }
+            }
+
+            nextBtn.onclick = () => { currentStep++; showStep(currentStep); };
+            prevBtn.onclick = () => { currentStep--; showStep(currentStep); };
+            skipBtn.onclick = endWizard;
+
+            // Trigger automatically for new users or manual restart from settings
+            const urlParams = new URLSearchParams(window.location.search);
+            if (!localStorage.getItem('hub_wizard_complete') || urlParams.get('start_tour') === 'true') {
+                setTimeout(() => showStep(0), 1000);
+            }
 
             // Event listener for data-modal triggers
             document.addEventListener('click', (e) => {

@@ -416,12 +416,21 @@
         </div>
 
 
-        <!-- Maintenance Section -->
-        <div class="pt-8 mt-8 border-t border-white/10">
-            <h2 class="text-xl font-bold text-red-400 mb-4">System Maintenance</h2>
+        <!-- Maintenance & Guidance Section -->
+        <div class="pt-8 mt-8 border-t border-white/10 space-y-6">
+            <h2 class="text-xl font-bold text-current mb-4">System Maintenance & Guidance</h2>
+            
+            <div class="p-4 bg-white/5 border border-white/10 rounded-lg flex items-center justify-between">
+                <div>
+                    <h3 class="font-bold text-sm">Onboarding Guided Tour</h3>
+                    <p class="text-xs text-gray-500">Reset the first-time architect tour for this browser.</p>
+                </div>
+                <button type="button" onclick="localStorage.removeItem('hub_wizard_complete'); window.location.href='/admin/dashboard?start_tour=true';" class="px-4 py-2 bg-indigo-600/20 hover:bg-indigo-600/40 border border-indigo-500/30 rounded text-xs font-black uppercase text-indigo-400">Restart Tour</button>
+            </div>
+
             <div class="p-4 bg-red-900/10 border border-red-500/20 rounded-lg flex items-center justify-between">
                 <div>
-                    <h3 class="font-bold text-sm">Update Static Dependencies</h3>
+                    <h3 class="font-bold text-sm text-red-400">Update Static Dependencies</h3>
                     <p class="text-xs text-gray-500">Re-downloads all local JS/CSS libraries (LiteGraph, Chart.js, etc.) from secure sources.</p>
                 </div>
                 <button type="submit" form="refresh-assets-form" class="px-4 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded text-xs font-black uppercase">Update Libraries</button>

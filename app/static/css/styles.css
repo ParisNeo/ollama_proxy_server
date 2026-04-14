@@ -370,6 +370,16 @@ select { cursor: pointer; transition: all 0.2s ease; }
 }
 
 /* --- Global Animations --- */
+@keyframes wizard-pulse {
+    0% { box-shadow: 0 0 0 0 rgba(99, 102, 241, 0.7); }
+    70% { box-shadow: 0 0 0 15px rgba(99, 102, 241, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(99, 102, 241, 0); }
+}
+.wizard-highlight-zone {
+    animation: wizard-pulse 2s infinite;
+    border-radius: 8px;
+    box-shadow: 0 0 0 10px rgba(99, 102, 241, 0.1);
+}
 .animate-spin {
     animation: spin 1s linear infinite;
 }
