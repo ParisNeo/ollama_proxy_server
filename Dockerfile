@@ -1,44 +1,46 @@
-# --- Build Stage ---
+# --- Builder Stage ---
 FROM python:3.13-slim AS builder
 
-# Set working directory
 WORKDIR /app
 
-# Install poetry
-RUN pip install poetry gunicorn
-
-# Copy only dependency-defining files
-COPY pyproject.toml ./
-
-# Install dependencies for poetry
 RUN apt-get update && apt-get install -y \
     build-essential \
     pkg-config \
     libcairo2-dev \
+    python3-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Install dependencies, without dev dependencies, into a virtual environment
+RUN pip install --no-cache-dir poetry
+
+COPY pyproject.toml ./
+
 RUN poetry config virtualenvs.create false && \
     poetry install --without dev --no-root --no-interaction --no-ansi
 
-# Set a non-root user
+# --- Runtime Stage ---
+FROM python:3.13-slim
+
+WORKDIR /home/app
+
+RUN apt-get update && apt-get install -y \
+    libcairo2 \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN pip install --no-cache-dir gunicorn
+
 RUN addgroup --system app && adduser --system --group app
 
-# Set working directory
-WORKDIR /home/app
+COPY --from=builder /usr/local/lib/python3.13 /usr/local/lib/python3.13
+COPY --from=builder /usr/local/bin /usr/local/bin
 
 COPY ./app ./app
 COPY gunicorn_conf.py .
 
-RUN chmod 0755 -R ./app gunicorn_conf.py && \
-    mkdir -p ./app/static/uploads ./.ssl ./benchmarks && \
-    chown app:app ./app/static/uploads ./.ssl ./benchmarks
+RUN mkdir -p ./app/static/uploads ./.ssl ./benchmarks && \
+    chown -R app:app /home/app
 
 USER app
 
-# Expose the port the app runs on
 EXPOSE 8080
 
-# Command to run the application using our custom Gunicorn config file.
-# This ensures structured JSON logging is used in production.
 CMD ["gunicorn", "-c", "./gunicorn_conf.py", "app.main:app"]
