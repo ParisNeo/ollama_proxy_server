@@ -10,6 +10,13 @@ RUN pip install poetry gunicorn
 # Copy only dependency-defining files
 COPY pyproject.toml ./
 
+# Install dependencies for poetry
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    pkg-config \
+    libcairo2-dev \
+    && rm -rf /var/lib/apt/lists/*
+
 # Install dependencies, without dev dependencies, into a virtual environment
 RUN poetry config virtualenvs.create false && \
     poetry install --without dev --no-root --no-interaction --no-ansi
