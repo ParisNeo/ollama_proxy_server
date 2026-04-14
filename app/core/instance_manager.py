@@ -176,23 +176,36 @@ class InstanceSupervisor:
         return pm.is_installed("vllm")
 
     async def install_vllm(self, upgrade=False) -> Tuple[bool, str]:
-        """Attempts to install or update vLLM using pipmaster."""
+        """Attempts to install or update vLLM."""
         from app.core.events import event_manager, ProxyEvent
+        import sys
+        import asyncio
         task_name = "Updating" if upgrade else "Installing"
         req_id = "sys_vllm"
         
         try:
-            event_manager.emit(ProxyEvent("received", req_id, "vLLM", "Local", "Admin", error_message=f"{task_name} vLLM via pipmaster..."))
+            event_manager.emit(ProxyEvent("received", req_id, "vLLM", "Local", "Admin", error_message=f"{task_name} vLLM..."))
             
-            # vLLM is heavy, we use pipmaster to handle the async installation
-            success = await pm.async_install("vllm", upgrade=upgrade)
+            cmd = f"{sys.executable} -m pip install {'--upgrade' if upgrade else ''} vllm"
+            process = await asyncio.create_subprocess_shell(
+                cmd, 
+                stdout=asyncio.subprocess.PIPE, 
+                stderr=asyncio.subprocess.STDOUT
+            )
             
-            if success:
+            while True:
+                line = await process.stdout.readline()
+                if not line: break
+                event_manager.emit(ProxyEvent("active", req_id, "vLLM", "Local", "Admin", error_message=line.decode().strip()))
+            
+            await process.wait()
+            
+            if process.returncode == 0:
                 msg = f"vLLM {'updated' if upgrade else 'installed'} successfully."
                 event_manager.emit(ProxyEvent("completed", req_id, "vLLM", "Local", "Admin", error_message=msg))
                 return True, msg
             
-            err = "pipmaster failed to install vllm."
+            err = "pip install failed."
             event_manager.emit(ProxyEvent("error", req_id, "vLLM", "Local", "Admin", error_message=err))
             return False, err
         except Exception as e:

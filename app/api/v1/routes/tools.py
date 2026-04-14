@@ -239,26 +239,32 @@ async def api_test_tool(
         resolution = await _resolve_target(db, target_agent,[{"role": "user", "content": user_prompt}], request=request)
         real_model, msgs = resolution
 
-        # Inject Protocol Enforcement as the very first system instruction
-        msgs.insert(0, {"role": "system", "content": protocol_instruction})
+        ai_msg = {}
 
-        servers = await server_crud.get_servers_with_model(db, real_model)
-        if not servers: return JSONResponse({"error": "No backend servers found for the test agent."}, status_code=503)
-        
-        # Build payload with strict tool definitions
-        payload = {
-            "model": real_model, 
-            "messages": msgs, 
-            "tools": tool_defs, 
-            "stream": False
-        }
+        if real_model == "__result__":
+            # The workflow already produced the final answer
+            ai_msg = msgs[-1] if msgs else {}
+        else:
+            # Inject Protocol Enforcement as the very first system instruction
+            msgs.insert(0, {"role": "system", "content": protocol_instruction})
 
-        resp, _ = await _reverse_proxy(request, "chat", servers, json.dumps(payload).encode(), is_subrequest=True)
-        
-        if not hasattr(resp, 'body'): return JSONResponse({"error": "Empty response from AI"}, status_code=500)
-        
-        ai_data = json.loads(resp.body.decode())
-        ai_msg = ai_data.get("message", {})
+            servers = await server_crud.get_servers_with_model(db, real_model)
+            if not servers: return JSONResponse({"error": "No backend servers found for the test agent."}, status_code=503)
+            
+            # Build payload with strict tool definitions
+            payload = {
+                "model": real_model, 
+                "messages": msgs, 
+                "tools": tool_defs, 
+                "stream": False
+            }
+
+            resp, _ = await _reverse_proxy(request, "chat", servers, json.dumps(payload).encode(), is_subrequest=True)
+            
+            if not hasattr(resp, 'body'): return JSONResponse({"error": "Empty response from AI"}, status_code=500)
+            
+            ai_data = json.loads(resp.body.decode())
+            ai_msg = ai_data.get("message", {})
         tool_calls = ai_msg.get("tool_calls", [])
 
         # PHASE 2: Execute found tool calls with User awareness and Log Capture

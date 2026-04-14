@@ -267,8 +267,62 @@
         }
     }
 
-    window.browseLocalModels = () => {
-        alert("Tip: If you downloaded a model via HF Hub, it is stored in: {{ request.app.state.settings.default_models_path }}/[repo_name]");
+    window.browseLocalModels = async (event) => {
+        let btn = null;
+        let originalHTML = '📁';
+        if (event && event.currentTarget) {
+            btn = event.currentTarget;
+            originalHTML = btn.innerHTML;
+            btn.innerHTML = '<svg class="animate-spin h-3 w-3 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>';
+        }
+
+        try {
+            const resp = await fetch('{{ url_for("admin_local_files") }}');
+            const data = await resp.json();
+            
+            let fileListHTML = '';
+            if (data.files && data.files.length > 0) {
+                fileListHTML = data.files.map(f => `
+                    <div class="p-2 bg-white/5 hover:bg-indigo-500/20 border border-white/5 rounded cursor-pointer text-[10px] font-mono truncate text-indigo-200 hover:text-white transition-colors" onclick="selectLocalFile('${f.replace(/\\/g, '\\\\')}')" title="${f}">
+                        ${f}
+                    </div>
+                `).join('');
+            } else {
+                fileListHTML = `<div class="p-4 text-center text-gray-500 italic text-xs">No local models found in the default models path (${data.base_dir || 'configured path'}). Try downloading one via the HF Downloader first.</div>`;
+            }
+            
+            const modalBody = `
+                <div class="space-y-4">
+                    <div class="p-3 bg-indigo-500/10 border border-indigo-500/30 rounded-lg">
+                        <h4 class="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-1">Local Model Browser</h4>
+                        <p class="text-[11px] text-gray-400 leading-relaxed">Select a downloaded model file (.gguf, .safetensors, .pt, etc.) to auto-fill the path.</p>
+                    </div>
+                    <div class="max-h-64 overflow-y-auto custom-scrollbar space-y-1">
+                        ${fileListHTML}
+                    </div>
+                </div>
+            `;
+            window.showModal("Select Local Model", modalBody);
+        } catch(e) {
+            alert("Failed to list local models: " + e.message);
+        } finally {
+            if (btn) btn.innerHTML = originalHTML;
+        }
+    };
+    
+    window.selectLocalFile = (filepath) => {
+        document.getElementById('model_path_input').value = filepath;
+        document.getElementById('modal-close-btn').click();
+    };
+
+    window.showButtonSpinner = (form, loadingText, selector = 'button[type="submit"]') => {
+        const btn = form.querySelector(selector);
+        if (btn) {
+            btn.dataset.originalContent = btn.innerHTML;
+            btn.innerHTML = `<svg class="animate-spin -ml-1 mr-2 h-3 w-3 text-current inline" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>${loadingText}`;
+            btn.classList.add('opacity-50', 'cursor-not-allowed');
+            btn.style.pointerEvents = 'none';
+        }
     };
 
     window.openHFDownloader = () => {

@@ -309,7 +309,10 @@ select { cursor: pointer; transition: all 0.2s ease; }
     box-shadow: 6px 6px 0px black !important;
 }
 
-/* --- Collapsible 'Thinking' Block --- */
+/* --- Collapsible 'Thinking' & 'Processing' Blocks --- */
+details > summary { list-style: none; }
+details > summary::-webkit-details-marker { display: none; }
+
 .think-block { background-color: rgba(128, 128, 128, 0.1); border-left: 3px solid var(--color-primary-500); border-radius: 4px; margin: 1em 0; }
 .think-block summary { cursor: pointer; font-weight: 600; color: var(--color-primary-500); padding: 0.5em 1em; }
 .think-block[open] > summary { border-bottom: 1px solid rgba(128, 128, 128, 0.2); }

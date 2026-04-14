@@ -2347,6 +2347,21 @@ async def update_binaries_endpoint(request: Request, background_tasks: Backgroun
     background_tasks.add_task(task_wrapper)
     return JSONResponse({"success": True, "message": "Binary Hub update check started."})
 
+@router.get("/instances/local-files", name="admin_local_files")
+async def get_local_files(request: Request, admin_user: User = Depends(require_admin_user)):
+    app_settings = request.app.state.settings
+    base_dir = Path(app_settings.default_models_path)
+    if not base_dir.is_absolute():
+        base_dir = Path.cwd() / base_dir
+    
+    files =[]
+    if base_dir.exists():
+        for ext in ["*.gguf", "*.safetensors", "*.bin", "*.pt", "*.pth"]:
+            for f in base_dir.rglob(ext):
+                files.append(str(f.absolute()))
+    
+    return {"success": True, "files": sorted(files), "base_dir": str(base_dir.absolute())}
+
 @router.get("/hf/search", name="admin_hf_search")
 async def hf_search(q: str = Query(...), admin_user: User = Depends(require_admin_user)):
     """Search for models on Hugging Face."""
@@ -2675,27 +2690,32 @@ async def analyze_logs_ai(request: Request, db: AsyncSession = Depends(get_db), 
         logger.info(f"AI Log Analysis started using agent: {target_agent}")
         req_id = f"sys_analysis_{secrets.token_hex(4)}"
         real_model, final_msgs = await _resolve_target(db, target_agent, payload["messages"], request=request, request_id=req_id, sender=admin_user.username)
-        servers = await server_crud.get_servers_with_model(db, real_model)
         
-        if not servers: 
-            logger.error(f"Analysis failed: No servers found for model {real_model}")
-            return JSONResponse({"error": f"Compute node for model '{real_model}' is offline or not found."}, status_code=503)
+        if real_model == "__result__":
+            analysis_text = final_msgs[-1]["content"] if final_msgs else "Analysis failed."
+        else:
+            servers = await server_crud.get_servers_with_model(db, real_model)
+            if not servers: 
+                logger.error(f"Analysis failed: No servers found for model {real_model}")
+                return JSONResponse({"error": f"Compute node for model '{real_model}' is offline or not found."}, status_code=503)
 
-        # Surgical Fix: Explicitly pass a long timeout for the analysis sub-request
-        resp, _ = await _reverse_proxy(
-            request, "chat", servers, 
-            json.dumps({"model": real_model, "messages": final_msgs, "stream": False}).encode(), 
-            is_subrequest=True,
-            request_id=req_id,
-            model=real_model,
-            sender=admin_user.username
-        )
-        
-        if hasattr(resp, 'status_code') and resp.status_code != 200:
-             error_data = json.loads(resp.body.decode()) if hasattr(resp, 'body') else {"error": "Unknown backend error"}
-             return JSONResponse({"error": f"AI Backend Error: {error_data.get('error', 'Unknown')}"}, status_code=resp.status_code)
+            # Surgical Fix: Explicitly pass a long timeout for the analysis sub-request
+            resp, _ = await _reverse_proxy(
+                request, "chat", servers, 
+                json.dumps({"model": real_model, "messages": final_msgs, "stream": False}).encode(), 
+                is_subrequest=True,
+                request_id=req_id,
+                model=real_model,
+                sender=admin_user.username
+            )
+            
+            if hasattr(resp, 'status_code') and resp.status_code != 200:
+                 error_data = json.loads(resp.body.decode()) if hasattr(resp, 'body') else {"error": "Unknown backend error"}
+                 return JSONResponse({"error": f"AI Backend Error: {error_data.get('error', 'Unknown')}"}, status_code=resp.status_code)
 
-        if hasattr(resp, 'body'):
+            if not hasattr(resp, 'body'):
+                return JSONResponse({"error": "Empty response from AI"}, status_code=500)
+
             data = json.loads(resp.body.decode())
             analysis_text = data.get("message", {}).get("content", "Analysis failed.")
             

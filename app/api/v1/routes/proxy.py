@@ -2679,6 +2679,7 @@ async def proxy_ollama(
     A catch-all route that proxies all other requests to the backend with token tracking.
     """
     request.state.enforce_strict_context = False
+    request.state.processing_depth = 0
     req_id = secrets.token_hex(4)
     
     body_bytes = await request.body()

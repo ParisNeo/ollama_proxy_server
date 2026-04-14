@@ -53,6 +53,7 @@ class AppSettingsModel(BaseModel):
     # Instance Management
     instance_scan_start_port: int = 11434
     instance_scan_end_port: int = 11445
+    default_models_path: str = "models"
 
     # Administrative Hub Agent
     admin_agent_name: Optional[str] = None

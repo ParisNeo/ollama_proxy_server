@@ -905,82 +905,121 @@ SUPPORTED ANNOTATION SCHEMAS:
         const contentString = String(rawContent || '');
         container.dataset.rawContent = rawContent;
 
-        // Split content by special tags, keeping the tags as delimiters. This is more robust.
-        const parts = contentString.split(/(<think>[\s\S]*?<\/think>|<think>[\s\S]*|<processing>[\s\S]*?<\/processing>|<processing>[\s\S]*|<annotate>[\s\S]*?<\/annotate>)/g);
-        
         let finalHtml = '';
-        for (const part of parts) {
-            if (!part) continue;
 
-            if (part.startsWith('<think>') || part.startsWith('<processing>')) {
-                const isThink = part.startsWith('<think>');
-                const tagLen = isThink ? 7 : 12;
-                const endTag = isThink ? '</think>' : '</processing>';
-                // Split content by special tags, keeping the tags as delimiters. This is more robust.
-                const parts = contentString.split('</processing>');
-                
-                const isClosed = part.endsWith(endTag);
-                const blockContent = isClosed ? part.slice(tagEnd + 1, -endTag.length) : part.slice(tagEnd + 1);
-                
-                let summaryTitle = isThink ? 'Thoughts' : 'System Processing';
-                if (!isThink) {
+        const regex = /(<think>[\s\S]*?<\/think>|<processing[^>]*>[\s\S]*?(?:<\/processing>|$)|<annotate>[\s\S]*?<\/annotate>)/g;
+
+        const parts = contentString.split(regex).filter(Boolean);
+
+        for (const part of parts) {
+            if (part.startsWith('<think>')) {
+                const isClosed = part.endsWith('</think>');
+                const blockContent = isClosed ? part.slice(7, -8) : part.slice(7);
+                const summaryTitle = 'Thoughts';
+
+                if (isClosed) {
+                    finalHtml += `<details class="think-block"><summary>${summaryTitle}</summary><div>${marked.parse(blockContent.trim())}</div></details>`;
+                } else {
+                    finalHtml += `<details class="think-block" open>
+                        <summary class="flex items-center gap-2">
+                            ${summaryTitle}
+                            <svg class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                            </svg>
+                        </summary>
+                        <div>${marked.parse(blockContent.trim())}</div>
+                    </details>`;
+                }
+            } else if (part.startsWith('<processing')) {
+                const isClosed = part.includes('</processing>');
+                const tagEnd = part.indexOf('>');
+                let summaryTitle = 'System Processing';
+
+                let blockContent = '';
+                if (tagEnd !== -1) {
+                    const openTag = part.slice(0, tagEnd + 1);
+                    blockContent = isClosed
+                        ? part.slice(tagEnd + 1, part.lastIndexOf('</processing>'))
+                        : part.slice(tagEnd + 1);
+
                     const titleMatch = openTag.match(/title=["'](.*?)["']/);
                     if (titleMatch) summaryTitle = titleMatch[1];
+
+                    const lines = blockContent.split('\n').filter(l => l.trim());
+                    if (lines.length > 0) {
+                        summaryTitle = lines[lines.length - 1]
+                            .replace(/^\*\s*/, '')
+                            .replace(/<\/?processing[^>]*>/g, '')
+                            .trim();
+                    }
                 }
 
-                if (isThink) {
-                    if (isClosed) {
-                        finalHtml += `<details class="think-block"><summary>${summaryTitle}</summary><div>${marked.parse(blockContent.trim())}</div></details>`;
-                    } else {
-                        finalHtml += `<details class="think-block" open><summary class="flex items-center gap-2">${summaryTitle} <svg class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg></summary><div>${marked.parse(blockContent.trim())}</div></details>`;
-                    }
-                } else {
-                    const spinnerSvg = `<svg class="animate-spin h-4 w-4 text-indigo-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>`;
-                    const checkSvg = `<svg class="h-4 w-4 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>`;
-                    
-                    const timelineHtml = blockContent.split('\n')
-                        .filter(l => l.trim())
-                        .map(l => {
-                            let text = l.replace(/^\*\s*/, '').trim();
-                            return `<div class="flex items-start gap-2 mb-1"><div class="mt-1.5 w-1.5 h-1.5 rounded-full bg-indigo-500/50 flex-shrink-0"></div><span class="text-gray-300 leading-relaxed">${text}</span></div>`;
-                        }).join('');
+                const spinnerSvg = `<svg class="animate-spin h-4 w-4 text-indigo-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>`;
+                const checkSvg = `<svg class="h-4 w-4 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>`;
 
-                    finalHtml += `
-                    <div class="processing-block bg-black/20 border border-white/10 rounded-lg my-3 overflow-hidden shadow-sm max-w-lg">
-                        <div class="flex items-center gap-3 p-2.5 bg-black/40 border-b border-white/5 cursor-pointer hover:bg-white/5 transition-colors" onclick="this.nextElementSibling.classList.toggle('hidden')">
-                            <div class="flex-shrink-0">${isClosed ? checkSvg : spinnerSvg}</div>
-                            <div class="flex-grow text-xs font-bold ${isClosed ? 'text-gray-400' : 'text-indigo-300'} uppercase tracking-widest">${summaryTitle}</div>
-                            <div class="text-[10px] ${isClosed ? 'text-gray-600' : 'text-indigo-400/70'}">${isClosed ? 'Done' : 'Working...'}</div>
-                        </div>
-                        <div class="p-3 text-[11px] font-mono ${isClosed ? 'hidden' : 'block'} bg-[#050507]">
-                           ${timelineHtml || '<span class="text-gray-600 italic">Initializing...</span>'}
-                        </div>
+                const lines = blockContent.split('\n').filter(l => l.trim());
+                // Use the last active step as the "Status" title for the collapsed header
+                if (lines.length > 0) {
+                    summaryTitle = lines[lines.length - 1]
+                        .replace(/^\*\s*/, '')
+                        .replace(/Executing Node:\s*/i, '')
+                        .replace(/\.\.\.$/, '')
+                        .trim();
+                }
+
+                const timelineHtml = lines.map(l => {
+                    let text = l.replace(/^\*\s*/, '').replace(/<\/?processing[^>]*>/g, '').trim();
+                    return `<div class="flex items-start gap-2 mb-1 group/line">
+                        <div class="mt-1.5 w-1.5 h-1.5 rounded-full bg-indigo-500/40 group-last/line:bg-indigo-400 group-last/line:animate-pulse flex-shrink-0"></div>
+                        <span class="text-gray-300 leading-relaxed group-last/line:text-white group-last/line:font-bold">${text}</span>
                     </div>`;
+                }).join('');
+
+                if (isClosed) {
+                    finalHtml += `<details class="processing-block bg-black/20 border border-white/10 rounded-lg my-3 shadow-sm max-w-lg">
+                        <summary class="flex items-center gap-3 p-2.5 bg-black/40 cursor-pointer hover:bg-white/5">
+                            <div>${checkSvg}</div>
+                            <div class="flex-grow text-xs font-bold text-gray-400 uppercase truncate">${summaryTitle}</div>
+                            <div class="text-[10px] text-gray-600">Done</div>
+                        </summary>
+                        <div class="p-3 text-[11px] font-mono bg-[#050507] border-t border-white/5">
+                            ${timelineHtml || '<span class="text-gray-600 italic">No details.</span>'}
+                        </div>
+                    </details>`;
+                } else {
+                    finalHtml += `<details class="processing-block bg-black/20 border border-white/10 rounded-lg my-3 shadow-sm max-w-lg" open>
+                        <summary class="flex items-center gap-3 p-2.5 bg-black/40 cursor-pointer hover:bg-white/5">
+                            <div>${spinnerSvg}</div>
+                            <div class="flex-grow text-xs font-bold text-indigo-300 uppercase truncate">${summaryTitle}</div>
+                            <div class="text-[10px] text-indigo-400/70">Working...</div>
+                        </summary>
+                        <div class="p-3 text-[11px] font-mono bg-[#050507] border-t border-white/5">
+                            ${timelineHtml || '<span class="text-gray-600 italic">Initializing...</span>'}
+                        </div>
+                    </details>`;
                 }
             } else if (part.startsWith('<annotate>')) {
                 const annotationJson = part.slice(10, -11);
                 const safeJson = annotationJson.replace(/'/g, "&apos;");
+
                 if (!imageUrlForAnnotation) {
                     finalHtml += `<div class="text-red-400">Error: Could not find an image to annotate for this message.</div>`;
                 } else {
-                    const uniqueId = `annotation-container-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
-                    finalHtml += `<div id="${uniqueId}" class="annotated-image-container relative mt-2 group" data-annotations='${safeJson}' data-image-url="${imageUrlForAnnotation}">
+                    const uniqueId = `annotation-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+                    finalHtml += `<div id="${uniqueId}" class="annotated-image-container relative mt-2 group"
+                        data-annotations='${safeJson}' data-image-url="${imageUrlForAnnotation}">
                         <img src="${imageUrlForAnnotation}" class="block max-w-full h-auto rounded-md">
                         <div class="annotation-overlay"></div>
-                        <div class="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                           <button class="save-annotation-btn p-2 rounded-md bg-gray-800/80 hover:bg-gray-700 text-white" title="Save Annotated Image">
-                               <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
-                           </button>
-                        </div>
                     </div>`;
                 }
             } else {
                 finalHtml += marked.parse(part);
             }
         }
+
         container.innerHTML = finalHtml;
     }
-
 
     function renderChat() {
         chatContainer.innerHTML = '';

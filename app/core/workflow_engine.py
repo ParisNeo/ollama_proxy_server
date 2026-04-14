@@ -198,37 +198,52 @@ class WorkflowEngine:
         props = node.get("properties", {})
 
         # --- DEBUG MODE TRACING ---
-        # Defensive check: ensure request and app exist (bots/background tasks might have None)
         enable_debug = False
         if self.request and hasattr(self.request, 'app'):
             enable_debug = self.request.app.state.settings.enable_debug_mode
 
         node_title = node.get("title") or ntype.split("/")[-1].upper()
+        cb = getattr(self.request.state, "stream_callback", None) if self.request else None
+
         if enable_debug:
+            # 1. Manage Nesting Depth
+            depth = getattr(self.request.state, 'processing_depth', 0)
+            
+            if cb:
+                # Only open a new block if we are the root execution node
+                if depth == 0:
+                    await cb(f'<processing type="workflow" title="{self.name.upper()}">\n')
+                
+                # Always append the specific node execution line
+                await cb(f'* Executing Node: {node_title}...\n')
+
+            # Increment global request depth
+            if self.request:
+                self.request.state.processing_depth = depth + 1
+
             logger.info(f"DEBUG: Executing Graph Node [{node_title}] (ID: {node['id']})")
             event_manager.emit(ProxyEvent(
-                "active", 
-                self.request_id, 
-                node_title, 
-                "Workflow Engine", 
-                self.sender, 
+                "active", self.request_id, node_title, 
+                "Workflow Engine", self.sender, 
                 error_message=f"Step: {node_title}..."
             ))
-            
-            cb = getattr(self.request.state, "stream_callback", None)
-            if cb:
-                await cb(f'<processing type="workflow_node" title="{node_title}">\n* Executing...\n')
-        else:
-            cb = None
         
-        # 1. Plugin Execution (Self-contained nodes)
+        # 2. Plugin Execution
         res = None
-        node_cls = NodeRegistry.get_node(ntype)
-        if node_cls:
-            plugin = node_cls()
-            res = await plugin.execute(self, node, output_slot_idx)
-            
-        if enable_debug and cb:
-            await cb('</processing>\n')
+        try:
+            node_cls = NodeRegistry.get_node(ntype)
+            if node_cls:
+                plugin = node_cls()
+                res = await plugin.execute(self, node, output_slot_idx)
+        finally:
+            if enable_debug:
+                # Decrement depth
+                if self.request:
+                    self.request.state.processing_depth -= 1
+                    new_depth = self.request.state.processing_depth
+                    
+                    # Only close the tag if we have returned to the root level
+                    if cb and new_depth == 0:
+                        await cb('</processing>\n')
 
         return res
