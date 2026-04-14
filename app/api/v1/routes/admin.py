@@ -38,7 +38,7 @@ from app.api.v1.dependencies import get_csrf_token, validate_csrf_token, validat
 
 from app.database.models import BotConfig
 from app.core.encryption import encrypt_data
-
+from ascii_colors import trace_exception
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -2358,6 +2358,9 @@ async def hf_search(q: str = Query(...), admin_user: User = Depends(require_admi
         models = api.list_models(search=q, limit=10, sort="downloads", direction=-1)
         return [{"id": m.id, "downloads": m.downloads, "pipeline_tag": getattr(m, 'pipeline_tag', 'unknown')} for m in models]
     except Exception as e:
+        logger.error(f"AI Log Analysis Failed: {e}")
+        if getattr(request.app.state.settings, "enable_debug_mode", False):
+            trace_exception(e)
         return JSONResponse({"error": str(e)}, status_code=500)
 
 @router.get("/hf/files", name="admin_hf_files")
@@ -2373,6 +2376,9 @@ async def hf_files(repo_id: str = Query(...), admin_user: User = Depends(require
         important = [f for f in files if f.endswith(".gguf") or f.endswith(".safetensors") or "config.json" in f]
         return {"repo_id": repo_id, "files": important}
     except Exception as e:
+        logger.error(f"AI Log Analysis Failed: {e}")
+        if getattr(request.app.state.settings, "enable_debug_mode", False):
+            trace_exception(e)
         return JSONResponse({"error": str(e)}, status_code=500)
 
 @router.post("/hf/download", name="admin_hf_download", dependencies=[Depends(validate_csrf_token_header)])
@@ -2600,6 +2606,9 @@ async def analyze_logs_ai(request: Request, db: AsyncSession = Depends(get_db), 
             data = json.loads(resp.body.decode())
             return {"analysis": data.get("message", {}).get("content", "Analysis failed.")}
     except Exception as e:
+        logger.error(f"AI Log Analysis Failed: {e}")
+        if getattr(request.app.state.settings, "enable_debug_mode", False):
+            trace_exception(e)
         return JSONResponse({"error": str(e)}, status_code=500)
 
 @router.get("/logs", response_class=HTMLResponse, name="admin_logs")
@@ -2665,7 +2674,7 @@ async def analyze_logs_ai(request: Request, db: AsyncSession = Depends(get_db), 
     try:
         logger.info(f"AI Log Analysis started using agent: {target_agent}")
         req_id = f"sys_analysis_{secrets.token_hex(4)}"
-        real_model, final_msgs = await _resolve_target(db, target_agent, payload["messages"], request_id=req_id, sender=admin_user.username)
+        real_model, final_msgs = await _resolve_target(db, target_agent, payload["messages"], request=request, request_id=req_id, sender=admin_user.username)
         servers = await server_crud.get_servers_with_model(db, real_model)
         
         if not servers: 
@@ -2702,6 +2711,9 @@ async def analyze_logs_ai(request: Request, db: AsyncSession = Depends(get_db), 
                 "analysis": analysis_text
             }
     except Exception as e:
+        logger.error(f"AI Log Analysis Failed: {e}")
+        if getattr(request.app.state.settings, "enable_debug_mode", False):
+            trace_exception(e)
         return JSONResponse({"error": str(e)}, status_code=500)
 
 @router.get("/logs/analysis/history", name="admin_analysis_history")
@@ -2785,7 +2797,7 @@ async def admin_enhance_prompt(
         from app.api.v1.routes.proxy import _resolve_target, _reverse_proxy
         
         req_id = f"sys_enhance_{secrets.token_hex(4)}"
-        resolution = await _resolve_target(db, target_agent, payload["messages"], request_id=req_id, sender=admin_user.username)
+        resolution = await _resolve_target(db, target_agent, payload["messages"], request=request, request_id=req_id, sender=admin_user.username)
         if not resolution or not isinstance(resolution, tuple):
             return JSONResponse({"error": f"Failed to resolve management agent '{target_agent}'"}, status_code=500)
             
@@ -2825,6 +2837,8 @@ async def admin_enhance_prompt(
             
     except Exception as e:
         logger.error(f"Enhancement failed: {e}")
+        if getattr(request.app.state.settings, "enable_debug_mode", False):
+            trace_exception(e)
         return JSONResponse({"error": f"Enhancement failed: {str(e)}"}, status_code=500)
 
 

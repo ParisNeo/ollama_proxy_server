@@ -99,13 +99,18 @@ class MOENode(BaseNode):
         
         if not expert_tasks: return "No experts connected."
 
-        # Emit Status Telemetry
-        status_lines = [f"- {name} is working" for name in expert_names]
-        status_lines.append("- now the orchestrator is building final answer")
-        processing_block = "<processing>\n" + "\n".join(status_lines) + "\n</processing>\n\n"
+        # Emit Status Telemetry via stream_callback if available
+        status_lines =[f"* {name} is working..." for name in expert_names]
+        cb = getattr(engine.request.state, "stream_callback", None)
+        if cb:
+            await cb(f'<processing type="synthesis" title="Mixture of Experts" mode="parallel" agents="{", ".join(expert_names)}">\n' + "\n".join(status_lines) + '\n')
+        
+        processing_block = "" # Legacy text injection disabled in favor of Lollms Processing Protocol
         
         # Execute Experts
         responses = await asyncio.gather(*expert_tasks, return_exceptions=True)
+        if cb:
+            await cb(f'* All {len(responses)} experts replied. Synthesizing final answer...\n</processing>\n')
         
         # FIX: Ensure we handle exceptions or None results gracefully
         panel_data = ""

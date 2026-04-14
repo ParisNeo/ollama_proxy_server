@@ -14,6 +14,7 @@ from app.database.models import User, DataStore
 from app.api.v1.routes.admin import require_admin_user, get_template_context, templates, flash
 from app.api.v1.dependencies import validate_csrf_token
 from app.core.events import event_manager, ProxyEvent
+from ascii_colors import trace_exception
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -401,8 +402,8 @@ async def admin_build_datastore_graph(
         """Bridge between safe_store extraction prompts and Hub LLM nodes."""
         try:
             # Create a simple chat-style message list
-            msgs = [{"role": "user", "content": prompt}]
-            resolution = await _resolve_target(db, target_agent, msgs, sender="graph-builder")
+            msgs =[{"role": "user", "content": prompt}]
+            resolution = await _resolve_target(db, target_agent, msgs, request=request, sender="graph-builder")
             real_model, final_msgs = resolution
             
             servers = await server_crud.get_servers_with_model(db, real_model)
@@ -420,6 +421,8 @@ async def admin_build_datastore_graph(
                 return data.get("message", {}).get("content", "{}")
         except Exception as e:
             logger.error(f"Graph LLM Bridge error: {e}")
+            if getattr(request.app.state.settings, "enable_debug_mode", False):
+                trace_exception(e)
         return "{}"
 
     # 2. Start Extraction Task

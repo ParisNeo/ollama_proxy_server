@@ -13,7 +13,7 @@ class InputNode(BaseNode):
         if output_slot_idx == 2: 
             if not engine.initial_messages: return ""
             last_msg = engine.initial_messages[-1]
-            content = last_msg.get("content", "")
+            content = last_msg.get("content") or ""
             return content if isinstance(content, str) else ""
         return None
 

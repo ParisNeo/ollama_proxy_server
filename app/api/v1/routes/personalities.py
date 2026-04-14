@@ -14,6 +14,7 @@ from app.core import knowledge_importer as kit
 from app.core.skills_manager import SkillsManager
 from app.crud import server_crud
 import re
+from ascii_colors import trace_exception
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -87,7 +88,7 @@ async def api_build_personality(
             "STRICT: Output raw YAML only. No backticks."
         )
         
-        real_model, yaml_msgs = await _resolve_target(db, target_agent, [{"role": "user", "content": yaml_prompt}])
+        real_model, yaml_msgs = await _resolve_target(db, target_agent,[{"role": "user", "content": yaml_prompt}], request=request)
         servers = await server_crud.get_servers_with_model(db, real_model)
         if not servers: return JSONResponse({"error": "Backend offline"}, status_code=503)
 
@@ -110,7 +111,7 @@ async def api_build_personality(
             "STRICT: Output markdown body only. No YAML. No preamble."
         )
         
-        _, body_msgs = await _resolve_target(db, target_agent, [{"role": "user", "content": content_prompt}])
+        _, body_msgs = await _resolve_target(db, target_agent,[{"role": "user", "content": content_prompt}], request=request)
         b_resp, _ = await _reverse_proxy(request, "chat", servers, json.dumps({"model": real_model, "messages": body_msgs, "stream": False}).encode(), is_subrequest=True, request_id=f"{build_id}_b", model=real_model, sender=admin_user.username)
         markdown_body = json.loads(b_resp.body.decode()).get("message", {}).get("content", "").strip()
 
@@ -123,6 +124,8 @@ async def api_build_personality(
 
     except Exception as e:
         logger.error(f"Persona Build Failed: {e}")
+        if getattr(request.app.state.settings, "enable_debug_mode", False):
+            trace_exception(e)
         event_manager.emit(ProxyEvent("error", build_id, "Persona Builder", "Local", admin_user.username, error_message=str(e)))
         return JSONResponse({"error": str(e)}, status_code=500)
 
@@ -173,7 +176,7 @@ async def api_edit_personality(
 
     try:
         req_id = f"sys_edit_persona_{secrets.token_hex(4)}"
-        real_model, msgs = await _resolve_target(db, target_agent, [{"role": "user", "content": user_payload}])
+        real_model, msgs = await _resolve_target(db, target_agent,[{"role": "user", "content": user_payload}], request=request)
         msgs.insert(0, {"role": "system", "content": instruction})
         
         servers = await server_crud.get_servers_with_model(db, real_model)
@@ -186,6 +189,9 @@ async def api_edit_personality(
             edited_text = re.sub(r'^```markdown\s*|```$', '', data.get("message", {}).get("content", ""), flags=re.MULTILINE).strip()
             return {"success": True, "edited_content": edited_text}
     except Exception as e:
+        logger.error(f"Persona Edit Failed: {e}")
+        if getattr(request.app.state.settings, "enable_debug_mode", False):
+            trace_exception(e)
         return JSONResponse({"error": str(e)}, status_code=500)
         p_id = meta.get("name", f"persona_{secrets.token_hex(4)}")
         filename = f"{p_id}.md"

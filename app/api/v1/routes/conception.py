@@ -15,6 +15,7 @@ from app.database.models import User, Workflow, DataStore, VirtualAgent, SmartRo
 from app.database.session import get_db
 from app.nodes.registry import NodeRegistry
 import re
+from ascii_colors import trace_exception
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -234,7 +235,7 @@ async def api_build_workflow(
     try:
         event_manager.emit(ProxyEvent("active", build_id, "Graph Architect", target_agent, admin_user.username, error_message="Generating Cognitive Graph..."))
         
-        real_model, msgs = await _resolve_target(db, target_agent, [{"role": "user", "content": user_payload}])
+        real_model, msgs = await _resolve_target(db, target_agent,[{"role": "user", "content": user_payload}], request=request)
         msgs.insert(0, {"role": "system", "content": instruction})
         
         servers = await server_crud.get_servers_with_model(db, real_model)
@@ -345,6 +346,8 @@ async def api_build_workflow(
             return {"success": True, "graph": final_graph, "has_new_assets": len(manifest) > 0}
     except Exception as e:
         logger.error(f"Graph Generation Failed: {e}")
+        if getattr(request.app.state.settings, "enable_debug_mode", False):
+            trace_exception(e)
         event_manager.emit(ProxyEvent("error", build_id, "Graph Architect", "Local", admin_user.username, error_message=str(e)))
         return JSONResponse({"error": str(e)}, status_code=500)
 
@@ -395,7 +398,7 @@ async def api_edit_workflow(
         user_payload += f"ADDITIONAL CONTEXT:\n{file_context}"
 
     try:
-        real_model, msgs = await _resolve_target(db, target_agent, [{"role": "user", "content": user_payload}])
+        real_model, msgs = await _resolve_target(db, target_agent,[{"role": "user", "content": user_payload}], request=request)
         msgs.insert(0, {"role": "system", "content": instruction})
         
         servers = await server_crud.get_servers_with_model(db, real_model)
@@ -422,6 +425,8 @@ async def api_edit_workflow(
             return {"success": True, "graph": parsed}
     except Exception as e:
         logger.error(f"Graph Generation Failed: {e}")
+        if getattr(request.app.state.settings, "enable_debug_mode", False):
+            trace_exception(e)
         event_manager.emit(ProxyEvent("error", build_id, "Graph Architect", "Local", admin_user.username, error_message=str(e)))
         return JSONResponse({"error": str(e)}, status_code=500)
 

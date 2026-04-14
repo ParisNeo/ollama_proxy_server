@@ -35,15 +35,27 @@ class AgentReasonerNode(BaseNode):
             real_model, turn_msgs = await engine.resolve_target_fn(engine.db, model, scratchpad, engine.depth + 1, engine.request, engine.request_id, engine.sender)
             event_manager.emit(ProxyEvent("active", engine.request_id, f"Agent Turn {turn}", real_model, engine.sender, error_message=f"Thinking... ({turn}/{max_turns})"))
             
+            cb = getattr(engine.request.state, "stream_callback", None)
+            if cb:
+                await cb(f'<processing type="tool_execution" title="Agent Loop" round="{turn}">\n* Agent is thinking (Turn {turn}/{max_turns})...\n')
+            
             servers = await server_crud.get_servers_with_model(engine.db, real_model)
-            if not servers: break
+            if not servers:
+                if cb: await cb(f'* Error: Server offline\n</processing>\n')
+                break
 
             payload = {"model": real_model, "messages": turn_msgs, "stream": False, "tools": [t for t in tools if t]}
             resp, _ = await engine.reverse_proxy_fn(engine.request, "chat", servers, json.dumps(payload).encode(), is_subrequest=True, sender="autonomous-agent")
             
-            if not hasattr(resp, 'body'): break
+            if not hasattr(resp, 'body'):
+                if cb: await cb(f'* Error: Empty response\n</processing>\n')
+                break
+                
             ai_msg = json.loads(resp.body.decode()).get("message", {})
             scratchpad.append(ai_msg)
+            
+            if cb:
+                await cb(f'* Turn {turn} complete.\n</processing>\n')
             
             if not ai_msg.get("tool_calls"):
                 return ai_msg.get("content", "") if output_slot_idx == 0 else scratchpad

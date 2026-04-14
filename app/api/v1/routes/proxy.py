@@ -1233,12 +1233,12 @@ async def _select_auto_model(db: AsyncSession, body: Dict[str, Any], overrides: 
         full_history_text = last_user_prompt
     elif "messages" in body:
         for msg in body["messages"]:
-            content = msg.get("content", "")
+            content = msg.get("content") or ""
             if isinstance(content, list):
                 content = " ".join([p.get("text", "") for p in content if p.get("type") == "text"])
-            full_history_text += content + " "
+            full_history_text += str(content) + " "
             if msg.get("role") == "user":
-                last_user_prompt = content
+                last_user_prompt = str(content)
 
     # Detect Reasoning Intent
     reasoning_keywords =["solve", "prove", "math", "why", "logic", "calculate", "step by step", "complex"]
@@ -1734,14 +1734,14 @@ async def _select_from_pool(db: AsyncSession, pool_name: str, body: Dict[str, An
             if msg.get("images"):
                 has_images_in_msgs = True
             
-            content = msg.get("content", "")
+            content = msg.get("content") or ""
             if isinstance(content, list):
                 for part in content:
                     if not isinstance(part, dict): continue
                     if part.get("type") == "image_url":
                         has_images_in_msgs = True
             elif not prompt_text:
-                prompt_text = content
+                prompt_text = str(content)
 
     features = {
         "has_images": bool(body.get("images") or has_images_in_msgs),
@@ -2375,22 +2375,11 @@ async def _handle_bundle_request(db: AsyncSession, request: Request, bundle_name
     # Otherwise return the stream for UI or streaming clients
     return StreamingResponse(bundle_orchestrator_generator(), media_type="application/x-ndjson")
 
-@router.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"])
-async def proxy_ollama(
-    request: Request,
-    path: str,
-    api_key: APIKey = Depends(get_valid_api_key),
-    db: AsyncSession = Depends(get_db),
-    settings: AppSettingsModel = Depends(get_settings),
-    servers: List[OllamaServer] = Depends(get_active_servers),
+async def _process_proxy_logic(
+    request: Request, path: str, api_key: APIKey, db: AsyncSession, 
+    settings: AppSettingsModel, servers: List[OllamaServer], 
+    body: dict, body_bytes: bytes, model_name: str, req_id: str
 ):
-    """
-    A catch-all route that proxies all other requests to the backend with token tracking.
-    """
-    # Initialize context enforcement flag (bundles/orchestrators will set to True)
-    request.state.enforce_strict_context = False
-    
-    req_id = secrets.token_hex(4)
     blocked_paths = {p.strip().lstrip('/') for p in settings.blocked_ollama_endpoints.split(',') if p.strip()}
     request_path = path.strip().lstrip('/')
 
@@ -2402,18 +2391,6 @@ async def proxy_ollama(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"Access to the endpoint '/api/{request_path}' is disabled by the proxy administrator."
         )
-
-    body_bytes = await request.body()
-    model_name = None
-    body = {}
-
-    if body_bytes:
-        try:
-            body = json.loads(body_bytes)
-            if isinstance(body, dict) and "model" in body:
-                model_name = body["model"]
-        except (json.JSONDecodeError, Exception):
-            pass
 
     # 1. Handle 'auto' model routing FIRST            
     if model_name == "auto":
@@ -2687,3 +2664,86 @@ async def proxy_ollama(
             logger.debug(f"Failed to queue usage log: {e}")
 
     return response
+
+
+@router.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"])
+async def proxy_ollama(
+    request: Request,
+    path: str,
+    api_key: APIKey = Depends(get_valid_api_key),
+    db: AsyncSession = Depends(get_db),
+    settings: AppSettingsModel = Depends(get_settings),
+    servers: List[OllamaServer] = Depends(get_active_servers),
+):
+    """
+    A catch-all route that proxies all other requests to the backend with token tracking.
+    """
+    request.state.enforce_strict_context = False
+    req_id = secrets.token_hex(4)
+    
+    body_bytes = await request.body()
+    model_name = None
+    body = {}
+
+    if body_bytes:
+        try:
+            body = json.loads(body_bytes)
+            if isinstance(body, dict) and "model" in body:
+                model_name = body["model"]
+        except (json.JSONDecodeError, Exception):
+            pass
+            
+    client_wants_stream = body.get("stream", True) if isinstance(body, dict) else True
+    
+    if not client_wants_stream:
+        return await _process_proxy_logic(request, path, api_key, db, settings, servers, body, body_bytes, model_name, req_id)
+        
+    stream_queue = asyncio.Queue()
+    async def _stream_cb(text: str):
+        await stream_queue.put(text)
+    request.state.stream_callback = _stream_cb
+    
+    async def stream_generator():
+        import datetime
+        from ascii_colors import trace_exception
+        
+        def format_chunk(content):
+            now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z")
+            chunk = {
+                "model": model_name or "unknown",
+                "created_at": now_iso,
+                "done": False
+            }
+            if "chat" in path:
+                chunk["message"] = {"role": "assistant", "content": content}
+            else:
+                chunk["response"] = content
+            return (json.dumps(chunk) + "\n").encode()
+            
+        task = asyncio.create_task(_process_proxy_logic(request, path, api_key, db, settings, servers, body, body_bytes, model_name, req_id))
+        
+        while not task.done():
+            try:
+                text = await asyncio.wait_for(stream_queue.get(), timeout=0.1)
+                yield format_chunk(text)
+            except asyncio.TimeoutError:
+                continue
+                
+        try:
+            res = task.result()
+        except Exception as e:
+            trace_exception(e)
+            yield format_chunk(f'<processing type="error" title="Proxy Error">\n* {str(e)}\n</processing>\n')
+            yield (json.dumps({"model": model_name or "unknown", "done": True}) + "\n").encode()
+            return
+            
+        while not stream_queue.empty():
+            yield format_chunk(stream_queue.get_nowait())
+            
+        if isinstance(res, StreamingResponse):
+            async for chunk in res.body_iterator:
+                yield chunk
+        elif hasattr(res, 'body'):
+            yield res.body
+            
+    return StreamingResponse(stream_generator(), media_type="application/x-ndjson")

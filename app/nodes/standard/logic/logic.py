@@ -12,8 +12,8 @@ class ExtractTextNode(BaseNode):
         msgs = await engine._resolve_input(node, 0)
         if msgs and isinstance(msgs, list):
             last_msg = msgs[-1]
-            content = last_msg.get("content", "")
+            content = last_msg.get("content") or ""
             if isinstance(content, list):
                 return "\n".join([p.get("text", "") for p in content if isinstance(p, dict) and p.get("type") == "text"]).strip()
-            return content
+            return str(content)
         return ""

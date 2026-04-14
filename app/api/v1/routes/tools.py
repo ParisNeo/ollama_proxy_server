@@ -17,6 +17,7 @@ from app.api.v1.routes.proxy import _resolve_target, _reverse_proxy
 from app.crud import server_crud
 import re
 import os
+from ascii_colors import trace_exception
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
@@ -173,9 +174,8 @@ def execute_tool_universally(code: str, fn_name: str, args: Any, user: User, lib
         try:
             result = asyncio.run(_run())
         except Exception as e:
-            import traceback
             print(f"CRASH IN TOOL: {str(e)}")
-            print(traceback.format_exc())
+            trace_exception(e)
             result = {"error": str(e), "type": "runtime_exception"}
         
         # Cleanup logging
@@ -236,7 +236,7 @@ async def api_test_tool(
     try:
         # PHASE 1: Get Tool Call from AI
         # Resolve to physical model
-        resolution = await _resolve_target(db, target_agent, [{"role": "user", "content": user_prompt}])
+        resolution = await _resolve_target(db, target_agent,[{"role": "user", "content": user_prompt}], request=request)
         real_model, msgs = resolution
 
         # Inject Protocol Enforcement as the very first system instruction
@@ -280,6 +280,8 @@ async def api_test_tool(
         }
     except Exception as e:
         logger.error(f"Test Execution Failed: {e}")
+        if getattr(request.app.state.settings, "enable_debug_mode", False):
+            trace_exception(e)
         return JSONResponse({"error": str(e)}, status_code=500)
 
 @router.post("/api/tools/fix", name="api_fix_tool")
@@ -325,7 +327,7 @@ async def api_fix_tool(
     user_payload += f"CURRENT SOURCE CODE:\n{current_code}"
 
     try:
-        real_model, msgs = await _resolve_target(db, target_agent, [{"role": "user", "content": user_payload}])
+        real_model, msgs = await _resolve_target(db, target_agent,[{"role": "user", "content": user_payload}], request=request)
         msgs.insert(0, {"role": "system", "content": instruction})
         
         servers = await server_crud.get_servers_with_model(db, real_model)
@@ -340,6 +342,9 @@ async def api_fix_tool(
             fixed_code = fixed_code.replace('\r\n', '\n').strip() + '\n'
             return {"success": True, "fixed_code": fixed_code}
     except Exception as e:
+        logger.error(f"Tool Fix Failed: {e}")
+        if getattr(request.app.state.settings, "enable_debug_mode", False):
+            trace_exception(e)
         return JSONResponse({"error": str(e)}, status_code=500)
 
 @router.post("/api/tools/build", name="api_build_tool")
@@ -398,7 +403,7 @@ async def api_build_tool(
     try:
         event_manager.emit(ProxyEvent("active", build_id, "Tool Architect", target_agent, admin_user.username, error_message="Generating implementation..."))
         
-        real_model, msgs = await _resolve_target(db, target_agent, [{"role": "user", "content": user_request}])
+        real_model, msgs = await _resolve_target(db, target_agent, [{"role": "user", "content": user_request}], request=request)
         msgs.insert(0, {"role": "system", "content": strict_instruction})
         
         servers = await server_crud.get_servers_with_model(db, real_model)
@@ -451,5 +456,7 @@ async def api_build_tool(
         return {"success": True, "filename": filename, "content": clean_code}
     except Exception as e:
         logger.error(f"Tool Build Failed: {e}")
+        if getattr(request.app.state.settings, "enable_debug_mode", False):
+            trace_exception(e)
         event_manager.emit(ProxyEvent("error", build_id, "Tool Architect", "Local", admin_user.username, error_message=str(e)))
         return JSONResponse({"error": str(e)}, status_code=500)

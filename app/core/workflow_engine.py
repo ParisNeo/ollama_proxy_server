@@ -203,8 +203,8 @@ class WorkflowEngine:
         if self.request and hasattr(self.request, 'app'):
             enable_debug = self.request.app.state.settings.enable_debug_mode
 
+        node_title = node.get("title") or ntype.split("/")[-1].upper()
         if enable_debug:
-            node_title = node.get("title") or ntype.split("/")[-1].upper()
             logger.info(f"DEBUG: Executing Graph Node [{node_title}] (ID: {node['id']})")
             event_manager.emit(ProxyEvent(
                 "active", 
@@ -214,12 +214,21 @@ class WorkflowEngine:
                 self.sender, 
                 error_message=f"Step: {node_title}..."
             ))
+            
+            cb = getattr(self.request.state, "stream_callback", None)
+            if cb:
+                await cb(f'<processing type="workflow_node" title="{node_title}">\n* Executing...\n')
+        else:
+            cb = None
         
         # 1. Plugin Execution (Self-contained nodes)
+        res = None
         node_cls = NodeRegistry.get_node(ntype)
         if node_cls:
             plugin = node_cls()
-            return await plugin.execute(self, node, output_slot_idx)
+            res = await plugin.execute(self, node, output_slot_idx)
+            
+        if enable_debug and cb:
+            await cb('</processing>\n')
 
-        # 2. Legacy Fallback Execution (Only for nodes not yet ported to plugins)
-        return None
+        return res

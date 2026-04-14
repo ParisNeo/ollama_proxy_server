@@ -59,13 +59,17 @@ class VisionNode(BaseNode):
             
             # Capture last user prompt to guide the VLM's attention
             if msg.get("role") == "user":
-                last_user_prompt = msg.get("content", "")
+                last_user_prompt = msg.get("content") or ""
 
         # 2. If no images were found, return the (potentially flattened) text history
         if not all_images:
             return updated_messages
 
         # 3. Call the VLM to generate descriptions
+        cb = getattr(engine.request.state, "stream_callback", None)
+        if cb:
+            await cb(f'<processing type="tool_execution" title="Vision Hydrator">\n* Analyzing {len(all_images)} image(s) with {vlm_model}...\n')
+            
         vision_prompt = (
             "Analyze the provided images and describe their contents in detail. "
             f"Pay special attention to elements relevant to this user query:\n\"{last_user_prompt}\"\n\n"
@@ -115,15 +119,20 @@ class VisionNode(BaseNode):
                     # This provides the text model with the visual context it lacks
                     for i in range(len(updated_messages) - 1, -1, -1):
                         if updated_messages[i].get("role") == "user":
-                            orig_text = updated_messages[i].get("content", "")
+                            orig_text = updated_messages[i].get("content") or ""
                             updated_messages[i]["content"] = (
                                 f"### CONTEXTUAL IMAGE ANALYSIS:\n{description}\n\n"
                                 f"### USER QUERY:\n{orig_text}"
                             ).strip()
                             break
+            
+            if cb:
+                await cb('* VLM analysis complete.\n</processing>\n')
                             
         except Exception as e:
             logger.error(f"Vision Hydrator failure: {e}", exc_info=True)
+            if cb:
+                await cb(f'* Failed: {str(e)}\n</processing>\n')
             # On failure, we still return the cleaned (text-only) messages to prevent 
             # binary image data from crashing the final text model.
 
