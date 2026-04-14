@@ -236,14 +236,19 @@ async def api_build_workflow(
         event_manager.emit(ProxyEvent("active", build_id, "Graph Architect", target_agent, admin_user.username, error_message="Generating Cognitive Graph..."))
         
         real_model, msgs = await _resolve_target(db, target_agent,[{"role": "user", "content": user_payload}], request=request)
-        msgs.insert(0, {"role": "system", "content": instruction})
         
-        servers = await server_crud.get_servers_with_model(db, real_model)
-        if not servers: return JSONResponse({"error": "Backend offline"}, status_code=503)
+        if real_model == "__result__":
+            raw_output = msgs[-1]["content"] if msgs else ""
+        else:
+            msgs.insert(0, {"role": "system", "content": instruction})
+            servers = await server_crud.get_servers_with_model(db, real_model)
+            if not servers: return JSONResponse({"error": "Backend offline"}, status_code=503)
 
-        resp, _ = await _reverse_proxy(request, "chat", servers, json.dumps({"model": real_model, "messages": msgs, "stream": False}).encode(), is_subrequest=True, request_id=build_id, model=real_model, sender=admin_user.username)
-        
-        if hasattr(resp, 'body'):
+            resp, _ = await _reverse_proxy(request, "chat", servers, json.dumps({"model": real_model, "messages": msgs, "stream": False}).encode(), is_subrequest=True, request_id=build_id, model=real_model, sender=admin_user.username)
+            
+            if not hasattr(resp, 'body'):
+                return JSONResponse({"error": "Empty response from AI"}, status_code=500)
+
             data = json.loads(resp.body.decode())
             raw_output = data.get("message", {}).get("content", "").strip()
             
@@ -399,14 +404,19 @@ async def api_edit_workflow(
 
     try:
         real_model, msgs = await _resolve_target(db, target_agent,[{"role": "user", "content": user_payload}], request=request)
-        msgs.insert(0, {"role": "system", "content": instruction})
         
-        servers = await server_crud.get_servers_with_model(db, real_model)
-        if not servers: return JSONResponse({"error": "Backend offline"}, status_code=503)
+        if real_model == "__result__":
+            raw_output = msgs[-1]["content"] if msgs else ""
+        else:
+            msgs.insert(0, {"role": "system", "content": instruction})
+            servers = await server_crud.get_servers_with_model(db, real_model)
+            if not servers: return JSONResponse({"error": "Backend offline"}, status_code=503)
 
-        resp, _ = await _reverse_proxy(request, "chat", servers, json.dumps({"model": real_model, "messages": msgs, "stream": False}).encode(), is_subrequest=True, request_id=build_id, model=real_model, sender=admin_user.username)
-        
-        if hasattr(resp, 'body'):
+            resp, _ = await _reverse_proxy(request, "chat", servers, json.dumps({"model": real_model, "messages": msgs, "stream": False}).encode(), is_subrequest=True, request_id=build_id, model=real_model, sender=admin_user.username)
+            
+            if not hasattr(resp, 'body'):
+                return JSONResponse({"error": "Empty response from AI"}, status_code=500)
+
             data = json.loads(resp.body.decode())
             raw_output = data.get("message", {}).get("content", "").strip()
             

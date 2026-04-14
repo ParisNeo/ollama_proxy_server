@@ -289,11 +289,15 @@ async def api_build_skill(
         )
         
         real_model, yaml_msgs = await _resolve_target(db, target_agent, [{"role": "user", "content": yaml_prompt}])
-        servers = await server_crud.get_servers_with_model(db, real_model)
-        if not servers: return JSONResponse({"error": "Backend offline"}, status_code=503)
+        
+        if real_model == "__result__":
+            raw_yaml = yaml_msgs[-1]["content"] if yaml_msgs else ""
+        else:
+            servers = await server_crud.get_servers_with_model(db, real_model)
+            if not servers: return JSONResponse({"error": "Backend offline"}, status_code=503)
 
-        y_resp, _ = await _reverse_proxy(request, "chat", servers, json.dumps({"model": real_model, "messages": yaml_msgs, "stream": False}).encode(), is_subrequest=True, request_id=f"{build_id}_y", model=real_model, sender=admin_user.username)
-        raw_yaml = json.loads(y_resp.body.decode()).get("message", {}).get("content", "").strip()
+            y_resp, _ = await _reverse_proxy(request, "chat", servers, json.dumps({"model": real_model, "messages": yaml_msgs, "stream": False}).encode(), is_subrequest=True, request_id=f"{build_id}_y", model=real_model, sender=admin_user.username)
+            raw_yaml = json.loads(y_resp.body.decode()).get("message", {}).get("content", "").strip()
         # Clean potential markdown fences from lazy models
         raw_yaml = raw_yaml.replace("```yaml", "").replace("```", "").strip()
         
@@ -317,9 +321,13 @@ async def api_build_skill(
             "STRICT: Output ONLY the markdown body. No YAML, no preamble, no chatter."
         )
         
-        _, body_msgs = await _resolve_target(db, target_agent, [{"role": "user", "content": content_prompt}])
-        b_resp, _ = await _reverse_proxy(request, "chat", servers, json.dumps({"model": real_model, "messages": body_msgs, "stream": False}).encode(), is_subrequest=True, request_id=f"{build_id}_b", model=real_model, sender=admin_user.username)
-        markdown_body = json.loads(b_resp.body.decode()).get("message", {}).get("content", "").strip()
+        real_model_b, body_msgs = await _resolve_target(db, target_agent, [{"role": "user", "content": content_prompt}])
+        
+        if real_model_b == "__result__":
+            markdown_body = body_msgs[-1]["content"] if body_msgs else ""
+        else:
+            b_resp, _ = await _reverse_proxy(request, "chat", servers, json.dumps({"model": real_model_b, "messages": body_msgs, "stream": False}).encode(), is_subrequest=True, request_id=f"{build_id}_b", model=real_model_b, sender=admin_user.username)
+            markdown_body = json.loads(b_resp.body.decode()).get("message", {}).get("content", "").strip()
 
         # --- FINAL ASSEMBLY ---
         final_content = f"---\n{raw_yaml}\n---\n\n{markdown_body}"

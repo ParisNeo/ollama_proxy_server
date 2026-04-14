@@ -2822,38 +2822,30 @@ async def admin_enhance_prompt(
             return JSONResponse({"error": f"Failed to resolve management agent '{target_agent}'"}, status_code=500)
             
         real_model, final_msgs = resolution
-        from app.crud.apikey_crud import create_api_key
         
-        # Get or create a temporary system user for this task
-        # Simplified: Use the existing logic by calling the backend function directly
-        # Note: In a production refactor, extract the 'resolve and execute' logic to a service
-        from app.api.v1.routes.playground_chat import admin_playground_stream
-        
-        # For simplicity and to avoid circular deps, we hit the internal proxy logic
-        # via httpx but on the local loopback
-        headers = {"Content-Type": "application/json"}
-        # We'll use a more direct approach since we are inside the app:
-        from app.api.v1.routes.proxy import _reverse_proxy, _resolve_target, _async_log_usage
-        
-        real_model, final_msgs = resolution # Use already resolved model/messages
-        servers = await server_crud.get_servers_with_model(db, real_model)
-        
-        if not servers:
-            return JSONResponse({"error": f"Model for agent {target_agent} not found."}, status_code=503)
+        if real_model == "__result__":
+            enhanced = final_msgs[-1]["content"] if final_msgs else ""
+        else:
+            servers = await server_crud.get_servers_with_model(db, real_model)
+            if not servers:
+                return JSONResponse({"error": f"Model for agent {target_agent} not found."}, status_code=503)
 
-        resp, _ = await _reverse_proxy(
-            request, "chat", servers, 
-            json.dumps({"model": real_model, "messages": final_msgs, "stream": False}).encode(),
-            is_subrequest=True,
-            request_id=req_id,
-            model=real_model,
-            sender=admin_user.username
-        )
-        
-        if hasattr(resp, 'body'):
+            resp, _ = await _reverse_proxy(
+                request, "chat", servers, 
+                json.dumps({"model": real_model, "messages": final_msgs, "stream": False}).encode(),
+                is_subrequest=True,
+                request_id=req_id,
+                model=real_model,
+                sender=admin_user.username
+            )
+            
+            if not hasattr(resp, 'body'):
+                return JSONResponse({"error": "Empty response from AI"}, status_code=500)
+
             resp_data = json.loads(resp.body.decode())
             enhanced = resp_data.get("message", {}).get("content", "").strip()
-            return {"enhanced": enhanced}
+            
+        return {"enhanced": enhanced}
             
     except Exception as e:
         logger.error(f"Enhancement failed: {e}")
