@@ -19,12 +19,17 @@ class VisionNode(BaseNode):
         This allows text-only models to understand image content.
         """
         # Resolve input messages or fallback to initial request history
-        msgs = await engine._resolve_input(node, 0) or engine.initial_messages
+        input_data = await engine._resolve_input(node, 0)
+        # SECURITY FIX: Ensure we never return None or an empty list if global history exists.
+        # Use 'is None' to distinguish between 'unconnected slot' and 'empty conversation'.
+        msgs = input_data if input_data is not None else engine.initial_messages
+        
         if not msgs:
             return []
             
         vlm_model = node["properties"].get("vlm", "auto")
-        updated_messages = copy.deepcopy(msgs)
+        # Ensure deepcopy receives a list to prevent None propagation
+        updated_messages = copy.deepcopy(list(msgs))
         
         # 1. Gather all images and identify the last user prompt for context
         all_images = []

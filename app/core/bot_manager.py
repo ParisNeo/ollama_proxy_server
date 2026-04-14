@@ -72,16 +72,9 @@ class BotManager:
             if len(self.chat_histories[user_identifier]) > 10:
                 self.chat_histories[user_identifier] = self.chat_histories[user_identifier][-10:]
             
-            # 2. Fetch Long-Term Cognitive Memory
-            memory_context = await CognitiveMemoryManager.get_memory_context(db, user_identifier, target_workflow)
-            asyncio.create_task(CognitiveMemoryManager.reorganize_memories(db, user_identifier, target_workflow))
-
-            # 3. Inject Memory directly into the current prompt to bypass Workflow overwrites
+            # Memory logic is now handled by the 'hub/agent' node inside the workflow itself.
+            # We only manage the rolling history window for consistency.
             messages = copy.deepcopy(self.chat_histories[user_identifier])
-            messages[-1]["content"] = f"{memory_context}\n\nUSER MESSAGE:\n{user_text}"
-
-            if self.app.state.settings.enable_debug_mode:
-                logger.info(f"[DEBUG] BOT INPUT INJECTION:\n{messages[-1]['content']}")
 
             # 4. Agentic Retrieval Loop
             for turn in range(3):

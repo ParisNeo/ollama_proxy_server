@@ -614,6 +614,25 @@ async def run_all_migrations(engine: AsyncEngine) -> None:
                 "chunk_size": "INTEGER DEFAULT 512",
                 "chunk_overlap": "INTEGER DEFAULT 50",
                 "created_at": "DATETIME",
+            },
+            "bot_configs": {
+                "name": "VARCHAR NOT NULL",
+                "platform": "VARCHAR NOT NULL",
+                "encrypted_token": "VARCHAR NOT NULL",
+                "target_workflow": "VARCHAR NOT NULL",
+                "is_active": "BOOLEAN DEFAULT 0 NOT NULL",
+                "history_limit": "INTEGER DEFAULT 10",
+                "history_limit_unit": "VARCHAR DEFAULT 'messages'",
+                "extra_settings": "JSON",
+                "created_at": "DATETIME",
+            },
+            "memory_systems": {
+                "name": "VARCHAR NOT NULL",
+                "description": "VARCHAR",
+                "system_instruction": "TEXT NOT NULL",
+                "importance_decay": "INTEGER DEFAULT 2",
+                "is_active": "BOOLEAN DEFAULT 1 NOT NULL",
+                "created_at": "DATETIME",
             }
         }
 

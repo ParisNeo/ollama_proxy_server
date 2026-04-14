@@ -1,781 +1,439 @@
 {% extends "admin/base.html" %}
 
 {% block title %}Live System Flow{% endblock %}
-
 {% block header_title %}System Architecture Flow{% endblock %}
 
 {% block content %}
-<style>
-    #status-tooltip {
-        pointer-events: auto; 
-        position: absolute; /* Changed to absolute to stay inside relative container */
-        z-index: 100;
-        background: rgba(15, 15, 25, 0.98);
-        border: 1px solid rgba(255, 255, 255, 0.2);
-        padding: 14px;
-        border-radius: 12px;
-        box-shadow: 0 20px 40px rgba(0,0,0,0.9), 0 0 20px rgba(99, 102, 241, 0.2);
-        display: none;
-        font-family: ui-monospace, monospace;
-        backdrop-filter: blur(20px);
-        width: 280px;
-        transition: opacity 0.2s ease;
-    }
-</style>
 
-<div class="card-style h-[80vh] flex flex-col p-0 overflow-hidden relative border-2 border-white/5 bg-[#030305]">
-    <!-- Tooltip Element -->
-    <div id="status-tooltip"></div>
-
-    <!-- Header -->
-    <div class="p-4 border-b border-white/10 flex flex-col md:flex-row justify-between items-center bg-black/40 backdrop-blur-md z-20 gap-4">
-        <div class="flex items-center gap-4">
-            <div class="h-10 w-10 rounded-full bg-[var(--color-primary-600)] flex items-center justify-center shadow-[0_0_15px_rgba(99,102,241,0.5)]">
-                <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
-            </div>
-            <div>
-                <h2 class="text-xl font-bold text-white tracking-tight">Live Request Pipeline</h2>
-                <div class="flex items-center gap-3 mt-0.5">
-                    <span id="connection-status" class="text-[9px] font-black px-2 py-0.5 rounded border border-white/10">OFFLINE</span>
-                    <p class="text-[10px] text-gray-500 uppercase tracking-widest font-bold">Session Telemetry Active</p>
-                </div>
-            </div>
-            <button onclick="window.location.reload()" class="p-2 hover:bg-white/10 rounded-lg text-gray-500 hover:text-white transition-colors" title="Reset View">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
-            </button>
+<div class="card-style h-[80vh] flex flex-col p-0 overflow-hidden bg-[#030305] border border-white/10 relative">
+    <div class="p-4 border-b border-white/10 flex justify-between items-center bg-black/40 z-20">
+        <div class="flex items-center gap-3">
+            <h2 class="text-white font-bold tracking-tight">Live Request Flow</h2>
+            <div id="active-count" class="px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-400 text-[10px] font-black uppercase">0 Active</div>
         </div>
+        <span id="connection-status" class="text-[10px] px-3 py-1 rounded border border-red-500/30 text-red-400 font-bold">OFFLINE</span>
+    </div>
 
-        <!-- Session Stats Bar -->
-        <div class="flex gap-6 items-center px-6 py-2 bg-white/5 rounded-2xl border border-white/5">
-            <div class="text-center">
-                <div class="text-[10px] text-gray-500 font-bold uppercase">Active Load</div>
-                <div id="stat-load" class="text-lg font-black text-indigo-400">0</div>
-            </div>
-            <div class="w-px h-8 bg-white/10"></div>
-            <div class="text-center">
-                <div class="text-[10px] text-gray-500 font-bold uppercase">Session Tokens</div>
-                <div id="stat-tokens" class="text-lg font-black text-emerald-400">0</div>
-            </div>
-            <div class="w-px h-8 bg-white/10"></div>
-            <div class="text-center">
-                <div class="text-[10px] text-gray-500 font-bold uppercase">Avg. TTFT</div>
-                <div id="stat-avg-ttft" class="text-lg font-black text-amber-400">0<span class="text-[10px] ml-0.5 text-gray-500">ms</span></div>
+    <!-- Floating Tooltip -->
+    <div id="particle-tooltip" class="absolute pointer-events-none opacity-0 transition-opacity duration-200 z-50 bg-black/90 border border-indigo-500/50 p-3 rounded-xl shadow-2xl backdrop-blur-md">
+        <div id="tooltip-title" class="text-[10px] font-black text-indigo-400 uppercase mb-1">Request Trace</div>
+        <div class="space-y-1.5">
+            <div class="flex justify-between gap-8"><span class="text-[9px] text-gray-500 uppercase">Model:</span> <span id="tt-model" class="text-[11px] text-white font-bold">...</span></div>
+            <div class="flex justify-between gap-8"><span class="text-[9px] text-gray-500 uppercase">User:</span> <span id="tt-user" class="text-[11px] text-indigo-300">...</span></div>
+            <div id="tt-stats-row" class="pt-1 mt-1 border-t border-white/5 flex gap-4">
+                <div class="flex flex-col"><span class="text-[8px] text-gray-600 uppercase">TTFT</span> <span id="tt-ttft" class="text-[10px] text-amber-400 font-mono">--</span></div>
+                <div class="flex flex-col"><span class="text-[8px] text-gray-600 uppercase">Speed</span> <span id="tt-tps" class="text-[10px] text-emerald-400 font-mono">--</span></div>
             </div>
         </div>
     </div>
-    
-    <div class="flex-grow flex relative cursor-crosshair" id="canvas-container">
-        <!-- Sidebar Activity List -->
-        <div id="live-activity-sidebar" class="w-64 bg-black/60 border-r border-white/10 z-10 p-4 overflow-y-auto hidden md:block">
-            <h3 class="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-4">Active Sessions</h3>
-            <div id="active-list" class="space-y-3">
-                <p class="text-[10px] text-gray-700 italic">No active traffic.</p>
-            </div>
-        </div>
 
-        <canvas id="flowCanvas" class="flex-grow h-full"></canvas>
-        
-        <!-- Trash Bin -->
-        <div id="trash-bin" class="absolute bottom-6 right-6 p-4 rounded-xl bg-white/5 border border-white/10 flex flex-col items-center opacity-40">
-            <svg class="w-6 h-6 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-        </div>
+    <div id="canvas-container" class="flex-grow relative cursor-crosshair">
+        <!-- Overlay for Labeling (Kept for CSS positioning if needed, but drawing trash in PIXI for overlapping) -->
     </div>
 </div>
 
+<script src="{{ url_for('static', path='vendor/pixi.min.js') }}"></script>
+
 <script>
 document.addEventListener('DOMContentLoaded', () => {
-    const canvas = document.getElementById('flowCanvas');
-    const ctx = canvas.getContext('2d');
     const container = document.getElementById('canvas-container');
     const statusEl = document.getElementById('connection-status');
-    const tooltip = document.getElementById('status-tooltip');
-    const trashBin = document.getElementById('trash-bin');
-    
-    let width, height;
-    let mouse = { x: 0, y: 0 };
-    let hoveredParticleId = null;
-    let tooltipHideTimer = null;
+    const countEl = document.getElementById('active-count');
+    const tooltip = document.getElementById('particle-tooltip');
+
     const particles = new Map();
-    const historyQueue = []; // Array of completed particles
-    const MAX_HISTORY = 10;
-    const serverNodes = new Map(); 
+    const trails = new Map();
+    const serverNodes = new Map();
     
-    // Global session stats
-    let sessionStats = {
-        totalTokens: 0,
-        ttftSum: 0,
-        ttftCount: 0
-    };
+    const app = new PIXI.Application();
+    let glowLayer, particleLayer, trailLayer, uiLayer;
 
-    const THEME = {
-        bg: '#030305',
-        lineBase: 'rgba(255, 255, 255, 0.05)',
-        received: '#6366f1',
-        assigned: '#f59e0b',
-        active: '#10b981',
-        success: '#10b981',
-        error: '#ef4444'
-    };
-
-    function resize() {
-        width = container.clientWidth;
-        height = container.clientHeight;
-        canvas.width = width * window.devicePixelRatio;
-        canvas.height = height * window.devicePixelRatio;
-        ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
-    }
-    window.addEventListener('resize', resize);
-    resize();
-
-    container.addEventListener('mousemove', (e) => {
-        const rect = container.getBoundingClientRect();
-        mouse.x = e.clientX - rect.left;
-        mouse.y = e.clientY - rect.top;
-        checkProximity();
-    });
-
-    tooltip.addEventListener('mouseenter', () => {
-        if (tooltipHideTimer) clearTimeout(tooltipHideTimer);
-    });
-
-    tooltip.addEventListener('mouseleave', () => {
-        startHideTimer();
-    });
-
-    function startHideTimer() {
-        if (tooltipHideTimer) clearTimeout(tooltipHideTimer);
-        tooltipHideTimer = setTimeout(() => {
-            hoveredParticleId = null;
-            tooltip.style.display = 'none';
-        }, 300);
-    }
-
-    function checkProximity() {
-        let foundParticle = null;
+    // --- HIGH-FIDELITY PROCEDURAL LOGOS ---
+    function drawIcon(g, type, color) {
+        g.clear();
+        const strokeColor = 0xffffff;
         
-        for (const p of particles.values()) {
-            const dist = Math.hypot(mouse.x - p.x, mouse.y - p.y);
-            if (dist < 25) { 
-                foundParticle = p;
+        switch(type) {
+            case 'hub': // Fortress Shield (Official Style)
+                g.moveTo(0, -15).lineTo(12, -8).lineTo(12, 5).bezierCurveTo(12, 12, 0, 18, 0, 18).bezierCurveTo(0, 18, -12, 12, -12, 5).lineTo(-12, -8).closePath()
+                 .fill({color, alpha: 0.9}).stroke({width: 2, color: strokeColor});
+                // Inner "L"
+                g.moveTo(-4, -4).lineTo(-4, 6).lineTo(4, 6).stroke({width: 2, color: strokeColor});
                 break;
-            }
-        }
 
-        if (foundParticle) {
-            if (tooltipHideTimer) clearTimeout(tooltipHideTimer);
-            
-            // CRITICAL FIX: Only update the HTML if the hovered particle has CHANGED
-            // This prevents the DOM from refreshing while you are trying to click the button
-            if (hoveredParticleId !== foundParticle.id) {
-                hoveredParticleId = foundParticle.id;
-                updateTooltip(foundParticle);
-            }
-        } else {
-            // Only start hide timer if we aren't hovering the tooltip itself
-            const tooltipRect = tooltip.getBoundingClientRect();
-            const containerRect = container.getBoundingClientRect();
-            // Check if mouse is inside the tooltip area
-            const isOverTooltip = (
-                (mouse.x + containerRect.left) >= tooltipRect.left && 
-                (mouse.x + containerRect.left) <= tooltipRect.right &&
-                (mouse.y + containerRect.top) >= tooltipRect.top && 
-                (mouse.y + containerRect.top) <= tooltipRect.bottom
-            );
+            case 'ollama': // The Llama Mascot
+                // Head/Face
+                g.ellipse(0, 0, 10, 13).fill({color, alpha: 0.9}).stroke({width: 1, color: strokeColor});
+                // Ears
+                g.poly([-8, -10, -5, -18, -2, -10], true).fill(color);
+                g.poly([8, -10, 5, -18, 2, -10], true).fill(color);
+                // Snout area
+                g.circle(0, 5, 4).fill({color: 0x000000, alpha: 0.2});
+                break;
 
-            if (!isOverTooltip) startHideTimer();
+            case 'vllm': // Fast "V" Chevron
+                g.poly([-12, -10, 0, 12, 12, -10, 8, -10, 0, 4, -8, -10], true).fill({color: 0xf97316, alpha: 0.9}).stroke({width: 1, color: strokeColor});
+                // Speed lines
+                g.rect(-15, -5, 4, 1).fill(0xffffff);
+                g.rect(-18, 0, 5, 1).fill(0xffffff);
+                break;
+
+            case 'cloud': // Multi-Node Cloud
+                g.circle(0, 0, 8).circle(-7, 3, 6).circle(7, 3, 6).rect(-8, 5, 16, 4).fill({color: 0x3b82f6, alpha: 0.8}).stroke({width: 1, color: strokeColor});
+                break;
+
+            case 'workflow': // Logic Engine (Pulsing Brain-Graph)
+                g.circle(0, 0, 12).fill({color: 0xa855f7, alpha: 0.2}).stroke({width: 1, color: 0xa855f7, dash:[2,2]});
+                g.circle(0, 0, 6).fill(0xa855f7);
+                // Connection dots
+                g.circle(8, -8, 3).fill(0xffffff);
+                g.circle(-8, 8, 3).fill(0xffffff);
+                g.circle(8, 8, 3).fill(0xffffff);
+                break;
+
+            default: // Generic compute node
+                g.poly([0,-12, 11,-6, 11,6, 0,12, -11,6, -11,-6], true).fill({color, alpha: 0.8}).stroke({width:1, color: strokeColor});
         }
     }
 
-    let serversLoaded = false;
-    let pendingSnapshot = null;
+    function createMiniWorkflowVisual() {
+        const container = new PIXI.Container();
+        for(let i=0; i<3; i++) {
+            const dot = new PIXI.Graphics().circle(0, 0, 2).fill(0xa855f7);
+            dot.x = (i - 1) * 8;
+            dot.y = 15; // Offset below particle
+            container.addChild(dot);
+        }
+        return container;
+    }
 
-    async function syncServers() {
+    // --- NODE DISCOVERY ---
+    async function initNodes() {
+        serverNodes.set('gateway', { name: 'Gateway', x: 100, y: app.screen.height / 2, type: 'hub' });
+
         try {
             const resp = await fetch("{{ url_for('admin_get_server_nodes') }}");
-            const data = await resp.json();
-            data.forEach(s => updateServerLayout(s.name));
-            serversLoaded = true;
+            const activeServers = await resp.json();
             
-            // If a snapshot arrived while we were loading servers, process it now
-            if (pendingSnapshot) {
-                handleSnapshot(pendingSnapshot);
-                pendingSnapshot = null;
-            }
-        } catch(e) { console.error(e); }
-    }
+            const padding = 120;
+            const availableHeight = app.screen.height - (padding * 2);
+            const step = activeServers.length > 1 ? availableHeight / (activeServers.length - 1) : 0;
 
-    // Start loading servers immediately
-    syncServers();
-
-    const evtSource = new EventSource("{{ url_for('sse_events') }}");
-    evtSource.onopen = () => {
-        statusEl.innerHTML = '● LIVE PIPELINE';
-        statusEl.className = "text-[10px] font-black px-3 py-1 rounded-md border border-green-500/30 text-green-500 bg-green-500/10";
-    };
-    evtSource.onmessage = (e) => {
-        try { 
-            const msg = JSON.parse(e.data);
-            if (msg.type === 'snapshot') {
-                handleSnapshot(msg.data);
-            } else {
-                handleEvent(msg); 
-            }
-        } catch(err) {
-            console.error("SSE Parse Error:", err);
-        }
-    };
-
-    evtSource.onerror = (e) => {
-        statusEl.innerHTML = '● CONNECTION LOST';
-        statusEl.className = "text-[10px] font-black px-3 py-1 rounded-md border border-red-500/30 text-red-500 bg-red-500/10";
-        console.warn("EventSource failed. Attempting to reconnect...");
-    };
-
-    function handleSnapshot(data) {
-        // If servers aren't mapped yet, buffer the snapshot
-        if (!serversLoaded) {
-            pendingSnapshot = data;
-            return;
-        }
-
-        // Reality check: Synchronize with server state
-        particles.clear();
-        historyQueue.length = 0;
-        sessionStats.totalTokens = 0;
-        sessionStats.ttftSum = 0;
-        sessionStats.ttftCount = 0;
-
-        // Restore active particles
-        data.active.forEach(req => {
-            // Re-map server state to UI particle state
-            const stateMap = { 'received': 'queued', 'assigned': 'traveling', 'active': 'active' };
-            
-            // Ensure the server node exists in our layout
-            if (req.server && req.server !== 'none' && !serverNodes.has(req.server)) {
-                updateServerLayout(req.server);
-            }
-
-            particles.set(req.id, {
-                ...req,
-                state: stateMap[req.type] || 'active',
-                progress: req.type === 'active' ? 1 : 0,
-                color: req.type === 'active' ? THEME.active : THEME.received,
-                size: 5, alpha: 1, yOffset: (Math.random() - 0.5) * 15,
-                startTime: req.ts * 1000, 
-                lastSeen: Date.now(),
-                targetServer: req.server
+            activeServers.forEach((srv, i) => {
+                serverNodes.set(srv.name, {
+                    name: srv.name,
+                    x: app.screen.width - 200,
+                    y: activeServers.length === 1 ? app.screen.height / 2 : padding + (i * step),
+                    type: srv.type || 'ollama'
+                });
             });
-
-            // Update session stats from snapshot
-            if (req.tokens) sessionStats.totalTokens += req.tokens;
-            if (req.ttft) {
-                sessionStats.ttftSum += req.ttft;
-                sessionStats.ttftCount++;
-            }
-        });
-
-        // Restore Cemetery
-        data.history.forEach(req => {
-            const p = {
-                ...req,
-                state: 'completed',
-                color: req.type === 'error' ? THEME.error : THEME.success,
-                alpha: 0.6, size: 3,
-                finishTime: req.ts * 1000
-            };
-            particles.set(req.id, p);
-            historyQueue.push(p);
-        });
-    }
-
-    function handleEvent(data) {
-        const { type, id, server, model, sender, ttft, tps, tokens, error } = data;
-        
-        // Always update lastSeen for existing particles to prevent GC during long streams
-        if (particles.has(id)) {
-            particles.get(id).lastSeen = Date.now();
-        }
-
-        if (!particles.has(id) && type !== 'completed' && type !== 'error') {
-            particles.set(id, {
-                id, state: 'queued', progress: 0,
-                sender: sender || 'anon', model: model || 'unknown',
-                color: THEME.received, size: 5, alpha: 1,
-                yOffset: (Math.random() - 0.5) * 15,
-                startTime: Date.now(),
-                lastSeen: Date.now(),
-                ttft: 0, tps: 0
-            });
-        } else if (type === 'assigned') {
-            const p = particles.get(id);
-            if (p) { 
-                if (p.state === 'queued') { 
-                    p.state = 'traveling'; 
-                    p.progress = 0; 
-                }
-                // Transitioning to a new node? Reset progress for the line animation
-                if (p.targetServer && p.targetServer !== server) {
-                    p.progress = 0;
-                }
-                
-                p.targetServer = server;
-                
-                // CRITICAL: Dynamically add virtual nodes (orchestrator, etc) to layout
-                if (server && server !== 'none' && !serverNodes.has(server)) {
-                    updateServerLayout(server);
-                }
-            }
-        } else if (type === 'active') {
-            const p = particles.get(id);
-            if (p) { 
-                p.state = 'active'; 
-                p.color = THEME.active; 
-                p.ttft = ttft;
-                // Update Session Avg TTFT
-                sessionStats.ttftSum += ttft;
-                sessionStats.ttftCount++;
-                document.getElementById('stat-avg-ttft').innerHTML = `${Math.round(sessionStats.ttftSum / sessionStats.ttftCount)}<span class="text-[10px] ml-0.5 text-gray-500">ms</span>`;
-            }
-        } else if (type === 'completed') {
-            const p = particles.get(id);
-            if (p) { 
-                p.state = 'completed'; 
-                p.color = THEME.success;
-                p.tps = tps;
-                p.finalTokens = tokens;
-                p.finishTime = Date.now();
-                
-                // Add to history queue
-                historyQueue.unshift(p);
-                if (historyQueue.length > MAX_HISTORY) {
-                    const removed = historyQueue.pop();
-                    particles.delete(removed.id);
-                }
-
-                // Update Session Tokens
-                sessionStats.totalTokens += tokens;
-                document.getElementById('stat-tokens').innerText = sessionStats.totalTokens.toLocaleString();
-            }
-        } else if (type === 'error') {
-            const p = particles.get(id);
-            if (p) { 
-                p.state = 'completed'; // Send to cemetery
-                p.color = THEME.error; 
-                p.error = error || "Unknown Server Error";
-                p.finishTime = Date.now();
-                
-                if (!historyQueue.includes(p)) historyQueue.unshift(p);
-                if (historyQueue.length > MAX_HISTORY) {
-                    const removed = historyQueue.pop();
-                    particles.delete(removed.id);
-                }
-            }
-        }
-    }
-
-    function updateServerLayout(name) {
-        if (!name || name === 'none') return;
-        serverNodes.set(name, { name });
-        
-        // Split real servers from virtual orchestrators for layout
-        const allNames = Array.from(serverNodes.keys());
-        const orchestrators = allNames.filter(n => n === 'orchestrator' || n === 'ensemble-agents');
-        const servers = allNames.filter(n => !orchestrators.includes(n)).sort();
-        
-        // Combine them: Orchestrators at the bottom
-        const names = [...servers, ...orchestrators];
-        
-        const padding = 100;
-        const availableHeight = height - (padding * 2);
-        const step = names.length > 1 ? availableHeight / (names.length - 1) : 0;
-        
-        names.forEach((n, i) => {
-            serverNodes.set(n, {
-                name: n,
-                x: width - 220, // Move server slightly left to leave room for the line
-                y: names.length > 1 ? padding + (i * step) : height / 2
-            });
-        });
-    }
-
-    // Helper to get exact coordinates along the multi-segment path
-    function getPathPos(t, s) {
-        const startX = 60;
-        const centerY = height / 2;
-        const splitX = width * 0.4;
-        const endX = s.x;
-        const endY = s.y;
-
-        // segment lengths (approx proportions)
-        // 1: x-line, 2: curve, 3: y-line, 4: curve, 5: x-line
-        if (t <= 0.3) { // Segment 1: Horizontal
-            const st = t / 0.3;
-            return { x: startX + (splitX - 30 - startX) * st, y: centerY };
-        } else if (t <= 0.4) { // Segment 2: First Curve
-            const st = (t - 0.3) / 0.1;
-            const inv = 1 - st;
-            const p0 = { x: splitX - 30, y: centerY };
-            const p1 = { x: splitX, y: centerY };
-            const p2 = { x: splitX, y: centerY + (endY > centerY ? 30 : -30) };
-            return {
-                x: inv * inv * p0.x + 2 * inv * st * p1.x + st * st * p2.x,
-                y: inv * inv * p0.y + 2 * inv * st * p1.y + st * st * p2.y
-            };
-        } else if (t <= 0.6) { // Segment 3: Vertical
-            const st = (t - 0.4) / 0.2;
-            const yStart = centerY + (endY > centerY ? 30 : -30);
-            const yEnd = endY - (endY > centerY ? 30 : -30);
-            return { x: splitX, y: yStart + (yEnd - yStart) * st };
-        } else if (t <= 0.7) { // Segment 4: Second Curve
-            const st = (t - 0.6) / 0.1;
-            const inv = 1 - st;
-            const p0 = { x: splitX, y: endY - (endY > centerY ? 30 : -30) };
-            const p1 = { x: splitX, y: endY };
-            const p2 = { x: splitX + 30, y: endY };
-            return {
-                x: inv * inv * p0.x + 2 * inv * st * p1.x + st * st * p2.x,
-                y: inv * inv * p0.y + 2 * inv * st * p1.y + st * st * p2.y
-            };
-        } else { // Segment 5: Final Horizontal
-            const st = (t - 0.7) / 0.3;
-            return { x: (splitX + 30) + (endX - (splitX + 30)) * st, y: endY };
-        }
-    }
-
-    function draw() {
-        ctx.fillStyle = THEME.bg;
-        ctx.fillRect(0, 0, width, height);
-
-        const startX = 60;
-        const splitX = width * 0.4;
-        const centerY = height / 2;
-        const historyX = 80;
-        const historyTopY = height - 60;
-        let activeHover = null;
-
-        // 1. Draw Paths
-        ctx.lineWidth = 2;
-        serverNodes.forEach(s => {
-            ctx.beginPath();
-            ctx.strokeStyle = THEME.lineBase;
-            ctx.moveTo(startX, centerY);
-            ctx.lineTo(splitX - 30, centerY);
-            ctx.quadraticCurveTo(splitX, centerY, splitX, centerY + (s.y > centerY ? 30 : -30));
-            ctx.lineTo(splitX, s.y + (s.y > centerY ? -30 : 30));
-            ctx.quadraticCurveTo(splitX, s.y, splitX + 30, s.y);
-            ctx.lineTo(s.x, s.y);
-            ctx.stroke();
-
-            // Server Box
-            const isHover = mouse.x > s.x && mouse.x < s.x + 180 && Math.abs(mouse.y - s.y) < 20;
-            ctx.fillStyle = isHover ? 'rgba(255,255,255,0.05)' : '#0a0a0f';
-            ctx.strokeStyle = isHover ? THEME.active : 'rgba(255,255,255,0.1)';
-            ctx.beginPath();
-            ctx.roundRect(s.x, s.y - 15, 180, 30, 6);
-            ctx.fill(); ctx.stroke();
-            ctx.fillStyle = '#fff';
-            ctx.font = 'bold 10px ui-monospace';
-            ctx.textAlign = 'left';
-            ctx.fillText(s.name, s.x + 10, s.y + 3);
-
-            if (isHover) activeHover = { type: 'server', data: s };
-        });
-
-        // 2. Gateway
-        ctx.fillStyle = '#0a0a0f';
-        ctx.strokeStyle = THEME.received;
-        ctx.beginPath();
-        ctx.arc(startX, centerY, 22, 0, Math.PI*2);
-        ctx.fill(); ctx.stroke();
-
-        // 2.5 Draw History Header (Cemetery)
-        if (historyQueue.length > 0) {
-            ctx.fillStyle = 'rgba(255,255,255,0.15)';
-            ctx.font = 'bold 9px ui-monospace';
-            ctx.textAlign = 'left';
-            ctx.fillText('⚰️ CEMETERY (LAST FINISHED)', historyX - 10, historyTopY - 15);
-        }
-
-        // 3. Prepare Server Slots (to prevent overlapping)
-        const serverSlots = new Map(); // serverName -> count of active particles
-        // 4. Garbage Collection (Clear artifacts from disconnected clients)
-        const now = Date.now();
-        particles.forEach((p, id) => {
-            const age = now - p.lastSeen;
             
-            // Aggressive cleanup: 
-            // - Queued requests that never assigned within 30s
-            // - Active requests with no updates for 60s (likely lost SSE connection)
-            if ((p.state === 'active' && age > 60000) || (p.state === 'queued' && age > 30000)) {
-                // If it was active but "died", move it to history as an error before deleting
-                if (p.state === 'active' && !historyQueue.includes(p)) {
-                    p.state = 'completed';
-                    p.color = THEME.error;
-                    historyQueue.unshift(p);
-                } else {
-                    particles.delete(id);
-                }
-                return;
-            }
-        });
-
-
-        // 5. Particles
-        particles.forEach((p, id) => {
-            let x, y;
-            const speed = 0.008;
-
-            if (p.state === 'queued') {
-                x = startX; y = centerY + p.yOffset;
-                p.progress += 0.05;
-                p.size = 5 + Math.sin(p.progress) * 2;
-            } else if (p.state === 'completed') {
-                // Determine target position in the history list (Cemetery - Horizontal)
-                const historyIndex = historyQueue.indexOf(p);
-                if (historyIndex === -1) return;
-
-                const targetX = historyX + (historyIndex * 30);
-                const targetY = historyTopY;
-                
-                // Smoothly glide to history slot at the bottom
-                p.x += (targetX - p.x) * 0.05;
-                p.y += (targetY - p.y) * 0.05;
-                x = p.x; y = p.y;
-                
-                // Fade out as they get pushed to the bottom edge
-                const fadeThreshold = MAX_HISTORY * 0.6;
-                if (historyIndex > fadeThreshold) {
-                    p.alpha = Math.max(0, 0.6 * (1 - (historyIndex - fadeThreshold) / (MAX_HISTORY - fadeThreshold)));
-                } else {
-                    p.alpha = 0.6;
-                }
-                p.size = 3;
-            } else if (p.state === 'traveling') {
-                p.progress += speed * 1.5;
-                const s = serverNodes.get(p.targetServer);
-                const pos = getPathPos(p.progress, s);
-                x = pos.x; y = pos.y;
-                if (p.progress >= 1) p.state = 'active';
-            } else if (p.state === 'active') {
-                const s = serverNodes.get(p.targetServer);
-                const slot = serverSlots.get(p.targetServer) || 0;
-                serverSlots.set(p.targetServer, slot + 1);
-                
-                // Stay on the line (Segment 5) by mapping slot to a slightly-less-than-1 progress
-                // Each particle sits ~20 pixels apart on the horizontal line segment
-                const pos = getPathPos(0.98 - (slot * 0.025), s);
-                x = pos.x; y = pos.y;
-                
-                p.size = 6 + Math.sin(Date.now()/100) * 2;
-            } else if (p.state === 'exiting') {
-                p.exitProgress += 0.02;
-                const s = serverNodes.get(p.targetServer) || {x: width/2, y: height/2};
-                x = s.x + ( (width - 40) - s.x ) * p.exitProgress;
-                y = s.y + ( (height - 40) - s.y ) * p.exitProgress;
-                p.alpha = 1 - p.exitProgress;
-                if (p.exitProgress >= 1) particles.delete(id);
-            }
-
-            p.x = x; p.y = y;
-
-            // Deriving visual color from data state to prevent Red/Success mismatch
-            const errorMsg = p.error || p.error_message;
-            const drawColor = errorMsg ? THEME.error : (p.state === 'completed' ? THEME.success : p.color);
-
-            ctx.save();
-            ctx.globalAlpha = p.alpha;
-            
-            // --- Processing Spinner for Active Particles ---
-            if (p.state === 'active') {
-                ctx.beginPath();
-                ctx.strokeStyle = drawColor;
-                ctx.lineWidth = 2;
-                ctx.setLineDash([5, 5]);
-                // Rotate the ring based on time
-                const angle = (Date.now() / 200) % (Math.PI * 2);
-                ctx.arc(x, y, p.size + 4, angle, angle + Math.PI * 1.5);
-                ctx.stroke();
-                ctx.setLineDash([]); // Reset dash
-            }
-
-            ctx.shadowBlur = 15;
-            ctx.shadowColor = drawColor;
-            ctx.fillStyle = drawColor;
-            ctx.beginPath();
-            ctx.arc(x, y, p.size, 0, Math.PI*2);
-            ctx.fill();
-
-            // REFINED LABELS: Only show when hovered
-            if (p.state !== 'failed' && activeHover && activeHover.data.id === id) {
-                ctx.font = 'bold 10px ui-monospace';
-                let labelText = `[${p.sender}] ${p.model}`;
-                if (p.state === 'completed' || p.state === 'active') {
-                    labelText += ` | ${p.ttft}ms | ${p.tps}t/s`;
-                }
-                const m = ctx.measureText(labelText);
-                
-                ctx.shadowBlur = 0;
-                ctx.fillStyle = 'rgba(0,0,0,0.85)';
-                ctx.beginPath();
-                
-                const labelY = y - 13;
-                const pillY = y - 25;
-                const labelX = x;
-
-                ctx.roundRect(x - m.width/2 - 8, pillY, m.width + 16, 16, 4);
-                ctx.fill();
-                
-                ctx.fillStyle = '#fff';
-                ctx.textAlign = 'center';
-                ctx.fillText(labelText, labelX, labelY);
-            }
-            ctx.restore();
-        });
-
-        // 4. Update Load Stat & Sidebar
-        const activeParticles = Array.from(particles.values()).filter(p => p.state !== 'completed');
-        document.getElementById('stat-load').innerText = activeParticles.length;
-        
-        updateSidebarList(activeParticles);
-
-        requestAnimationFrame(draw);
+            drawNodeStaticMarkers();
+        } catch (e) { console.error(e); }
     }
 
-    function updateSidebarList(active) {
-        const listEl = document.getElementById('active-list');
-        if (active.length === 0) {
-            listEl.innerHTML = '<p class="text-[10px] text-gray-700 italic">No active traffic.</p>';
-            return;
+    function drawNodeStaticMarkers() {
+        uiLayer.removeChildren();
+        
+        // Background Grid
+        const grid = new PIXI.Graphics();
+        for(let i=0; i<app.screen.width; i+=50) {
+            grid.moveTo(i, 0).lineTo(i, app.screen.height).stroke({width:1, color:0xffffff, alpha:0.02});
         }
+        for(let j=0; j<app.screen.height; j+=50) {
+            grid.moveTo(0, j).lineTo(app.screen.width, j).stroke({width:1, color:0xffffff, alpha:0.02});
+        }
+        uiLayer.addChild(grid);
 
-        listEl.innerHTML = active.map(p => `
-            <div class="p-2 rounded bg-white/5 border border-white/5">
-                <div class="flex justify-between items-start mb-1">
-                    <span class="text-[10px] font-black text-white truncate w-24">${p.sender}</span>
-                    <span class="text-[8px] px-1 rounded bg-indigo-500/20 text-indigo-400 font-bold uppercase">${p.state}</span>
-                </div>
-                <div class="text-[9px] text-gray-400 font-mono truncate">${p.model}</div>
-                ${p.ttft ? `<div class="mt-1 text-[8px] text-amber-500 font-bold">${p.ttft}ms TTFT</div>` : ''}
-            </div>
-        `).join('');
-    }
+        // --- DISPOSAL ZONE (Internal PIXI Drawing) ---
+        const trashHeight = 60;
+        const trash = new PIXI.Graphics()
+            .rect(0, app.screen.height - trashHeight, app.screen.width, trashHeight)
+            .fill({color: 0xef4444, alpha: 0.05})
+            .moveTo(0, app.screen.height - trashHeight).lineTo(app.screen.width, app.screen.height - trashHeight)
+            .stroke({width: 1, color: 0xffffff, alpha: 0.05});
+        uiLayer.addChild(trash);
 
-    function updateTooltip(p) {
-        if (!p) return; // Safety check
-        
-        tooltip.style.display = 'block';
-        tooltip.style.opacity = '1';
-        
-        // Use coordinates, fallback to 0 if not yet set
-        const px = p.x || 0;
-        const py = p.y || 0;
+        const trashLabel = new PIXI.Text({
+            text: "DISPOSAL ZONE • AUTO-PURGE ACTIVE",
+            style: { fontFamily: 'monospace', fontSize: 9, fill: 0x374151, fontWeight: '900', letterSpacing: 4 }
+        });
+        trashLabel.anchor.set(0.5, 0.5);
+        trashLabel.x = app.screen.width / 2;
+        trashLabel.y = app.screen.height - (trashHeight / 2);
+        uiLayer.addChild(trashLabel);
 
-        let tx = px + 20;
-        let ty = py - 50;
+        serverNodes.forEach(node => {
+            const container = new PIXI.Container();
+            container.x = node.x; container.y = node.y;
 
-        // Boundary checks to keep tooltip inside the viewport
-        if (tx + 300 > width) tx = p.x - 300;
-        if (ty + 280 > height) ty = p.y - 270;
-        if (ty < 0) ty = p.y + 20;
-
-        tooltip.style.left = tx + 'px';
-        tooltip.style.top = ty + 'px';
-
-        // Deriving state and color from the actual error presence
-        const errorMsg = p.error || p.error_message;
-        const isActuallyError = !!errorMsg;
-        const displayState = isActuallyError ? "FAILED" : (p.state === 'completed' ? "SUCCESS" : p.state.toUpperCase());
-        const displayColor = isActuallyError ? THEME.error : (p.state === 'completed' ? THEME.success : p.color);
-
-        let errorHtml = errorMsg ? `
-            <div class="mt-3 pt-3 border-t border-red-500/30">
-                <div class="flex justify-between items-center mb-1">
-                    <div class="text-red-400 text-[10px] font-black uppercase tracking-tighter">Diagnostic Data</div>
-                    <button class="copy-error-btn text-[9px] bg-red-500/20 hover:bg-red-500/40 text-red-100 px-2 py-0.5 rounded border border-red-500/30 transition-colors uppercase font-bold">Copy Error</button>
-                </div>
-                <div id="error-text-content" class="text-red-200 text-[11px] leading-relaxed bg-red-950/40 p-2 rounded border border-red-500/20 break-words max-h-32 overflow-y-auto font-mono">
-                    ${errorMsg}
-                </div>
-            </div>
-        ` : `
-            <div class="mt-3 pt-3 border-t border-green-500/20 text-center">
-                <p class="text-[9px] text-gray-500 uppercase font-bold">Request successfully fulfilled</p>
-            </div>
-        `;
-
-        tooltip.innerHTML = `
-            <div class="flex justify-between items-center mb-3">
-                <div class="text-indigo-400 text-[10px] font-black uppercase tracking-widest">Active Trace</div>
-                <button class="copy-info-btn text-[9px] bg-white/5 hover:bg-white/10 text-gray-300 px-2 py-0.5 rounded border border-white/10 uppercase transition-colors font-bold">Copy JSON</button>
-            </div>
-            <div id="info-text-content" class="space-y-1.5">
-                <div class="flex justify-between text-[11px]"><span class="text-gray-500 uppercase font-bold">UUID</span> <span class="text-gray-300 font-mono">${p.id}</span></div>
-                <div class="flex justify-between text-[11px]"><span class="text-gray-500 uppercase font-bold">Origin</span> <span class="text-white font-bold">${p.sender}</span></div>
-                <div class="flex justify-between text-[11px]"><span class="text-gray-500 uppercase font-bold">Resource</span> <span class="text-white font-bold">${p.model}</span></div>
-                <div class="flex justify-between text-[11px]"><span class="text-gray-500 uppercase font-bold">State</span> <span style="color:${displayColor}" class="font-black">${displayState}</span></div>
-            </div>
-            <div class="mt-3 pt-3 border-t border-white/10 grid grid-cols-3 gap-2 text-center">
-                <div class="bg-white/5 p-1.5 rounded">
-                    <div class="text-[8px] text-gray-500 uppercase font-bold">TTFT</div>
-                    <div class="text-[11px] text-amber-400 font-black">${p.ttft ? p.ttft + 'ms' : '--'}</div>
-                </div>
-                <div class="bg-white/5 p-1.5 rounded">
-                    <div class="text-[8px] text-gray-500 uppercase font-bold">Speed</div>
-                    <div class="text-[11px] text-emerald-400 font-black">${p.tps ? p.tps + 't/s' : '--'}</div>
-                </div>
-                <div class="bg-white/5 p-1.5 rounded">
-                    <div class="text-[8px] text-gray-500 uppercase font-bold">Tokens</div>
-                    <div class="text-[11px] text-blue-400 font-black">${p.finalTokens || p.tokens || '--'}</div>
-                </div>
-            </div>
-            ${errorHtml}
-        `;
-    }
-    
-    // --- Tooltip Interaction Logic ---
-    tooltip.addEventListener('click', (e) => {
-        const btn = e.target.closest('button');
-        if (!btn) return;
-
-        const isInfo = btn.classList.contains('copy-info-btn');
-        const isError = btn.classList.contains('copy-error-btn');
-        
-        if (isInfo || isError) {
-            // Pull data directly from the particle map instead of the DOM
-            const p = particles.get(hoveredParticleId);
-            if (!p) return;
-
-            let textToCopy = "";
-            if (isInfo) {
-                textToCopy = JSON.stringify({
-                    id: p.id,
-                    user: p.sender,
-                    model: p.model,
-                    server: p.targetServer,
-                    state: p.state,
-                    metrics: { ttft: p.ttft, tps: p.tps, tokens: p.finalTokens || p.tokens }
-                }, null, 2);
-            } else {
-                textToCopy = p.error || p.error_message || "Unknown error";
+            // Wiring (Gateway to Node)
+            if (node.type !== 'hub') {
+                const gateway = serverNodes.get('gateway');
+                const wire = new PIXI.Graphics()
+                    .moveTo(gateway.x, gateway.y)
+                    .bezierCurveTo(gateway.x + 200, gateway.y, node.x - 200, node.y, node.x, node.y)
+                    .stroke({width: 1, color: 0x6366f1, alpha: 0.1});
+                uiLayer.addChild(wire);
             }
-            
-            navigator.clipboard.writeText(textToCopy).then(() => {
-                const originalText = btn.innerText;
-                btn.innerText = 'COPIED!';
-                btn.style.color = '#10b981'; // Success green
-                
-                setTimeout(() => {
-                    btn.innerText = originalText;
-                    btn.style.color = '';
-                }, 1500);
-            }).catch(err => {
-                console.error('Clipboard error:', err);
-                alert("Copy failed. Make sure you are using HTTPS or localhost.");
+
+            const iconG = new PIXI.Graphics();
+            drawIcon(iconG, node.type, node.type === 'hub' ? 0x6366f1 : 0x10b981);
+            container.addChild(iconG);
+
+            const label = new PIXI.Text({
+                text: node.name.toUpperCase(),
+                style: { fontFamily: 'monospace', fontSize: 10, fill: 0x4b5563, fontWeight: '900' }
             });
-        }
+            label.anchor.set(node.type === 'hub' ? 1 : 0, 0.5);
+            label.x = node.type === 'hub' ? -30 : 30;
+            uiLayer.addChild(container);
+            uiLayer.addChild(label);
+        });
+    }
+
+    app.init({
+        resizeTo: container,
+        background: '#030305',
+        antialias: true,
+        resolution: window.devicePixelRatio || 1,
+        autoDensity: true
+    }).then(() => {
+        container.appendChild(app.canvas);
+
+        trailLayer = new PIXI.Container();
+        glowLayer = new PIXI.Container();
+        particleLayer = new PIXI.Container();
+        uiLayer = new PIXI.Container();
+
+        app.stage.addChild(trailLayer);
+        app.stage.addChild(glowLayer);
+        app.stage.addChild(particleLayer);
+        app.stage.addChild(uiLayer);
+
+        initNodes();
+        startEngine();
+        connectSSE();
+
+        // Hover detection
+        app.stage.interactive = true;
+        app.stage.hitArea = app.screen;
+        app.stage.on('mousemove', handleHover);
     });
 
-    draw();
+    function handleHover(event) {
+        const mouseX = event.global.x;
+        const mouseY = event.global.y;
+        let found = false;
+
+        particles.forEach(p => {
+            const dx = p.x - mouseX;
+            const dy = p.y - mouseY;
+            if (Math.sqrt(dx*dx + dy*dy) < 15) {
+                found = true;
+                tooltip.style.opacity = '1';
+                tooltip.style.left = `${mouseX + 20}px`;
+                tooltip.style.top = `${mouseY - 40}px`;
+                document.getElementById('tt-model').textContent = p.model;
+                document.getElementById('tt-user').textContent = p.sender;
+                document.getElementById('tt-ttft').textContent = p.ttft ? `${p.ttft}ms` : '--';
+                document.getElementById('tt-tps').textContent = p.tps ? `${p.tps} t/s` : '--';
+            }
+        });
+
+        if (!found) tooltip.style.opacity = '0';
+    }
+
+    function startEngine() {
+        app.ticker.add(() => {
+            renderParticles();
+            renderTrails();
+            updateStats();
+        });
+    }
+
+    function updateStats() {
+        let active = 0;
+        particles.forEach(p => { if (p.state !== 'disposed') active++; });
+        countEl.textContent = `${active} Active`;
+    }
+
+    function createParticle(id, data = {}) {
+        if (particles.has(id)) return;
+
+        const isWorkflow = data.req_type === 'REQ' || data.model.includes('flow');
+        const color = isWorkflow ? 0xa855f7 : (data.req_type === 'EMBED' ? 0xf59e0b : 0x6366f1);
+
+        const core = new PIXI.Graphics().circle(0, 0, 5).fill(0xffffff).stroke({width:2, color});
+        const glow = new PIXI.Graphics().circle(0, 0, 15).fill({ color, alpha: 0.2 });
+
+        particleLayer.addChild(core);
+        glowLayer.addChild(glow);
+
+        const pObj = {
+            id,
+            x: 50,
+            y: app.screen.height / 2,
+            state: 'queued',
+            targetServer: 'gateway',
+            sender: data.sender || "anon",
+            model: data.model || "unknown",
+            ttft: data.ttft || 0,
+            tps: data.tps || 0,
+            opacity: 1,
+            isWorkflow,
+            core,
+            glow
+        };
+
+        if(isWorkflow) {
+            pObj.miniMap = createMiniWorkflowVisual();
+            particleLayer.addChild(pObj.miniMap);
+        }
+
+        particles.set(id, pObj);
+        trails.set(id, []);
+    }
+
+    function updateRouting(p) {
+        const target = serverNodes.get(p.targetServer) || serverNodes.get('gateway');
+        
+        if (p.state === 'queued') {
+            p.x += 3;
+            p.y += Math.sin(p.x * 0.05) * 2;
+            if (p.x > 180) p.state = 'routing';
+        }
+
+        if (p.state === 'routing') {
+            // Cubic Bezier-like curve for organic movement
+            const dx = target.x - p.x;
+            const dy = target.y - p.y;
+            
+            p.x += dx * 0.06;
+            p.y += dy * 0.06 + Math.sin(p.x * 0.02) * 5;
+
+            if (Math.abs(dx) < 8 && Math.abs(dy) < 8) {
+                p.state = 'processing';
+            }
+        }
+
+        if (p.state === 'processing') {
+            // Orbiting the target node
+            const time = performance.now() * 0.005;
+            p.x = target.x + Math.cos(time + p.id.charCodeAt(0)) * 15;
+            p.y = target.y + Math.sin(time + p.id.charCodeAt(0)) * 15;
+            
+            // If it's a workflow, pulsate the core
+            p.core.scale.set(1 + Math.sin(time * 2) * 0.2);
+        }
+
+        if (p.state === 'disposed') {
+            // Stronger pull towards bottom center
+            const trashY = app.screen.height - 30;
+            const targetX = p.x + 50; 
+
+            p.y += (trashY - p.y) * 0.12;
+            p.x += (targetX - p.x) * 0.05;
+            
+            p.opacity -= 0.02;
+            
+            if (p.opacity <= 0) {
+                particleLayer.removeChild(p.core);
+                glowLayer.removeChild(p.glow);
+                // REPAIR MISSION: property name is 'miniMap', not 'wfIcon'
+                if(p.miniMap) particleLayer.removeChild(p.miniMap);
+                particles.delete(p.id);
+                trails.delete(p.id);
+            }
+        }
+    }
+
+    function renderParticles() {
+        const time = performance.now() * 0.01;
+        particles.forEach((p) => {
+            updateRouting(p);
+            p.core.x = p.x; p.core.y = p.y;
+            p.glow.x = p.x; p.glow.y = p.y;
+            
+            if(p.miniMap) {
+                p.miniMap.x = p.x; p.miniMap.y = p.y;
+                p.miniMap.alpha = p.opacity;
+                // Animate dots in mini-map
+                p.miniMap.children.forEach((c, i) => {
+                    c.alpha = 0.3 + Math.sin(time + i) * 0.7;
+                });
+            }
+
+            p.core.alpha = p.opacity;
+            p.glow.alpha = p.opacity * 0.3;
+
+            const t = trails.get(p.id);
+            if (t) {
+                t.push({ x: p.x, y: p.y });
+                if (t.length > 25) t.shift();
+            }
+        });
+    }
+
+    function renderTrails() {
+        trailLayer.removeChildren();
+        trails.forEach((trail, id) => {
+            const p = particles.get(id);
+            if (!p || trail.length < 2) return;
+
+            const g = new PIXI.Graphics();
+            for (let i = 1; i < trail.length; i++) {
+                const alpha = (i / trail.length) * p.opacity * 0.5;
+                g.moveTo(trail[i-1].x, trail[i-1].y);
+                g.lineTo(trail[i].x, trail[i].y);
+                g.stroke({ width: 2, color: 0x6366f1, alpha });
+            }
+            trailLayer.addChild(g);
+        });
+    }
+
+    function connectSSE() {
+        const evtSource = new EventSource("{{ url_for('sse_events') }}");
+
+        evtSource.onopen = () => {
+            statusEl.innerHTML = "● CLUSTER CONNECTED";
+            statusEl.className = "text-[10px] px-3 py-1 rounded border border-green-500/30 text-green-400 font-bold";
+        };
+
+        evtSource.onmessage = (e) => {
+            const msg = JSON.parse(e.data);
+
+            if (msg.type === "snapshot") {
+                msg.data.active.forEach(r => createParticle(r.id, r));
+            }
+
+            if (msg.type === "received") {
+                createParticle(msg.id, msg);
+            }
+
+            const p = particles.get(msg.id);
+            if (!p) return;
+
+            if (msg.server && msg.server !== 'none') p.targetServer = msg.server;
+            if (msg.ttft) p.ttft = msg.ttft;
+            if (msg.tps) p.tps = msg.tps;
+
+            if (msg.type === "assigned" || msg.type === "active") {
+                p.state = 'routing';
+            }
+
+            if (msg.type === "completed" || msg.type === "error") {
+                p.state = 'disposed';
+                if (msg.type === "error") p.glow.tint = 0xef4444;
+            }
+        };
+
+        evtSource.onerror = () => {
+            statusEl.innerHTML = "● GATEWAY TIMEOUT";
+            statusEl.className = "text-[10px] px-3 py-1 rounded border border-red-500/30 text-red-400 font-bold";
+        };
+    }
 });
 </script>
+
 {% endblock %}

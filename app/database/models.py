@@ -8,6 +8,7 @@ from sqlalchemy import (
     ForeignKey,
     UniqueConstraint,
     JSON,
+    TEXT
 )
 from sqlalchemy.orm import relationship
 from app.database.base import Base
@@ -212,17 +213,6 @@ class VirtualAgent(Base):
     mcp_servers = Column(JSON, nullable=True)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
-class MemoryEntry(Base):
-    __tablename__ = "agent_memories"
-    id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    agent_name = Column(String, nullable=False, index=True)
-    category = Column(String, nullable=False, index=True)
-    title = Column(String, nullable=False)
-    content = Column(String, nullable=False)
-    importance = Column(Integer, default=50) # 0-100
-    last_accessed = Column(DateTime, default=datetime.datetime.utcnow)
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
 class MemoryEntry(Base):
     __tablename__ = "memory_entries"
@@ -255,10 +245,22 @@ class BotConfig(Base):
     name = Column(String, nullable=False)
     platform = Column(String, nullable=False) # 'telegram', 'discord', 'slack'
     encrypted_token = Column(String, nullable=False)
-    target_workflow = Column(String, nullable=False) # The model/workflow name to call
+    target_workflow = Column(String, nullable=False) 
     is_active = Column(Boolean, default=False)
+    history_limit = Column(Integer, default=10) # How many messages/tokens to keep
+    history_limit_unit = Column(String, default="messages") # 'messages' or 'tokens'
     # Extra config like specific channel IDs or server IDs
     extra_settings = Column(JSON, nullable=True) 
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+class MemorySystem(Base):
+    __tablename__ = "memory_systems"
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, unique=True, index=True, nullable=False)
+    description = Column(String, nullable=True)
+    system_instruction = Column(TEXT, nullable=False) # The prompt telling the AI how to use tags
+    importance_decay = Column(Integer, default=2) # Points lost per maintenance cycle
+    is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
 class Workflow(Base):

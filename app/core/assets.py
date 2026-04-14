@@ -15,6 +15,7 @@ REQUIRED_ASSETS = {
     "marked.min.js": "https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js",
     "highlight.min.js": "https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js",
     "highlight-dark.min.css": "https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css",
+    "pixi.min.js": "https://cdn.jsdelivr.net/npm/pixi.js@8.18.1/dist/pixi.min.js",
 }
 
 VENDOR_DIR = Path("app/static/vendor")

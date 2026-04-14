@@ -329,6 +329,9 @@ async def admin_playground_stream(
     admin_user: User = Depends(require_admin_user)
 ):
     try:
+        # STABILITY FIX: Initialize recursion tracking attributes for playground sessions
+        request.state.processing_depth = 0
+        request.state.enforce_strict_context = True
         data = await request.json()
         model_name = data.get("model")
         messages = data.get("messages")

@@ -9,7 +9,7 @@ from fastapi import Request
 from app.crud import server_crud
 from app.core.events import event_manager, ProxyEvent
 from app.nodes.registry import NodeRegistry
-
+from ascii_colors import trace_exception
 logger = logging.getLogger(__name__)
 
 class WorkflowEngine:
@@ -43,53 +43,67 @@ class WorkflowEngine:
         to allow the Gateway to stream directly to the client.
         """
         self.initial_messages = messages
-        exit_node = next((n for n in self.nodes.values() if n["type"] == "hub/output"), None)
-        if not exit_node:
-            return await self.resolve_target_fn(self.db, "auto", messages, self.depth + 1, self.request, self.request_id, self.sender)
+        
+        # UI FIX: Open a single unified block for the entire workflow execution
+        cb = getattr(self.request.state, "stream_callback", None)
+        if cb and self.depth == 0:
+            await cb(f'<processing type="workflow" title="ORCHESTRATING: {self.name.upper()}">\n')
 
-        if "inputs" in exit_node and exit_node["inputs"] and exit_node["inputs"][0].get("link") is not None:
-            link = self.links.get(exit_node["inputs"][0]["link"])
-            if link:
-                src_node = self.nodes.get(link[1])
-                # --- LATENCY FIX: Terminal LLM Passthrough ---
-                if src_node and src_node["type"] in ("hub/llm_chat", "hub/llm_instruct", "hub/model"):
-                    props = src_node.get("properties", {})
-                    target_model = str(props.get("model", "auto")).strip()
-                    
-                    val = await self._resolve_input_by_name(src_node, "Messages")
-                    if val is None: val = await self._resolve_input_by_name(src_node, "Prompt")
-                    if val is None: val = await self._resolve_input(src_node, 0)
-                    
-                    resolved_messages = val if isinstance(val, list) else [{"role": "user", "content": str(val)}]
+        try:
+            exit_node = next((n for n in self.nodes.values() if n["type"] == "hub/output"), None)
+            if not exit_node:
+                    return await self.resolve_target_fn(self.db, "auto", messages, self.depth + 1, self.request, self.request_id, self.sender)
 
-                    settings = await self._resolve_input_by_name(src_node, "Settings")
-                    if settings is None: settings = await self._resolve_input(src_node, 1)
-                    if isinstance(settings, dict) and self.request:
-                        self.request.state.graph_temperature = settings.get("temperature")
+            if "inputs" in exit_node and exit_node["inputs"] and exit_node["inputs"][0].get("link") is not None:
+                link = self.links.get(exit_node["inputs"][0]["link"])
+                if link:
+                    src_node = self.nodes.get(link[1])
+                    # --- LATENCY FIX: Terminal LLM Passthrough ---
+                    if src_node and src_node["type"] in ("hub/llm_chat", "hub/llm_instruct", "hub/model"):
+                        props = src_node.get("properties", {})
+                        target_model = str(props.get("model", "auto")).strip()
+                        
+                        val = await self._resolve_input_by_name(src_node, "Messages")
+                        if val is None: val = await self._resolve_input_by_name(src_node, "Prompt")
+                        if val is None: val = await self._resolve_input(src_node, 0)
+                        
+                        resolved_messages = val if isinstance(val, list) else [{"role": "user", "content": str(val)}]
 
-                    final_tools = []
-                    for inp_idx, inp in enumerate(src_node.get("inputs", [])):
-                        if inp.get("name", "").startswith("Tool"):
-                            tool_data = await self._resolve_input(src_node, inp_idx)
-                            if tool_data:
-                                if isinstance(tool_data, list): final_tools.extend(tool_data)
-                                else: final_tools.append(tool_data)
-                    
-                    if final_tools and self.request:
-                        self.request.state.graph_tools = final_tools
+                        settings = await self._resolve_input_by_name(src_node, "Settings")
+                        if settings is None: settings = await self._resolve_input(src_node, 1)
+                        if isinstance(settings, dict) and self.request:
+                            self.request.state.graph_temperature = settings.get("temperature")
 
-                    # Recursively resolve with current call stack
-                    return await self.resolve_target_fn(
-                        self.db, target_model, resolved_messages, self.depth + 1, 
-                        self.request, self.request_id, self.sender, call_stack=self.call_stack
-                    )
+                        final_tools = []
+                        for inp_idx, inp in enumerate(src_node.get("inputs", [])):
+                            if inp.get("name", "").startswith("Tool"):
+                                tool_data = await self._resolve_input(src_node, inp_idx)
+                                if tool_data:
+                                    if isinstance(tool_data, list): final_tools.extend(tool_data)
+                                    else: final_tools.append(tool_data)
+                        
+                        if final_tools and self.request:
+                            self.request.state.graph_tools = final_tools
 
-                # For static outputs (Composers, Datastores), resolve normally
-                final_val = await self.resolve_node_output(link[1], link[2])
-                if isinstance(final_val, tuple): return final_val
-                return "__result__", [{"role": "assistant", "content": str(final_val)}]
+                        # Recursively resolve with current call stack
+                        return await self.resolve_target_fn(
+                            self.db, target_model, resolved_messages, self.depth + 1, 
+                            self.request, self.request_id, self.sender, call_stack=self.call_stack
+                        )
 
-        return await self.resolve_target_fn(self.db, "auto", messages, self.depth + 1, self.request, self.request_id, self.sender)
+                    # For static outputs (Composers, Datastores), resolve normally
+                    final_val = await self.resolve_node_output(link[1], link[2])
+                    if isinstance(final_val, tuple): return final_val
+                    return "__result__", [{"role": "assistant", "content": str(final_val)}]
+
+                return await self.resolve_target_fn(self.db, "auto", messages, self.depth + 1, self.request, self.request_id, self.sender)
+        except Exception as ex:
+            trace_exception(ex)
+        finally:
+            # UI FIX: Close the block ONLY at the root level after all nodes finish
+            if cb and self.depth == 0:
+                await cb('</processing>\n')
+
 
     async def _resolve_input(self, node: Dict[str, Any], idx: int) -> Any:
         if not node.get("inputs") or idx >= len(node["inputs"]): return None
@@ -196,54 +210,35 @@ class WorkflowEngine:
     async def _evaluate_node(self, node: Dict[str, Any], output_slot_idx: int) -> Any:
         ntype = node["type"]
         props = node.get("properties", {})
-
+        
         # --- DEBUG MODE TRACING ---
         enable_debug = False
         if self.request and hasattr(self.request, 'app'):
             enable_debug = self.request.app.state.settings.enable_debug_mode
 
-        node_title = node.get("title") or ntype.split("/")[-1].upper()
-        cb = getattr(self.request.state, "stream_callback", None) if self.request else None
+        # Mapping generic types to meaningful actions
+        raw_title = node.get("title") or ntype.split("/")[-1].replace("_", " ")
+        display_title = raw_title.upper()
 
-        if enable_debug:
-            # 1. Manage Nesting Depth
-            depth = getattr(self.request.state, 'processing_depth', 0)
-            
-            if cb:
-                # Only open a new block if we are the root execution node
-                if depth == 0:
-                    await cb(f'<processing type="workflow" title="{self.name.upper()}">\n')
-                
-                # Always append the specific node execution line
-                await cb(f'* Executing Node: {node_title}...\n')
-
-            # Increment global request depth
-            if self.request:
-                self.request.state.processing_depth = depth + 1
-
-            logger.info(f"DEBUG: Executing Graph Node [{node_title}] (ID: {node['id']})")
+        if enable_debug and ntype not in ("hub/input", "hub/output"):
+            # Telemetry update for Live View
             event_manager.emit(ProxyEvent(
-                "active", self.request_id, node_title, 
-                "Workflow Engine", self.sender, 
-                error_message=f"Step: {node_title}..."
+                event_type="active", 
+                request_id=self.request_id, 
+                model=self.name,
+                server="Workflow Engine", 
+                sender=self.sender,
+                error_message=f"Step: {display_title}"
             ))
-        
-        # 2. Plugin Execution
-        res = None
-        try:
-            node_cls = NodeRegistry.get_node(ntype)
-            if node_cls:
-                plugin = node_cls()
-                res = await plugin.execute(self, node, output_slot_idx)
-        finally:
-            if enable_debug:
-                # Decrement depth
-                if self.request:
-                    self.request.state.processing_depth -= 1
-                    new_depth = self.request.state.processing_depth
-                    
-                    # Only close the tag if we have returned to the root level
-                    if cb and new_depth == 0:
-                        await cb('</processing>\n')
+            
+            cb = getattr(self.request.state, "stream_callback", None)
+            if cb:
+                # UI FIX: Append to the unified block instead of opening a new one
+                await cb(f'* Processing: {display_title}...\n')
 
-        return res
+        # 1. Plugin Execution
+        node_cls = NodeRegistry.get_node(ntype)
+        if node_cls:
+            plugin = node_cls()
+            return await plugin.execute(self, node, output_slot_idx)
+        return None

@@ -342,6 +342,8 @@ app.include_router(importer_router, prefix="/admin/api/importer", tags=["Importe
 app.include_router(conception_router, prefix="/admin", tags=["Admin UI"], include_in_schema=False)
 app.include_router(node_builder_router, prefix="/admin", tags=["Admin UI"], include_in_schema=False)
 app.include_router(datastores_router, prefix="/admin", tags=["Admin UI"], include_in_schema=False)
+from app.api.v1.routes.architect import router as arch_router
+app.include_router(arch_router, prefix="/admin", tags=["Architect"], include_in_schema=False)
 
 # Protocol Routes
 app.include_router(openai_router, prefix="/v1", tags=["OpenAI Protocol"])
@@ -355,6 +357,8 @@ app.include_router(importer_router, prefix="/admin/api/importer", tags=["Importe
 app.include_router(conception_router, prefix="/admin", tags=["Admin UI"], include_in_schema=False)
 app.include_router(node_builder_router, prefix="/admin", tags=["Admin UI"], include_in_schema=False)
 app.include_router(datastores_router, prefix="/admin", tags=["Admin UI"], include_in_schema=False)
+from app.api.v1.routes.architect import router as arch_router
+app.include_router(arch_router, prefix="/admin", tags=["Architect"], include_in_schema=False)
 
 @app.get("/", include_in_schema=False, summary="Root")
 def read_root():

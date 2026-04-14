@@ -14,6 +14,11 @@ function NodeAgent() {
         this.properties.max_turns = v; 
         if(window.pushHistoryState) window.pushHistoryState();
     }, { min: 1, max: 30 });
+
+    this.addWidget("toggle", "Enable Cognitive Memory", this.properties.enable_memory, (v) => {
+        this.properties.enable_memory = v;
+        if(window.pushHistoryState) window.pushHistoryState();
+    });
     
     this.addWidget("button", "+ Add Tool Slot", null, () => {
         this.addInput("Tool " + (this.inputs.length - 1), "tool,mcp");

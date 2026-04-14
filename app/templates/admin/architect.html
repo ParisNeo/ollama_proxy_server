@@ -1,0 +1,136 @@
+{% extends "admin/base.html" %}
+{% block title %}Master Architect{% endblock %}
+{% block header_title %}Fortress Master Architect{% endblock %}
+
+{% block content %}
+<div class="space-y-8 h-[85vh] flex flex-col">
+    <div class="card-style bg-indigo-600/5 border-indigo-500/20 flex flex-col md:flex-row gap-6 p-6">
+        <div class="flex-grow space-y-4">
+            <div class="flex items-center gap-4 mb-2">
+                <div class="h-12 w-12 rounded-2xl bg-indigo-600 flex items-center justify-center text-white shadow-xl shadow-indigo-500/20">
+                    <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path></svg>
+                </div>
+                <div>
+                    <h2 class="text-2xl font-black text-white tracking-tighter">Universal Forge</h2>
+                    <p class="text-xs text-indigo-400 font-bold uppercase tracking-widest">Master AI Architect Protocol</p>
+                </div>
+            </div>
+            
+            <!-- Objective Switcher -->
+            <div class="flex flex-wrap gap-2">
+                <button onclick="setObjective('tool', this)" class="obj-btn active px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest border border-indigo-500/30 bg-indigo-600 text-white">Python Tool</button>
+                <button onclick="setObjective('node', this)" class="obj-btn px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest border border-white/5 bg-white/5 text-gray-500 hover:text-white">Custom Node</button>
+                <button onclick="setObjective('workflow', this)" class="obj-btn px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest border border-white/5 bg-white/5 text-gray-500 hover:text-white">Workflow Graph</button>
+                <button onclick="setObjective('persona', this)" class="obj-btn px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest border border-white/5 bg-white/5 text-gray-500 hover:text-white">AI Personality</button>
+                <button onclick="setObjective('skill', this)" class="obj-btn px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest border border-white/5 bg-white/5 text-gray-500 hover:text-white">Claude Skill</button>
+            </div>
+
+            <textarea id="master-prompt" rows="4" class="w-full bg-black/40 border border-white/10 rounded-2xl p-4 text-sm text-white focus:border-indigo-500 outline-none transition-all" placeholder="Describe what you want to build..."></textarea>
+            
+            <div class="flex justify-between items-center">
+                <div class="flex gap-2">
+                    <button onclick="document.getElementById('master-files').click()" class="px-4 py-2 bg-white/5 hover:bg-white/10 rounded-lg text-[10px] font-bold uppercase text-gray-400">Attach Reference Context</button>
+                    <input type="file" id="master-files" class="hidden" multiple>
+                </div>
+                <button onclick="runMasterBuild()" id="forge-btn" class="bg-indigo-600 hover:bg-indigo-500 px-10 py-3 rounded-2xl font-black text-xs uppercase tracking-[0.2em] text-white shadow-2xl shadow-indigo-500/40 transform active:scale-95 transition-all">Forge Asset</button>
+            </div>
+        </div>
+        
+        <!-- Live Console -->
+        <div class="w-full md:w-80 flex flex-col gap-2">
+            <span class="text-[10px] font-black text-gray-500 uppercase tracking-widest px-2">Telemetric Trace</span>
+            <div id="master-console" class="flex-grow bg-black/60 border border-white/5 rounded-2xl p-4 font-mono text-[10px] text-indigo-300 space-y-2 overflow-y-auto custom-scrollbar shadow-inner">
+                <div class="text-gray-600 italic">Standing by for Architect instructions...</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Asset Preview/Editor -->
+    <div class="flex-grow card-style p-0 overflow-hidden border border-white/10 flex flex-col bg-[#050507]">
+        <div class="p-3 bg-black/40 border-b border-white/5 flex justify-between items-center">
+            <div id="asset-meta" class="text-[10px] font-bold text-gray-500 uppercase tracking-widest">No Active Forge Session</div>
+            <div class="flex gap-2">
+                <button onclick="copyForgeCode()" class="text-[10px] font-bold text-indigo-400 hover:text-white px-2 py-1">Copy Code</button>
+                <button id="save-forge-btn" class="hidden px-4 py-1 bg-green-600 rounded text-[10px] font-black text-white uppercase">Deploy to Cluster</button>
+            </div>
+        </div>
+        <div id="forge-editor" class="flex-grow overflow-auto custom-scrollbar p-4">
+            <pre id="forge-code" class="text-xs text-emerald-400 font-mono"></pre>
+        </div>
+    </div>
+</div>
+
+<script>
+    let currentObjective = 'tool';
+    
+    function setObjective(obj, btn) {
+        currentObjective = obj;
+        document.querySelectorAll('.obj-btn').forEach(b => {
+            b.classList.remove('active', 'bg-indigo-600', 'text-white');
+            b.classList.add('bg-white/5', 'text-gray-500');
+        });
+        btn.classList.add('active', 'bg-indigo-600', 'text-white');
+        btn.classList.remove('bg-white/5', 'text-gray-500');
+        
+        const prompts = {
+            tool: "e.g. Build a Python tool that scrapes news for a specific ticker symbol.",
+            node: "e.g. Create a node that translates incoming text into Pirate speak.",
+            workflow: "e.g. A RAG pipeline that prioritizes internal PDF docs over web search.",
+            persona: "e.g. A cynical Linux SysAdmin who only speaks in terminal commands.",
+            skill: "e.g. A standardized skill for performing deep security audits on Python code."
+        };
+        document.getElementById('master-prompt').placeholder = prompts[obj];
+    }
+
+    async function runMasterBuild() {
+        const btn = document.getElementById('forge-btn');
+        const console = document.getElementById('master-console');
+        const prompt = document.getElementById('master-prompt').value;
+        
+        if(!prompt.trim()) return alert("Forge requires a design prompt.");
+        
+        btn.disabled = true;
+        btn.innerHTML = '<span class="animate-pulse">Forging...</span>';
+        console.innerHTML = `<div class="text-indigo-400 font-bold">[Architect] Initializing protocol: ${currentObjective.toUpperCase()}</div>`;
+
+        const formData = new FormData();
+        formData.append('objective', currentObjective);
+        formData.append('prompt', prompt);
+        formData.append('csrf_token', document.querySelector('input[name="csrf_token"]').value);
+        
+        const fileInput = document.getElementById('master-files');
+        for(let f of fileInput.files) formData.append('files', f);
+
+        try {
+            const resp = await fetch("/admin/architect/execute", { method: 'POST', body: formData });
+            const result = await resp.json();
+            
+            if(result.success) {
+                document.getElementById('asset-meta').innerText = `READY: ${result.data.filename}`;
+                document.getElementById('forge-code').innerText = result.data.content || JSON.stringify(result.data, null, 2);
+                document.getElementById('save-forge-btn').classList.remove('hidden');
+                console.innerHTML += `<div class="text-green-400 font-bold">[Success] Asset verified and staged.</div>`;
+            } else {
+                console.innerHTML += `<div class="text-red-400">[Error] ${result.error}</div>`;
+            }
+        } catch(e) {
+            console.innerHTML += `<div class="text-red-500">[Network Error] ${e.message}</div>`;
+        } finally {
+            btn.disabled = false;
+            btn.innerText = 'Forge Asset';
+        }
+    }
+
+    // SSE Listener for real-time trace
+    const archSource = new EventSource("{{ url_for('sse_events') }}");
+    archSource.onmessage = (e) => {
+        const msg = JSON.parse(e.data);
+        if(msg.id && msg.id.startsWith('sys_arch_')) {
+            const console = document.getElementById('master-console');
+            const color = msg.type === 'error' ? 'text-red-400' : 'text-indigo-300';
+            console.innerHTML += `<div class="${color} opacity-80">${msg.error || 'Thinking...'}</div>`;
+            console.scrollTop = console.scrollHeight;
+        }
+    };
+</script>
+{% endblock %}

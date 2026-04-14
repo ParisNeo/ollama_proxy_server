@@ -24,3 +24,4 @@ youtube-transcript-api
 safe-store>=0.2.1
 requests
 defusedxml
+scrapemaster

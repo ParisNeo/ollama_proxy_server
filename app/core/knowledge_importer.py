@@ -100,113 +100,27 @@ def search_arxiv_sync(
 
 def fetch_youtube_transcript_sync(video_id_or_url: str, languages: List[str] = ['en']) -> List[Dict[str, Any]]:
     """
-    Robustly imports YouTube transcripts using smart language selection.
-    Priority: Requested -> Translated -> English -> First Available.
+    Uses ScrapeMaster to import YouTube transcripts with built-in language preference.
     """
-    # 0. Ensure library is available AND forced to upgrade to handle latest YouTube HTML changes
-    pm.ensure_packages({"youtube-transcript-api": ">=1.2.4"})
-    from youtube_transcript_api import YouTubeTranscriptApi
+    pm.ensure_packages(["scrapemaster"], verbose=True)
+    from scrapemaster import ScrapeMaster
     
-    # 1. Hardened Video ID Extraction (matches working snippet)
-    video_id = None
-    patterns = [
-        r'(?:v=|\/|shorts\/)([0-9A-Za-z_-]{11}).*', # Added shorts/ explicitly for safety
-        r'(?:youtu\.be\/)([0-9A-Za-z_-]{11})', 
-        r'(?:embed\/)([0-9A-Za-z_-]{11})'
-    ]
-    
-    for p in patterns:
-         match = re.search(p, video_id_or_url)
-         if match:
-             video_id = match.group(1)
-             break
-    
-    # Fallback: check if the whole string is an ID
-    if not video_id:
-         if len(video_id_or_url) == 11 and re.match(r'^[0-9A-Za-z_-]{11}$', video_id_or_url):
-             video_id = video_id_or_url
-    
-    if not video_id:
-        raise ValueError("Could not extract a valid YouTube Video ID from the provided URL.")
-
+    scraper = ScrapeMaster()
     try:
-        # 2. Retrieve Transcript List
-        try:
-            yvt = YouTubeTranscriptApi()
-            transcript_list_obj = yvt.list(video_id)
-        except Exception as e:
-            raise RuntimeError(f"Failed to retrieve transcript list. Video may not have captions or is restricted. Error: {e}")
-
-        target_transcript = None
-        requested_lang = (languages[0] if languages else 'en').lower().strip()
-
-        # 3. Smart Selection Logic
-        if requested_lang:
-            # Try finding exact match
-            try:
-                target_transcript = transcript_list_obj.find_transcript([requested_lang])
-            except:
-                # Try finding a translation
-                try:
-                    # Translate the first available transcript
-                    first_available = next(iter(transcript_list_obj))
-                    if first_available.is_translatable:
-                        target_transcript = first_available.translate(requested_lang)
-                except:
-                    pass 
+        lang_code = languages[0] if languages else 'en'
+        transcript = scraper.scrape_youtube_transcript(video_id_or_url, language_code=lang_code)
         
-        # If no specific language requested OR specific lookup failed
-        if not target_transcript:
-            # Priority: English -> First Available
-            try:
-                target_transcript = transcript_list_obj.find_generated_transcript(['en'])
-            except:
-                pass
-            
-            if not target_transcript:
-                try:
-                    target_transcript = transcript_list_obj.find_manually_created_transcript(['en'])
-                except:
-                    pass
-            
-            if not target_transcript:
-                try:
-                    target_transcript = next(iter(transcript_list_obj))
-                except:
-                    pass
+        if not transcript:
+            raise RuntimeError("No transcript available or could not be reached.")
 
-        if not target_transcript:
-            raise RuntimeError("No suitable transcript found.")
-
-        # 4. Fetch
-        transcript_data = target_transcript.fetch()
-
-        # 5. Format[MM:SS]
-        lines =[]
-        # Support both standard list of dicts and custom objects (like .snippets)
-        entries = transcript_data.snippets if hasattr(transcript_data, 'snippets') else transcript_data
-        
-        for entry in entries:
-            start = int(entry.start if hasattr(entry, 'start') else entry.get('start', 0))
-            text = entry.text if hasattr(entry, 'text') else entry.get('text', '')
-            minutes = start // 60
-            seconds = start % 60
-            lines.append(f"[{minutes:02d}:{seconds:02d}] {text}")
-        
-        lang_label = getattr(target_transcript, 'language', requested_lang)
-        full_content = f"# YouTube Transcript ({lang_label})\nSource: {video_id_or_url}\n\n" + "\n".join(lines)
-        
-        return[{
-            "title": f"YouTube: {video_id}", 
-            "snippet": " ".join(lines[:3]), 
-            "content": full_content
+        return [{
+            "title": f"YouTube Transcript",
+            "snippet": transcript[:300] + "...",
+            "content": transcript
         }]
-
     except Exception as e:
-        err_msg = str(e)
-        if "no element found" in err_msg.lower():
-            err_msg = "YouTube returned an empty response. Ensure the package upgraded correctly, or the video might be restricted."
-        raise RuntimeError(f"YouTube Import Failed: {err_msg}")
+        logger.error(f"YouTube ScrapeMaster failed: {e}")
+        raise RuntimeError(f"YouTube Import Failed: {str(e)}")
 
 def search_google_sync(query: str) -> List[Dict[str, Any]]:
     """Performs a web search via Google."""
@@ -227,8 +141,30 @@ def search_google_sync(query: str) -> List[Dict[str, Any]]:
     return results
 
 async def scrape_url(url: str, depth: int = 0) -> Dict[str, Any]:
+    """
+    Uses ScrapeMaster to extract clean Markdown content from a URL.
+    Handles fallbacks for JS-heavy sites and anti-bot measures.
+    """
     pm.ensure_packages(["scrapemaster"], verbose=True)
-    from scrapemaster import WebScraper
-    scraper = WebScraper(respect_robots_txt=True)
-    data = scraper.scrape_url(url, {'content': 'body::text', 'title': 'title::text'})
-    return {"title": data.get('title') or url, "content": data.get('content') or ""}
+    from scrapemaster import ScrapeMaster
+    
+    try:
+        # Initialize ScrapeMaster for the target URL
+        scraper = ScrapeMaster(url)
+        
+        # Scrape to Markdown (best for LLM context)
+        # This automatically cycles through Requests -> Selenium -> Undetected if blocked
+        content_md = scraper.scrape_markdown()
+        
+        if not content_md and scraper.last_error:
+            logger.error(f"ScrapeMaster failed: {scraper.last_error}")
+            return {"title": url, "content": f"Error: {scraper.last_error}"}
+
+        return {
+            "title": scraper.title or url,
+            "content": content_md or "",
+            "strategy": scraper.last_strategy_used
+        }
+    except Exception as e:
+        logger.error(f"ScrapeMaster exception: {e}")
+        return {"title": url, "content": f"Scraper Exception: {str(e)}"}

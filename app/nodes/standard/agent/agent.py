@@ -12,11 +12,26 @@ class AgentReasonerNode(BaseNode):
     node_icon = "🧠"
 
     async def execute(self, engine, node: Dict[str, Any], output_slot_idx: int) -> Any:
-        msgs = await engine._resolve_input(node, 0) or engine.initial_messages
-        scratchpad = copy.deepcopy(msgs)
-        model = node["properties"].get("model", "auto")
-        max_turns = int(node["properties"].get("max_turns", 10))
+        from app.core.memory_manager import CognitiveMemoryManager
         
+        props = node.get("properties", {})
+        msgs = await engine._resolve_input(node, 0) or engine.initial_messages
+        scratchpad = copy.deepcopy(list(msgs))
+        model = props.get("model", "auto")
+        max_turns = int(props.get("max_turns", 10))
+        
+        # --- UNIVERSAL COGNITIVE MEMORY INJECTION ---
+        if props.get("enable_memory"):
+            # Identify user by the 'sender' field passed through the engine
+            user_id = engine.sender or "anonymous"
+            memory_context = await CognitiveMemoryManager.get_memory_context(engine.db, user_id, engine.name)
+            
+            # Inject memory context into the system prompt or as a high-priority user message
+            if scratchpad and scratchpad[0].get("role") == "system":
+                scratchpad[0]["content"] = f"{memory_context}\n\n{scratchpad[0]['content']}"
+            else:
+                scratchpad.insert(0, {"role": "system", "content": memory_context})
+
         tools = []
         for i in range(2, len(node.get("inputs", []))):
             t_data = await engine._resolve_input(node, i)
@@ -58,5 +73,12 @@ class AgentReasonerNode(BaseNode):
                 await cb(f'* Turn {turn} complete.\n</processing>\n')
             
             if not ai_msg.get("tool_calls"):
-                return ai_msg.get("content", "") if output_slot_idx == 0 else scratchpad
+                content = ai_msg.get("content", "")
+                
+                # --- PROCESS MEMORY TAGS ---
+                if props.get("enable_memory"):
+                    # Extract tags, save to DB, and return clean text to user
+                    content = await CognitiveMemoryManager.process_tags(engine.db, engine.sender, engine.name, content)
+                
+                return content if output_slot_idx == 0 else scratchpad
         return "Agent finished."

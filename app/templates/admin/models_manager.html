@@ -6,6 +6,29 @@
 
 {% block content %}
 <div class="space-y-8">
+    <!-- AI Auto-Config Section -->
+    <div class="card-style border-l-4 border-purple-600 bg-purple-600/5 mb-8">
+        <div class="flex flex-col md:flex-row justify-between items-center gap-6">
+            <div class="flex items-center gap-4">
+                <div class="p-3 bg-purple-600 rounded-2xl shadow-xl shadow-purple-500/20">
+                    <svg class="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                </div>
+                <div>
+                    <h2 class="text-xl font-black text-white uppercase tracking-tighter">AI Auto-Config</h2>
+                    <p class="text-xs text-purple-300 font-bold uppercase tracking-widest">Ground model metadata in industry standard scorecards</p>
+                </div>
+            </div>
+            <div class="flex flex-grow max-w-xl gap-2">
+                <input type="text" id="ai-config-url" value="https://grumpified-oggvct.github.io/model-trust-scorecard/" class="flex-grow bg-black/40 border border-purple-500/30 rounded-xl px-4 py-2 text-sm text-white outline-none focus:border-purple-500">
+                <button onclick="runAIConfig()" id="ai-config-btn" class="bg-purple-600 hover:bg-purple-500 text-white px-6 py-2 rounded-xl font-black text-xs uppercase tracking-widest transition-all transform active:scale-95 shadow-lg shadow-purple-900/20">Sync Metadata</button>
+            </div>
+        </div>
+        
+        <div id="ai-config-console" class="hidden mt-6 bg-black/60 border border-white/5 rounded-xl p-4 font-mono text-[10px] text-purple-300 space-y-1 h-32 overflow-y-auto custom-scrollbar">
+            <div class="text-gray-600 italic">Waiting for architect...</div>
+        </div>
+    </div>
+
     <div class="card-style">
         <h2 class="card-header text-2xl font-bold mb-4 pb-2">About the 'auto' Model</h2>
         <p class="text-current">
@@ -309,5 +332,53 @@
             btn.disabled = false;
         }
     }
+
+    window.runAIConfig = async () => {
+        const btn = document.getElementById('ai-config-btn');
+        const console = document.getElementById('ai-config-console');
+        const url = document.getElementById('ai-config-url').value;
+        
+        if(!url) return alert("Scorecard URL required.");
+        
+        btn.disabled = true;
+        btn.innerText = "CONFIGURING...";
+        console.classList.remove('hidden');
+        console.innerHTML = '<div class="text-purple-400 font-bold">[Architect] Handshaking with cluster...</div>';
+
+        const formData = new FormData();
+        formData.append('url', url);
+        formData.append('csrf_token', "{{ csrf_token }}");
+
+        try {
+            const resp = await fetch("{{ url_for('admin_ai_configure_models') }}", { 
+                method: 'POST', 
+                body: formData 
+            });
+            const data = await resp.json();
+            if(data.success) {
+                console.innerHTML += `<div class="text-green-400 font-bold">[Success] Logic applied. Refreshing in 3s...</div>`;
+                setTimeout(() => window.location.reload(), 3000);
+            } else {
+                console.innerHTML += `<div class="text-red-400">[Error] ${data.error}</div>`;
+                btn.disabled = false;
+                btn.innerText = "Sync Metadata";
+            }
+        } catch(e) { 
+            console.innerHTML += `<div class="text-red-500">[Network Error] ${e.message}</div>`;
+            btn.disabled = false;
+        }
+    };
+
+    // SSE Listener for Config Trace
+    const configSource = new EventSource("{{ url_for('sse_events') }}");
+    configSource.onmessage = (e) => {
+        const msg = JSON.parse(e.data);
+        if(msg.id && msg.id.startsWith('sys_build_config_')) {
+            const console = document.getElementById('ai-config-console');
+            const color = msg.type === 'error' ? 'text-red-400' : 'text-purple-300';
+            console.innerHTML += `<div class="${color} opacity-80">${msg.error || 'Analyzing node data...'}</div>`;
+            console.scrollTop = console.scrollHeight;
+        }
+    };
 </script>
 {% endblock %}

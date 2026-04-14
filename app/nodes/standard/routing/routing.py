@@ -100,10 +100,12 @@ class MOENode(BaseNode):
         if not expert_tasks: return "No experts connected."
 
         # Emit Status Telemetry via stream_callback if available
-        status_lines =[f"* {name} is working..." for name in expert_names]
+        status_lines =[f"  - polling {name}..." for name in expert_names]
         cb = getattr(engine.request.state, "stream_callback", None)
         if cb:
-            await cb(f'<processing type="synthesis" title="Mixture of Experts" mode="parallel" agents="{", ".join(expert_names)}">\n' + "\n".join(status_lines) + '\n')
+            # UI FIX: Just append lines to the engine's existing block
+            await cb(f'* MIXTURE OF EXPERTS: Activating {len(expert_names)} models in parallel...\n' + 
+                     "\n".join(status_lines) + '\n')
         
         processing_block = "" # Legacy text injection disabled in favor of Lollms Processing Protocol
         

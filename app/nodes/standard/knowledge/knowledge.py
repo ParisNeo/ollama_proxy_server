@@ -25,7 +25,7 @@ class RAGDatastoreNode(BaseNode):
         
         cb = getattr(engine.request.state, "stream_callback", None)
         if cb:
-            await cb(f'<processing type="tool_execution" title="RAG Datastore" tool="datastore">\n* Searching datastore \'{store_name}\' for \'{str(query)[:30]}...\'\n')
+            await cb(f'* DATASTORE: Searching "{store_name}" for "{str(query)[:40]}..."\n')
 
         async with AsyncSessionLocal() as db:
             res = await db.execute(select(DataStore).filter(DataStore.name == store_name))
@@ -44,7 +44,7 @@ class RAGDatastoreNode(BaseNode):
         context_parts = [f"[[SOURCE {i+1}: {r.get('document_title')}]]\n{r.get('chunk_text')}" for i, r in enumerate(raw_results)]
         
         if cb:
-            await cb(f'* Found {len(raw_results)} results.\n</processing>\n')
+            await cb(f'  - found {len(raw_results)} matches.\n')
             
         return "\n\n---\n\n".join(context_parts)
 
@@ -62,7 +62,7 @@ class WebSearchNode(BaseNode):
 
         cb = getattr(engine.request.state, "stream_callback", None)
         if cb:
-            await cb(f'<processing type="tool_execution" title="Web Search" tool="{service}">\n* Searching {service} for \'{str(query)[:30]}...\'\n')
+            await cb(f'* WEB SEARCH: Querying {service.capitalize()} for "{str(query)[:40]}..."\n')
 
         if service == "wikipedia": res = await run_in_threadpool(kit.search_wikipedia_sync, str(query))
         elif service == "arxiv": res = await run_in_threadpool(kit.search_arxiv_sync, str(query), max_results=count)
@@ -70,7 +70,7 @@ class WebSearchNode(BaseNode):
         else: res =[]
 
         if cb:
-            await cb(f'* Extracted {len(res)} results.\n</processing>\n')
+            await cb(f'  - found {len(res)} external links.\n')
 
         parts = [f"[[WEB: {r['title']}]]\n{r['content']}" for r in res[:count]]
         return "\n\n---\n\n".join(parts)

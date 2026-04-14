@@ -304,7 +304,7 @@ async def live_status_view(request: Request, admin_user: User = Depends(require_
 @router.get("/servers/nodes", name="admin_get_server_nodes")
 async def get_server_nodes(db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
     servers = await server_crud.get_servers(db)
-    return [{"name": s.name, "id": s.id} for s in servers if s.is_active]
+    return [{"name": s.name, "id": s.id, "type": s.server_type} for s in servers if s.is_active]
 
 @router.get("/events")
 async def sse_events(request: Request, admin_user: User = Depends(require_admin_user)):
@@ -1054,6 +1054,70 @@ async def admin_refresh_model_context(
         "success": False, 
         "error": "The backend server is connected, but it does not expose a 'context_length' field for this specific model architecture."
     }
+
+
+@router.post("/models-manager/ai-configure", name="admin_ai_configure_models")
+async def admin_ai_configure_models(
+    request: Request,
+    url: str = Form(...),
+    db: AsyncSession = Depends(get_db),
+    admin_user: User = Depends(require_admin_user)
+):
+    """Uses the Management Agent to scrape a URL and auto-configure model metadata."""
+    from app.core import knowledge_importer as kit
+    from app.core.architect_manager import MasterArchitect
+    from app.core.events import event_manager, ProxyEvent
+    import secrets
+
+    build_id = f"sys_build_config_{secrets.token_hex(4)}"
+    event_manager.emit(ProxyEvent("received", build_id, "Cluster Architect", "Local", admin_user.username, error_message=f"Accessing Scorecard: {url}..."))
+
+    try:
+        # 1. Scrape the external data
+        scraped = await kit.scrape_url(url)
+        scorecard_text = scraped.get('content', "")
+        if not scorecard_text:
+            return JSONResponse({"error": "Could not extract content from the provided URL."}, status_code=400)
+
+        # 2. Get the list of models we actually have
+        all_meta = await model_metadata_crud.get_all_metadata(db)
+        hub_model_names = [m.model_name for m in all_meta]
+        
+        # 3. Ask AI to perform the mapping
+        event_manager.emit(ProxyEvent("active", build_id, "Cluster Architect", "AI", admin_user.username, error_message=f"Analyzing {len(hub_model_names)} models..."))
+        
+        prompt = (
+            f"SCORECARD DATA:\n{scorecard_text[:15000]}\n\n"
+            f"HUB MODELS TO CONFIGURE:\n{', '.join(hub_model_names)}"
+        )
+        
+        result = await MasterArchitect.execute_build(db, request, "cluster_config", prompt, "", admin_user.username)
+        
+        # 4. Apply updates to the database
+        update_count = 0
+        if "updates" in result:
+            for update in result["updates"]:
+                m_name = update.get("model_name")
+                if m_name in hub_model_names:
+                    await model_metadata_crud.update_metadata(
+                        db, 
+                        model_name=m_name,
+                        max_context=update.get("max_context", 4096),
+                        supports_images=update.get("supports_images", False),
+                        is_reasoning_model=update.get("is_reasoning", False),
+                        is_code_model=update.get("is_code", False),
+                        description=update.get("description", "Auto-configured profile."),
+                        priority=update.get("priority", 10)
+                    )
+                    update_count += 1
+
+        event_manager.emit(ProxyEvent("completed", build_id, "Cluster Architect", "Local", admin_user.username, error_message=f"Successfully configured {update_count} models."))
+        return {"success": True, "count": update_count}
+
+    except Exception as e:
+        logger.error(f"AI Config Failed: {e}")
+        event_manager.emit(ProxyEvent("error", build_id, "Cluster Architect", "Local", admin_user.username, error_message=str(e)))
+        return JSONResponse({"error": str(e)}, status_code=500)
 
 
 @router.post("/models-manager/update", name="admin_update_model_metadata", dependencies=[Depends(validate_csrf_token)])
@@ -2854,6 +2918,19 @@ async def admin_enhance_prompt(
         return JSONResponse({"error": f"Enhancement failed: {str(e)}"}, status_code=500)
 
 
+
+@router.get("/memory-systems", response_class=HTMLResponse, name="admin_memory_systems")
+async def admin_memory_systems(request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
+    from app.database.models import MemorySystem, MemoryEntry
+    context = get_template_context(request)
+    res_sys = await db.execute(select(MemorySystem))
+    context["systems"] = res_sys.scalars().all()
+    
+    # Show a sample of recent memory operations across the cluster
+    res_entries = await db.execute(select(MemoryEntry).order_by(MemoryEntry.created_at.desc()).limit(20))
+    context["recent_memories"] = res_entries.scalars().all()
+    
+    return templates.TemplateResponse("admin/memory_systems.html", context)
 
 @router.get("/bots", response_class=HTMLResponse, name="admin_bots")
 async def admin_bots_page(request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
