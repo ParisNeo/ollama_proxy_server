@@ -25,39 +25,51 @@ async def conception_page(request: Request, db: AsyncSession = Depends(get_db), 
     context = get_template_context(request)
     context["csrf_token"] = await get_csrf_token(request)
     
-    # Load dynamic JS for custom nodes from the registry
-    context["dynamic_nodes_js"] = NodeRegistry.get_all_js()
-    
-    # Mirror Playground grouping for consistent model selection
-    model_groups = await server_crud.get_all_models_grouped_by_server(db)
-    context["model_groups"] = model_groups or {}
-    
-    # Collect available logical blocks (Agents, Routers, Ensembles)
-    from app.core.personalities_manager import PersonalityManager
-    res_a = await db.execute(select(VirtualAgent.name).filter(VirtualAgent.is_active == True))
-    res_r = await db.execute(select(SmartRouter.name).filter(SmartRouter.is_active == True))
-    res_e = await db.execute(select(EnsembleOrchestrator.name).filter(EnsembleOrchestrator.is_active == True))
-    
-    file_personas = [p["name"] for p in PersonalityManager.get_all_personalities()]
-    
-    context["logic_blocks"] = sorted(list(set(
-        res_a.scalars().all() + 
-        res_r.scalars().all() + 
-        res_e.scalars().all() + 
-        file_personas
-    )))
-    
-    # Datastores for RAG nodes
-    res_ds = await db.execute(select(DataStore).order_by(DataStore.name))
-    context["datastores"] = res_ds.scalars().all()
-    
-    # Memory Systems for Agent nodes
-    from app.database.models import MemorySystem
-    res_ms = await db.execute(select(MemorySystem.name).filter(MemorySystem.is_active == True))
-    context["memory_systems"] = res_ms.scalars().all()
-    
-    # Metadata for the sidebar
-    context["registered_nodes"] = NodeRegistry.get_node_list()
+    try:
+        # Load dynamic JS for custom nodes from the registry
+        context["dynamic_nodes_js"] = NodeRegistry.get_all_js()
+        
+        # Mirror Playground grouping for consistent model selection
+        model_groups = await server_crud.get_all_models_grouped_by_server(db)
+        context["model_groups"] = model_groups or {}
+        
+        # Collect available logical blocks
+        from app.core.personalities_manager import PersonalityManager
+        res_a = await db.execute(select(VirtualAgent.name).filter(VirtualAgent.is_active == True))
+        res_r = await db.execute(select(SmartRouter.name).filter(SmartRouter.is_active == True))
+        res_e = await db.execute(select(EnsembleOrchestrator.name).filter(EnsembleOrchestrator.is_active == True))
+        
+        file_personas = [p["name"] for p in PersonalityManager.get_all_personalities()]
+        
+        context["logic_blocks"] = sorted(list(set(
+            res_a.scalars().all() + 
+            res_r.scalars().all() + 
+            res_e.scalars().all() + 
+            file_personas
+        )))
+        
+        # Datastores for RAG nodes - Extract only names for JSON serialization in template
+        res_ds = await db.execute(select(DataStore.name).order_by(DataStore.name))
+        context["datastores"] = res_ds.scalars().all()
+        
+        # Memory Systems for Agent nodes
+        from app.database.models import MemorySystem
+        res_ms = await db.execute(select(MemorySystem.name).filter(MemorySystem.is_active == True))
+        context["memory_systems"] = res_ms.scalars().all()
+        
+        # Metadata for the sidebar
+        context["registered_nodes"] = NodeRegistry.get_node_list()
+        
+    except Exception as e:
+        logger.error(f"IO/Database Error while loading Conception context: {e}")
+        # Inject empty defaults so the page still renders (prevents 500 error)
+        context.setdefault("model_groups", {})
+        context.setdefault("logic_blocks", [])
+        context.setdefault("datastores", [])
+        context.setdefault("memory_systems", [])
+        context.setdefault("registered_nodes", [])
+        context.setdefault("dynamic_nodes_js", "")
+        flash(request, "System storage is full or database is locked. Some features may be disabled.", "error")
     
     return templates.TemplateResponse("admin/conception.html", context)
 

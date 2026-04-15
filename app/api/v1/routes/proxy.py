@@ -648,8 +648,8 @@ async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer
                     ))
                 await asyncio.sleep(2)
             elif is_server_error and not is_oom_crash:
-                logger.error(f"Fatal Backend Error from {chosen_server.name}. Skipping retries.")
-                break 
+                logger.error(f"Backend Error (500) from {chosen_server.name}. Failing over to next available node...")
+                continue 
             elif is_oom_crash:
                 logger.warning(f"Ollama OOM detected on {chosen_server.name}. Retrying with reduced context...")
                 # Strip the forced num_ctx for the retry to allow Ollama to use its internal defaults

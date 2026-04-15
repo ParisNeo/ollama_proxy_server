@@ -473,7 +473,9 @@ async def get_servers_with_model(db: AsyncSession, model_name: str) -> list[Olla
         if server.allowed_models and len(server.allowed_models) > 0:
             is_ollama = server.server_type == 'ollama'
             whitelisted = any(
-                m == model_name or (is_ollama and m.startswith(f"{model_name}:"))
+                m == model_name or 
+                m.replace(':latest', '') == model_name.replace(':latest', '') or
+                (is_ollama and m.startswith(f"{model_name}:"))
                 for m in server.allowed_models
             )
             if not whitelisted:
@@ -494,11 +496,18 @@ async def get_servers_with_model(db: AsyncSession, model_name: str) -> list[Olla
                     available_model_name = model_data["name"]
                     if not isinstance(available_model_name, str): continue
                         
-                    is_ollama = server.server_type == 'ollama'
+                    is_ollama = server.server_type in ('ollama', 'cloud')
+                    
+                    # Normalize names for comparison (remove :latest)
+                    norm_avail = available_model_name.replace(':latest', '')
+                    norm_req = model_name.replace(':latest', '')
+
                     is_match = (
                         available_model_name == model_name or
+                        norm_avail == norm_req or
                         (is_ollama and available_model_name.startswith(f"{model_name}:")) or
-                        (server.server_type == 'vllm' and model_name in available_model_name)
+                        (is_ollama and model_name.startswith(f"{available_model_name}:")) or
+                        (server.server_type == 'vllm' and norm_req in norm_avail)
                     )
                     
                     if is_match:

@@ -15,6 +15,7 @@ import logging
 import logging.config
 import os
 import sys
+import errno
 from logging.handlers import RotatingFileHandler
 from pythonjsonlogger import jsonlogger
 
@@ -32,6 +33,24 @@ class HumanReadableFormatter(logging.Formatter):
 
     def __init__(self):
         super().__init__(self.DEFAULT_FORMAT, self.DEFAULT_DATEFMT)
+
+# ----------------------------------------------------------------------
+# Robust Handlers
+# ----------------------------------------------------------------------
+class SafeRotatingFileHandler(RotatingFileHandler):
+    """
+    A version of RotatingFileHandler that ignores 'No space left on device' 
+    errors to prevent the application from crashing when logs cannot be written.
+    """
+    def handleError(self, record):
+        """
+        Overridden to catch disk full errors specifically.
+        """
+        _, e, _ = sys.exc_info()
+        if isinstance(e, OSError) and e.errno == errno.ENOSPC:
+            # Silence the error to keep the application processing
+            return
+        super().handleError(record)
 
 # ----------------------------------------------------------------------
 # JSON formatter – kept for compatibility
@@ -86,12 +105,13 @@ def _build_logging_config(log_level: str = "INFO") -> dict:
                 "stream": "ext://sys.stdout",
             },
             "file": {
-                "class": "logging.handlers.RotatingFileHandler",
+                "class": "app.core.logging_config.SafeRotatingFileHandler",
                 "formatter": formatter_name,
                 "filename": "lollms_hub.log",
-                "maxBytes": 10 * 1024 * 1024, # 10MB Default
-                "backupCount": 5,
+                "maxBytes": 5 * 1024 * 1024, # Reduced to 5MB
+                "backupCount": 2,            # Reduced count to save space
                 "encoding": "utf8",
+                "delay": True,               # Only open when needed
             },
         },
         # ------------------------------------------------------------------

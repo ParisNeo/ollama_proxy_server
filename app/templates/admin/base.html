@@ -6,6 +6,8 @@
     <title>{% block title %}LoLLMs Hub Admin{% endblock %}</title>
     <link rel="icon" href="{{ url_for('static', path='favicon.svg') }}" type="image/svg+xml">
     <link rel="shortcut icon" href="{{ url_for('static', path='favicon.svg') }}" type="image/svg+xml">
+    <!-- Redirect standard favicon request to our SVG -->
+    <link rel="icon" type="image/x-icon" href="{{ url_for('static', path='favicon.svg') }}">
     <script src="{{ url_for('static', path='vendor/tailwindcss.js') }}"></script>
     <script src="{{ url_for('static', path='vendor/chart.js') }}"></script>
     <script src="{{ url_for('static', path='vendor/marked.min.js') }}"></script>
