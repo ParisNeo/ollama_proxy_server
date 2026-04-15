@@ -9,12 +9,12 @@
 <script type="text/javascript" src="/static/vendor/litegraph.js"></script>
 <script src="{{ url_for('static', path='vendor/marked.min.js') }}"></script>
 <!-- CodeMirror for Node Studio -->
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.12/codemirror.min.css">
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.12/theme/monokai.min.css">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.12/codemirror.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.12/mode/javascript/javascript.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.12/mode/python/python.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/js-yaml@4.1.0/dist/js-yaml.min.js"></script>
+<link rel="stylesheet" href="{{ url_for('static', path='vendor/codemirror.min.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', path='vendor/codemirror-monokai.min.css') }}">
+<script src="{{ url_for('static', path='vendor/codemirror.min.js') }}"></script>
+<script src="{{ url_for('static', path='vendor/codemirror-javascript.min.js') }}"></script>
+<script src="{{ url_for('static', path='vendor/codemirror-python.min.js') }}"></script>
+<script src="{{ url_for('static', path='vendor/js-yaml.min.js') }}"></script>
 
 <style>
     /* --- Modal Scrollbar Fix --- */
@@ -223,7 +223,13 @@
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg>
                         Dashboard
                     </a>
-                    <h1 class="text-4xl font-black text-white tracking-tight">Workflow Architect</h1>
+                    <div class="flex items-center gap-4">
+                        <h1 class="text-4xl font-black text-white tracking-tight">Workflow Architect</h1>
+                        <button onclick="window.startCustomTour(ARCHITECT_TOUR, 'tour_conception_v1', true, true)" class="mt-2 flex items-center gap-2 text-[10px] font-black uppercase text-indigo-400 hover:text-white transition-colors bg-white/5 px-3 py-1 rounded-lg">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.79 4 4 0 2.21-1.79 4-4 4-1.742 0-3.223-.835-3.772-2M12 18.5v.01M12 5.5v.01"></path></svg>
+                            Replay Tour
+                        </button>
+                    </div>
                     <p class="text-gray-500 mt-2">Design complex AI cognitive graphs with modular reusable flows.</p>
                 </div>
                 <div class="flex gap-4">
@@ -404,8 +410,9 @@
 
     // --- DATA INJECTION FROM SERVER ---
     const model_groups = {{ (model_groups or {}) | tojson | safe }};
-    window.logic_blocks = {{ (logic_blocks or []) | tojson | safe }};
-    window.datastores_list = {{ (datastores or []) | tojson | safe }};
+    window.logic_blocks = {{ (logic_blocks or[]) | tojson | safe }};
+    window.datastores_list = {{ (datastores or[]) | tojson | safe }};
+    window.memory_systems_list = {{ (memory_systems or[]) | tojson | safe }};
 
     // Flatten model_groups into a prioritized list for LiteGraph combos
     window.available_models = ["auto"];
@@ -807,16 +814,17 @@
     const NODE_HELP = {
         "hub/input": "**ENTRY NODE:**\nCaptures the user's incoming message and settings from the Chat Playground.\n\n### Outputs:\n- **Messages:** Full conversation history.\n- **Settings:** Port, temperature, etc.\n- **Input:** Just the text of the *last* user message.",
         "hub/output": "**EXIT NODE:**\nDefines the final response sent back to the chat bubble. Connect your AI's answer here.",
-        "hub/llm_chat": "**LLM CHAT:**\nCore conversational engine.\n\n### Inputs:\n- **Messages:** Connect a 'Messages' array (usually from Input or System Modifier).\n- **Settings:** Custom generation parameters.\n- **Model Override:** Force a specific model ID.\n- **Tool [N]:** Connect Tool nodes to enable function calling.",
-        "hub/agent": "**AUTONOMOUS AGENT:**\nA multi-turn reasoning engine. It will loop up to 'Max Turns' to solve a problem.\n\n### Reasoning Logic:\n1. **Thought:** The agent uses `<thought>` tags to plan.\n2. **Action:** It calls connected Tools or MCPs.\n3. **Observation:** It processes tool results.\n4. **Final Answer:** It outputs the result when the task is complete.\n\n### Inputs:\n- **In Messages:** The starting conversation state.\n- **Tool [N]:** Add as many Tool or MCP nodes as needed.",
-        "hub/system_modifier": "**SYSTEM MODIFIER:**\nInjects or appends a System Prompt into the conversation history.\n\n### Configuration:\n- **Replace Existing:** If enabled, clears all prior system instructions and sets the new one as the 'Soul' (Recommended for Personalities).",
-        "hub/datastore": "**RAG DATASTORE:**\nRetrieves relevant chunks from your local indexed knowledge bases.\n\n### Configuration:\n- **Store:** Select one of your created Datastores.\n- **Top K:** Number of context chunks to retrieve.",
-        "hub/web_search": "**WEB SEARCH:**\nPerforms real-time queries against Wikipedia, ArXiv, or Google.\n\n### Configuration:\n- **Service:** The provider to use.\n- **Max Results:** How many snippets to include.",
-        "hub/personality": "**PERSONALITY:**\nLoads a persona defined in the Personalities Studio.\n\n### Output:\nOutputs the raw Markdown body as a System Prompt string.",
-        "hub/system_composer": "**SYSTEM COMPOSER:**\nMerges a Persona, Skills, and RAG context into a single structured system instruction.",
-        "hub/subgraph": "**SUB-WORKFLOW:**\nEmbeds another saved Workflow as a reusable single node.",
-        "hub/tool_selector": "**TOOL SELECTOR:**\nDynamically links a Python tool from your **Tools Library** to an AI node.\n\n### Configuration:\n- **Library:** Select the Python file (e.g., `wikipedia_search.py`).\n- **Function:** Select the specific `tool_` function to expose.\n\n### Usage:\nConnect the output to the **Tool** slots of an **LLM Chat** or **Autonomous Agent** node.",
-        "hub/mcp": "**MCP SERVER:**\nConfigures a Model Context Protocol connection. \n\n### Type:\n- **SSE:** Connect to a remote web server (e.g., Brave Search, Local RAG).\n- **Stdio:** Run a local command (e.g., npx server-filesystem)."
+        "hub/llm_chat": "**LLM CHAT:**\nCore conversational engine for standard interaction.\n\n### Inputs:\n- **Messages:** Full history (usually from Input or System Modifier).\n- **Settings:** Custom generation parameters.\n- **Tool [N]:** Connect **Tool Selectors** or **MCPs** to enable function calling.",
+        "hub/agent": "**AUTONOMOUS AGENT:**\nA multi-turn 'looping' engine. It plans, acts, and corrects itself.\n\n### Cognitive Loop:\n1. **Thought:** The model plans its next move.\n2. **Action:** It calls connected Tools to gather info.\n3. **Observation:** It reviews the result.\n4. **Final Answer:** It only exits the loop when the user's request is satisfied.\n\n### Inputs:\n- **Tool [N]:** Use this to give the agent 'limbs' (Filesystem, Web Search, APIs).",
+        "hub/system_modifier": "**SYSTEM MODIFIER:**\nSurgically updates the 'Soul' of the model.\n\n### Usage:\nConnect a string output (like from a Personality or Composer) to the 'System Prompt' slot. If **Replace Existing** is checked, it nukes prior instructions—ideal for forced persona shifts.",
+        "hub/datastore": "**RAG DATASTORE:**\nSemantic retrieval from your local knowledge bases.\n\n### Usage:\nConnect a search string (like user input) to the 'Query' slot. It will return the top-N relevant chunks from the selected store.",
+        "hub/web_search": "**WEB SEARCH:**\nReal-time internet access for the AI.\n\n### Providers:\n- **Wikipedia:** General facts.\n- **ArXiv:** Scientific papers.\n- **Google:** Live web results.",
+        "hub/personality": "**PERSONALITY LOADER:**\nInjects a persona from your **Personalities Studio**.\n\n### Output:\nReturns the raw SOUL.md content as a system instruction string.",
+        "hub/system_composer": "**SYSTEM COMPOSER:**\nCombines multiple knowledge sources into a single, structured system prompt. Useful for merging a Persona with RAG context.",
+        "hub/mcp": "**MCP (MODEL CONTEXT PROTOCOL):**\nThe industry standard for AI tool connectivity.\n\n### Transports:\n- **SSE (Server-Sent Events):** Connect to remote tool servers (e.g. Brave Search MCP, Google Maps MCP).\n- **Stdio:** Execute a local process that provides tools (e.g. `npx @modelcontextprotocol/server-filesystem`).\n\n### Wiring:\nConnect the output to an **Autonomous Agent** to allow the model to discover and call these external tools automatically.",
+        "hub/expert": "**EXPERT BUILDER:**\nCreates a structured 'Expert Bundle' containing a Model + Persona + Temperature.\n\n### Usage:\nConnect the output to the expert slots of a **Mixture of Experts (MoE)** node for parallel brainstorming.",
+        "hub/autorouter": "**SMART ROUTER:**\nDirects the flow based on logic.\n\n### Modes:\n- **Rules:** If keywords exist, go to Path A. Else Path B.\n- **Semantic:** Ask a small model to classify the intent (e.g. 'Is this about coding?') and route to the best specialist.",
+        "hub/note": "**DOCUMENTATION NOTE:**\nAdd markdown explanations to your graph. Essential for AI Architect handovers."
     };
 
     window.showNodeHelp = function(nodeType) {
@@ -1450,6 +1458,37 @@
     window.addWorkflowAsNode = function(name) {
         addNode("hub/subgraph", { workflow_name: name });
     };
+
+    // --- Page Tour Logic ---
+    const ARCHITECT_TOUR = [
+        {
+            target: '#library-view h1',
+            text: "Welcome to the <b>Forge</b>. Here you design the cognitive pathways of your AI cluster."
+        },
+        {
+            target: 'button[onclick*="openGraphArchitect"]',
+            text: "<b>AI Architect</b>: Don't want to wire things manually? Describe a workflow in plain English, and the Hub Agent will build the graph for you."
+        },
+        {
+            target: 'button[onclick*="toggleStudio"]',
+            text: "<b>Node Studio</b>: Use this to code your own Python/JS nodes if the standard library isn't enough."
+        },
+        {
+            target: '.workflow-card:first-child',
+            text: "Your saved workflows appear here. You can even embed one workflow inside another as a single <b>Sub-graph</b> node."
+        },
+        {
+            target: '#new-project-menu',
+            text: "Start with a <b>Standard Template</b> like the 'RAG Pipeline' or 'Parallel MoE' to see advanced orchestration in action."
+        }
+    ];
+
+    // Trigger on load passing the independent setting flag
+    document.addEventListener('DOMContentLoaded', () => {
+        if (window.startCustomTour) {
+            window.startCustomTour(ARCHITECT_TOUR, 'tour_conception_v1', {{ settings.tour_workflows | tojson }});
+        }
+    });
 
     // --- AI GRAPH ARCHITECT (Robust Definition) ---
     window.openGraphArchitect = (mode = 'build') => {

@@ -313,11 +313,11 @@ async def add_security_headers(request: Request, call_next):
     response.headers["X-Frame-Options"] = "DENY"
     csp_policy = (
         "default-src 'self'; "
-        "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.tailwindcss.com https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://unpkg.com; "
-        "style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; "
+        "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
+        "style-src 'self' 'unsafe-inline'; "
         "font-src 'self' data:; "
         "img-src 'self' https: data:; "
-        "connect-src 'self' https://unpkg.com; "
+        "connect-src 'self'; "
         "object-src 'none'; "
         "base-uri 'self'; "
         "form-action 'self';"
@@ -359,6 +359,8 @@ app.include_router(node_builder_router, prefix="/admin", tags=["Admin UI"], incl
 app.include_router(datastores_router, prefix="/admin", tags=["Admin UI"], include_in_schema=False)
 from app.api.v1.routes.architect import router as arch_router
 app.include_router(arch_router, prefix="/admin", tags=["Architect"], include_in_schema=False)
+from app.api.v1.routes.evaluations import router as eval_router
+app.include_router(eval_router, prefix="/admin", tags=["Evaluations"], include_in_schema=False)
 
 @app.get("/", include_in_schema=False, summary="Root")
 def read_root():

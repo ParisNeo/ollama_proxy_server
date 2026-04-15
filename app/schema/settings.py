@@ -88,10 +88,16 @@ class AppSettingsModel(BaseModel):
     google_search_api_key: Optional[str] = Field(default=None, description="SerpApi or Google Custom Search Key")
 
     # --- GATEWAY SETTINGS ---
+    enable_tours: bool = True
+    tour_dashboard: bool = True
+    tour_models: bool = True
+    tour_workflows: bool = True
+    tour_datastores: bool = True
+    tour_nodes: bool = True
     enable_bot_mode: bool = False
     enable_debug_mode: bool = False
     enable_ollama_api: bool = True
-    enable_openai_api: bool = True
+    enable_openai_api: bool = False
     openai_port: int = 8081 # Default secondary port
 
     # --- SECURITY ---

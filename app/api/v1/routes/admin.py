@@ -8,6 +8,7 @@ import httpx
 import asyncio
 import secrets
 import json
+import datetime
 import subprocess
 from pathlib import Path
 import os
@@ -36,7 +37,7 @@ from app.schema.server import ServerCreate, ServerUpdate
 from app.schema.settings import AppSettingsModel
 from app.api.v1.dependencies import get_csrf_token, validate_csrf_token, validate_csrf_token_header, login_rate_limiter
 
-from app.database.models import BotConfig
+from app.database.models import BotConfig, UsageLog
 from app.core.encryption import encrypt_data
 from ascii_colors import trace_exception
 
@@ -202,12 +203,46 @@ async def get_active_rate_limits(
         
     return sorted(limits, key=sort_key, reverse=True)[:10]
 
+async def calculate_system_health(db: AsyncSession, server_health: List[Dict]):
+    """Calculates a 0-100 health score based on servers, logs, and resources."""
+    # 1. Server Availability (40 points)
+    total_servers = len(server_health)
+    online_count = sum(1 for s in server_health if s['status'] == 'Online')
+    server_score = (online_count / total_servers * 40) if total_servers > 0 else 0
+
+    # 2. Operational Success Rate (40 points) - Last 200 logs
+    stmt = select(UsageLog.status_code).order_by(UsageLog.request_timestamp.desc()).limit(200)
+    res = await db.execute(stmt)
+    codes = res.scalars().all()
+    if not codes:
+        success_score = 40
+    else:
+        success_count = sum(1 for c in codes if 200 <= c < 300)
+        success_score = (success_count / len(codes)) * 40
+
+    # 3. Local Resource Stress (20 points)
+    mem_percent = psutil.virtual_memory().percent
+    cpu_percent = psutil.cpu_percent()
+    stress = (mem_percent + cpu_percent) / 2
+    resource_score = max(0, 20 - (stress / 5)) 
+
+    total = round(server_score + success_score + resource_score)
+    status = "Healthy" if total >= 85 else "Degraded" if total >= 60 else "Critical"
+    
+    return {
+        "score": total,
+        "status": status,
+        "color": "emerald" if total >= 85 else "amber" if total >= 60 else "red",
+        "breakdown": {"servers": round(server_score), "success": round(success_score), "resources": round(resource_score)}
+    }
+
 # --- Helper to add common context to all templates ---
 def get_template_context(request: Request) -> dict:
     return {
         "request": request,
         "is_redis_connected": request.app.state.redis is not None,
-        "bootstrap_settings": settings
+        "bootstrap_settings": settings,
+        "settings": getattr(request.app.state, 'settings', settings) # Pass DB-loaded settings to templates
     }
 
 def flash(request: Request, message: str, category: str = "info"):
@@ -325,15 +360,26 @@ async def get_system_and_ollama_info(
     # Run blocking psutil calls in a threadpool to avoid blocking the event loop
     system_info_task = run_in_threadpool(get_system_info)
     
-    # Fetch active models, server health, and server load concurrently
-    running_models_task = server_crud.get_active_models_all_servers(db, http_client)
-    server_health_task = server_crud.check_all_servers_health(db, http_client)
-    server_load_task = log_crud.get_server_load_stats(db)
+    # Create separate sessions for each concurrent DB-heavy task to avoid Connection pool leaks/corruption
+    from app.database.session import AsyncSessionLocal
     
-    # Fetch rate limit info from Redis if available
-    rate_limit_task = get_active_rate_limits(redis_client, db, app_settings)
+    async def fetch_running_models():
+        async with AsyncSessionLocal() as s_db:
+            return await server_crud.get_active_models_all_servers(s_db, http_client)
+            
+    async def fetch_server_health():
+        async with AsyncSessionLocal() as s_db:
+            return await server_crud.check_all_servers_health(s_db, http_client)
+            
+    async def fetch_server_load():
+        async with AsyncSessionLocal() as s_db:
+            return await log_crud.get_server_load_stats(s_db)
+            
+    async def fetch_rate_limits():
+        async with AsyncSessionLocal() as s_db:
+            return await get_active_rate_limits(redis_client, s_db, app_settings)
     
-    # Await all tasks
+    # Await all tasks safely
     (
         system_info, 
         running_models, 
@@ -342,16 +388,28 @@ async def get_system_and_ollama_info(
         rate_limits
     ) = await asyncio.gather(
         system_info_task,
-        running_models_task,
-        server_health_task,
-        server_load_task,
-        rate_limit_task
+        fetch_running_models(),
+        fetch_server_health(),
+        fetch_server_load(),
+        fetch_rate_limits()
     )
     
-    # Combine server health and load data into a single structure
+    # Combine server health, load, and penalization data
+    from app.api.v1.routes.proxy import _is_server_penalized, _server_penalties
+    import time
+
     server_load_map = {row.server_name: row.request_count for row in server_load}
     for server in server_health:
+        s_id = server["server_id"]
         server["request_count"] = server_load_map.get(server["name"], 0)
+        
+        # Inject Penalization Status
+        is_p = _is_server_penalized(s_id)
+        server["is_penalized"] = is_p
+        if is_p:
+            remaining = round(_server_penalties.get(s_id, 0) - time.time())
+            server["penalty_remaining"] = remaining
+            server["status"] = "Quarantined"
 
     # Calculate Total VRAM used by active models
     total_vram_bytes = sum(model.get("size_vram", 0) for model in running_models)
@@ -373,20 +431,42 @@ async def get_system_and_ollama_info(
         elif s['type'] == 'assigned' and user_summary[uname]['state'] != 'active':
             user_summary[uname]['state'] = 'assigned'
             
-    # Calculate Session CO2 (Simplified estimate: 1g per 1k tokens)
-    # We use tokens from the event history for session total
-    session_tokens = sum(r.get('tokens', 0) for r in event_manager.recent_completions)
-    session_co2 = (session_tokens / 1000.0) * 1.0 
+    # --- REFINED SUSTAINABILITY LOGIC ---
+    # We apply multipliers based on model "Priority" (proxy for size) or explicit metadata
+    # Base: 0.5g/1k (Small) | 1.2g/1k (Medium) | 3.0g/1k (Expert/MoE)
     
-    # Get total carbon from DB
+    recent_events = event_manager.recent_completions
+    session_co2 = 0
+    potential_co2_waste = 0 # What if user always used the largest model?
+
+    for r in recent_events:
+        tokens = r.get('tokens', 0)
+        m_name = r.get('model', 'unknown')
+        
+        # Determine weight (Heuristic based on metadata priority)
+        meta = await model_metadata_crud.get_metadata_by_model_name(db, m_name)
+        priority = meta.priority if meta else 10
+        
+        multiplier = 0.5 if priority < 5 else (1.2 if priority < 15 else 3.0)
+        session_co2 += (tokens / 1000.0) * multiplier
+        
+        # Optimization Gain: Assume largest model is 3.0g/1k
+        potential_co2_waste += (tokens / 1000.0) * 3.0
+
+    # Get total weighted carbon from DB logic
     total_co2 = await log_crud.get_total_carbon_footprint(db)
+    carbon_saved = max(0, potential_co2_waste - session_co2)
     
     # Calculate relatable metrics
     # Standards: Smartphone charge ~5g, 1km driving ~120g, Boiling 1L water ~15g
     total_users_res = await db.execute(select(sqlalchemy.func.count(User.id)))
     total_users_count = total_users_res.scalar() or 1
     
+    # Calculate System Health Assessment
+    health = await calculate_system_health(db, server_health)
+
     return {
+        "health": health,
         "system_info": system_info, 
         "running_models": running_models,
         "gpu_stats": {
@@ -401,10 +481,12 @@ async def get_system_and_ollama_info(
             "session_co2_g": round(session_co2, 3),
             "total_co2_g": round(total_co2, 2),
             "per_user_g": round(total_co2 / total_users_count, 2),
+            "carbon_saved_g": round(carbon_saved, 2),
             "equivalents": {
                 "smartphone_charges": round(total_co2 / 5.0, 1),
                 "kilometers_driven": round(total_co2 / 120.0, 2),
-                "liters_boiled": round(total_co2 / 15.0, 1)
+                "liters_boiled": round(total_co2 / 15.0, 1),
+                "lightbulb_hours": round(total_co2 / 10.0, 1) # 10W LED
             }
         }
     }
@@ -549,20 +631,17 @@ async def admin_add_server(
         flash(request, "Invalid server URL format", "error")
         return RedirectResponse(url=request.url_for("admin_servers"), status_code=status.HTTP_303_SEE_OTHER)
         
-    existing_server = await server_crud.get_server_by_url(db, url=server_url)
-    if existing_server:
-        flash(request, f"Server with URL '{server_url}' already exists.", "error")
-    else:
-        try:
-            server_in = ServerCreate(name=server_name, url=server_url, server_type=server_type, api_key=api_key)
-            await server_crud.create_server(db, server=server_in)
-            flash(request, f"Server '{server_name}' ({server_type}) added successfully.", "success")
-        except ValidationError as e:
-            logger.error(f"Validation error adding server: {e}")
-            flash(request, "Invalid server data: URL format or server type is invalid", "error")
-        except Exception as e:
-            logger.error(f"Error adding server: {e}")
-            flash(request, "An error occurred while adding the server", "error")
+    try:
+        server_in = ServerCreate(name=server_name, url=server_url, server_type=server_type, api_key=api_key)
+        await server_crud.create_server(db, server=server_in)
+        flash(request, f"Server '{server_name}' added successfully.", "success")
+    except ValidationError as e:
+        logger.error(f"Validation error adding server: {e}")
+        flash(request, "Invalid server data: URL format or server type is invalid", "error")
+    except Exception as e:
+        logger.error(f"Error adding server: {e}")
+        flash(request, "An error occurred while adding the server", "error")
+
     return RedirectResponse(url=request.url_for("admin_servers"), status_code=status.HTTP_303_SEE_OTHER)
 
 @router.post("/servers/{server_id}/delete", name="admin_delete_server", dependencies=[Depends(validate_csrf_token)])
@@ -1083,35 +1162,70 @@ async def admin_ai_configure_models(
         all_meta = await model_metadata_crud.get_all_metadata(db)
         hub_model_names = [m.model_name for m in all_meta]
         
-        # 3. Ask AI to perform the mapping
-        event_manager.emit(ProxyEvent("active", build_id, "Cluster Architect", "AI", admin_user.username, error_message=f"Analyzing {len(hub_model_names)} models..."))
+        # 3. Pre-filter scorecard to only relevant rows to save tokens and focus the AI
+        event_manager.emit(ProxyEvent("active", build_id, "Cluster Architect", "Local", admin_user.username, error_message=f"Filtering scorecard for {len(hub_model_names)} local models..."))
         
-        prompt = (
-            f"SCORECARD DATA:\n{scorecard_text[:15000]}\n\n"
-            f"HUB MODELS TO CONFIGURE:\n{', '.join(hub_model_names)}"
-        )
+        relevant_lines = []
+        lines = scorecard_text.split('\n')
+        for line in lines:
+            # If the line mentions any of our local model names (fuzzy check)
+            if any(m.lower() in line.lower() for m in hub_model_names):
+                relevant_lines.append(line)
         
-        result = await MasterArchitect.execute_build(db, request, "cluster_config", prompt, "", admin_user.username)
+        filtered_scorecard = "\n".join(relevant_lines)
         
-        # 4. Apply updates to the database
-        update_count = 0
-        if "updates" in result:
-            for update in result["updates"]:
-                m_name = update.get("model_name")
-                if m_name in hub_model_names:
-                    await model_metadata_crud.update_metadata(
-                        db, 
-                        model_name=m_name,
-                        max_context=update.get("max_context", 4096),
-                        supports_images=update.get("supports_images", False),
-                        is_reasoning_model=update.get("is_reasoning", False),
-                        is_code_model=update.get("is_code", False),
-                        description=update.get("description", "Auto-configured profile."),
-                        priority=update.get("priority", 10)
-                    )
-                    update_count += 1
+        # If filtering failed (no matches), fall back to partial scorecard but warn
+        if not filtered_scorecard:
+            filtered_scorecard = scorecard_text[:8000]
+            logger.warning("No direct fuzzy matches found in scorecard, sending raw snippet.")
 
-        event_manager.emit(ProxyEvent("completed", build_id, "Cluster Architect", "Local", admin_user.username, error_message=f"Successfully configured {update_count} models."))
+        # 4. BATCH PROCESSING LOOP
+        batch_size = 20
+        total_models = len(hub_model_names)
+        update_count = 0
+
+        for i in range(0, total_models, batch_size):
+            batch = hub_model_names[i : i + batch_size]
+            current_batch_num = (i // batch_size) + 1
+            total_batches = (total_models + batch_size - 1) // batch_size
+            progress = int((i / total_models) * 100)
+
+            event_manager.emit(ProxyEvent(
+                "active", build_id, "Cluster Architect", target_agent, admin_user.username, 
+                error_message=f"Batch {current_batch_num}/{total_batches}: Analyzing {len(batch)} models...",
+                token_count=progress # Use token_count field as a temporary progress carrier for UI
+            ))
+
+            batch_prompt = (
+                f"SCORECARD EXCERPT:\n{filtered_scorecard}\n\n"
+                f"TARGET BATCH:\n{', '.join(batch)}\n\n"
+                "INSTRUCTION: Extract metadata ONLY for models in the TARGET BATCH. "
+                "STRICT: Ignore any other models in the scorecard. Return JSON with 'updates' list."
+            )
+
+            # AI Call for this specific batch
+            result = await MasterArchitect.execute_build(db, request, "cluster_config", batch_prompt, "", admin_user.username)
+
+            # Apply updates for this batch
+            if "updates" in result and isinstance(result["updates"], list):
+                for update_data in result["updates"]:
+                    m_name = update_data.get("model_name")
+                    if m_name in batch: # Ensure model belongs to current batch
+                        fields = {
+                            "max_context": int(update_data.get("max_context", 4096)),
+                            "supports_images": bool(update_data.get("supports_images", False)),
+                            "is_reasoning_model": bool(update_data.get("is_reasoning", False)),
+                            "is_code_model": bool(update_data.get("is_code", False)),
+                            "description": str(update_data.get("description", "Auto-configured profile."))[:1024],
+                            "priority": int(update_data.get("priority", 10))
+                        }
+                        await model_metadata_crud.update_metadata(db, model_name=m_name, **fields)
+                        update_count += 1
+                
+                # Commit batch transaction to release connections and persist progress
+                await db.commit()
+
+        event_manager.emit(ProxyEvent("completed", build_id, "Cluster Architect", "Local", admin_user.username, error_message=f"Successfully configured {update_count} models.", token_count=100))
         return {"success": True, "count": update_count}
 
     except Exception as e:
@@ -1509,6 +1623,12 @@ async def admin_settings_post(
         "google_search_api_key": form_data.get("google_search_api_key") or None,
         "instance_scan_start_port": safe_int("instance_scan_start_port", current_settings.instance_scan_start_port),
         "instance_scan_end_port": safe_int("instance_scan_end_port", current_settings.instance_scan_end_port),
+        "enable_tours": form_data.get("enable_tours") == "true",
+        "tour_dashboard": form_data.get("tour_dashboard") == "true",
+        "tour_models": form_data.get("tour_models") == "true",
+        "tour_workflows": form_data.get("tour_workflows") == "true",
+        "tour_datastores": form_data.get("tour_datastores") == "true",
+        "tour_nodes": form_data.get("tour_nodes") == "true",
         "enable_bot_mode": form_data.get("enable_bot_mode") == "true",
         "enable_debug_mode": form_data.get("enable_debug_mode") == "true",
         "enable_ollama_api": form_data.get("enable_ollama_api") == "true",
@@ -2839,6 +2959,186 @@ async def delete_analysis(aid: int, db: AsyncSession = Depends(get_db), admin_us
         await db.commit()
     return {"success": True}
 
+@router.post("/system/report", name="admin_generate_system_report")
+async def generate_system_report(request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
+    """Generates a comprehensive AI audit of the cluster's current state."""
+    from app.api.v1.routes.proxy import _resolve_target, _reverse_proxy
+    
+    app_settings = request.app.state.settings
+    target_agent = app_settings.admin_agent_name
+    if not target_agent:
+        return JSONResponse({"error": "No Management Agent set for report generation."}, status_code=400)
+
+    # Gather data context
+    info_resp = await get_system_and_ollama_info(request, db, admin_user)
+    health_data = info_resp["health"]
+    
+    # Fetch recent errors
+    stmt = select(UsageLog.endpoint, UsageLog.status_code, UsageLog.model).filter(UsageLog.status_code >= 400).limit(10)
+    error_res = await db.execute(stmt)
+    errors = error_res.all()
+
+    report_prompt = (
+        f"Generate a 'Fortress Executive Report' for the administrator.\n\n"
+        f"CURRENT HEALTH SCORE: {health_data['score']}/100 ({health_data['status']})\n"
+        f"INFRASTRUCTURE: {len(info_resp['load_balancer_status'])} nodes configured.\n"
+        f"VRAM USAGE: {info_resp['gpu_stats']['vram_used_gb']} GB used.\n"
+        f"RECENT ERRORS: {errors}\n\n"
+        "Analyze this data. Identify performance leaks, security risks, or hardware bottlenecks. "
+        "Provide 3 actionable recommendations to improve system reliability. Format with clean Markdown."
+    )
+
+    try:
+        req_id = f"sys_report_{secrets.token_hex(4)}"
+        # Wrap the call to ensure we don't crash on unpacking if proxy logic fails
+        real_model, final_msgs = await _resolve_target(db, target_agent, [{"role": "user", "content": report_prompt}], request=request, request_id=req_id, sender=admin_user.username)
+        
+        servers = await server_crud.get_servers_with_model(db, real_model)
+        if not servers: return JSONResponse({"error": "No backend available to run report generation."}, status_code=503)
+
+        try:
+            # Wrap the call to ensure we don't crash on unpacking if proxy logic fails
+            proxy_result = await _reverse_proxy(
+                request, "chat", servers, 
+                json.dumps({"model": real_model, "messages": final_msgs, "stream": False}).encode(), 
+                is_subrequest=True, request_id=req_id, model=real_model, sender=admin_user.username
+            )
+            
+            if not proxy_result or not isinstance(proxy_result, tuple):
+                raise HTTPException(status_code=502, detail="Invalid response from proxy engine.")
+                
+            resp, chosen_server = proxy_result
+
+            if hasattr(resp, 'body'):
+                data = json.loads(resp.body.decode())
+
+                if resp.status_code >= 400:
+                    error_detail = data.get("error", "Unknown backend error")
+                    suggestion = "Suggestion: This model/provider is currently unavailable. Try switching to a locally hosted model or another cloud provider in Settings."
+                    if "limit" in error_detail.lower():
+                        suggestion = "Suggestion: Your usage limit for this provider has been reached. Please switch to a local instance or a different backend server."
+
+                    return JSONResponse({"error": error_detail, "suggestion": suggestion}, status_code=resp.status_code)
+
+                report_text = data.get("message", {}).get("content", "Report generation failed.")
+
+                # --- PERSISTENCE: Save report to Archive ---
+                new_report = LogAnalysis(content=f"SYSTEM_AUDIT_REPORT\n{report_text}")
+                db.add(new_report)
+                await db.commit()
+                await db.refresh(new_report)
+
+                return {"report": report_text, "timestamp": new_report.timestamp.strftime("%Y-%m-%d %H:%M")}
+                
+        except HTTPException as he:
+            # Re-raise FastAPIs own HTTP exceptions to be handled by the middleware
+            raise he
+        except Exception as inner_e:
+            logger.error(f"Report Proxy Logic Failed: {inner_e}")
+            return JSONResponse({"error": f"Failed to reach model: {str(inner_e)}"}, status_code=500)
+
+    except Exception as e:
+        logger.error(f"Generate System Report Failed: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+@router.post("/system/eco-report", name="admin_generate_eco_report")
+async def generate_eco_report(request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
+    """Generates a comprehensive AI eco-audit of the cluster's current state."""
+    from app.api.v1.routes.proxy import _resolve_target, _reverse_proxy
+    
+    app_settings = request.app.state.settings
+    target_agent = app_settings.admin_agent_name
+    if not target_agent:
+        return JSONResponse({"error": "No Management Agent set for report generation."}, status_code=400)
+
+    # Gather data context
+    info_resp = await get_system_and_ollama_info(request, db, admin_user)
+    sustain_data = info_resp["sustainability"]
+    gpu_data = info_resp["gpu_stats"]
+
+    report_prompt = (
+        f"Generate a 'Green Intelligence Eco-Audit Report' for the system administrator.\n\n"
+        f"SUSTAINABILITY METRICS:\n"
+        f"- Total Lifetime CO2e: {sustain_data['total_co2_g']}g\n"
+        f"- Current Session CO2e: {sustain_data['session_co2_g']}g\n"
+        f"- Carbon Saved via Auto-Routing: {sustain_data['carbon_saved_g']}g\n"
+        f"- Equivalents: {sustain_data['equivalents']['smartphone_charges']} smartphone charges, {sustain_data['equivalents']['kilometers_driven']} km driven.\n"
+        f"HARDWARE STATE:\n"
+        f"- VRAM Usage: {gpu_data['vram_used_gb']} GB used out of {gpu_data['vram_total_gb']} GB.\n\n"
+        "CONTEXT:\n"
+        "The cluster is located in France, where the grid has very low carbon intensity due to nuclear power. However, energy efficiency remains crucial.\n\n"
+        "INSTRUCTION:\n"
+        "Analyze these metrics. Provide a brief assessment of the cluster's ecological footprint and give 3 highly actionable recommendations to further reduce AI inference carbon emissions (e.g., model quantization, aggressive routing, scheduling). Format with clean Markdown."
+    )
+
+    try:
+        req_id = f"sys_eco_{secrets.token_hex(4)}"
+        # Wrap the call to ensure we don't crash on unpacking if proxy logic fails
+        real_model, final_msgs = await _resolve_target(db, target_agent,[{"role": "user", "content": report_prompt}], request=request, request_id=req_id, sender=admin_user.username)
+        
+        servers = await server_crud.get_servers_with_model(db, real_model)
+        if not servers: return JSONResponse({"error": "No backend available to run report generation."}, status_code=503)
+
+        proxy_result = await _reverse_proxy(
+            request, "chat", servers, 
+            json.dumps({"model": real_model, "messages": final_msgs, "stream": False}).encode(), 
+            is_subrequest=True, request_id=req_id, model=real_model, sender=admin_user.username
+        )
+        
+        if not proxy_result or not isinstance(proxy_result, tuple):
+            raise HTTPException(status_code=502, detail="Invalid response from proxy engine.")
+            
+        resp, chosen_server = proxy_result
+
+        if hasattr(resp, 'body'):
+            data = json.loads(resp.body.decode())
+
+            if resp.status_code >= 400:
+                error_detail = data.get("error", "Unknown backend error")
+                return JSONResponse({"error": error_detail}, status_code=resp.status_code)
+
+            report_text = data.get("message", {}).get("content", "Report generation failed.")
+
+            # --- PERSISTENCE: Save report to Archive ---
+            new_report = LogAnalysis(content=f"ECO_AUDIT_REPORT\n{report_text}")
+            db.add(new_report)
+            await db.commit()
+            await db.refresh(new_report)
+
+            return {"report": report_text, "timestamp": new_report.timestamp.strftime("%Y-%m-%d %H:%M")}
+            
+    except Exception as e:
+        logger.error(f"Generate Eco Report Failed: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+@router.get("/system/eco-report/latest", name="admin_get_latest_eco_report")
+async def get_latest_eco_report(db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
+    """Retrieves the most recently generated Eco Audit Report."""
+    stmt = select(LogAnalysis).filter(LogAnalysis.content.like("ECO_AUDIT_REPORT%")).order_by(LogAnalysis.timestamp.desc()).limit(1)
+    res = await db.execute(stmt)
+    latest = res.scalars().first()
+    
+    if not latest:
+        return JSONResponse({"error": "No eco reports found. Generate your first audit."}, status_code=404)
+        
+    clean_content = latest.content.replace("ECO_AUDIT_REPORT\n", "", 1)
+    return {"report": clean_content, "timestamp": latest.timestamp.strftime("%Y-%m-%d %H:%M")}
+
+@router.get("/system/report/latest", name="admin_get_latest_report")
+async def get_latest_report(db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
+    """Retrieves the most recently generated System Audit Report."""
+    # Filter for entries starting with our internal tag
+    stmt = select(LogAnalysis).filter(LogAnalysis.content.like("SYSTEM_AUDIT_REPORT%")).order_by(LogAnalysis.timestamp.desc()).limit(1)
+    res = await db.execute(stmt)
+    latest = res.scalars().first()
+    
+    if not latest:
+        return JSONResponse({"error": "No reports found. Generate your first audit to populate this view."}, status_code=404)
+        
+    # Strip the internal tag before returning
+    clean_content = latest.content.replace("SYSTEM_AUDIT_REPORT\n", "", 1)
+    return {"report": clean_content, "timestamp": latest.timestamp.strftime("%Y-%m-%d %H:%M")}
+
 # Add this new route for prompt enhancement
 @router.post("/enhance-prompt", name="admin_enhance_prompt")
 async def admin_enhance_prompt(
@@ -2921,16 +3221,128 @@ async def admin_enhance_prompt(
 
 @router.get("/memory-systems", response_class=HTMLResponse, name="admin_memory_systems")
 async def admin_memory_systems(request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
-    from app.database.models import MemorySystem, MemoryEntry
+    from app.database.models import MemorySystem
     context = get_template_context(request)
+    
+    # Check if default system exists, if not create it
     res_sys = await db.execute(select(MemorySystem))
-    context["systems"] = res_sys.scalars().all()
+    systems = res_sys.scalars().all()
+    if not systems:
+        default_sys = MemorySystem(name="default", description="Standard Global Core", system_instruction="Default")
+        db.add(default_sys)
+        await db.commit()
+        await db.refresh(default_sys)
+        systems = [default_sys]
+        
+    context["systems"] = systems
     
-    # Show a sample of recent memory operations across the cluster
-    res_entries = await db.execute(select(MemoryEntry).order_by(MemoryEntry.created_at.desc()).limit(20))
-    context["recent_memories"] = res_entries.scalars().all()
+    # Get distinct users who have memories
+    from app.database.models import MemoryEntry
+    res_users = await db.execute(select(MemoryEntry.user_identifier).distinct())
+    context["active_users"] = res_users.scalars().all()
     
+    context["csrf_token"] = await get_csrf_token(request)
     return templates.TemplateResponse("admin/memory_systems.html", context)
+
+@router.post("/api/memory/system/add", name="api_memory_add_system", dependencies=[Depends(validate_csrf_token)])
+async def api_memory_add_system(name: str = Form(...), desc: str = Form(""), db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
+    from app.database.models import MemorySystem
+    safe_name = re.sub(r'[^a-zA-Z0-9_-]', '_', name.lower())
+    db.add(MemorySystem(name=safe_name, description=desc, system_instruction="Default"))
+    await db.commit()
+    return RedirectResponse(url="/admin/memory-systems", status_code=303)
+
+@router.get("/api/memory/data", name="api_memory_data")
+async def api_memory_data(system: str, user: str, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
+    from app.database.models import MemoryEntry, DreamLog
+    
+    # Get standard memories
+    res_mem = await db.execute(
+        select(MemoryEntry).filter(
+            MemoryEntry.agent_name == system,
+            MemoryEntry.user_identifier == user,
+            MemoryEntry.category != 'affective'
+        ).order_by(MemoryEntry.importance.desc())
+    )
+    memories =[{"id": m.id, "cat": m.category, "title": m.title, "content": m.content, "imp": m.importance, "ts": m.created_at.strftime('%Y-%m-%d %H:%M')} for m in res_mem.scalars().all()]
+    
+    # Get Affective memory
+    res_aff = await db.execute(
+        select(MemoryEntry).filter(
+            MemoryEntry.agent_name == system, MemoryEntry.user_identifier == user, MemoryEntry.category == 'affective'
+        )
+    )
+    aff = res_aff.scalars().first()
+    affective_state = {"id": aff.id if aff else None, "content": aff.content if aff else "Neutral"}
+    
+    # Get Dreams
+    res_dreams = await db.execute(
+        select(DreamLog).filter(DreamLog.memory_system == system, DreamLog.user_identifier == user).order_by(desc(DreamLog.created_at)).limit(50)
+    )
+    dreams =[{"summary": d.summary, "ts": d.created_at.strftime('%Y-%m-%d %H:%M')} for d in res_dreams.scalars().all()]
+    
+    return {"memories": memories, "affective": affective_state, "dreams": dreams}
+
+@router.post("/api/memory/affective", name="api_memory_affective", dependencies=[Depends(validate_csrf_token)])
+async def api_memory_affective(
+    request: Request,
+    system: str = Form(...), user: str = Form(...), content: str = Form(...),
+    db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)
+):
+    from app.database.models import MemoryEntry
+    from sqlalchemy import update
+    
+    existing = await db.execute(select(MemoryEntry).filter_by(user_identifier=user, agent_name=system, category='affective'))
+    if existing.scalars().first():
+        await db.execute(update(MemoryEntry).filter_by(user_identifier=user, agent_name=system, category='affective').values(content=content))
+    else:
+        db.add(MemoryEntry(user_identifier=user, agent_name=system, category='affective', title='relationship', content=content, importance=100))
+    await db.commit()
+    return {"success": True}
+
+@router.delete("/api/memory/entry/{m_id}", name="api_memory_delete")
+async def api_memory_delete(m_id: int, request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
+    from app.database.models import MemoryEntry
+    from sqlalchemy import delete
+    await db.execute(delete(MemoryEntry).filter_by(id=m_id))
+    await db.commit()
+    return {"success": True}
+
+@router.post("/api/memory/wipe", name="api_memory_wipe", dependencies=[Depends(validate_csrf_token)])
+async def api_memory_wipe(system: str = Form(...), user: str = Form(...), db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
+    from app.database.models import MemoryEntry, DreamLog
+    from sqlalchemy import delete
+    await db.execute(delete(MemoryEntry).filter_by(user_identifier=user, agent_name=system))
+    await db.execute(delete(DreamLog).filter_by(user_identifier=user, memory_system=system))
+    await db.commit()
+    return {"success": True}
+
+@router.post("/api/memory/trigger_dream", name="api_memory_dream", dependencies=[Depends(validate_csrf_token)])
+async def api_memory_dream(system: str = Form(...), user: str = Form(...), db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
+    from app.core.memory_manager import CognitiveMemoryManager
+    await CognitiveMemoryManager.reorganize_memories(db, user, system)
+    return {"success": True}
+
+@router.post("/api/memory/import", name="api_memory_import", dependencies=[Depends(validate_csrf_token)])
+async def api_memory_import(
+    system: str = Form(...), user: str = Form(...), file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)
+):
+    from app.database.models import MemoryEntry
+    content = await file.read()
+    data = json.loads(content.decode('utf-8'))
+    
+    for item in data.get("memories",[]):
+        db.add(MemoryEntry(
+            user_identifier=user, agent_name=system,
+            category=item.get("cat", "general"), title=item.get("title", "imported"),
+            content=item.get("content", ""), importance=item.get("imp", 50)
+        ))
+    if data.get("affective"):
+        db.add(MemoryEntry(user_identifier=user, agent_name=system, category="affective", title="relationship", content=data["affective"], importance=100))
+        
+    await db.commit()
+    return {"success": True}
 
 @router.get("/bots", response_class=HTMLResponse, name="admin_bots")
 async def admin_bots_page(request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):

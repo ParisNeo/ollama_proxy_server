@@ -146,10 +146,10 @@
     </div>
 </template>
 
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.12/codemirror.min.css">
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.12/theme/monokai.min.css">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.12/codemirror.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.12/mode/python/python.min.js"></script>
+<link rel="stylesheet" href="{{ url_for('static', path='vendor/codemirror.min.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', path='vendor/codemirror-monokai.min.css') }}">
+<script src="{{ url_for('static', path='vendor/codemirror.min.js') }}"></script>
+<script src="{{ url_for('static', path='vendor/codemirror-python.min.js') }}"></script>
 
 <script>
 let currentFile = null;

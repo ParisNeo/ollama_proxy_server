@@ -48,8 +48,13 @@ async def conception_page(request: Request, db: AsyncSession = Depends(get_db), 
     )))
     
     # Datastores for RAG nodes
-    res_ds = await db.execute(select(DataStore.name).order_by(DataStore.name))
+    res_ds = await db.execute(select(DataStore).order_by(DataStore.name))
     context["datastores"] = res_ds.scalars().all()
+    
+    # Memory Systems for Agent nodes
+    from app.database.models import MemorySystem
+    res_ms = await db.execute(select(MemorySystem.name).filter(MemorySystem.is_active == True))
+    context["memory_systems"] = res_ms.scalars().all()
     
     # Metadata for the sidebar
     context["registered_nodes"] = NodeRegistry.get_node_list()

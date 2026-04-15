@@ -16,6 +16,15 @@ REQUIRED_ASSETS = {
     "highlight.min.js": "https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js",
     "highlight-dark.min.css": "https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css",
     "pixi.min.js": "https://cdn.jsdelivr.net/npm/pixi.js@8.18.1/dist/pixi.min.js",
+    "tailwindcss.js": "https://cdn.tailwindcss.com",
+    "js-yaml.min.js": "https://cdn.jsdelivr.net/npm/js-yaml@4.1.0/dist/js-yaml.min.js",
+    "mermaid.min.js": "https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js",
+    "codemirror.min.js": "https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.12/codemirror.min.js",
+    "codemirror.min.css": "https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.12/codemirror.min.css",
+    "codemirror-monokai.min.css": "https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.12/theme/monokai.min.css",
+    "codemirror-python.min.js": "https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.12/mode/python/python.min.js",
+    "codemirror-javascript.min.js": "https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.12/mode/javascript/javascript.min.js",
+    "vis-network.min.js": "https://unpkg.com/vis-network/standalone/umd/vis-network.min.js",
 }
 
 VENDOR_DIR = Path("app/static/vendor")

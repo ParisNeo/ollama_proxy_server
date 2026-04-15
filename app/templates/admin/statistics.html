@@ -22,7 +22,10 @@
     <!-- Header / Global Actions -->
     <div class="flex items-center justify-between">
         <h1 class="text-xl font-bold">System Analytics</h1>
-        <a href="{{ url_for('admin_stats_pdf') }}" class="px-6 py-2 bg-[var(--color-primary-600)] hover:bg-[var(--color-primary-700)] rounded-md text-white font-bold text-sm shadow-lg transition-all">Download PDF Report</a>
+        <div class="flex gap-4">
+            <button onclick="window.location.href='/admin/dashboard?trigger_report=true'" class="px-6 py-2 bg-purple-600 hover:bg-purple-700 rounded-md text-white font-bold text-sm shadow-lg transition-all">Generate AI Health Audit</button>
+            <a href="{{ url_for('admin_stats_pdf') }}" class="px-6 py-2 bg-[var(--color-primary-600)] hover:bg-[var(--color-primary-700)] rounded-md text-white font-bold text-sm shadow-lg transition-all">Download PDF Report</a>
+        </div>
     </div>
 
     <!-- Summary Cards -->
@@ -125,7 +128,7 @@
     </div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/chart.js/dist/chart.umd.js"></script>
+<script src="{{ url_for('static', path='vendor/chart.js') }}"></script>
 <script>
     function downloadURI(uri, name) {
         const link = document.createElement("a");

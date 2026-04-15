@@ -24,18 +24,39 @@
             </div>
         </div>
         
-        <div id="ai-config-console" class="hidden mt-6 bg-black/60 border border-white/5 rounded-xl p-4 font-mono text-[10px] text-purple-300 space-y-1 h-32 overflow-y-auto custom-scrollbar">
+        <div id="ai-config-progress-container" class="hidden mt-6">
+            <div class="flex justify-between text-[10px] font-black text-purple-400 uppercase tracking-widest mb-1">
+                <span id="ai-progress-label">Syncing Cluster Intelligence...</span>
+                <span id="ai-progress-percent">0%</span>
+            </div>
+            <div class="h-1.5 w-full bg-black/40 rounded-full border border-white/5 overflow-hidden">
+                <div id="ai-progress-bar" class="h-full bg-purple-600 transition-all duration-500 shadow-[0_0_10px_rgba(168,85,247,0.5)]" style="width: 0%"></div>
+            </div>
+        </div>
+        
+        <div id="ai-config-console" class="hidden mt-4 bg-black/60 border border-white/5 rounded-xl p-4 font-mono text-[10px] text-purple-300 space-y-1 h-32 overflow-y-auto custom-scrollbar">
             <div class="text-gray-600 italic">Waiting for architect...</div>
         </div>
     </div>
 
     <div class="card-style">
-        <h2 class="card-header text-2xl font-bold mb-4 pb-2">About the 'auto' Model</h2>
-        <p class="text-current">
-            The Models Manager allows you to configure rules for a virtual model named <code class="inline-code">auto</code>.
-            When a user makes a request to the model "auto", the proxy will analyze their prompt and intelligently route it to the best-suited model based on the capabilities and priorities you define below.
-        </p>
-        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mt-6">
+        <div class="flex justify-between items-center">
+            <div class="flex items-center gap-4 cursor-pointer" onclick="document.getElementById('doc-body').classList.toggle('hidden'); this.querySelector('.arrow').classList.toggle('rotate-180')">
+                <h2 class="text-2xl font-bold">Auto-Routing Logic & Metadata</h2>
+                <svg class="arrow w-6 h-6 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+            </div>
+            <button onclick="window.startCustomTour(MODELS_TOUR, 'tour_models_v1', true, true)" class="flex items-center gap-2 text-[10px] font-black uppercase text-indigo-400 hover:text-white transition-colors bg-white/5 px-3 py-1 rounded-lg">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.79 4 4 0 2.21-1.79 4-4 4-1.742 0-3.223-.835-3.772-2M12 18.5v.01M12 5.5v.01"></path></svg>
+                Replay Tour
+            </button>
+        </div>
+        
+        <div id="doc-body" class="mt-4 border-t border-white/5 pt-4">
+            <p class="text-current">
+                The Models Manager defines the "Intelligence DNA" for the virtual <code class="inline-code">auto</code> model. 
+                Instead of managing server hardware here (which has moved to **Workflows**), this page focuses on tagging models so the Gateway knows how to route requests based on prompt content.
+            </p>
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mt-6">
             <div class="p-3 bg-white/5 rounded border border-white/10">
                 <span class="block text-indigo-400 font-bold text-xs uppercase mb-1">👁️ Supports Images</span>
                 <p class="text-[11px] text-gray-400 leading-relaxed">Required for vision tasks. If a user attaches an image, the 'auto' router filters for these models only.</p>
@@ -60,10 +81,11 @@
                 <span class="block text-rose-400 font-bold text-xs uppercase mb-1">📏 Max Context</span>
                 <p class="text-[11px] text-gray-400 leading-relaxed">Token limit. The router checks if the current chat history fits before selecting the model.</p>
             </div>
+            </div>
         </div>
     </div>
 
-    <form action="{{ url_for('admin_update_model_metadata') }}" method="post" class="card-style">
+    <form id="metadata-form" action="{{ url_for('admin_update_model_metadata') }}" method="post" class="card-style">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <h2 class="card-header text-2xl font-bold mb-4 pb-2">Configure Model Capabilities</h2>
         
@@ -333,6 +355,41 @@
         }
     }
 
+    // --- Page Tour Logic ---
+    const MODELS_TOUR = [
+        {
+            target: '#metadata-tbody tr:first-child td:first-child',
+            text: "This is your <b>Hub Identity</b>. Every discovered model across your cluster is listed here uniquely."
+        },
+        {
+            target: '.capability-toggle',
+            text: "<b>Supports Images</b>: Vital for VLM routing. If a user attaches a file, the Hub only considers models with this checked."
+        },
+        {
+            target: 'input[name^="supports_thinking_"]',
+            text: "<b>Think (CoT)</b>: Enable this for Reasoning models. It prevents the Gateway from stripping the 'think' parameter."
+        },
+        {
+            target: 'input[name^="max_context_"]',
+            text: "<b>Max Context</b>: The token ceiling. The 'auto' router will bypass small models if the chat history is too long."
+        },
+        {
+            target: 'input[name^="priority_"]',
+            text: "<b>Priority</b>: Tie-breaker. If two models match the request, the one with the <b>lowest value</b> (e.g., 1 vs 10) wins."
+        },
+        {
+            target: '#btn-save-all',
+            text: "Don't forget to <b>Save All Changes</b> to update the cluster metadata."
+        }
+    ];
+
+    document.addEventListener('DOMContentLoaded', () => {
+        // Trigger page-specific tour passing the independent setting flag
+        if (window.startCustomTour) {
+            window.startCustomTour(MODELS_TOUR, 'tour_models_v1', {{ settings.tour_models | tojson }});
+        }
+    });
+
     window.runAIConfig = async () => {
         const btn = document.getElementById('ai-config-btn');
         const console = document.getElementById('ai-config-console');
@@ -369,15 +426,33 @@
         }
     };
 
-    // SSE Listener for Config Trace
+    // SSE Listener for Config Trace & Progress
     const configSource = new EventSource("{{ url_for('sse_events') }}");
     configSource.onmessage = (e) => {
         const msg = JSON.parse(e.data);
         if(msg.id && msg.id.startsWith('sys_build_config_')) {
-            const console = document.getElementById('ai-config-console');
+            const consoleEl = document.getElementById('ai-config-console');
+            const progressContainer = document.getElementById('ai-config-progress-container');
+            const progressBar = document.getElementById('ai-progress-bar');
+            const progressPercent = document.getElementById('ai-progress-percent');
+            
+            progressContainer.classList.remove('hidden');
+            
+            // Update Progress Bar using the 'tokens' field mapped in Python
+            if (msg.tokens !== undefined) {
+                const pct = msg.tokens + '%';
+                progressBar.style.width = pct;
+                progressPercent.innerText = pct;
+            }
+
             const color = msg.type === 'error' ? 'text-red-400' : 'text-purple-300';
-            console.innerHTML += `<div class="${color} opacity-80">${msg.error || 'Analyzing node data...'}</div>`;
-            console.scrollTop = console.scrollHeight;
+            consoleEl.innerHTML += `<div class="${color} opacity-80">${msg.error || 'Analyzing node data...'}</div>`;
+            consoleEl.scrollTop = consoleEl.scrollHeight;
+
+            if (msg.type === 'completed') {
+                progressBar.style.width = '100%';
+                progressPercent.innerText = '100%';
+            }
         }
     };
 </script>

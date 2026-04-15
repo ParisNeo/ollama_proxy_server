@@ -140,6 +140,7 @@ def validate_column_definition(definition: str) -> str:
     # These are strict patterns that don't allow arbitrary SQL injection
     allowed_patterns = [
         r'^JSON(\s+DEFAULT\s+\'[^\']*\')?(\s+NOT\s+NULL)?$',  # JSON type with DEFAULT support
+        r'^TEXT(\s+DEFAULT\s+\'[^\']*\')?(\s+NOT\s+NULL)?$',  # TEXT type (Large strings/Markdown)
         r'^DATETIME(\s+DEFAULT\s+CURRENT_TIMESTAMP)?(\s+NOT\s+NULL)?$',  # DATETIME
         r'^VARCHAR(\s*\(\s*\d+\s*\))?(\s+DEFAULT\s+\'[^\']*\')?(\s+NOT\s+NULL)?$',  # VARCHAR
         r'^INTEGER(\s+DEFAULT\s+\d+)?(\s+NOT\s+NULL)?$',  # INTEGER
@@ -513,6 +514,58 @@ async def check_and_report_schema(engine: AsyncEngine) -> None:
     logger.info("=" * 60)
 
 
+async def fix_server_url_uniqueness(engine: AsyncEngine) -> bool:
+    """
+    Relaxes the UNIQUE constraint on the 'url' column in SQLite.
+    Since SQLite doesn't support 'DROP CONSTRAINT', we must rebuild the table.
+    """
+    async with engine.begin() as conn:
+        # 1. Check if the constraint exists by attempting to find a unique index on 'url'
+        # or checking the table creation SQL.
+        res = await conn.execute(text("SELECT sql FROM sqlite_master WHERE name='ollama_servers'"))
+        row = res.fetchone()
+        if not row or "UNIQUE" not in row[0].upper() or "URL" not in row[0].upper():
+            return False # Already migrated or never had it
+
+        logger.info("Migrating 'ollama_servers' to allow non-unique URLs (Multi-Account Support)...")
+        
+        # 2. Rebuild the table
+        # Create temp table without UNIQUE constraint on url
+        await conn.execute(text("""
+            CREATE TABLE ollama_servers_dg_tmp (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name VARCHAR NOT NULL,
+                url VARCHAR NOT NULL,
+                server_type VARCHAR DEFAULT 'ollama' NOT NULL,
+                encrypted_api_key VARCHAR,
+                is_active BOOLEAN DEFAULT 1,
+                max_parallel_queries INTEGER DEFAULT 1 NOT NULL,
+                available_models JSON,
+                allowed_models JSON,
+                models_last_updated DATETIME,
+                last_error VARCHAR,
+                created_at DATETIME
+            )
+        """))
+
+        # Copy data
+        await conn.execute(text("""
+            INSERT INTO ollama_servers_dg_tmp 
+            SELECT id, name, url, server_type, encrypted_api_key, is_active, 
+                   max_parallel_queries, available_models, allowed_models, 
+                   models_last_updated, last_error, created_at 
+            FROM ollama_servers
+        """))
+
+        # Swap tables
+        await conn.execute(text("DROP TABLE ollama_servers"))
+        await conn.execute(text("ALTER TABLE ollama_servers_dg_tmp RENAME TO ollama_servers"))
+        
+        # Re-create index for performance (non-unique)
+        await conn.execute(text("CREATE INDEX ix_ollama_servers_url ON ollama_servers (url)"))
+        
+        return True
+
 async def run_all_migrations(engine: AsyncEngine) -> None:
     """
     Run all database migrations with a stylized ASCIIColors panel using Rich tags.
@@ -522,6 +575,10 @@ async def run_all_migrations(engine: AsyncEngine) -> None:
     try:
         # First, handle legacy column renames/drops for model_pools
         await fix_model_pools_legacy_schema(engine)
+        
+        # Handle server URL uniqueness relaxation
+        if await fix_server_url_uniqueness(engine):
+            report.append(" [green]FIXED[/green] Relaxed Server URL uniqueness for Multi-Account support.")
         
         table_schemas = {
             "ollama_servers": {
@@ -632,6 +689,27 @@ async def run_all_migrations(engine: AsyncEngine) -> None:
                 "system_instruction": "TEXT NOT NULL",
                 "importance_decay": "INTEGER DEFAULT 2",
                 "is_active": "BOOLEAN DEFAULT 1 NOT NULL",
+                "created_at": "DATETIME",
+            },
+            "dream_logs": {
+                "memory_system": "VARCHAR NOT NULL",
+                "user_identifier": "VARCHAR NOT NULL",
+                "summary": "VARCHAR NOT NULL",
+                "created_at": "DATETIME",
+            },
+            "benchmark_datasets": {
+                "name": "VARCHAR NOT NULL",
+                "description": "VARCHAR",
+                "content": "JSON NOT NULL",
+                "dataset_card": "TEXT",
+                "created_at": "DATETIME",
+            },
+            "benchmark_runs": {
+                "dataset_id": "INTEGER NOT NULL",
+                "name": "VARCHAR NOT NULL",
+                "models": "JSON NOT NULL",
+                "evaluator_config": "JSON NOT NULL",
+                "results": "JSON NOT NULL",
                 "created_at": "DATETIME",
             }
         }

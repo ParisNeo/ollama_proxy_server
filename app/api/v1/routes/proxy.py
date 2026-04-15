@@ -32,9 +32,37 @@ from ascii_colors import trace_exception
 logger = logging.getLogger(__name__)
 router = APIRouter(dependencies=[Depends(ip_filter), Depends(rate_limiter)])
 
-# --- Connection Pool Cache ---
+# --- Connection Pool Cache & Penalization ---
 _server_health_cache: Dict[int, Dict[str, Any]] = {}
 _health_cache_ttl_seconds = 5
+
+# Penalization storage: server_id -> timestamp until penalty ends
+_server_penalties: Dict[int, float] = {}
+
+# Constants for cooldown durations (in seconds)
+PENALTY_RATE_LIMIT = 300  # 5 minutes for 429 errors
+PENALTY_OVERLOADED = 60   # 1 minute for 503 errors
+PENALTY_GENERAL_ERR = 30  # 30 seconds for 500/502 errors
+
+
+def _is_server_penalized(server_id: int) -> bool:
+    """Checks if a server is currently in a penalty cooldown period."""
+    import time
+    penalty_expiry = _server_penalties.get(server_id, 0)
+    if penalty_expiry > time.time():
+        return True
+    return False
+
+
+def _apply_server_penalty(server_id: int, server_name: str, duration: int, reason: str):
+    """Adds a server to the penalty list with a reason log."""
+    import time
+    expiry = time.time() + duration
+    _server_penalties[server_id] = expiry
+    logger.warning(
+        f"⚠️ SERVER PENALIZED: '{server_name}' [ID:{server_id}] is now in cooldown for {duration}s. "
+        f"Reason: {reason}. Proxy will avoid this node until {datetime.datetime.fromtimestamp(expiry).strftime('%H:%M:%S')}."
+    )
 
 
 def _is_server_healthy_cached(server_id: int) -> bool:
@@ -197,6 +225,15 @@ async def _send_backend_request(
             error_body = await backend_response.aread()
             error_text = error_body.decode('utf-8', errors='replace')
             
+            # --- SELF-HEALING: RESYNC ON 404 GHOST MODELS ---
+            if backend_response.status_code == 404 and ("not found" in error_text.lower() or "no such model" in error_text.lower()):
+                logger.warning(f"Ghost Model Detected! '{model}' not found on {server.name}. Triggering hard resync...")
+                from app.database.session import AsyncSessionLocal
+                async def _background_resync():
+                    async with AsyncSessionLocal() as db:
+                        await server_crud.fetch_and_update_models(db, server.id)
+                asyncio.create_task(_background_resync())
+
             # Log the deep details
             logger.error(f"--- BACKEND FAILURE DIAGNOSTICS ---")
             logger.error(f"Server: {server.name} ({server.url})")
@@ -382,12 +419,23 @@ async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer
 
     logger.info(f"_reverse_proxy called with {len(servers)} total server(s), filtering to active...")
     
+    # 1. Filter for active and healthy servers
     candidate_servers = [
         s for s in servers 
         if s.is_active and _is_server_healthy_cached(s.id)
     ]
     
-    logger.info(f"After filtering: {len(candidate_servers)} active server(s): {[s.name for s in candidate_servers]}")
+    # 2. Filter for non-penalized servers
+    available_servers = [s for s in candidate_servers if not _is_server_penalized(s.id)]
+    
+    # 3. FAIL-SAFE: If ALL servers are penalized, we ignore penalties to avoid a 503 block
+    if not available_servers and candidate_servers:
+        logger.info("All potential servers are penalized. Entering fail-safe mode: Attempting request anyway.")
+        available_servers = candidate_servers
+    
+    candidate_servers = available_servers
+
+    logger.info(f"After filtering penalties: {len(candidate_servers)} available node(s): {[s.name for s in candidate_servers]}")
     
     if not candidate_servers:
         candidate_servers = [s for s in servers if s.is_active]
@@ -569,6 +617,16 @@ async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer
             resp = getattr(first_error, 'response', None)
             status_code = resp.status_code if resp else None
             
+            # --- PENALIZATION LOGIC ---
+            if status_code == 429:
+                _apply_server_penalty(chosen_server.id, chosen_server.name, PENALTY_RATE_LIMIT, "Rate Limit (429) Reached")
+                if request_id:
+                    event_manager.emit(ProxyEvent("error", request_id, model, chosen_server.name, sender, error_message="Rate Limit Reached (Penalizing Node)"))
+            elif status_code == 503:
+                _apply_server_penalty(chosen_server.id, chosen_server.name, PENALTY_OVERLOADED, "Server Overloaded (503)")
+            elif status_code in (500, 502, 504):
+                _apply_server_penalty(chosen_server.id, chosen_server.name, PENALTY_GENERAL_ERR, f"Backend error ({status_code})")
+
             is_busy = status_code in (429, 503)
             is_server_error = status_code == 500
             
@@ -678,11 +736,16 @@ async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer
         f"Servers tried: {', '.join(servers_tried)}"
     )
     if request_id:
-        event_manager.emit(ProxyEvent("error", request_id, model, "none", sender))
+        event_manager.emit(ProxyEvent("error", request_id, model, "none", sender, error_message="All backends failed"))
 
+    # Raise a descriptive error instead of letting the function end and return None
     raise HTTPException(
-        status_code=status.HTTP_504_GATEWAY_TIMEOUT,
-        detail=f"All backend servers unavailable. Tried: {', '.join(servers_tried)}"
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail={
+            "error": "No reachable backends found.",
+            "tried": servers_tried,
+            "suggestion": "Check server connectivity or switch to a local model."
+        }
     )
 
 
@@ -1255,6 +1318,19 @@ async def _select_auto_model(db: AsyncSession, body: Dict[str, Any], overrides: 
     all_metadata = await model_metadata_crud.get_all_metadata(db)
     all_available_models = await server_crud.get_all_available_model_names(db)
     available_metadata = [m for m in all_metadata if m.model_name in all_available_models]
+
+    # --- ECOLOGICAL FILTERING (Green Routing) ---
+    # Detect Trivial/Simple tasks to save energy
+    simple_keywords = ["hello", "hi", "thanks", "ok", "bye", "test", "ping"]
+    is_trivial = not has_images and not is_reasoning_task and any(kw == last_user_prompt.lower().strip() for kw in simple_keywords)
+
+    if is_trivial:
+        # For trivial tasks, filter out any model larger than 14B (High energy cost)
+        # We prioritize "Fast" and "Small" models.
+        green_candidates = [m for m in available_metadata if m.is_fast_model or m.max_context < 16384]
+        if green_candidates:
+            available_metadata = green_candidates
+            logger.info("Green Routing: Trivial task detected. Filtering for low-energy models.")
 
     if not available_metadata:
         logger.warning("Auto-routing failed: No models with metadata are available on active servers.")
@@ -2725,28 +2801,33 @@ async def proxy_ollama(
             
         task = asyncio.create_task(_process_proxy_logic(request, path, api_key, db, settings, servers, body, body_bytes, model_name, req_id))
         
-        while not task.done():
-            try:
-                text = await asyncio.wait_for(stream_queue.get(), timeout=0.1)
-                yield format_chunk(text)
-            except asyncio.TimeoutError:
-                continue
-                
         try:
-            res = task.result()
-        except Exception as e:
-            trace_exception(e)
-            yield format_chunk(f'<processing type="error" title="Proxy Error">\n* {str(e)}\n</processing>\n')
-            yield (json.dumps({"model": model_name or "unknown", "done": True}) + "\n").encode()
-            return
-            
-        while not stream_queue.empty():
-            yield format_chunk(stream_queue.get_nowait())
-            
-        if isinstance(res, StreamingResponse):
-            async for chunk in res.body_iterator:
-                yield chunk
-        elif hasattr(res, 'body'):
-            yield res.body
+            while not task.done():
+                try:
+                    text = await asyncio.wait_for(stream_queue.get(), timeout=0.1)
+                    yield format_chunk(text)
+                except asyncio.TimeoutError:
+                    continue
+                    
+            try:
+                res = task.result()
+            except Exception as e:
+                trace_exception(e)
+                yield format_chunk(f'<processing type="error" title="Proxy Error">\n* {str(e)}\n</processing>\n')
+                yield (json.dumps({"model": model_name or "unknown", "done": True}) + "\n").encode()
+                return
+                
+            while not stream_queue.empty():
+                yield format_chunk(stream_queue.get_nowait())
+                
+            if isinstance(res, StreamingResponse):
+                async for chunk in res.body_iterator:
+                    yield chunk
+            elif hasattr(res, 'body'):
+                yield res.body
+        except asyncio.CancelledError:
+            # Client disconnected, cancel the processing task to prevent DB session leak
+            task.cancel()
+            raise
             
     return StreamingResponse(stream_generator(), media_type="application/x-ndjson")

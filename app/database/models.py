@@ -75,7 +75,7 @@ class OllamaServer(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, nullable=False)
-    url = Column(String, unique=True, nullable=False)
+    url = Column(String, nullable=False)
     server_type = Column(String, nullable=False, default="ollama", server_default="ollama")
     encrypted_api_key = Column(String, nullable=True)
     is_active = Column(Boolean, default=True)
@@ -89,6 +89,25 @@ class OllamaServer(Base):
     @property
     def has_api_key(self) -> bool:
         return bool(self.encrypted_api_key)
+
+class BenchmarkDataset(Base):
+    __tablename__ = "benchmark_datasets"
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, unique=True, index=True, nullable=False)
+    description = Column(String, nullable=True)
+    content = Column(JSON, nullable=False)
+    dataset_card = Column(TEXT, nullable=True) # HF format Markdown
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+class BenchmarkRun(Base):
+    __tablename__ = "benchmark_runs"
+    id = Column(Integer, primary_key=True, index=True)
+    dataset_id = Column(Integer, ForeignKey("benchmark_datasets.id"), nullable=False)
+    name = Column(String, nullable=False)
+    models = Column(JSON, nullable=False)
+    evaluator_config = Column(JSON, nullable=False)
+    results = Column(JSON, nullable=False)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
 class AppSettings(Base):
     __tablename__ = "app_settings"
@@ -251,6 +270,14 @@ class BotConfig(Base):
     history_limit_unit = Column(String, default="messages") # 'messages' or 'tokens'
     # Extra config like specific channel IDs or server IDs
     extra_settings = Column(JSON, nullable=True) 
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+class DreamLog(Base):
+    __tablename__ = "dream_logs"
+    id = Column(Integer, primary_key=True, index=True)
+    memory_system = Column(String, index=True, nullable=False)
+    user_identifier = Column(String, index=True, nullable=False)
+    summary = Column(String, nullable=False)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
 class MemorySystem(Base):

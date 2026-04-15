@@ -6,11 +6,11 @@
     <title>{% block title %}LoLLMs Hub Admin{% endblock %}</title>
     <link rel="icon" href="{{ url_for('static', path='favicon.svg') }}" type="image/svg+xml">
     <link rel="shortcut icon" href="{{ url_for('static', path='favicon.svg') }}" type="image/svg+xml">
-    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="{{ url_for('static', path='vendor/tailwindcss.js') }}"></script>
     <script src="{{ url_for('static', path='vendor/chart.js') }}"></script>
     <script src="{{ url_for('static', path='vendor/marked.min.js') }}"></script>
-    <script src="https://cdn.jsdelivr.net/npm/js-yaml@4.1.0/dist/js-yaml.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+    <script src="{{ url_for('static', path='vendor/js-yaml.min.js') }}"></script>
+    <script src="{{ url_for('static', path='vendor/mermaid.min.js') }}"></script>
     <link rel="stylesheet" href="{{ url_for('static', path='css/styles.css') }}">
     
     <link rel="stylesheet" href="{{ url_for('static', path='vendor/highlight-dark.min.css') }}">
@@ -98,6 +98,10 @@
                         <svg class="w-6 h-6 mr-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"></path></svg>
                         Data Stores (RAG)
                     </a>
+                    <a href="{{ url_for('admin_memory_systems') }}" class="flex items-center px-4 py-3 whitespace-nowrap {% if 'memory-systems' in request.url.path %}active{% endif %}">
+                        <svg class="w-6 h-6 mr-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path></svg>
+                        Memory Cores
+                    </a>
                     <a href="{{ url_for('admin_skills') }}" class="flex items-center px-4 py-3 whitespace-nowrap {% if 'skills' in request.url.path %}active{% endif %}">
                         <svg class="w-6 h-6 mr-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"></path></svg>
                         Skills Library
@@ -120,6 +124,10 @@
                     <a id="nav-embedding" href="{{ url_for('admin_embedding_playground') }}" class="flex items-center px-4 py-3 whitespace-nowrap {% if 'embedding-playground' in request.url.path %}active{% endif %}">
                         <svg class="w-6 h-6 mr-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 14v6m-3-3h6M3 10h2a2 2 0 012 2v2a2 2 0 01-2 2H3v-6zm0 6h2a2 2 0 002-2v-2a2 2 0 00-2-2H3v6zm6 0h2a2 2 0 002-2v-2a2 2 0 00-2-2H9v6z"></path></svg>
                         Embedding Benchmark
+                    </a>
+                    <a id="nav-evaluations" href="{{ url_for('admin_evaluations') }}" class="flex items-center px-4 py-3 whitespace-nowrap {% if 'evaluations' in request.url.path %}active{% endif %}">
+                        <svg class="w-6 h-6 mr-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012-2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path></svg>
+                        Capabilities Evaluation
                     </a>
 
                     <!-- GROUP: MONITORING -->
@@ -475,8 +483,9 @@
                     const data = await resp.json();
                     
                     if (resp.ok && Array.isArray(data) && data.length > 0) {
-                        window.activeImporterCallback(data[0].title, data[0].content);
                         document.getElementById('modal-close-btn').click();
+                        // Delay callback slightly to allow DOM cleanup
+                        setTimeout(() => window.activeImporterCallback(data[0].title, data[0].content), 50);
                     } else {
                         const errorMsg = data.error || data.detail || "No transcript found for this video/language.";
                         alert("YouTube Error: " + errorMsg);
@@ -492,12 +501,30 @@
 
             // --- Case B: Direct URL Scrape ---
             if (activeTab === 'url') {
-                return window.executeUrlImport(); // Existing logic handles this
+                const url = document.getElementById('imp-url-val').value;
+                const depth = document.getElementById('imp-url-depth').value;
+                if(!url) return alert("Enter URL");
+                
+                finalBtn.disabled = true; finalBtn.innerText = "SCRAPING...";
+
+                try {
+                    const formData = new FormData();
+                    formData.append("url", url);
+                    formData.append("depth", depth);
+                    const resp = await fetch("/admin/api/importer/scrape", { method: 'POST', body: formData });
+                    const data = await resp.json();
+                    document.getElementById('modal-close-btn').click();
+                    setTimeout(() => window.activeImporterCallback(data.title || url, data.content), 50);
+                } catch(e) { alert(e.message); }
+                finally { finalBtn.disabled = false; finalBtn.innerText = "Import Web Page"; }
+                return;
             }
 
             // --- Case C: Search Selection (ArXiv, Wiki, Google) ---
             const selectedIndices = Array.from(window.importSelection);
             if (selectedIndices.length === 0) return alert("Please search and select items first");
+
+            document.getElementById('modal-close-btn').click();
 
             for (const idx of selectedIndices) {
                 const item = window.lastImporterResults[idx];
@@ -518,7 +545,6 @@
                     window.activeImporterCallback(item.title, item.content);
                 }
             }
-            document.getElementById('modal-close-btn').click();
         };
 
         window.switchImporterTab = (tab) => {
@@ -899,6 +925,39 @@
                 }
             }
 
+            window.startCustomTour = (steps, storageKey, tourSettingEnabled = true, force = false) => {
+                // 1. Check Global & Page Toggles
+                {% if not settings.enable_tours %} return; {% endif %}
+                if (!tourSettingEnabled && !force) return;
+
+                // 2. Check LocalStorage (Only block if not forced)
+                if (localStorage.getItem(storageKey) && !force) {
+                    console.log(`Tour ${storageKey} already seen. Use force=true to replay.`);
+                    return;
+                }
+
+                console.log(`Starting Tour: ${storageKey}`);
+                
+                // 3. Setup Wizard Session
+                WIZARD_STEPS.length = 0; // Clear array safely
+                steps.forEach(s => WIZARD_STEPS.push(s));
+                
+                const originalEnd = endWizard;
+                endWizard = function() {
+                    overlay.classList.add('hidden');
+                    bubble.classList.add('hidden');
+                    document.querySelectorAll('.wizard-highlight-zone').forEach(el => {
+                        el.classList.remove('wizard-highlight-zone', 'z-[210]', 'relative', 'bg-indigo-500/10');
+                    });
+                    localStorage.setItem(storageKey, 'true');
+                    // Restore original end logic
+                    endWizard = originalEnd;
+                };
+
+                currentStep = 0;
+                showStep(0);
+            };
+
             function endWizard() {
                 overlay.classList.add('hidden');
                 bubble.classList.add('hidden');
@@ -917,10 +976,12 @@
             prevBtn.onclick = () => { currentStep--; showStep(currentStep); };
             skipBtn.onclick = endWizard;
 
-            // Trigger automatically for new users or manual restart from settings
+            // Global Onboarding steps for first-time use
+            const ONBOARDING_TOUR = [...WIZARD_STEPS];
+            
             const urlParams = new URLSearchParams(window.location.search);
-            if (!localStorage.getItem('hub_wizard_complete') || urlParams.get('start_tour') === 'true') {
-                setTimeout(() => showStep(0), 1000);
+            if (urlParams.get('start_tour') === 'true') {
+                window.startCustomTour(ONBOARDING_TOUR, 'hub_wizard_complete', true, true);
             }
 
             // Event listener for data-modal triggers

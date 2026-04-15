@@ -101,7 +101,7 @@
                                 <a href="{{ url_for('admin_manage_server_models', server_id=server.id) }}" class="text-[var(--color-primary-500)] hover:text-[var(--color-primary-700)]">Manage Models</a>
                                 <form action="{{ url_for('admin_refresh_models', server_id=server.id) }}" method="post" class="inline">
                                     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                                    <button type="submit" class="text-blue-400 hover:text-blue-600">Refresh</button>
+                                    <button type="submit" class="text-blue-400 hover:text-blue-600" title="Purge stale models and rescan server catalog.">Refresh</button>
                                 </form>
                                 <form action="{{ url_for('admin_delete_server', server_id=server.id) }}" method="post" onsubmit="return confirm('Are you sure you want to delete this server?');" class="inline">
                                     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">

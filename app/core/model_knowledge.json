@@ -16,7 +16,8 @@
       "context_length": 128000,
       "capabilities": ["general", "coding", "multimodal"],
       "supports_thinking": false,
-      "is_moe": true
+      "is_moe": true,
+      "energy_class": "B"
     },
     {
       "name": "llama-3.3-70b",

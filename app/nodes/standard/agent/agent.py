@@ -21,10 +21,11 @@ class AgentReasonerNode(BaseNode):
         max_turns = int(props.get("max_turns", 10))
         
         # --- UNIVERSAL COGNITIVE MEMORY INJECTION ---
-        if props.get("enable_memory"):
+        memory_system = props.get("memory_system", "none")
+        if memory_system and memory_system != "none":
             # Identify user by the 'sender' field passed through the engine
             user_id = engine.sender or "anonymous"
-            memory_context = await CognitiveMemoryManager.get_memory_context(engine.db, user_id, engine.name)
+            memory_context = await CognitiveMemoryManager.get_memory_context(engine.db, user_id, memory_system)
             
             # Inject memory context into the system prompt or as a high-priority user message
             if scratchpad and scratchpad[0].get("role") == "system":
@@ -76,9 +77,9 @@ class AgentReasonerNode(BaseNode):
                 content = ai_msg.get("content", "")
                 
                 # --- PROCESS MEMORY TAGS ---
-                if props.get("enable_memory"):
+                if memory_system and memory_system != "none":
                     # Extract tags, save to DB, and return clean text to user
-                    content = await CognitiveMemoryManager.process_tags(engine.db, engine.sender, engine.name, content)
+                    content = await CognitiveMemoryManager.process_tags(engine.db, engine.sender, memory_system, content)
                 
                 return content if output_slot_idx == 0 else scratchpad
         return "Agent finished."

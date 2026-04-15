@@ -259,24 +259,27 @@ async def _ingest_document_logic(request, db, ds, file_path, use_ai, admin_user)
             except Exception as e:
                 logger.error(f"Failed to generate metadata for {fname}: {e}")
 
-    # Initialize store
-    s = SafeStore(
-        db_path=ds.db_path,
-        vectorizer_name=v_key,
-        vectorizer_config=ds.vectorizer_config or {},
-        chunking_strategy=ds.chunking_strategy,
-        chunk_size=ds.chunk_size,
-        chunk_overlap=ds.chunk_overlap
-    )
-    
-    with s:
-        if ai_prefix:
-            # Prepend context to the text so every chunk inherits it
-            with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
-                full_text = ai_prefix + f.read()
-            s.add_document_from_text(full_text, fname, force_reindex=True)
-        else:
-            s.add_document(file_path, force_reindex=True)
+    def _sync_store_op():
+        # Initialize store
+        s = SafeStore(
+            db_path=ds.db_path,
+            vectorizer_name=v_key,
+            vectorizer_config=ds.vectorizer_config or {},
+            chunking_strategy=ds.chunking_strategy,
+            chunk_size=ds.chunk_size,
+            chunk_overlap=ds.chunk_overlap
+        )
+        
+        with s:
+            if ai_prefix:
+                # Prepend context to the text so every chunk inherits it
+                with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                    full_text = ai_prefix + f.read()
+                s.add_document_from_text(full_text, fname, force_reindex=True)
+            else:
+                s.add_document(file_path, force_reindex=True)
+                
+    await run_in_threadpool(_sync_store_op)
             
     event_manager.emit(ProxyEvent("completed", task_id, "Datastore", "Local", admin_user.username, error_message=f"Finished indexing: {fname}"))
 
@@ -335,9 +338,17 @@ async def admin_add_folder_datastore(
                 if any(f.lower().endswith(ext) for ext in ext_list):
                     files_to_process.append(os.path.join(root, f))
         
-        for f_path in files_to_process:
-            # We must use run_in_threadpool because the ingest logic is sync-heavy
-            await run_in_threadpool(lambda: asyncio.run(_ingest_document_logic(request, db, ds, f_path, use_ai_metadata, admin_user)))
+        # We need a fresh DB session for the background task to avoid Connection leaks
+        from app.database.session import AsyncSessionLocal
+        
+        async with AsyncSessionLocal() as background_db:
+            # Re-fetch the datastore in the new session to prevent detached instance errors
+            background_ds = await background_db.get(DataStore, ds_id)
+            if not background_ds: return
+            
+            for f_path in files_to_process:
+                # _ingest_document_logic is already async and handles its own threadpooling internally now
+                await _ingest_document_logic(request, background_db, background_ds, f_path, use_ai_metadata, admin_user)
 
     # Start background task wrapper
     asyncio.create_task(_folder_task())

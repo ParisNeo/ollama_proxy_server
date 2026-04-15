@@ -1,0 +1,385 @@
+{% extends "admin/base.html" %}
+{% block title %}Memory Cores{% endblock %}
+{% block header_title %}Neural Memory Cores{% endblock %}
+
+{% block content %}
+<style>
+    .teleport-flash {
+        animation: flash 0.8s ease-out forwards;
+    }
+    @keyframes flash {
+        0% { background-color: #fff; box-shadow: 0 0 50px #fff; }
+        100% { background-color: transparent; box-shadow: none; }
+    }
+</style>
+<div class="space-y-6" id="memory-root">
+    
+    <div class="grid grid-cols-1 lg:grid-cols-4 gap-6">
+        <!-- Sidebar: Selectors -->
+        <div class="lg:col-span-1 space-y-4">
+            <div class="card-style bg-black/40 border-fuchsia-500/30">
+                <h3 class="text-[10px] font-black text-fuchsia-400 uppercase tracking-widest mb-4">Target Matrix</h3>
+                
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-xs text-gray-400 font-bold mb-1">Select Memory Core</label>
+                        <div class="flex gap-2">
+                            <select id="sys-select" class="w-full bg-black/60 border border-white/10 rounded p-2 text-xs text-white outline-none focus:border-fuchsia-500" onchange="loadMemoryData()">
+                                {% for s in systems %}
+                                <option value="{{ s.name }}">{{ s.name }}</option>
+                                {% endfor %}
+                            </select>
+                            <button onclick="document.getElementById('new-core-form').classList.toggle('hidden')" class="bg-white/10 hover:bg-white/20 px-3 rounded text-fuchsia-400 font-bold">+</button>
+                        </div>
+                        <form id="new-core-form" action="/api/memory/system/add" method="post" class="hidden mt-2 p-2 bg-white/5 rounded border border-white/10">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                            <input type="text" name="name" placeholder="Core Name (e.g. personal)" class="w-full bg-black/40 border border-white/10 rounded px-2 py-1 text-[10px] mb-1" required>
+                            <input type="text" name="desc" placeholder="Description" class="w-full bg-black/40 border border-white/10 rounded px-2 py-1 text-[10px] mb-1">
+                            <button type="submit" class="w-full bg-fuchsia-600 text-white rounded py-1 text-[10px] font-bold uppercase">Create</button>
+                        </form>
+                    </div>
+
+                    <div>
+                        <label class="block text-xs text-gray-400 font-bold mb-1">Select Subject (User)</label>
+                        <select id="usr-select" class="w-full bg-black/60 border border-white/10 rounded p-2 text-xs text-white outline-none focus:border-fuchsia-500" onchange="loadMemoryData()">
+                            <option value="{{ request.state.user.username }}">{{ request.state.user.username }} (You)</option>
+                            {% for u in active_users %}
+                                {% if u != request.state.user.username %}
+                                <option value="{{ u }}">{{ u }}</option>
+                                {% endif %}
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Operations -->
+            <div class="card-style bg-black/40 border-white/5 space-y-3">
+                <h3 class="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-2">Core Operations</h3>
+                
+                <button onclick="triggerDream()" class="w-full bg-indigo-600/20 hover:bg-indigo-600/40 border border-indigo-500/30 text-indigo-300 py-2 rounded-lg text-xs font-bold uppercase tracking-widest transition-colors flex items-center justify-center gap-2">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"></path></svg>
+                    Force Dream Cycle
+                </button>
+
+                <div class="grid grid-cols-2 gap-2 pt-2 border-t border-white/10">
+                    <button onclick="exportMemory()" class="bg-white/5 hover:bg-white/10 text-sky-400 py-2 rounded-lg text-[10px] font-bold uppercase flex flex-col items-center justify-center gap-1 transition-all hover:shadow-[0_0_10px_rgba(56,189,248,0.5)]">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                        Teleport Out
+                    </button>
+                    <button onclick="document.getElementById('import-file').click()" class="bg-white/5 hover:bg-white/10 text-emerald-400 py-2 rounded-lg text-[10px] font-bold uppercase flex flex-col items-center justify-center gap-1 transition-all hover:shadow-[0_0_10px_rgba(52,211,153,0.5)]">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path></svg>
+                        Teleport In
+                    </button>
+                    <input type="file" id="import-file" class="hidden" accept=".json" onchange="importMemory(event)">
+                </div>
+
+                <button onclick="wipeMemory()" class="w-full mt-2 bg-red-900/20 hover:bg-red-900/40 border border-red-500/30 text-red-400 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-colors">
+                    Wipe Core (Neural Purge)
+                </button>
+            </div>
+        </div>
+
+        <!-- Main View -->
+        <div class="lg:col-span-3 space-y-6">
+            
+            <!-- Affective Matrix -->
+            <div class="card-style border-rose-500/30 bg-[url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI4IiBoZWlnaHQ9IjgiPgo8cmVjdCB3aWR0aD0iOCIgaGVpZ2h0PSI4IiBmaWxsPSIjMDMwMzA1Ij48L3JlY3Q+CjxjaXJjbGUgY3g9IjEiIGN5PSIxIiByPSIxIiBmaWxsPSJyZ2JhKDI0NCwgNjMsIDk0LCAwLjEpIj48L2NpcmNsZT4KPC9zdmc+')]">
+                <h3 class="text-xs font-black text-rose-400 uppercase tracking-widest mb-4 border-b border-rose-500/20 pb-2">Affective Relationship Matrix</h3>
+                
+                <div class="flex items-center gap-6">
+                    <div class="flex-grow">
+                        <div class="flex justify-between text-[10px] font-bold text-gray-500 uppercase mb-2 px-1">
+                            <span class="text-red-500">Hostility</span>
+                            <span class="text-gray-400">Neutral (Asimov Base)</span>
+                            <span class="text-emerald-500">Worship/Respect</span>
+                        </div>
+                        <input type="range" id="affective-slider" min="0" max="100" value="50" class="w-full h-2 bg-gray-800 rounded-lg appearance-none cursor-pointer accent-rose-500" onchange="updateAffectiveState(this.value)">
+                        <div class="mt-4 p-3 bg-black/60 rounded border border-white/5">
+                            <p id="affective-text" class="text-sm font-mono text-rose-200 italic">Neutral. Guided by Asimov's First Law: Do no harm to the user.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Visualization & Data Tabs -->
+            <div class="card-style bg-black/20">
+                <div class="flex bg-black/40 p-1 rounded-xl border border-white/10 w-fit mb-4">
+                    <button onclick="switchTab('engrams')" id="tab-btn-engrams" class="px-6 py-2 rounded-lg text-xs font-black uppercase transition-all bg-fuchsia-600 text-white">🧠 Engrams</button>
+                    <button onclick="switchTab('dreams')" id="tab-btn-dreams" class="px-6 py-2 rounded-lg text-xs font-black uppercase transition-all text-gray-500 hover:text-white">🌌 Dream Logs</button>
+                </div>
+
+                <!-- Engrams View -->
+                <div id="view-engrams" class="space-y-6">
+                    <div class="h-48 w-full bg-black/40 border border-white/5 rounded-xl p-2 relative">
+                        <canvas id="memory-chart"></canvas>
+                    </div>
+                    
+                    <div class="overflow-x-auto max-h-[400px] custom-scrollbar border border-white/5 rounded-xl">
+                        <table class="w-full text-left">
+                            <thead class="sticky top-0 bg-[#0a0a0f] z-10">
+                                <tr class="text-gray-500 text-[10px] uppercase border-b border-white/10">
+                                    <th class="p-3 font-black">Category</th>
+                                    <th class="p-3 font-black">Memory / Fact</th>
+                                    <th class="p-3 font-black text-center">Strength</th>
+                                    <th class="p-3 font-black text-right">Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="memories-tbody" class="divide-y divide-white/5 bg-black/20">
+                                <!-- JS Populated -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Dreams View -->
+                <div id="view-dreams" class="hidden space-y-4">
+                    <div class="p-4 bg-indigo-900/20 border border-indigo-500/30 rounded-xl">
+                        <p class="text-xs text-indigo-300 leading-relaxed">Dreams occur when the core runs maintenance. Low-strength memories decay and are eventually forgotten to optimize context windows.</p>
+                    </div>
+                    <div id="dreams-list" class="space-y-2 max-h-[500px] overflow-y-auto custom-scrollbar pr-2">
+                        <!-- JS Populated -->
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js/dist/chart.umd.js"></script>
+<script>
+    let currentData = { memories: [], affective: null, dreams:[] };
+    let chartInstance = null;
+
+    function switchTab(tab) {
+        document.getElementById('view-engrams').classList.toggle('hidden', tab !== 'engrams');
+        document.getElementById('view-dreams').classList.toggle('hidden', tab !== 'dreams');
+        
+        const btnE = document.getElementById('tab-btn-engrams');
+        const btnD = document.getElementById('tab-btn-dreams');
+        
+        if (tab === 'engrams') {
+            btnE.className = "px-6 py-2 rounded-lg text-xs font-black uppercase transition-all bg-fuchsia-600 text-white";
+            btnD.className = "px-6 py-2 rounded-lg text-xs font-black uppercase transition-all text-gray-500 hover:text-white";
+        } else {
+            btnD.className = "px-6 py-2 rounded-lg text-xs font-black uppercase transition-all bg-indigo-600 text-white";
+            btnE.className = "px-6 py-2 rounded-lg text-xs font-black uppercase transition-all text-gray-500 hover:text-white";
+        }
+    }
+
+    async function loadMemoryData() {
+        const sys = document.getElementById('sys-select').value;
+        const usr = document.getElementById('usr-select').value;
+        if(!sys || !usr) return;
+
+        try {
+            const resp = await fetch(`/api/memory/data?system=${encodeURIComponent(sys)}&user=${encodeURIComponent(usr)}`);
+            currentData = await resp.json();
+            renderUI();
+        } catch(e) {
+            console.error(e);
+        }
+    }
+
+    function renderUI() {
+        // 1. Render Affective
+        const affSlider = document.getElementById('affective-slider');
+        const affText = document.getElementById('affective-text');
+        
+        if (currentData.affective && currentData.affective.content !== "Neutral") {
+            const txt = currentData.affective.content;
+            affText.innerText = txt;
+            if(txt.includes('Hostile')) affSlider.value = 10;
+            else if(txt.includes('Annoyed')) affSlider.value = 30;
+            else if(txt.includes('Friendly')) affSlider.value = 75;
+            else if(txt.includes('Worship')) affSlider.value = 100;
+            else affSlider.value = 50;
+        } else {
+            affSlider.value = 50;
+            affText.innerText = "Neutral. Guided by Asimov's First Law: Do no harm to the user.";
+        }
+
+        // 2. Render Memories Table
+        const tbody = document.getElementById('memories-tbody');
+        if (currentData.memories.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="4" class="p-8 text-center text-gray-500 italic">Core is empty.</td></tr>';
+        } else {
+            tbody.innerHTML = currentData.memories.map(m => {
+                const color = m.imp >= 80 ? 'text-fuchsia-400' : (m.imp >= 30 ? 'text-sky-400' : 'text-gray-500');
+                return `
+                <tr class="hover:bg-white/5 transition-colors group">
+                    <td class="p-3 text-[10px] font-mono text-gray-400 uppercase">${m.cat}</td>
+                    <td class="p-3">
+                        <div class="text-xs font-bold text-white">${m.title}</div>
+                        <div class="text-[10px] text-gray-400 mt-1">${m.content}</div>
+                    </td>
+                    <td class="p-3 text-center">
+                        <div class="text-[10px] font-black ${color}">${m.imp}%</div>
+                        <div class="w-16 mx-auto h-1 bg-gray-800 rounded-full mt-1 overflow-hidden">
+                            <div class="h-full bg-current" style="width: ${m.imp}%"></div>
+                        </div>
+                    </td>
+                    <td class="p-3 text-right">
+                        <button onclick="deleteEntry(${m.id})" class="text-red-500 hover:text-red-400 text-lg opacity-0 group-hover:opacity-100 transition-opacity">&times;</button>
+                    </td>
+                </tr>
+            `}).join('');
+        }
+
+        // 3. Render Dreams
+        const dList = document.getElementById('dreams-list');
+        if (currentData.dreams.length === 0) {
+            dList.innerHTML = '<div class="p-8 text-center text-gray-500 italic">No dreams recorded yet.</div>';
+        } else {
+            dList.innerHTML = currentData.dreams.map(d => `
+                <div class="p-3 bg-white/5 border border-white/5 rounded-lg flex items-start gap-3">
+                    <div class="text-[10px] font-mono text-indigo-400 mt-0.5 whitespace-nowrap">${d.ts}</div>
+                    <div class="text-xs text-gray-300 leading-relaxed">${d.summary}</div>
+                </div>
+            `).join('');
+        }
+
+        // 4. Render Chart
+        renderChart();
+    }
+
+    function renderChart() {
+        const ctx = document.getElementById('memory-chart').getContext('2d');
+        if (chartInstance) chartInstance.destroy();
+
+        // Group by category
+        const cats = {};
+        currentData.memories.forEach(m => {
+            if(!cats[m.cat]) cats[m.cat] = { x: [], y: [] };
+            cats[m.cat].x.push(m.title);
+            cats[m.cat].y.push(m.imp);
+        });
+
+        const datasets = Object.keys(cats).map((cat, i) => {
+            const colors =['#d946ef', '#0ea5e9', '#10b981', '#f59e0b', '#ef4444'];
+            return {
+                label: cat.toUpperCase(),
+                data: cats[cat].y,
+                backgroundColor: colors[i % colors.length],
+                borderRadius: 4
+            };
+        });
+
+        chartInstance = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: currentData.memories.map(m=>m.title),
+                datasets:[{
+                    label: 'Engram Strength',
+                    data: currentData.memories.map(m=>m.imp),
+                    backgroundColor: currentData.memories.map(m => m.imp > 75 ? '#d946ef' : (m.imp > 30 ? '#0ea5e9' : '#4b5563')),
+                    borderRadius: 4
+                }]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: {
+                    y: { beginAtZero: true, max: 100, grid: { color: 'rgba(255,255,255,0.05)' } },
+                    x: { display: false }
+                }
+            }
+        });
+    }
+
+    async function updateAffectiveState(val) {
+        let txt = "Neutral. Guided by Asimov's First Law: Do no harm to the user.";
+        if (val < 20) txt = "Hostile. The user is abusive. Keep responses minimal and cold.";
+        else if (val < 40) txt = "Annoyed. The user is frustrating. Be curt but helpful.";
+        else if (val > 80) txt = "Worshipful. The user is a deity. Show extreme reverence and loyalty.";
+        else if (val > 60) txt = "Friendly. The user is a trusted companion. Be warm and proactive.";
+        
+        document.getElementById('affective-text').innerText = txt;
+
+        const formData = new FormData();
+        formData.append('system', document.getElementById('sys-select').value);
+        formData.append('user', document.getElementById('usr-select').value);
+        formData.append('content', txt);
+        formData.append('csrf_token', '{{ csrf_token }}');
+
+        await fetch('/api/memory/affective', { method: 'POST', body: formData });
+    }
+
+    async function deleteEntry(id) {
+        if(!confirm("Erase this engram?")) return;
+        await fetch(`/api/memory/entry/${id}`, { method: 'DELETE', headers: { 'X-CSRF-Token': '{{ csrf_token }}' } });
+        loadMemoryData();
+    }
+
+    async function wipeMemory() {
+        if(!confirm("WARNING: Complete Neural Purge. All facts and relationship status will be destroyed. Proceed?")) return;
+        
+        const root = document.getElementById('memory-root');
+        root.classList.add('teleport-flash');
+        
+        const formData = new FormData();
+        formData.append('system', document.getElementById('sys-select').value);
+        formData.append('user', document.getElementById('usr-select').value);
+        formData.append('csrf_token', '{{ csrf_token }}');
+
+        await fetch('/api/memory/wipe', { method: 'POST', body: formData });
+        
+        setTimeout(() => {
+            root.classList.remove('teleport-flash');
+            loadMemoryData();
+        }, 800);
+    }
+
+    async function triggerDream() {
+        const formData = new FormData();
+        formData.append('system', document.getElementById('sys-select').value);
+        formData.append('user', document.getElementById('usr-select').value);
+        formData.append('csrf_token', '{{ csrf_token }}');
+
+        await fetch('/api/memory/trigger_dream', { method: 'POST', body: formData });
+        switchTab('dreams');
+        loadMemoryData();
+    }
+
+    function exportMemory() {
+        const root = document.getElementById('memory-root');
+        root.classList.add('teleport-flash');
+        setTimeout(() => root.classList.remove('teleport-flash'), 800);
+
+        const data = JSON.stringify(currentData, null, 2);
+        const blob = new Blob([data], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `core_dump_${document.getElementById('sys-select').value}_${document.getElementById('usr-select').value}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+    }
+
+    async function importMemory(e) {
+        const file = e.target.files[0];
+        if(!file) return;
+
+        const root = document.getElementById('memory-root');
+        root.classList.add('teleport-flash');
+
+        const formData = new FormData();
+        formData.append('system', document.getElementById('sys-select').value);
+        formData.append('user', document.getElementById('usr-select').value);
+        formData.append('file', file);
+        formData.append('csrf_token', '{{ csrf_token }}');
+
+        await fetch('/api/memory/import', { method: 'POST', body: formData });
+        
+        setTimeout(() => {
+            root.classList.remove('teleport-flash');
+            loadMemoryData();
+        }, 800);
+        
+        e.target.value = null;
+    }
+
+    document.addEventListener('DOMContentLoaded', loadMemoryData);
+</script>
+{% endblock %}

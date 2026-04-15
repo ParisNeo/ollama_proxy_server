@@ -365,29 +365,34 @@ async def admin_playground_stream(
                 
             task = asyncio.create_task(_process_playground_logic(request, db, admin_user, data, model_name, messages, think_option, req_id))
             
-            while not task.done():
-                try:
-                    text = await asyncio.wait_for(stream_queue.get(), timeout=0.1)
-                    yield format_chunk(text)
-                except asyncio.TimeoutError:
-                    continue
-                    
             try:
-                res = task.result()
-            except Exception as e:
-                trace_exception(e)
-                yield format_chunk(f'<processing type="error" title="Playground Error">\n* {str(e)}\n</processing>\n')
-                yield (json.dumps({"model": model_name, "done": True}) + "\n").encode()
-                return
-                
-            while not stream_queue.empty():
-                yield format_chunk(stream_queue.get_nowait())
-                
-            if isinstance(res, StreamingResponse):
-                async for chunk in res.body_iterator:
-                    yield chunk
-            elif hasattr(res, 'body'):
-                yield res.body
+                while not task.done():
+                    try:
+                        text = await asyncio.wait_for(stream_queue.get(), timeout=0.1)
+                        yield format_chunk(text)
+                    except asyncio.TimeoutError:
+                        continue
+                        
+                try:
+                    res = task.result()
+                except Exception as e:
+                    trace_exception(e)
+                    yield format_chunk(f'<processing type="error" title="Playground Error">\n* {str(e)}\n</processing>\n')
+                    yield (json.dumps({"model": model_name, "done": True}) + "\n").encode()
+                    return
+                    
+                while not stream_queue.empty():
+                    yield format_chunk(stream_queue.get_nowait())
+                    
+                if isinstance(res, StreamingResponse):
+                    async for chunk in res.body_iterator:
+                        yield chunk
+                elif hasattr(res, 'body'):
+                    yield res.body
+            except asyncio.CancelledError:
+                # If the client disconnects, cancel the background task to prevent DB session leaks
+                task.cancel()
+                raise
                 
         return StreamingResponse(stream_generator(), media_type="application/x-ndjson")
         

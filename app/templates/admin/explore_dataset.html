@@ -1,0 +1,336 @@
+{% extends "admin/base.html" %}
+{% block title %}Explore: {{ dataset.name }}{% endblock %}
+{% block header_title %}Dataset Explorer{% endblock %}
+
+{% block content %}
+<div class="space-y-8">
+    <div class="flex justify-between items-center">
+        <a href="{{ url_for('admin_evaluations') }}" class="text-indigo-400 hover:text-indigo-300 font-bold text-xs uppercase flex items-center gap-2">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg>
+            Back to Benchmarks
+        </a>
+        <div class="flex gap-4">
+             <button onclick="openPushToHF()" class="bg-amber-500 hover:bg-amber-400 text-black px-6 py-2 rounded-xl font-black text-xs uppercase tracking-widest shadow-lg transition-all flex items-center gap-2">
+                🤗 Push to Hugging Face
+            </button>
+            <button onclick="openAddItemForm({{ dataset.id }})" class="bg-white/5 hover:bg-white/10 text-indigo-400 border border-indigo-500/30 px-6 py-2 rounded-xl font-black text-xs uppercase tracking-widest transition-all">
+                Add Manual Task
+            </button>
+        </div>
+    </div>
+
+    <!-- Analytics Header -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div class="lg:col-span-1 card-style bg-indigo-600/5 border-indigo-500/20 flex flex-col justify-center">
+            <div class="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">Dataset Profile</div>
+            <h2 class="text-3xl font-black text-white uppercase tracking-tighter">{{ dataset.name }}</h2>
+            <p class="text-sm text-indigo-300 mt-1">{{ dataset.description or 'No description provided.' }}</p>
+            <div class="mt-4 pt-4 border-t border-white/5 flex gap-6">
+                <div>
+                    <div class="text-[9px] font-bold text-gray-600 uppercase">Total Items</div>
+                    <div class="text-xl font-black text-white" id="stat-total">--</div>
+                </div>
+                <div>
+                    <div class="text-[9px] font-bold text-gray-600 uppercase">Categories</div>
+                    <div class="text-xl font-black text-white" id="stat-cats">--</div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="lg:col-span-2 card-style min-h-[200px]">
+            <canvas id="categoryChart"></canvas>
+        </div>
+    </div>
+
+    <!-- HF Dataset Card Editor -->
+    <div class="card-style border-t-4 border-purple-600">
+        <div class="flex justify-between items-center mb-4">
+            <h3 class="text-sm font-black text-purple-400 uppercase tracking-widest flex items-center gap-2">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                Hugging Face Dataset Card (README.md)
+            </h3>
+            <button onclick="generateCardWithAI()" id="btn-gen-card" class="bg-purple-600/20 hover:bg-purple-600/40 text-purple-400 px-4 py-1 rounded-lg text-[10px] font-black uppercase border border-purple-500/30 transition-all">✨ Generate with AI Agent</button>
+        </div>
+        <textarea id="hf-card-editor" class="w-full h-64 bg-black/40 border border-white/10 rounded-xl p-4 font-mono text-xs text-indigo-100 outline-none focus:border-purple-500 custom-scrollbar" placeholder="HF Metadata & Documentation... (Standard Markdown)">{{ dataset.dataset_card or '' }}</textarea>
+    </div>
+
+    <!-- Item Management -->
+    <div id="items-container" class="space-y-6">
+        <!-- Rendered by JS -->
+    </div>
+</div>
+
+<script src="{{ url_for('static', path='vendor/chart.js') }}"></script>
+<script>
+    let datasetItems = {{ dataset.content | tojson | safe }};
+    const dsId = {{ dataset.id }};
+    let chart = null;
+
+    // --- UTILITY: Robust Fetch ---
+    async function apiCall(url, options = {}) {
+        if (!options.headers) options.headers = {};
+        options.headers['X-CSRF-Token'] = '{{ csrf_token }}';
+        
+        const response = await fetch(url, options);
+        const data = await response.json();
+        
+        if (!response.ok) {
+            const msg = data.error || data.detail || "Server rejected the request.";
+            alert(`Error ${response.status}: ${msg}`);
+            throw new Error(msg);
+        }
+        return data;
+    }
+
+    function renderAnalytics() {
+        const groups = {};
+        datasetItems.forEach(it => {
+            const cat = it.category || "General";
+            groups[cat] = (groups[cat] || 0) + 1;
+        });
+
+        document.getElementById('stat-total').innerText = datasetItems.length;
+        document.getElementById('stat-cats').innerText = Object.keys(groups).length;
+
+        const ctx = document.getElementById('categoryChart').getContext('2d');
+        if(chart) chart.destroy();
+        
+        chart = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: Object.keys(groups),
+                datasets: [{
+                    label: 'Items per Category',
+                    data: Object.values(groups),
+                    backgroundColor: 'rgba(99, 102, 241, 0.5)',
+                    borderColor: '#6366f1',
+                    borderWidth: 1,
+                    borderRadius: 8
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: {
+                    y: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#6b7280' } },
+                    x: { grid: { display: false }, ticks: { color: '#6b7280' } }
+                }
+            }
+        });
+    }
+
+    function renderItems() {
+        const container = document.getElementById('items-container');
+        const groups = {};
+        datasetItems.forEach((it, idx) => {
+            const cat = it.category || "General";
+            if(!groups[cat]) groups[cat] = [];
+            groups[cat].push({ ...it, idx });
+        });
+
+        let html = '';
+        Object.keys(groups).forEach(cat => {
+            html += `
+                <div class="space-y-4">
+                    <h4 class="text-[10px] font-black text-indigo-400 uppercase tracking-[0.2em] flex items-center gap-3 px-2">
+                        <span class="w-1.5 h-1.5 rounded-full bg-indigo-500 shadow-[0_0_8px_#6366f1]"></span>
+                        ${cat} (${groups[cat].length})
+                    </h4>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        ${groups[cat].map(it => `
+                            <div class="card-style bg-black/40 border border-white/5 group hover:border-indigo-500/30 transition-all relative">
+                                <div class="flex justify-between items-start mb-4">
+                                    <span class="text-[9px] font-mono text-gray-600">ID: #${it.idx}</span>
+                                    <div class="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                        <button onclick="editItem(${it.idx})" class="text-[9px] font-black text-indigo-400 uppercase hover:underline">Edit</button>
+                                        <button onclick="deleteItem(${it.idx})" class="text-[9px] font-black text-red-500 uppercase hover:underline">Delete</button>
+                                    </div>
+                                </div>
+                                <div class="space-y-3">
+                                    <div>
+                                        <div class="text-[8px] font-black text-gray-500 uppercase mb-1">PROMPT</div>
+                                        <div class="text-xs text-white leading-relaxed line-clamp-3">${it.prompt}</div>
+                                    </div>
+                                    <div class="pt-3 border-t border-white/5">
+                                        <div class="text-[8px] font-black text-emerald-500 uppercase mb-1">REFERENCE</div>
+                                        <div class="text-xs text-gray-400 italic line-clamp-3">${it.reference_answer}</div>
+                                    </div>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+        });
+        container.innerHTML = html;
+    }
+
+    // --- CRUD OPERATIONS ---
+    window.deleteItem = async (index) => {
+        if(!confirm("Remove this item from the dataset?")) return;
+        try {
+            // NOTE: Targeting the /admin prefix to avoid 401
+            await apiCall(`/admin/api/evaluations/datasets/${dsId}/items/${index}`, { method: 'DELETE' });
+            datasetItems.splice(index, 1);
+            renderAnalytics();
+            renderItems();
+        } catch(e) {}
+    };
+
+    window.editItem = (index) => {
+        const item = datasetItems[index];
+        const body = `
+            <div class="space-y-4 text-left">
+                <div>
+                    <label class="block text-[10px] font-black text-gray-500 uppercase mb-1">Category</label>
+                    <input type="text" id="edit-item-cat" value="${item.category}" class="w-full bg-black/40 border border-white/10 rounded-lg p-2 text-sm">
+                </div>
+                <div>
+                    <label class="block text-[10px] font-black text-gray-500 uppercase mb-1">Prompt</label>
+                    <textarea id="edit-item-prompt" rows="3" class="w-full bg-black/40 border border-white/10 rounded-lg p-2 text-sm">${item.prompt}</textarea>
+                </div>
+                <div>
+                    <label class="block text-[10px] font-black text-gray-500 uppercase mb-1">Answer</label>
+                    <textarea id="edit-item-answer" rows="3" class="w-full bg-black/40 border border-white/10 rounded-lg p-2 text-sm">${item.reference_answer}</textarea>
+                </div>
+                <div class="flex justify-end pt-4">
+                    <button onclick="submitEditItem(${index})" class="bg-indigo-600 px-8 py-2 rounded-xl text-xs font-black uppercase">Update Item</button>
+                </div>
+            </div>
+        `;
+        window.showModal("Edit Dataset Item", body);
+    };
+
+    window.submitEditItem = async (index) => {
+        const payload = {
+            category: document.getElementById('edit-item-cat').value,
+            prompt: document.getElementById('edit-item-prompt').value,
+            reference_answer: document.getElementById('edit-item-answer').value
+        };
+
+        try {
+            await apiCall(`/admin/api/evaluations/datasets/${dsId}/items/${index}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            datasetItems[index] = { ...datasetItems[index], ...payload };
+            document.getElementById('modal-close-btn').click();
+            renderAnalytics();
+            renderItems();
+        } catch(e) {}
+    };
+
+    window.openAddItemForm = (dsId) => {
+        const body = `
+            <div class="space-y-4 text-left">
+                <div>
+                    <label class="block text-[10px] font-black text-gray-500 uppercase mb-1">Category</label>
+                    <input type="text" id="add-item-cat" placeholder="Logic, Coding, Facts..." class="w-full bg-black/40 border border-white/10 rounded-lg p-2 text-sm">
+                </div>
+                <div>
+                    <label class="block text-[10px] font-black text-gray-500 uppercase mb-1">Task / Prompt</label>
+                    <textarea id="add-item-prompt" rows="3" class="w-full bg-black/40 border border-white/10 rounded-lg p-2 text-sm outline-none focus:border-indigo-500" placeholder="Ask a question based on your expertise..."></textarea>
+                </div>
+                <div>
+                    <label class="block text-[10px] font-black text-gray-500 uppercase mb-1">Expert Reference Answer</label>
+                    <textarea id="add-item-answer" rows="3" class="w-full bg-black/40 border border-white/10 rounded-lg p-2 text-sm outline-none focus:border-emerald-500" placeholder="Provide the ground truth answer..."></textarea>
+                </div>
+                <div class="flex justify-end pt-4 border-t border-white/5">
+                    <button onclick="submitNewItem()" class="bg-indigo-600 hover:bg-indigo-500 text-white px-8 py-2 rounded-xl font-black text-xs uppercase tracking-widest transition-all shadow-lg">Save to Dataset</button>
+                </div>
+            </div>
+        `;
+        window.showModal("Expert Curation: New Item", body);
+    };
+
+    window.submitNewItem = async () => {
+        const payload = {
+            category: document.getElementById('add-item-cat').value,
+            prompt: document.getElementById('add-item-prompt').value,
+            reference_answer: document.getElementById('add-item-answer').value
+        };
+
+        try {
+            await apiCall(`/admin/api/evaluations/datasets/${dsId}/items`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            datasetItems.push(payload);
+            document.getElementById('modal-close-btn').click();
+            renderAnalytics();
+            renderItems();
+        } catch(e) {}
+    };
+
+    // --- CLOUD OPS ---
+    window.generateCardWithAI = async () => {
+        const btn = document.getElementById('btn-gen-card');
+        const original = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerText = "AGENT ANALYZING...";
+
+        try {
+            // FIX: Added /admin prefix
+            const data = await apiCall(`/admin/api/evaluations/datasets/${dsId}/generate_card`, { method: 'POST' });
+            if(data.success) {
+                document.getElementById('hf-card-editor').value = data.card;
+            }
+        } catch(e) {}
+        finally { btn.disabled = false; btn.innerText = "Sync Complete ✓"; setTimeout(() => btn.innerHTML = original, 2000); }
+    };
+
+    window.openPushToHF = () => {
+        const body = `
+            <div class="space-y-4 text-left">
+                <div class="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl mb-4">
+                    <p class="text-[11px] text-amber-200">This will create a new dataset repository on Hugging Face or update an existing one.</p>
+                </div>
+                <div>
+                    <label class="block text-[10px] font-black text-gray-500 uppercase mb-1">Repo ID (username/dataset-name)</label>
+                    <input type="text" id="hf-repo-id" placeholder="ParisNeo/lollms-benchmark" class="w-full bg-black/40 border border-white/10 rounded-lg p-2.5 text-sm">
+                </div>
+                <div>
+                    <label class="block text-[10px] font-black text-gray-500 uppercase mb-1">HF Write Token</label>
+                    <input type="password" id="hf-token" placeholder="hf_..." class="w-full bg-black/40 border border-white/10 rounded-lg p-2.5 text-sm">
+                </div>
+                <div class="flex justify-end pt-4">
+                    <button onclick="executeHFPush()" id="btn-final-push" class="bg-amber-500 text-black px-10 py-3 rounded-xl font-black text-xs uppercase tracking-widest shadow-xl transform active:scale-95 transition-all">Start Cloud Sync</button>
+                </div>
+            </div>
+        `;
+        window.showModal("Push to Hugging Face Hub", body);
+    };
+
+    window.executeHFPush = async () => {
+        const btn = document.getElementById('btn-final-push');
+        const repoId = document.getElementById('hf-repo-id').value;
+        const token = document.getElementById('hf-token').value;
+        
+        if(!repoId || !token) return alert("Repo ID and Token are mandatory.");
+        
+        btn.disabled = true;
+        btn.innerText = "UPLOADING SHARDS...";
+
+        const formData = new FormData();
+        formData.append('repo_id', repoId);
+        formData.append('hf_token', token);
+        formData.append('csrf_token', '{{ csrf_token }}');
+
+        try {
+            // FIX: Added /admin prefix
+            const data = await apiCall(`/admin/api/evaluations/datasets/${dsId}/push_hf`, { method: 'POST', body: formData });
+            if(data.success) {
+                window.showModal("Upload Successful", `<div class="p-8 text-center"><div class="text-4xl mb-4">🚀</div><p class="text-white font-bold mb-4">Dataset published successfully!</p><a href="${data.url}" target="_blank" class="text-amber-500 underline text-sm">${data.url}</a></div>`);
+            }
+        } catch(e) { btn.disabled = false; btn.innerText = "Retry Push"; }
+    };
+
+    document.addEventListener('DOMContentLoaded', () => {
+        renderAnalytics();
+        renderItems();
+    });
+</script>
+{% endblock %}

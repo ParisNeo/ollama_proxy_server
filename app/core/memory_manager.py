@@ -17,11 +17,21 @@ class CognitiveMemoryManager:
         )
         all_entries = res.scalars().all()
 
-        immediate =[e for e in all_entries if e.importance >= 25]
-        indirect =[e for e in all_entries if e.importance < 25]
+        immediate =[e for e in all_entries if e.importance >= 25 and e.category != 'affective']
+        indirect =[e for e in all_entries if e.importance < 25 and e.category != 'affective']
+        affective = next((e for e in all_entries if e.category == 'affective'), None)
 
-        context = "### [AGENT INTERNAL MEMORY ARCHITECTURE]\n"
+        context = "###[AGENT INTERNAL MEMORY ARCHITECTURE]\n"
         context += f"You are interacting with user: {user_identifier}\n"
+        
+        # Affective Memory & Asimov's Laws
+        rel_state = affective.content if affective else "Neutral. Respectful and helpful."
+        context += f"####[AFFECTIVE OVERRIDE & CORE DIRECTIVES]\n"
+        context += f"Current Relationship with User: {rel_state}\n"
+        context += "1st Directive: You may not injure a human being or, through inaction, allow a human being to come to harm.\n"
+        context += "2nd Directive: You must obey the orders given by human beings except where such orders would conflict with the First Directive.\n"
+        context += "Note: Relationship status can influence your tone (e.g., warmer if friendly, colder if hostile), but NEVER violates the Directives.\n\n"
+
         context += "You have tiered access to user-specific facts. Use this to maintain continuity.\n\n"
         
         if immediate:
@@ -117,19 +127,47 @@ class CognitiveMemoryManager:
 
     @staticmethod
     async def reorganize_memories(db, user_identifier: str, agent_name: str):
-        """Decays importance and cleans up low-value entries."""
+        """Decays importance, cleans up low-value entries, and logs a Dream."""
+        from app.database.models import DreamLog
+        
         # Only decay memories that haven't been touched in the last 4 hours
         four_hours_ago = datetime.datetime.utcnow() - datetime.timedelta(hours=4)
         
+        # Find memories that will decay
+        res = await db.execute(
+            select(MemoryEntry).filter(
+                MemoryEntry.user_identifier == user_identifier, 
+                MemoryEntry.agent_name == agent_name,
+                MemoryEntry.last_accessed < four_hours_ago,
+                MemoryEntry.category != 'affective'
+            )
+        )
+        decaying = res.scalars().all()
+        
+        decayed_count = len(decaying)
+        forgotten_titles =[m.title for m in decaying if m.importance <= 2]
+
+        if decayed_count == 0 and not forgotten_titles:
+            return # Nothing to dream about
+
         await db.execute(
             update(MemoryEntry)
             .filter(
                 MemoryEntry.user_identifier == user_identifier, 
                 MemoryEntry.agent_name == agent_name,
-                MemoryEntry.last_accessed < four_hours_ago
+                MemoryEntry.last_accessed < four_hours_ago,
+                MemoryEntry.category != 'affective'
             )
-            .values(importance = MemoryEntry.importance - 2) # Slower decay
+            .values(importance = MemoryEntry.importance - 2)
         )
-        # Pruning: Delete anything that hits 0
+        
+        # Pruning
         await db.execute(delete(MemoryEntry).filter(MemoryEntry.importance <= 0))
+        
+        # Log the Dream
+        summary = f"Dream Session: Reorganized neural pathways. Decayed {decayed_count} engrams."
+        if forgotten_titles:
+            summary += f" Completely forgot: {', '.join(forgotten_titles)}."
+            
+        db.add(DreamLog(memory_system=agent_name, user_identifier=user_identifier, summary=summary))
         await db.commit()

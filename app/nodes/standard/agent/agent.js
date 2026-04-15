@@ -3,7 +3,7 @@ function NodeAgent() {
     this.addInput("Settings", "object");
     this.addOutput("Final Answer", "string");
     this.addOutput("Out Messages", "messages");
-    this.properties = { model: "auto", max_turns: 10 };
+    this.properties = { model: "auto", max_turns: 10, memory_system: "none" };
     
     this.mWidget = this.addWidget("combo", "Model", this.properties.model, (v) => { 
         this.properties.model = v; 
@@ -15,10 +15,10 @@ function NodeAgent() {
         if(window.pushHistoryState) window.pushHistoryState();
     }, { min: 1, max: 30 });
 
-    this.addWidget("toggle", "Enable Cognitive Memory", this.properties.enable_memory, (v) => {
-        this.properties.enable_memory = v;
+    this.msWidget = this.addWidget("combo", "Memory Core", this.properties.memory_system, (v) => {
+        this.properties.memory_system = v;
         if(window.pushHistoryState) window.pushHistoryState();
-    });
+    }, { values: ["none"].concat(window.memory_systems_list ||["default"]) });
     
     this.addWidget("button", "+ Add Tool Slot", null, () => {
         this.addInput("Tool " + (this.inputs.length - 1), "tool,mcp");
@@ -38,6 +38,12 @@ NodeAgent.title = "🧠 AUTONOMOUS AGENT";
 NodeAgent.prototype.onConfigure = function() {
     if (this.mWidget) this.mWidget.value = this.properties.model;
     if (this.tWidget) this.tWidget.value = this.properties.max_turns;
+    if (this.msWidget) this.msWidget.value = this.properties.memory_system;
     if (!this.title || this.title === "NodeAgent") this.title = "🧠 AUTONOMOUS AGENT";
+};
+NodeAgent.prototype.onAdded = function() {
+    if (this.msWidget && window.memory_systems_list) {
+        this.msWidget.options.values = ["none"].concat(window.memory_systems_list);
+    }
 };
 LiteGraph.registerNodeType("hub/agent", NodeAgent);

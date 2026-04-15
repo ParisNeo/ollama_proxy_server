@@ -98,7 +98,7 @@
     </div>
 </template>
 
-<script src="https://cdn.jsdelivr.net/npm/chart.js/dist/chart.umd.js"></script>
+<script src="{{ url_for('static', path='vendor/chart.js') }}"></script>
 <script>
 // Main script for embedding playground benchmark tool
 document.addEventListener('DOMContentLoaded', () => {

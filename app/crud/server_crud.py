@@ -83,9 +83,10 @@ async def get_servers(db: AsyncSession, skip: int = 0, limit: Optional[int] = No
 
 
 async def create_server(db: AsyncSession, server: ServerCreate) -> OllamaServer:
+    """Creates a new server. Multiple servers with same URL are allowed (e.g. different account keys)."""
     # Validate URL safety
     if not _is_safe_url(str(server.url)):
-        raise ValueError(f"URL {server.url} is not allowed for security reasons. Internal IPs and localhost are blocked.")
+        raise ValueError(f"URL {server.url} is not allowed for security reasons.")
         
     # Validate name
     if not server.name or len(server.name) > 128:

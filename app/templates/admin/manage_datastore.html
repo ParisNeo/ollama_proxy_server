@@ -5,7 +5,7 @@
 {% block content %}
 <input type="hidden" id="ds-id-hidden" value="{{ datastore.id }}">
 <!-- Vis Network for Knowledge Graph -->
-<script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+<script type="text/javascript" src="{{ url_for('static', path='vendor/vis-network.min.js') }}"></script>
 
 <div class="space-y-8">
     <div class="flex justify-between items-center">
