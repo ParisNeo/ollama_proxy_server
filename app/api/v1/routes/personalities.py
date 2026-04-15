@@ -6,9 +6,11 @@ from fastapi import APIRouter, Depends, Request, Form, File, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database.session import get_db
+from app.database.models import User
 from app.api.v1.routes.admin import require_admin_user, get_template_context, templates
 from app.core.personalities_manager import PersonalityManager
-from app.api.v1.dependencies import get_csrf_token, validate_csrf_token
+from app.schema.settings import AppSettingsModel
+from app.api.v1.dependencies import get_csrf_token, validate_csrf_token, get_settings
 from app.api.v1.routes.proxy import _resolve_target, _reverse_proxy
 from app.core import knowledge_importer as kit
 from app.core.skills_manager import SkillsManager
@@ -58,17 +60,17 @@ async def api_build_personality(
     csrf_token: str = Form(...),
     files: List[UploadFile] = File(default=[]),
     db: AsyncSession = Depends(get_db),
+    app_settings: AppSettingsModel = Depends(get_settings),
     admin_user = Depends(require_admin_user)
 ):
     """Generates a complete Lollms Personality (.md) via the Management Agent."""
     from app.core.events import event_manager, ProxyEvent
     build_id = f"sys_build_persona_{secrets.token_hex(4)}"
     
-    app_settings = request.app.state.settings
     target_agent = app_settings.admin_agent_name
     
     if not target_agent:
-        return JSONResponse({"error": "No Management Agent set in Settings."}, status_code=503)
+        return JSONResponse({"error": "No Management Agent set in Settings. Please go to Settings > Hub Orchestration and select an Agent."}, status_code=503)
 
     event_manager.emit(ProxyEvent("received", build_id, "Persona Builder", "Local", admin_user.username, error_message="Initializing Persona Architect..."))
 

@@ -9,7 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.session import get_db
 from app.database.models import User
-from app.api.v1.dependencies import validate_csrf_token
+from app.schema.settings import AppSettingsModel
+from app.api.v1.dependencies import validate_csrf_token, get_settings
 from app.api.v1.routes.admin import require_admin_user, get_template_context, templates
 from app.core.skills_manager import SkillsManager
 from app.core import knowledge_importer as kit
@@ -125,34 +126,22 @@ async def api_build_skill(
     csrf_token: str = Form(...),
     files: Optional[List[UploadFile]] = File(None),
     db: AsyncSession = Depends(get_db),
+    app_settings: AppSettingsModel = Depends(get_settings),
     admin_user: User = Depends(require_admin_user)
 ):
     """Orchestrates building a new skill using the 'build-a-skill' persona."""
-    # Validate CSRF manually for form-data
-    # DEBUG: Log incoming fields to server console
-    form_data = await request.form()
-    logger.info(f"--- DEBUG: Incoming Form Fields ---")
-    logger.info(f"Keys present: {list(form_data.keys())}")
-    for key in form_data:
-        val = form_data[key]
-        if isinstance(val, UploadFile):
-            logger.info(f"Field '{key}' is a file: {val.filename}")
-        else:
-            logger.info(f"Field '{key}' value: {val}")
-    logger.info(f"------------------------------------")
-    
     # Validate CSRF manually
     from app.api.v1.dependencies import get_csrf_token
     import secrets
     stored_token = await get_csrf_token(request)
     if not stored_token or not secrets.compare_digest(csrf_token, stored_token):
         raise HTTPException(status_code=403, detail="CSRF token mismatch")
-    app_settings = request.app.state.settings
+        
     target_agent = app_settings.admin_agent_name
     
     if not target_agent:
         return JSONResponse(
-            {"error": "No Management Agent set. Please go to Settings > Hub Orchestration and select a Management Agent."}, 
+            {"error": "No Management Agent set in Settings. Please go to Settings > Hub Orchestration and select an Agent."}, 
             status_code=503
         )
         

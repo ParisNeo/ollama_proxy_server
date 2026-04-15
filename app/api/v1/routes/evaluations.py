@@ -560,6 +560,142 @@ async def api_delete_run(run_id: int, request: Request, db: AsyncSession = Depen
         await db.commit()
     return {"success": True}
 
+@router.get("/evaluations/runs/{run_id}/report", response_class=HTMLResponse, name="admin_evaluation_report")
+async def admin_evaluation_report(run_id: int, request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
+    run = await db.get(BenchmarkRun, run_id)
+    if not run: raise HTTPException(status_code=404)
+    
+    # 1. Advanced Statistics Aggregation
+    stats = {}
+    category_scores = {} # {model: {cat: [scores]}}
+    
+    for model, results in run.results.items():
+        scores = [r["score"] for r in results]
+        stats[model] = {
+            "avg": sum(scores) / len(scores) if scores else 0,
+            "min": min(scores) if scores else 0,
+            "max": max(scores) if scores else 0,
+            "std": float(np.std(scores)) if scores else 0,
+            "count": len(scores)
+        }
+        
+        category_scores[model] = {}
+        for r in results:
+            cat = r.get("category", "General")
+            if cat not in category_scores[model]: category_scores[model][cat] = []
+            category_scores[model][cat].append(r["score"])
+
+    # Calculate average per category
+    cat_summary = {} # {cat: {model: avg}}
+    for model, cats in category_scores.items():
+        for cat, scores in cats.items():
+            if cat not in cat_summary: cat_summary[cat] = {}
+            cat_summary[cat][model] = sum(scores) / len(scores)
+
+    context = get_template_context(request)
+    context.update({
+        "run": run,
+        "stats": stats,
+        "cat_summary": cat_summary,
+        "csrf_token": await get_csrf_token(request)
+    })
+    return templates.TemplateResponse("admin/evaluation_report.html", context)
+
+@router.get("/evaluations/runs/{run_id}/export-pdf", name="admin_export_run_pdf")
+async def admin_export_run_pdf(run_id: int, request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
+    from xhtml2pdf import pisa
+    import io
+    import os
+    from fastapi.concurrency import run_in_threadpool
+
+    # Reuse the report logic to get the HTML
+    response = await admin_evaluation_report(run_id, request, db, admin_user)
+    html_content = response.body.decode()
+
+    def link_callback(uri, rel):
+        """
+        Convert HTML URIs to local filesystem paths so xhtml2pdf can access them
+        without making internal HTTP requests.
+        """
+        # handle /static/ and /uploads/
+        if uri.startswith('/static/'):
+            path = os.path.join("app", uri.lstrip('/'))
+        elif uri.startswith('/static/uploads/'):
+            path = os.path.join("app", uri.lstrip('/'))
+        else:
+            return uri
+
+        if not os.path.isfile(path):
+            logger.warning(f"PDF Export: Asset not found at {path}")
+            return uri
+        return path
+
+    def generate_pdf(content):
+        pdf_buffer = io.BytesIO()
+        # Create PDF using local file access
+        pisa_status = pisa.CreatePDF(content, dest=pdf_buffer, link_callback=link_callback)
+        if pisa_status.err:
+            return None
+        return pdf_buffer.getvalue()
+
+    # Execute CPU-bound PDF generation in a separate thread
+    pdf_data = await run_in_threadpool(generate_pdf, html_content)
+    
+    if pdf_data is None:
+        raise HTTPException(status_code=500, detail="PDF Generation Failed (Internal Engine Error)")
+        
+    return Response(
+        pdf_data, 
+        media_type="application/pdf", 
+        headers={"Content-Disposition": f"attachment; filename=Benchmark_Report_{run_id}.pdf"}
+    )
+
+@router.post("/api/evaluations/runs/{run_id}/analyze", name="api_eval_analyze_run")
+async def api_eval_analyze_run(run_id: int, request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
+    """Uses the Hub Agent to provide qualitative analysis of the benchmark results."""
+    run = await db.get(BenchmarkRun, run_id)
+    if not run: return JSONResponse({"error": "Run not found"}, status_code=404)
+    
+    agent = request.app.state.settings.admin_agent_name
+    if not agent: return JSONResponse({"error": "Management Agent not configured"}, status_code=400)
+
+    # Prepare a condensed data view for the AI
+    summary_data = {
+        "name": run.name,
+        "evaluator": run.evaluator_config,
+        "models": run.models,
+        "results_summary": {}
+    }
+    
+    for m, res in run.results.items():
+        avg = sum(r["score"] for r in res) / len(res)
+        weakest = sorted(res, key=lambda x: x["score"])[0]
+        summary_data["results_summary"][m] = {
+            "average_score": avg,
+            "worst_case_prompt": weakest["prompt"],
+            "worst_case_score": weakest["score"]
+        }
+
+    prompt = (
+        f"You are the Lead Evaluator for LoLLMs Hub. Analyze the following benchmark data.\n"
+        f"DATA: {json.dumps(summary_data)}\n\n"
+        "1. Identify the 'Winner' and why.\n"
+        "2. Identify specific logical weaknesses or biases in the losing models.\n"
+        "3. Provide 3 actionable deployment recommendations.\n"
+        "Format with clear, professional Markdown."
+    )
+    
+    try:
+        real_model, msgs = await _resolve_target(db, agent, [{"role": "user", "content": prompt}], request=request)
+        servers = await server_crud.get_servers_with_model(db, real_model)
+        if not servers: return JSONResponse({"error": "Compute offline"}, status_code=503)
+
+        resp, _ = await _reverse_proxy(request, "chat", servers, json.dumps({"model": real_model, "messages": msgs, "stream": False}).encode(), is_subrequest=True)
+        analysis = json.loads(resp.body.decode()).get("message", {}).get("content", "Analysis failed.")
+        return {"analysis": analysis}
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
 @router.get("/api/evaluations/runs/{run_id}/data", name="api_eval_run_data")
 async def api_get_run_data(run_id: int, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
     run = await db.get(BenchmarkRun, run_id)

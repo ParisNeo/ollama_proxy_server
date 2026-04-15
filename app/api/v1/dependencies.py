@@ -17,8 +17,26 @@ logger = logging.getLogger(__name__)
 api_key_header = APIKeyHeader(name="Authorization", auto_error=False)
 
 # --- NEW: Dependency to get DB-loaded settings ---
-def get_settings(request: Request) -> AppSettingsModel:
-    return request.app.state.settings
+async def get_settings(request: Request) -> AppSettingsModel:
+    """
+    Authoritative settings provider. 
+    If the in-memory state is missing critical values (like the admin agent),
+    it performs a hot-reload from the database to ensure worker synchronization.
+    """
+    settings_in_state = getattr(request.app.state, 'settings', None)
+    
+    # If state is missing or the management agent isn't set in memory, check the DB
+    if not settings_in_state or not settings_in_state.admin_agent_name:
+        from app.database.session import AsyncSessionLocal
+        from app.crud import settings_crud
+        async with AsyncSessionLocal() as db:
+            db_settings_obj = await settings_crud.get_app_settings(db)
+            if db_settings_obj:
+                new_settings = AppSettingsModel.model_validate(db_settings_obj.settings_data)
+                request.app.state.settings = new_settings
+                return new_settings
+                
+    return settings_in_state
 
 # --- CSRF Token Generation and Validation ---
 async def get_csrf_token(request: Request) -> str:

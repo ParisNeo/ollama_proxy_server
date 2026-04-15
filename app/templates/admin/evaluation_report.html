@@ -1,0 +1,246 @@
+{% extends "admin/base.html" %}
+{% block title %}Benchmark Report: {{ run.name }}{% endblock %}
+{% block header_title %}Benchmark Analysis Report{% endblock %}
+
+{% block content %}
+<div class="space-y-8 pb-20">
+    <!-- Header Summary -->
+    <div class="flex justify-between items-end border-b border-white/10 pb-6">
+        <div>
+            <div class="text-[10px] font-black text-fuchsia-500 uppercase tracking-widest mb-1">Execution ID: #{{ run.id }}</div>
+            <h1 class="text-4xl font-black text-white tracking-tighter">{{ run.name }}</h1>
+            <p class="text-gray-500 mt-1">Evaluated using <b>{{ run.evaluator_config.type }}</b> logic on {{ run.created_at.strftime('%Y-%m-%d %H:%M') }}</p>
+        </div>
+        <div class="flex gap-3">
+            <button onclick="runAIAnalysis()" id="btn-ai-analyze" class="bg-purple-600 hover:bg-purple-500 text-white px-6 py-2 rounded-xl font-black text-xs uppercase tracking-widest shadow-lg shadow-purple-900/20 transition-all flex items-center gap-2">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"></path></svg>
+                AI Insights
+            </button>
+            <a href="{{ url_for('admin_export_run_pdf', run_id=run.id) }}" class="bg-white/5 hover:bg-white/10 text-indigo-400 border border-indigo-500/30 px-6 py-2 rounded-xl font-black text-xs uppercase tracking-widest transition-all flex items-center gap-2">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                Download PDF
+            </a>
+        </div>
+    </div>
+
+    <!-- AI Analysis Section (Dynamic) -->
+    <div id="ai-analysis-container" class="hidden card-style border-purple-500/50 bg-purple-500/5 animate-pulse">
+        <div class="flex items-center gap-3 mb-4">
+            <div class="w-2 h-2 bg-purple-500 rounded-full animate-ping"></div>
+            <span class="text-xs font-black text-purple-400 uppercase tracking-widest">Architect analysis in progress...</span>
+        </div>
+    </div>
+    <div id="ai-analysis-result" class="hidden card-style border-purple-500/30 bg-purple-500/5">
+        <h3 class="text-sm font-black text-purple-400 uppercase tracking-widest mb-4">AI Qualitative Audit</h3>
+        <div id="ai-analysis-content" class="prose prose-invert prose-purple max-w-none text-sm leading-relaxed"></div>
+    </div>
+
+    <!-- Main Statistics Grid -->
+    <div class="grid grid-cols-1 lg:grid-cols-4 gap-6">
+        {% for model, s in stats.items() %}
+        <div class="card-style bg-black/40 border-white/5 relative overflow-hidden group">
+            <div class="absolute -right-4 -bottom-4 opacity-5 group-hover:scale-110 transition-transform">
+                <svg class="w-24 h-24" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2l4.5 20.29L12 18l-4.5 4.29L12 2z"/></svg>
+            </div>
+            <div class="text-[9px] font-black text-gray-600 uppercase mb-2">Model Performance</div>
+            <h3 class="text-lg font-black text-indigo-400 truncate mb-4">{{ model }}</h3>
+            
+            <div class="space-y-4">
+                <div>
+                    <div class="flex justify-between items-end mb-1">
+                        <span class="text-[10px] text-gray-500 font-bold uppercase">Average Accuracy</span>
+                        <span class="text-2xl font-black text-white">{{ (s.avg * 100) | round(1) }}%</span>
+                    </div>
+                    <div class="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
+                        <div class="h-full bg-indigo-500" style="width: {{ s.avg * 100 }}%"></div>
+                    </div>
+                </div>
+                <div class="grid grid-cols-2 gap-4 pt-2 border-t border-white/5">
+                    <div>
+                        <span class="text-[8px] text-gray-600 uppercase font-bold">Consistency (Std)</span>
+                        <div class="text-xs text-indigo-300 font-mono">±{{ s.std | round(3) }}</div>
+                    </div>
+                    <div class="text-right">
+                        <span class="text-[8px] text-gray-600 uppercase font-bold">Variance Range</span>
+                        <div class="text-xs text-amber-500 font-mono">{{ (s.max - s.min) | round(2) }}</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+
+    <!-- Comparative Visuals -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <!-- Chart: Category Comparison -->
+        <div class="card-style h-[400px] flex flex-col">
+            <div class="flex justify-between items-center mb-6">
+                <h3 class="text-xs font-black text-gray-400 uppercase tracking-widest">Semantic Category Breakdown</h3>
+                <span class="text-[9px] text-gray-600 italic">Scores normalized 0.0 - 1.0</span>
+            </div>
+            <div class="flex-grow relative">
+                <canvas id="categoryCompareChart"></canvas>
+            </div>
+        </div>
+
+        <!-- Chart: Global Score Distribution -->
+        <div class="card-style h-[400px] flex flex-col">
+            <div class="flex justify-between items-center mb-6">
+                <h3 class="text-xs font-black text-gray-400 uppercase tracking-widest">Global Ranking Curve</h3>
+                <span class="text-[9px] text-gray-600 italic">Density of performance clusters</span>
+            </div>
+            <div class="flex-grow relative">
+                <canvas id="rankingChart"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <!-- Task Explorer -->
+    <div class="card-style">
+        <h3 class="card-header text-xl font-bold mb-6 pb-2">Individual Task Audit</h3>
+        <div class="space-y-6">
+            {% set first_model = stats.keys() | list | first %}
+            {% for i in range(stats[first_model].count) %}
+            <div class="p-4 bg-white/5 border border-white/10 rounded-2xl hover:border-indigo-500/40 transition-all group">
+                <div class="flex justify-between items-start mb-4 border-b border-white/5 pb-2">
+                    <div class="flex items-center gap-3">
+                        <span class="text-[10px] font-black bg-indigo-600 text-white px-2 py-0.5 rounded-md">TASK #{{ i + 1 }}</span>
+                        <span class="text-[10px] font-bold text-gray-500 uppercase">{{ run.results[first_model][i].category }}</span>
+                    </div>
+                    <div class="flex gap-4">
+                        {% for model in run.results.keys() %}
+                        <div class="flex flex-col items-end">
+                            <span class="text-[8px] text-gray-600 uppercase font-black">{{ model }}</span>
+                            <span class="text-xs font-black {% if run.results[model][i].score > 0.8 %}text-emerald-400{% elif run.results[model][i].score > 0.5 %}text-amber-400{% else %}text-red-400{% endif %}">
+                                {{ (run.results[model][i].score * 100) | round(1) }}%
+                            </span>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+                
+                <div class="mb-4">
+                    <p class="text-sm font-bold text-white leading-relaxed">{{ run.results[first_model][i].prompt }}</p>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    <div class="p-3 bg-black/40 rounded-xl border border-white/5">
+                        <span class="text-[8px] font-black text-gray-600 uppercase block mb-1">Ground Truth Reference</span>
+                        <p class="text-[11px] text-gray-400 italic line-clamp-4">{{ run.results[first_model][i].reference_answer }}</p>
+                    </div>
+                    {% for model in run.results.keys() %}
+                    <div class="p-3 bg-indigo-900/10 border border-indigo-500/10 rounded-xl">
+                        <span class="text-[8px] font-black text-indigo-400 uppercase block mb-1">{{ model }} Response</span>
+                        <p class="text-[11px] text-indigo-100 line-clamp-4">{{ run.results[model][i].model_answer }}</p>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+
+<script src="{{ url_for('static', path='vendor/chart.js') }}"></script>
+<script>
+    document.addEventListener('DOMContentLoaded', () => {
+        // --- DATA PREP ---
+        const catSummary = {{ cat_summary | tojson | safe }};
+        const stats = {{ stats | tojson | safe }};
+        const categories = Object.keys(catSummary);
+        const models = Object.keys(stats);
+        const palette = ['#6366f1', '#d946ef', '#10b981', '#f59e0b', '#ef4444'];
+
+        // --- CHART 1: Category Comparison (Radar or Bar) ---
+        const catCtx = document.getElementById('categoryCompareChart').getContext('2d');
+        new Chart(catCtx, {
+            type: 'radar',
+            data: {
+                labels: categories,
+                datasets: models.map((m, i) => ({
+                    label: m,
+                    data: categories.map(c => catSummary[c][m] || 0),
+                    borderColor: palette[i % palette.length],
+                    backgroundColor: palette[i % palette.length] + '22',
+                    borderWidth: 3,
+                    pointBackgroundColor: palette[i % palette.length]
+                }))
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    r: {
+                        grid: { color: 'rgba(255,255,255,0.05)' },
+                        angleLines: { color: 'rgba(255,255,255,0.1)' },
+                        pointLabels: { color: '#9ca3af', font: { size: 10, weight: 'bold' } },
+                        ticks: { display: false },
+                        suggestedMin: 0,
+                        suggestedMax: 1
+                    }
+                },
+                plugins: {
+                    legend: { position: 'bottom', labels: { color: '#e5e7eb', usePointStyle: true, font: { size: 11, weight: '900' } } }
+                }
+            }
+        });
+
+        // --- CHART 2: Global Ranking Curve ---
+        const rankCtx = document.getElementById('rankingChart').getContext('2d');
+        new Chart(rankCtx, {
+            type: 'bar',
+            data: {
+                labels: models,
+                datasets: [{
+                    label: 'Global Score',
+                    data: models.map(m => stats[m].avg * 100),
+                    backgroundColor: palette,
+                    borderRadius: 12
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: { beginAtZero: true, max: 100, grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#6b7280' } },
+                    x: { grid: { display: false }, ticks: { color: '#e5e7eb', font: { weight: 'bold' } } }
+                },
+                plugins: { legend: { display: false } }
+            }
+        });
+    });
+
+    async function runAIAnalysis() {
+        const btn = document.getElementById('btn-ai-analyze');
+        const container = document.getElementById('ai-analysis-container');
+        const result = document.getElementById('ai-analysis-result');
+        const content = document.getElementById('ai-analysis-content');
+
+        btn.disabled = true;
+        container.classList.remove('hidden');
+        result.classList.add('hidden');
+
+        try {
+            const resp = await fetch("{{ url_for('api_eval_analyze_run', run_id=run.id) }}", {
+                method: 'POST',
+                headers: { 'X-CSRF-Token': '{{ csrf_token }}' }
+            });
+            const data = await resp.json();
+            
+            if (data.analysis) {
+                content.innerHTML = marked.parse(data.analysis);
+                container.classList.add('hidden');
+                result.classList.remove('hidden');
+            } else {
+                alert("AI Analysis failed to generate a response.");
+                container.classList.add('hidden');
+            }
+        } catch(e) {
+            alert("Connection error: " + e.message);
+            container.classList.add('hidden');
+        } finally {
+            btn.disabled = false;
+        }
+    }
+</script>
+{% endblock %}

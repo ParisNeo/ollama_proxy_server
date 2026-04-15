@@ -572,21 +572,37 @@ async def admin_stats(
 async def export_pdf_report(request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
     from xhtml2pdf import pisa
     import io
+    import os
+    from fastapi.concurrency import run_in_threadpool
     
     # Get context data for the page
     response = await admin_stats(request, db, admin_user)
     html_content = response.body.decode()
     
-    # Create PDF using xhtml2pdf
-    pdf_buffer = io.BytesIO()
-    pisa_status = pisa.CreatePDF(html_content, dest=pdf_buffer)
+    def link_callback(uri, rel):
+        if uri.startswith('/static/'):
+            path = os.path.join("app", uri.lstrip('/'))
+            if os.path.isfile(path):
+                return path
+        return uri
+
+    def generate_pdf(content):
+        pdf_buffer = io.BytesIO()
+        pisa_status = pisa.CreatePDF(content, dest=pdf_buffer, link_callback=link_callback)
+        if pisa_status.err:
+            return None
+        return pdf_buffer.getvalue()
+
+    pdf_data = await run_in_threadpool(generate_pdf, html_content)
     
-    if pisa_status.err:
-        logger.error(f"PDF export failed: {pisa_status.err}")
-        raise HTTPException(status_code=500, detail="Failed to generate PDF")
+    if pdf_data is None:
+        raise HTTPException(status_code=500, detail="Failed to generate PDF report")
         
-    pdf_buffer.seek(0)
-    return StreamingResponse(pdf_buffer, media_type="application/pdf", headers={"Content-Disposition": "attachment; filename=usage-report.pdf"})
+    return Response(
+        pdf_data, 
+        media_type="application/pdf", 
+        headers={"Content-Disposition": "attachment; filename=usage-report.pdf"}
+    )
 
     
 @router.get("/help", response_class=HTMLResponse, name="admin_help")

@@ -258,7 +258,7 @@
                             <td class="p-3 text-xs text-gray-400">{{ run.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
                             <td class="p-3 text-right">
                                 <div class="flex justify-end gap-3">
-                                    <button onclick="viewResults({{ run.id }})" class="text-fuchsia-400 font-bold text-xs uppercase hover:text-fuchsia-300">View Details</button>
+                                    <a href="{{ url_for('admin_evaluation_report', run_id=run.id) }}" class="text-fuchsia-400 font-bold text-xs uppercase hover:text-fuchsia-300">Analysis Report</a>
                                     <button onclick="deleteResource('runs', {{ run.id }})" class="text-red-400 font-bold text-xs uppercase hover:text-red-300">Delete</button>
                                 </div>
                             </td>
