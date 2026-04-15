@@ -55,16 +55,16 @@
                     Pull from Hub
                 </button>
             </div>
-            <form onsubmit="generateDataset(event)" class="space-y-4">
+            <form onsubmit="generateDataset(event)" class="space-y-4" autocomplete="off">
                 <div class="grid grid-cols-1 gap-6">
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                         <div>
                             <label class="block text-xs text-gray-400 uppercase font-bold mb-1">Dataset Name</label>
-                            <input type="text" id="gen-ds-name" placeholder="e.g. Legal-Contracts-QA" required class="w-full p-2 rounded bg-black/20 border border-white/10 focus:border-indigo-500 outline-none">
+                            <input type="text" id="gen-ds-name" placeholder="e.g. Legal-Contracts-QA" required autocomplete="off" class="w-full p-2 rounded bg-black/20 border border-white/10 focus:border-indigo-500 outline-none">
                         </div>
                         <div>
                             <label class="block text-xs text-gray-400 uppercase font-bold mb-1">Description</label>
-                            <input type="text" id="gen-ds-desc" placeholder="Dataset purpose..." class="w-full p-2 rounded bg-black/20 border border-white/10 focus:border-indigo-500 outline-none">
+                            <input type="text" id="gen-ds-desc" placeholder="Dataset purpose..." autocomplete="off" class="w-full p-2 rounded bg-black/20 border border-white/10 focus:border-indigo-500 outline-none">
                         </div>
                     </div>
 

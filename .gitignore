@@ -114,3 +114,5 @@ app/static/uploads/
 *.db
 *.log
 *.log.*
+*.db-shm
+*.db-wal

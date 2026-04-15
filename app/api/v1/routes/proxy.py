@@ -2492,7 +2492,8 @@ async def _process_proxy_logic(
         is_chat_mode = "messages" in body
         input_msgs = body.get("messages",[]) if is_chat_mode else [{"role": "user", "content": body.get("prompt", "")}]
         
-        resolved_model_name, resolved_messages = await _resolve_target(db, model_name, input_msgs, request=request, request_id=req_id, sender=api_key.user.username)
+        sender_name = api_key.user.username if (api_key.user and api_key.user.username) else "system"
+        resolved_model_name, resolved_messages = await _resolve_target(db, model_name, input_msgs, request=request, request_id=req_id, sender=sender_name)
         
         # --- STATIC RESULT INTERCEPTION ---
         # Handles cases where a Graph Workflow produces a final answer (Composer/Aggregation)
@@ -2603,7 +2604,9 @@ async def _process_proxy_logic(
         body_bytes = json.dumps(body).encode('utf-8')
 
     # --- COGNITIVE MEMORY INJECTION ---
-    memory_context = await CognitiveMemoryManager.get_memory_context(db, api_key.user_id, model_name)
+    # Safe user ID for internal system calls or keys without direct DB users
+    effective_user_id = api_key.user_id if api_key.user_id is not None else 0
+    memory_context = await CognitiveMemoryManager.get_memory_context(db, effective_user_id, model_name)
     if "messages" in body:
         # Find system message or inject new one
         sys_msg = next((m for m in body["messages"] if m["role"] == "system"), None)

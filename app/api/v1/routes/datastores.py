@@ -110,15 +110,17 @@ async def admin_add_datastore(
             v_config["base_url"] = target_url
     
     # --- INTERNAL KEY MANAGEMENT ---
+    # --- INTERNAL KEY MANAGEMENT ---
     if vectorizer_api_key:
-        v_config["api_key"] = vectorizer_api_key
+        v_config["api_key"] = vectorizer_api_key.strip().strip('"').strip("'")
     else:
         # If pointing to self (localhost/127.0.0.1), inject the Hub's loopback auth key
         url_str = target_url.lower()
         if "localhost" in url_str or "127.0.0.1" in url_str:
             # We use the Hub's SECRET_KEY to authenticate against its own API
             from app.core.config import settings as bootstrap_settings
-            v_config["api_key"] = bootstrap_settings.SECRET_KEY
+            # Ensure we send the clean key
+            v_config["api_key"] = bootstrap_settings.SECRET_KEY.strip().strip('"').strip("'")
             logger.info(f"Datastore '{name}': Loopback detected. Injecting Hub SECRET_KEY for internal authentication.")
     
     try:
@@ -289,8 +291,7 @@ async def _ingest_document_logic(request, db, ds, file_path, use_ai, admin_user)
             vectorizer_config=ds.vectorizer_config or {},
             chunking_strategy=ds.chunking_strategy,
             chunk_size=ds.chunk_size,
-            chunk_overlap=ds.chunk_overlap,
-            log_level="info"
+            chunk_overlap=ds.chunk_overlap
         )
         
         with s:
@@ -548,19 +549,77 @@ async def admin_view_datastore_doc(ds_id: int, file_path: str, request: Request,
     if not ds: raise HTTPException(status_code=404)
     
     def _read_doc():
-        import pipmaster as pm
-        pm.ensure_packages(["safe-store"])
+        import sqlite3
+        import numpy as np
+        from sklearn.decomposition import PCA
         from safe_store import SafeStore
+        
         v_key = VECTORIZER_MAP.get(ds.vectorizer_name, ds.vectorizer_name)
-        s = SafeStore(db_path=ds.db_path, vectorizer_name=v_key, vectorizer_config=ds.vectorizer_config or {})
-        with s:
-            if hasattr(s, "reconstruct_document_text"):
-                return s.reconstruct_document_text(file_path)
-            return "Reconstruction not supported by this safe-store version."
+        
+        # Connect directly to the SQLite backend to get raw vectors
+        with sqlite3.connect(ds.db_path) as conn:
+            cursor = conn.cursor()
+            # 1. Get Document ID
+            cursor.execute("SELECT id FROM documents WHERE title = ?", (file_path,))
+            doc_row = cursor.fetchone()
+            if not doc_row:
+                return {"error": "Document not found in storage."}
+            doc_id = doc_row[0]
+            
+            # 2. Get Chunks and Embeddings
+            cursor.execute("SELECT id, text, embedding FROM chunks WHERE document_id = ?", (doc_id,))
+            rows = cursor.fetchall()
+            
+        if not rows:
+            return {"content": "No chunks found.", "chunk_count": 0, "pca_points": []}
+
+        chunks_data = []
+        vectors = []
+        full_text = ""
+        
+        for r in rows:
+            c_id, c_text, c_emb_raw = r
+            chunks_data.append({"id": c_id, "text": c_text})
+            full_text += c_text + "\n"
+            
+            # Handle both JSON strings and binary BLOBs
+            try:
+                if isinstance(c_emb_raw, (bytes, bytearray)):
+                    vec = np.frombuffer(c_emb_raw, dtype=np.float32)
+                else:
+                    vec = json.loads(c_emb_raw)
+                vectors.append(vec)
+            except:
+                continue
+                
+        pca_points = []
+        # PCA requires at least 2 samples
+        if len(vectors) >= 2:
+            try:
+                vectors_np = np.array(vectors)
+                pca = PCA(n_components=2)
+                reduced = pca.fit_transform(vectors_np)
+                for i, point in enumerate(reduced):
+                    pca_points.append({
+                        "x": float(point[0]),
+                        "y": float(point[1]),
+                        "id": chunks_data[i]["id"],
+                        "label": f"Chunk #{i+1}",
+                        "preview": chunks_data[i]["text"][:100] + "..."
+                    })
+            except Exception as pca_err:
+                logger.warning(f"PCA calculation failed: {pca_err}")
+
+        return {
+            "content": full_text,
+            "file_path": file_path,
+            "chunk_count": len(chunks_data),
+            "pca_points": pca_points
+        }
                 
     try:
-        content = await run_in_threadpool(_read_doc)
-        return {"content": content, "file_path": file_path}
+        result = await run_in_threadpool(_read_doc)
+        return result
     except Exception as e:
         logger.error(f"View doc error: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)

@@ -31,11 +31,34 @@ clear
 print_header "    LoLLMs Hub Fortress Installer & Runner"
 
 print_info "Performing initial system checks..."
+
+# 1. Check Python Core
 if ! command -v "$PYTHON_BIN" &>/dev/null || ! "$PYTHON_BIN" -m pip --version &>/dev/null || ! "$PYTHON_BIN" -m venv -h &>/dev/null; then
     print_error "Python ($PYTHON_BIN), pip, or venv is missing."
     exit 1
 fi
-print_success "Python ($PYTHON_BIN), pip, and venv are available."
+
+# 2. Check Linux System Dependencies (Cairo for PDF generation)
+if [[ "$(uname)" == "Linux" ]]; then
+    print_info "Verifying Linux binary dependencies..."
+    
+    # Check for pkg-config and cairo (required by pycairo -> xhtml2pdf)
+    if ! command -v pkg-config &>/dev/null || ! pkg-config --exists cairo; then
+        print_warn "System package 'libcairo2-dev' or 'pkg-config' is missing."
+        print_info "This is required to compile 'pycairo' for PDF report generation."
+        print_warn "Please run: sudo apt update && sudo apt install libcairo2-dev pkg-config python3-dev"
+        
+        read -p "   -> Attempt to continue Python setup anyway? (y/n): " CONTINUE_DEP
+        if [[ ! "$CONTINUE_DEP" =~ ^[Yy]$ ]]; then
+            print_error "Setup aborted by user to install system dependencies."
+            exit 1
+        fi
+    else
+        print_success "System dependencies (Cairo/pkg-config) detected."
+    fi
+fi
+
+print_success "Core environment checks passed."
 
 CURRENT_STATE=0
 if [[ -f "$STATE_FILE" ]]; then CURRENT_STATE=$(cat "$STATE_FILE"); fi

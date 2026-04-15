@@ -419,10 +419,14 @@ async def _run_benchmark_task(request: Request, run_name: str, dataset_id: int, 
                         reasoning = "Model failed to return an answer or is offline."
                     elif evaluator_type == "vectorizer":
                         def _sim():
+                            import numpy as np
                             from safe_store.search.similarity import cosine_similarity
                             embs = vectorizer.vectorize([item["reference_answer"], model_answer])
-                            s = cosine_similarity(embs[0],[embs[1]])[0]
-                            return (s + 1) / 2 # Normalize from[-1, 1] to [0, 1]
+                            # Convert lists to numpy arrays to satisfy safe_store requirements
+                            query_vec = np.array(embs[0])
+                            target_vecs = np.array([embs[1]])
+                            s = cosine_similarity(query_vec, target_vecs)[0]
+                            return float((s + 1) / 2) # Normalize from [-1, 1] to [0, 1]
                         score = await run_in_threadpool(_sim)
                         score = float(score)
                         reasoning = f"Cosine similarity against reference answer using {evaluator_config.get('name', 'st')}."

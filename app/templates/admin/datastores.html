@@ -16,17 +16,21 @@
 
     <div class="card-style border-t-4 border-teal-600">
         <h2 class="card-header text-xl font-bold mb-4">Create New Data Store</h2>
-        <form action="{{ url_for('admin_add_datastore') }}" method="post" class="space-y-4">
+        <form action="{{ url_for('admin_add_datastore') }}" method="post" class="space-y-4" autocomplete="off">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             
+            <!-- Fake fields to trick aggressive browser autofill -->
+            <input style="display:none" type="text" name="fakeusernameremembered"/>
+            <input style="display:none" type="password" name="fakepasswordremembered"/>
+
             <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
                     <label class="block text-xs text-gray-400 uppercase font-bold mb-1">Store Name</label>
-                    <input type="text" name="name" placeholder="e.g. company-policies" required class="w-full p-2 rounded bg-black/20 border border-white/10 focus:border-teal-500 outline-none">
+                    <input type="text" name="name" placeholder="e.g. company-policies" required autocomplete="off" class="w-full p-2 rounded bg-black/20 border border-white/10 focus:border-teal-500 outline-none">
                 </div>
                 <div>
                     <label class="block text-xs text-gray-400 uppercase font-bold mb-1">Description</label>
-                    <input type="text" name="description" placeholder="Optional info..." class="w-full p-2 rounded bg-black/20 border border-white/10 focus:border-teal-500 outline-none">
+                    <input type="text" name="description" placeholder="Optional info..." autocomplete="off" class="w-full p-2 rounded bg-black/20 border border-white/10 focus:border-teal-500 outline-none">
                 </div>
                 
                 <div class="md:col-span-2">
@@ -50,15 +54,15 @@
                             <option value="{{ m }}">{{ m }}</option>
                             {% endfor %}
                         </select>
-                        <input type="text" name="vectorizer_model_custom" placeholder="Or type model name..." class="w-full p-2 mt-2 rounded bg-black/40 border border-white/10 text-xs outline-none focus:border-teal-500">
+                        <input type="text" name="vectorizer_model_custom" placeholder="Or type model name..." autocomplete="off" class="w-full p-2 mt-2 rounded bg-black/40 border border-white/10 text-xs outline-none focus:border-teal-500">
                     </div>
                     <div id="url-config-container">
                         <label class="block text-[10px] text-gray-400 uppercase font-black mb-1">Base URL (Optional)</label>
-                        <input type="text" name="vectorizer_base_url" placeholder="e.g. http://127.0.0.1:8080" class="w-full p-2 rounded bg-black/40 border border-white/10 text-xs outline-none focus:border-teal-500">
+                        <input type="text" name="vectorizer_base_url" placeholder="e.g. http://127.0.0.1:8080" autocomplete="off" class="w-full p-2 rounded bg-black/40 border border-white/10 text-xs outline-none focus:border-teal-500">
                     </div>
                     <div>
                         <label class="block text-[10px] text-gray-400 uppercase font-black mb-1">External API Key (Optional)</label>
-                        <input type="password" name="vectorizer_api_key" autocomplete="off" placeholder="Auto-managed for Hub" class="w-full p-2 rounded bg-black/40 border border-white/10 text-xs outline-none focus:border-teal-500">
+                        <input type="password" name="vectorizer_api_key" autocomplete="new-password" placeholder="Auto-managed for Hub" class="w-full p-2 rounded bg-black/40 border border-white/10 text-xs outline-none focus:border-teal-500">
                     </div>
                 </div>
                 

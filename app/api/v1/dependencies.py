@@ -88,20 +88,38 @@ async def get_valid_api_key(
             detail="Authorization header is missing",
         )
 
-    if not auth_header.startswith("Bearer "):
+    # --- INTERNAL SYSTEM BYPASS (PRIORITY) ---
+    # Check if the header matches the SECRET_KEY exactly or as the token in a Bearer scheme.
+    from app.core.config import settings
+    
+    # Extract token and strip any whitespace/quotes that might have leaked from .env or headers
+    if auth_header.lower().startswith("bearer "):
+        raw_token = auth_header[7:].strip().strip('"').strip("'")
+    else:
+        raw_token = auth_header.strip().strip('"').strip("'")
+    
+    target_key = settings.SECRET_KEY.strip().strip('"').strip("'")
+    
+    if raw_token == target_key:
+        # Return a synthetic system key object with a mock user to prevent AttributeErrors in proxy logic
+        from app.database.models import User
+        mock_user = User(id=0, username="system_internal", is_admin=True)
+        return APIKey(id=0, key_name="Internal System", key_prefix="sys_internal", is_active=True, is_revoked=False, user_id=0, user=mock_user)
+
+    # --- STANDARD KEY ENFORCEMENT ---
+    if not auth_header.lower().startswith("bearer "):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid authentication scheme. Use 'Bearer <api_key>'.",
         )
 
-    api_key_str = auth_header.split(" ")[1]
-
-    # --- INTERNAL SYSTEM BYPASS ---
-    # Allow the Hub's own SECRET_KEY to authenticate internal service requests (e.g. RAG)
-    from app.core.config import settings
-    if api_key_str == settings.SECRET_KEY:
-        # Return a synthetic system key object
-        return APIKey(key_name="Internal System", key_prefix="sys_internal", is_active=True, is_revoked=False)
+    parts = auth_header.split(" ", 1)
+    if len(parts) < 2:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid API key format",
+        )
+    api_key_str = parts[1]
 
     try:
         prefix, secret = api_key_str.rsplit("_", 1)

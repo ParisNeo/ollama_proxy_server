@@ -225,7 +225,8 @@
 
         window.viewDocument = async function(filePath) {
             const url = `/admin/datastores/${currentDsId}/view_doc?file_path=${encodeURIComponent(filePath)}`;
-            window.showModal("Loading Document...", '<div class="p-10 text-center animate-pulse text-teal-500 font-bold">Reconstructing text from chunks...</div>');
+            window.showModal("Analyzing Structure...", '<div class="p-10 text-center animate-pulse text-teal-500 font-bold">Computing semantic topology and fetching chunks...</div>');
+            
             try {
                 const resp = await fetch(url);
                 const data = await resp.json();
@@ -233,18 +234,102 @@
                     window.showModal("Error", `<div class="p-4 text-red-400 font-mono">${data.error}</div>`);
                     return;
                 }
+
                 const htmlContent = marked.parse(data.content || "*No content found.*");
+                
                 const modalBody = `
-                    <div class="space-y-4">
-                        <div class="text-[10px] font-mono text-gray-500 border-b border-white/5 pb-2 mb-4 truncate" title="${filePath}">${filePath}</div>
-                        <div class="prose prose-invert max-w-none text-sm text-gray-300 max-h-[65vh] overflow-y-auto custom-scrollbar pr-2">${htmlContent}</div>
-                        <div class="flex justify-end pt-4 border-t border-white/10">
-                            <button onclick="document.getElementById('modal-close-btn').click()" class="bg-teal-600 px-6 py-2 rounded text-xs font-black uppercase text-white">Done</button>
+                    <div class="space-y-6 flex flex-col max-h-[80vh]">
+                        <!-- Info Header -->
+                        <div class="flex justify-between items-center bg-black/40 p-3 rounded-xl border border-white/5">
+                            <div class="flex flex-col">
+                                <span class="text-[9px] font-black text-gray-500 uppercase tracking-widest">Document Source</span>
+                                <span class="text-xs font-mono text-indigo-300 truncate max-w-xs" title="${data.file_path}">${data.file_path}</span>
+                            </div>
+                            <div class="text-right">
+                                <span class="text-[9px] font-black text-teal-500 uppercase tracking-widest">Structural Analysis</span>
+                                <div class="text-xl font-black text-white">${data.chunk_count} <span class="text-[10px] text-gray-500">CHUNKS</span></div>
+                            </div>
+                        </div>
+
+                        <!-- Analysis Visuals (PCA Plot) -->
+                        ${data.pca_points && data.pca_points.length > 0 ? `
+                        <div class="bg-black/60 rounded-xl border border-white/5 p-4">
+                            <div class="flex justify-between items-center mb-2">
+                                <span class="text-[10px] font-black text-indigo-400 uppercase tracking-widest">Semantic Topology (PCA 2D)</span>
+                                <span class="text-[9px] text-gray-600 italic">Spatial distance = Semantic similarity</span>
+                            </div>
+                            <div class="h-48 w-full relative">
+                                <canvas id="pca-canvas"></canvas>
+                            </div>
+                        </div>
+                        ` : ''}
+
+                        <!-- Content Preview -->
+                        <div class="flex-grow overflow-hidden flex flex-col border border-white/5 rounded-xl bg-black/20">
+                            <div class="p-2 px-4 bg-white/5 border-b border-white/5 text-[10px] font-black text-gray-500 uppercase tracking-widest">Reconstructed text</div>
+                            <div class="flex-grow overflow-y-auto custom-scrollbar p-4 prose prose-invert max-w-none text-sm text-gray-300 leading-relaxed">
+                                ${htmlContent}
+                            </div>
+                        </div>
+
+                        <div class="flex justify-end pt-2">
+                            <button onclick="document.getElementById('modal-close-btn').click()" class="bg-indigo-600 hover:bg-indigo-500 px-10 py-2 rounded-xl text-xs font-black uppercase text-white shadow-lg transition-all">Done</button>
                         </div>
                     </div>`;
-                window.showModal("Document Content", modalBody);
+
+                window.showModal("Document Insight", modalBody);
+
+                // Initialize PCA Chart if data exists
+                if (data.pca_points && data.pca_points.length > 0) {
+                    setTimeout(() => {
+                        const ctx = document.getElementById('pca-canvas').getContext('2d');
+                        new Chart(ctx, {
+                            type: 'scatter',
+                            data: {
+                                datasets: [{
+                                    label: 'Chunks',
+                                    data: data.pca_points,
+                                    backgroundColor: function(context) {
+                                        // Color by index to distinguish sequence
+                                        const index = context.dataIndex;
+                                        const total = context.dataset.data.length;
+                                        const hue = (index / total) * 280; // Spread across blue-to-purple spectrum
+                                        return `hsla(${hue}, 70%, 60%, 0.7)`;
+                                    },
+                                    pointRadius: 6,
+                                    pointHoverRadius: 9,
+                                    borderWidth: 1,
+                                    borderColor: 'white'
+                                }]
+                            },
+                            options: {
+                                responsive: true,
+                                maintainAspectRatio: false,
+                                plugins: {
+                                    legend: { display: false },
+                                    tooltip: {
+                                        callbacks: {
+                                            label: (context) => {
+                                                const p = context.raw;
+                                                return [p.label, p.preview];
+                                            }
+                                        }
+                                    }
+                                },
+                                scales: {
+                                    x: { display: false },
+                                    y: { display: false }
+                                }
+                            }
+                        });
+                    }, 100);
+                }
+
                 document.querySelectorAll('#modal pre code').forEach(b => { if(window.hljs) hljs.highlightElement(b); });
-            } catch (e) { window.showModal("Error", e.message); }
+            } catch (e) { 
+                console.error(e);
+                window.showModal("Error", "Failed to retrieve document diagnostics: " + e.message); 
+            }
         };
 
         function logToConsole(text, color = 'text-teal-200') {
