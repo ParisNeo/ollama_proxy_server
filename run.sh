@@ -38,20 +38,42 @@ if ! command -v "$PYTHON_BIN" &>/dev/null || ! "$PYTHON_BIN" -m pip --version &>
     exit 1
 fi
 
-# 2. Check Linux System Dependencies (Cairo for PDF generation)
+# 2. Check & Install Linux System Dependencies (Cairo for PDF generation)
 if [[ "$(uname)" == "Linux" ]]; then
     print_info "Verifying Linux binary dependencies..."
     
     # Check for pkg-config and cairo (required by pycairo -> xhtml2pdf)
     if ! command -v pkg-config &>/dev/null || ! pkg-config --exists cairo; then
-        print_warn "System package 'libcairo2-dev' or 'pkg-config' is missing."
-        print_info "This is required to compile 'pycairo' for PDF report generation."
-        print_warn "Please run: sudo apt update && sudo apt install libcairo2-dev pkg-config python3-dev"
+        print_warn "System dependencies (libcairo2-dev/pkg-config) are missing."
+        print_info "These are required for PDF report generation."
         
-        read -p "   -> Attempt to continue Python setup anyway? (y/n): " CONTINUE_DEP
-        if [[ ! "$CONTINUE_DEP" =~ ^[Yy]$ ]]; then
-            print_error "Setup aborted by user to install system dependencies."
-            exit 1
+        read -p "   -> Would you like me to install them for you? (y/n): " INSTALL_CHOICE
+        if [[ "$INSTALL_CHOICE" =~ ^[Yy]$ ]]; then
+            print_info "Identifying package manager..."
+            if command -v apt-get &>/dev/null; then
+                print_info "Using apt-get..."
+                sudo apt-get update && sudo apt-get install -y libcairo2-dev pkg-config python3-dev
+            elif command -v dnf &>/dev/null; then
+                print_info "Using dnf..."
+                sudo dnf install -y cairo-devel pkg-config python3-devel
+            elif command -v pacman &>/dev/null; then
+                print_info "Using pacman..."
+                sudo pacman -S --noconfirm cairo pkgconf
+            else
+                print_error "Could not find a supported package manager (apt, dnf, pacman)."
+                print_warn "Please install cairo and pkg-config development headers manually."
+                exit 1
+            fi
+            
+            # Re-verify after installation
+            if pkg-config --exists cairo; then
+                print_success "System dependencies installed successfully."
+            else
+                print_error "Installation failed. Please check the logs above."
+                exit 1
+            fi
+        else
+            print_warn "Continuing without system dependencies. PDF generation may fail."
         fi
     else
         print_success "System dependencies (Cairo/pkg-config) detected."
