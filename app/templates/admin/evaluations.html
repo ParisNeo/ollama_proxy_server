@@ -208,7 +208,7 @@
                                 <select id="run-vec-method" class="w-full p-2 rounded bg-black/40 border border-white/10 text-xs text-indigo-400 font-bold" onchange="updateBenchmarkVecModels()">
                                     <option value="ollama">Ollama (Managed Backend)</option>
                                     <option value="st">SentenceTransformers (Local CPU/GPU)</option>
-                                    <option value="tfidf">TF-IDF (Fast/Keyword)</option>
+                                    <option value="tf_idf">TF-IDF (Fast/Keyword)</option>
                                     <option value="openai">OpenAI (External API)</option>
                                 </select>
                             </div>
@@ -630,8 +630,8 @@
             HUB_EMBED_MODELS.forEach(m => modelSel.innerHTML += `<option value="${m}">${m}</option>`);
         } else if (method === 'st') {
             ST_BENCH_MODELS.forEach(m => modelSel.innerHTML += `<option value="${m.val}">${m.label}</option>`);
-        } else if (method === 'tfidf') {
-            modelSel.innerHTML = '<option value="tfidf">Standard TF-IDF</option>';
+        } else if (method === 'tf_idf') {
+            modelSel.innerHTML = '<option value="tf_idf">Standard TF-IDF</option>';
         } else {
             modelSel.innerHTML = '<option value="text-embedding-3-small">text-embedding-3-small</option>';
         }

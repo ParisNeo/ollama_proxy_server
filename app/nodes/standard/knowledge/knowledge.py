@@ -33,8 +33,8 @@ class RAGDatastoreNode(BaseNode):
             
         if not ds: return f"[Error: Datastore '{store_name}' not found]"
 
-        V_MAP = {"sentense_transformer": "st", "tf_idf": "tfidf", "ollama": "ollama", "openai": "openai", "cohere": "cohere", "lollms": "lollms"}
-        v_key = V_MAP.get(ds.vectorizer_name, "tfidf")
+        V_MAP = {"sentense_transformer": "st", "tf_idf": "tf_idf", "ollama": "ollama", "openai": "openai", "cohere": "cohere", "lollms": "lollms"}
+        v_key = V_MAP.get(ds.vectorizer_name, "tf_idf")
 
         def _query():
             s = SafeStore(db_path=ds.db_path, vectorizer_name=v_key, vectorizer_config=ds.vectorizer_config or {})

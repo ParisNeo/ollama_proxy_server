@@ -665,7 +665,7 @@ async def run_all_migrations(engine: AsyncEngine) -> None:
                 "name": "VARCHAR NOT NULL",
                 "description": "VARCHAR",
                 "db_path": "VARCHAR NOT NULL",
-                "vectorizer_name": "VARCHAR DEFAULT 'tfidf'",
+                "vectorizer_name": "VARCHAR DEFAULT 'tf_idf'",
                 "vectorizer_config": "JSON",
                 "chunking_strategy": "VARCHAR DEFAULT 'recursive'",
                 "chunk_size": "INTEGER DEFAULT 512",

@@ -21,13 +21,14 @@ router = APIRouter()
 
 # Mapping UI names to SafeStore internal keys
 # FIXED: UI uses 'sentense_transformer' but we ensure internal 'st' mapping is robust.
+# 'lollms' in the Hub UI uses the Hub proxy, which follows the 'ollama' protocol.
 VECTORIZER_MAP = {
     "sentense_transformer": "st",
-    "tf_idf": "tfidf",
+    "tf_idf": "tf_idf",
     "ollama": "ollama",
     "openai": "openai",
     "cohere": "cohere",
-    "lollms": "lollms"
+    "lollms": "ollama"
 }
 
 DATASTORES_DIR = Path("app/static/datastores")
@@ -74,70 +75,88 @@ async def admin_add_datastore(
     # Internal Mapping to SafeStore keys
     v_key = vectorizer_name
     if v_key == "sentense_transformer": v_key = "st"
-    elif v_key == "tf_idf": v_key = "tfidf"
+    elif v_key == "tf_idf": v_key = "tf_idf"
 
     from app.core.config import settings
     v_config = {}
     final_model = vectorizer_model_custom.strip() if vectorizer_model_custom and vectorizer_model_custom.strip() else vectorizer_model
+    
+    # safe-store's ollama/openai bindings require a model
+    if not final_model and vectorizer_name in ("ollama", "lollms", "openai"):
+        final_model = "nomic-embed-text" if vectorizer_name != "openai" else "text-embedding-3-small"
+        
     if final_model: v_config["model"] = final_model
     
     # --- URL & HOST MAPPING ---
-    # SafeStore uses 'host' for Ollama and 'base_url' for others.
+    app_settings = request.app.state.settings
     
-    # Special handling for OpenAI vectorizer: if no URL is provided, default to Hub Proxy
-    if vectorizer_name == "openai" and not vectorizer_base_url:
-        target_url = f"http://127.0.0.1:{settings.OPENAI_PROXY_PORT}"
-        logger.info(f"Datastore '{name}': OpenAI vectorizer selected with no URL. Defaulting to Hub Proxy.")
-    else:
-        target_url = vectorizer_base_url.strip() if vectorizer_base_url else f"http://127.0.0.1:{settings.PROXY_PORT}"
-    
-    if vectorizer_name == "ollama":
+    # Handle the 'lollms' proxy loopback separately to use the correct ports and protocol
+    if vectorizer_name == "lollms":
+        # lollms option uses the primary proxy port
+        target_url = f"http://127.0.0.1:{settings.PROXY_PORT}"
         v_config["host"] = target_url
-    else:
+        logger.info(f"Datastore '{name}': lollms proxy loopback selected. URL: {target_url}")
+    elif vectorizer_name == "openai" and not vectorizer_base_url:
+        # openai option with no URL uses the secondary OpenAI port
+        target_url = f"http://127.0.0.1:{app_settings.openai_port}"
         v_config["base_url"] = target_url
+        logger.info(f"Datastore '{name}': OpenAI loopback selected. URL: {target_url}")
+    else:
+        # Remote or manual URL
+        target_url = vectorizer_base_url.strip() if vectorizer_base_url else f"http://127.0.0.1:{settings.PROXY_PORT}"
+        if vectorizer_name == "ollama":
+            v_config["host"] = target_url
+        else:
+            v_config["base_url"] = target_url
     
     # --- INTERNAL KEY MANAGEMENT ---
     if vectorizer_api_key:
         v_config["api_key"] = vectorizer_api_key
     else:
-        # If pointing to self (localhost/127.0.0.1) or explicitly OpenAI without key, inject the Hub System Key
+        # If pointing to self (localhost/127.0.0.1), inject the Hub's loopback auth key
         url_str = target_url.lower()
-        is_local = "localhost" in url_str or "127.0.0.1" in url_str
-        
-        if is_local or vectorizer_name == "openai":
-            # Attempt to get system key, fallback gracefully if not available
-            system_key = getattr(request.app.state, 'system_key', None)
-            if system_key:
-                v_config["api_key"] = system_key
-                logger.info(f"Datastore '{name}': Injecting Hub System Key for local/OpenAI proxy usage.")
-            else:
-                logger.warning(f"Datastore '{name}': OpenAI vectorizer selected but system_key not found in app state. Request may fail without an API key.")
+        if "localhost" in url_str or "127.0.0.1" in url_str:
+            # We use the Hub's SECRET_KEY to authenticate against its own API
+            from app.core.config import settings as bootstrap_settings
+            v_config["api_key"] = bootstrap_settings.SECRET_KEY
+            logger.info(f"Datastore '{name}': Loopback detected. Injecting Hub SECRET_KEY for internal authentication.")
     
-    ds = DataStore(
-        name=name,
-        description=description,
-        db_path=db_path,
-        vectorizer_name=vectorizer_name, # Keep UI name for persistence
-        chunking_strategy=chunking_strategy,
-        chunk_size=chunk_size,
-        chunk_overlap=chunk_overlap,
-        vectorizer_config=v_config
-    )
-    db.add(ds)
-    await db.commit()
+    try:
+        ds = DataStore(
+            name=name,
+            description=description,
+            db_path=db_path,
+            vectorizer_name=vectorizer_name, # Keep UI name for persistence
+            chunking_strategy=chunking_strategy,
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
+            vectorizer_config=v_config
+        )
+        db.add(ds)
+        await db.commit()
+    except Exception as e:
+        import traceback
+        err_trace = traceback.format_exc()
+        logger.error(f"Failed to store updated vectorizer params: {e}\n{err_trace}")
+        flash(request, "Failed to store updated vectorizer params", "error", trace=err_trace)
+        return RedirectResponse(url=request.url_for("admin_datastores"), status_code=303)
     
     def _init_store():
         import pipmaster as pm
         pm.ensure_packages(["safe-store"])
         from safe_store import SafeStore
-        s = SafeStore(db_path=db_path, vectorizer_name=v_key, vectorizer_config=v_config)
+        # Ensure we open and close the store to verify parameters and release locks
+        with SafeStore(db_path=db_path, vectorizer_name=v_key, vectorizer_config=v_config):
+            pass
     
     try:
         await run_in_threadpool(_init_store)
         flash(request, f"Datastore '{name}' created.", "success")
     except Exception as e:
-        logger.error(f"Failed to initialize datastore: {e}")
-        flash(request, f"Failed to initialize SafeStore: {e}", "error")
+        import traceback
+        err_trace = traceback.format_exc()
+        logger.error(f"Failed to initialize datastore: {e}\n{err_trace}")
+        flash(request, f"Failed to initialize SafeStore: {e}", "error", trace=err_trace)
         
     return RedirectResponse(url=request.url_for("admin_datastores"), status_code=303)
 
@@ -180,7 +199,10 @@ async def admin_boot_datastore(ds_id: int, request: Request, db: AsyncSession = 
         pm.ensure_packages(["safe-store"])
         from safe_store import SafeStore
         
-        v_key = VECTORIZER_MAP.get(ds.vectorizer_name, "tfidf")
+        # Use v_key mapping (e.g. 'lollms' -> 'ollama', 'sentense_transformer' -> 'st')
+        v_key = VECTORIZER_MAP.get(ds.vectorizer_name, ds.vectorizer_name)
+        
+        logger.info(f"Booting SafeStore: {ds.name} with binding: {v_key}")
         # Loading the store here triggers vectorizer load if needed
         s = SafeStore(
             db_path=ds.db_path, 
@@ -267,7 +289,8 @@ async def _ingest_document_logic(request, db, ds, file_path, use_ai, admin_user)
             vectorizer_config=ds.vectorizer_config or {},
             chunking_strategy=ds.chunking_strategy,
             chunk_size=ds.chunk_size,
-            chunk_overlap=ds.chunk_overlap
+            chunk_overlap=ds.chunk_overlap,
+            log_level="info"
         )
         
         with s:
@@ -442,7 +465,7 @@ async def admin_build_datastore_graph(
         pm.ensure_packages(["safe-store"])
         from safe_store import SafeStore, GraphStore
         
-        v_key = VECTORIZER_MAP.get(ds.vectorizer_name, "tfidf")
+        v_key = VECTORIZER_MAP.get(ds.vectorizer_name, "tf_idf")
         s = SafeStore(db_path=ds.db_path, vectorizer_name=v_key, vectorizer_config=ds.vectorizer_config or {})
         
         try:

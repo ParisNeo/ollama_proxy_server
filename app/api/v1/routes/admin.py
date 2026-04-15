@@ -245,12 +245,26 @@ def get_template_context(request: Request) -> dict:
         "settings": getattr(request.app.state, 'settings', settings) # Pass DB-loaded settings to templates
     }
 
-def flash(request: Request, message: str, category: str = "info"):
+def flash(request: Request, message: str, category: str = "info", trace: str = None):
     """
-    FIX: Re-assign list to session to avoid mutation issues with modern SessionMiddleware.
+    Enhanced flash message utility. 
+    If category is 'error' and no trace is provided, it attempts to 
+    auto-capture the traceback from sys.exc_info().
     """
+    import traceback
+    import sys
+
+    if category == "error" and trace is None:
+        etype, value, tb = sys.exc_info()
+        if etype:
+            trace = "".join(traceback.format_exception(etype, value, tb))
+
     messages = request.session.get("_messages", [])
-    messages.append({"message": message, "category": category})
+    messages.append({
+        "message": message, 
+        "category": category,
+        "trace": trace
+    })
     request.session["_messages"] = messages
 
 def get_flashed_messages(request: Request): return request.session.pop("_messages", [])

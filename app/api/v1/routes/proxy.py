@@ -400,7 +400,8 @@ async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer
                         api_key_id: Optional[int] = None, log_id: Optional[int] = None,
                         request_id: Optional[str] = None, model: str = "unknown",
                         sender: str = "system", is_subrequest: bool = False,
-                        client_wants_stream: bool = True) -> Tuple[Response, OllamaServer]:
+                        client_wants_stream: bool = True, prompt_tokens: int = 0,
+                        user_id: Optional[int] = None) -> Tuple[Response, OllamaServer]:
     """
     Core lollms hub reverse proxy logic with retry support and token tracking.
     """
@@ -523,7 +524,6 @@ async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer
                 if not candidate_servers:
                     logger.error("No more candidate servers after vLLM failure")
                     break
-                current_index = safe_index % max(1, len(candidate_servers))
                 continue
 
         logger.info(f"Using Ollama branch with retry logic for server '{chosen_server.name}'")
@@ -553,7 +553,7 @@ async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer
             if is_streaming and client_wants_stream and log_id and not is_subrequest:
                 # Wrap for token tracking and live visualization
                 wrapped_response = _wrap_response_for_token_tracking(
-                    backend_response, chosen_server, api_key_id, log_id, path, request_id, model, sender
+                    backend_response, chosen_server, api_key_id, log_id, path, request_id, model, sender, prompt_tokens, user_id
                 )
                 return wrapped_response, chosen_server
             else:
@@ -693,7 +693,7 @@ async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer
                 
                 if is_streaming and log_id:
                     wrapped_response = _wrap_response_for_token_tracking(
-                        backend_response, chosen_server, api_key_id, log_id, path
+                        backend_response, chosen_server, api_key_id, log_id, path, request_id, model, sender, prompt_tokens, user_id
                     )
                     return wrapped_response, chosen_server
                 else:
@@ -729,7 +729,6 @@ async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer
         if not candidate_servers:
             logger.error("No more candidate servers after Ollama failure")
             break
-        current_index = safe_index % max(1, len(candidate_servers))
 
     logger.error(
         f"All {len(servers_tried)} backend server(s) failed after retries. "
@@ -757,7 +756,9 @@ def _wrap_response_for_token_tracking(
     path: str = "",
     request_id: Optional[str] = None,
     model: str = "unknown",
-    sender: str = "anon"
+    sender: str = "anon",
+    prompt_tokens: int = 0,
+    user_id: Optional[int] = None
 ) -> StreamingResponse:
     """Wraps a streaming response to capture token usage from chunks."""
     
@@ -807,8 +808,15 @@ def _wrap_response_for_token_tracking(
                     # Capture current buffer for background processing
                     # Use a copy to avoid race conditions with the buffer clear logic
                     tag_payload = str(buffer)
-                    # Use api_key.user_id instead of raw ID
-                    asyncio.create_task(CognitiveMemoryManager.process_tags(db, api_key.user_id, model, tag_payload))
+                    
+                    # Background process memory updates
+                    async def _background_memory_task(u_id, m_name, payload):
+                        from app.database.session import AsyncSessionLocal
+                        async with AsyncSessionLocal() as b_db:
+                            await CognitiveMemoryManager.process_tags(b_db, str(u_id), m_name, payload)
+                            
+                    if user_id:
+                        asyncio.create_task(_background_memory_task(user_id, model, tag_payload))
                 
                 # Process complete lines
                 lines = buffer.split('\n')
@@ -912,7 +920,7 @@ def _wrap_response_for_token_tracking(
                     server=server.name, 
                     sender=sender,
                     token_count=accumulated_tokens["total_tokens"] or 0,
-                    prompt_tokens=accumulated_tokens["prompt_tokens"] or p_tokens,
+                    prompt_tokens=accumulated_tokens["prompt_tokens"] or prompt_tokens,
                     tps=0
                 ))    
 
@@ -2703,7 +2711,9 @@ async def _process_proxy_logic(
         request_id=req_id, 
         model=model_name or "unknown",
         sender=api_key.user.username,
-        client_wants_stream=client_wants_stream
+        client_wants_stream=client_wants_stream,
+        prompt_tokens=p_tokens,
+        user_id=api_key.user_id
     )
 
     # --- INJECT RAG SOURCES INTO FINAL RESPONSE ---
