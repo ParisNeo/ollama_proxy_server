@@ -911,6 +911,12 @@ def _wrap_response_for_token_tracking(
                 logger.error(f"Error in token tracking stream for {request_id}: {error_detail}")
                 event_manager.emit(ProxyEvent("error", request_id, model, server.name, sender, error_message=error_detail))
         finally:
+            # CRITICAL FIX: Explicitly close the backend stream
+            try:
+                await backend_response.aclose()
+            except:
+                pass
+
             # SAFETY CHECK: Ensure the UI always gets a closing event
             if not tokens_finalized and request_id:
                 event_manager.emit(ProxyEvent(
@@ -1244,7 +1250,7 @@ async def federate_models(
     }
 
     try:
-        asyncio.create_task(_async_log_usage(db, api_key.id, "/api/tags", 200, None, None))
+        asyncio.create_task(_async_log_usage(api_key.id, "/api/tags", 200, None, None))
     except Exception as e:
         logger.debug(f"Failed to queue usage log: {e}")
     
@@ -1255,7 +1261,6 @@ async def federate_models(
 
 
 async def _async_log_usage(
-    db: AsyncSession, 
     api_key_id: int, 
     endpoint: str, 
     status_code: int, 
@@ -2460,10 +2465,12 @@ async def _handle_bundle_request(db: AsyncSession, request: Request, bundle_name
     return StreamingResponse(bundle_orchestrator_generator(), media_type="application/x-ndjson")
 
 async def _process_proxy_logic(
-    request: Request, path: str, api_key: APIKey, db: AsyncSession, 
+    request: Request, path: str, api_key: APIKey, 
     settings: AppSettingsModel, servers: List[OllamaServer], 
     body: dict, body_bytes: bytes, model_name: str, req_id: str
 ):
+    from app.database.session import AsyncSessionLocal
+    
     blocked_paths = {p.strip().lstrip('/') for p in settings.blocked_ollama_endpoints.split(',') if p.strip()}
     request_path = path.strip().lstrip('/')
 
@@ -2476,150 +2483,110 @@ async def _process_proxy_logic(
             detail=f"Access to the endpoint '/api/{request_path}' is disabled by the proxy administrator."
         )
 
-    # 1. Handle 'auto' model routing FIRST            
-    if model_name == "auto":
-        chosen_model_name = await _select_auto_model(db, body)
-        if not chosen_model_name:
-            raise HTTPException(status_code=503, detail="Auto-routing failed.")
-        model_name = chosen_model_name
-        body["model"] = model_name
-
-    # 2. Resolve Workflow / Graph Tools
-    # Legacy VirtualAgents, Routers, Ensembles, and Vision Augmenters have been removed.
-    # Everything now passes through the recursive Workflow Engine.
-    requested_model_name = model_name
-    if model_name and isinstance(body, dict):
-        is_chat_mode = "messages" in body
-        input_msgs = body.get("messages",[]) if is_chat_mode else [{"role": "user", "content": body.get("prompt", "")}]
-        
-        sender_name = api_key.user.username if (api_key.user and api_key.user.username) else "system"
-        resolved_model_name, resolved_messages = await _resolve_target(db, model_name, input_msgs, request=request, request_id=req_id, sender=sender_name)
-        
-        # --- STATIC RESULT INTERCEPTION ---
-        # Handles cases where a Graph Workflow produces a final answer (Composer/Aggregation)
-        # without needing a final LLM inference step.
-        if resolved_model_name == "__result__":
-            content = resolved_messages[-1]["content"] if resolved_messages else ""
-            final_data = {
-                "model": requested_model_name,
-                "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z"),
-                "done": True
-            }
-            if is_chat_mode:
-                final_data["message"] = {"role": "assistant", "content": content}
-            else:
-                final_data["response"] = content
-            
-            # Emit completion event for the UI
-            event_manager.emit(ProxyEvent("completed", req_id, requested_model_name, "Workflow Engine", api_key.user.username, token_count=len(content)//4))
-            return JSONResponse(content=final_data)
-
-        if resolved_model_name != model_name or resolved_messages != input_msgs:
-            model_name = resolved_model_name
+    async with AsyncSessionLocal() as db:
+        # 1. Handle 'auto' model routing FIRST            
+        if model_name == "auto":
+            chosen_model_name = await _select_auto_model(db, body)
+            if not chosen_model_name:
+                raise HTTPException(status_code=503, detail="Auto-routing failed.")
+            model_name = chosen_model_name
             body["model"] = model_name
-            if is_chat_mode:
-                body["messages"] = resolved_messages
-            else:
-                body["prompt"] = resolved_messages[-1]["content"] if resolved_messages else ""
 
-        if hasattr(request.state, 'graph_tools') and request.state.graph_tools:
-            if "tools" not in body or not body["tools"]:
-                body["tools"] =[]
-            for t in request.state.graph_tools:
-                if t not in body["tools"]:
-                    body["tools"].append(t)
-
-    # 4. Handle Capabilities Gatekeeper (Tools & Thinking & Graph Settings)
-    if model_name and isinstance(body, dict):
-        # Apply temperature resolved from graph (if any)
-        graph_temp = getattr(request.state, 'graph_temperature', None)
-        if graph_temp is not None:
-            if "options" not in body: body["options"] = {}
-            body["options"]["temperature"] = graph_temp
-        # Apply temperature resolved from graph (if any)
-        graph_temp = getattr(request.state, 'graph_temperature', None)
-        if graph_temp is not None:
-            if "options" not in body: body["options"] = {}
-            body["options"]["temperature"] = graph_temp
-        # --- TOOL SANITIZATION ---
-        # Robustly handle tool list. If the workflow provides an empty tool list,
-        # we MUST delete the key from the payload or the model will expect a tool call.
-        if "tools" in body:
-            # Flatten potential nested lists from the graph
-            if isinstance(body["tools"], list):
-                # Filter out None or empty dicts
-                body["tools"] = [t for t in body["tools"] if t]
-                
-            if isinstance(body["tools"], list) and len(body["tools"]) > 0:
-                logger.info(f"Forwarding {len(body['tools'])} tool(s) to backend.")
-            else:
-                # If the list is empty after filtering, strip it entirely
-                del body["tools"]
-                if "tool_choice" in body:
-                    del body["tool_choice"]
-
-        # Final check: Ensure tool_choice is never sent without tools
-        if "tool_choice" in body and "tools" not in body:
-            del body["tool_choice"]
-
-        # --- REFINED THINKING LOGIC ---
-        # 1. Fetch exact UI configuration for this model
-        meta = await model_metadata_crud.get_metadata_by_model_name(db, model_name)
-        ui_allows_thinking = meta.supports_thinking if meta else False
-        
-        # 2. Only act if the client EXPLICITLY provided the thinking parameter
-        if "think" in body:
-            think_val = body.get("think")
+        # 2. Resolve Workflow / Graph Tools
+        requested_model_name = model_name
+        if model_name and isinstance(body, dict):
+            is_chat_mode = "messages" in body
+            input_msgs = body.get("messages",[]) if is_chat_mode else [{"role": "user", "content": body.get("prompt", "")}]
             
-            # If they explicitly want to turn it off, always allow that (to suppress default reasoning)
-            if think_val is False:
-                pass # Leave it in the payload so the backend disables it
+            sender_name = api_key.user.username if (api_key.user and api_key.user.username) else "system"
+            resolved_model_name, resolved_messages = await _resolve_target(db, model_name, input_msgs, request=request, request_id=req_id, sender=sender_name)
+            
+            # --- STATIC RESULT INTERCEPTION ---
+            if resolved_model_name == "__result__":
+                content = resolved_messages[-1]["content"] if resolved_messages else ""
+                final_data = {
+                    "model": requested_model_name,
+                    "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z"),
+                    "done": True
+                }
+                if is_chat_mode:
+                    final_data["message"] = {"role": "assistant", "content": content}
+                else:
+                    final_data["response"] = content
                 
-            elif ui_allows_thinking:
-                # Normal path: Translation for special models like gpt-oss
-                if "gpt-oss" in model_name.lower() and think_val is True:
-                    body["think"] = "medium"
+                event_manager.emit(ProxyEvent("completed", req_id, requested_model_name, "Workflow Engine", api_key.user.username, token_count=len(content)//4))
+                return JSONResponse(content=final_data)
+
+            if resolved_model_name != model_name or resolved_messages != input_msgs:
+                model_name = resolved_model_name
+                body["model"] = model_name
+                if is_chat_mode:
+                    body["messages"] = resolved_messages
+                else:
+                    body["prompt"] = resolved_messages[-1]["content"] if resolved_messages else ""
+
+            if hasattr(request.state, 'graph_tools') and request.state.graph_tools:
+                if "tools" not in body or not body["tools"]:
+                    body["tools"] =[]
+                for t in request.state.graph_tools:
+                    if t not in body["tools"]:
+                        body["tools"].append(t)
+
+        # 4. Handle Capabilities Gatekeeper (Tools & Thinking & Graph Settings)
+        if model_name and isinstance(body, dict):
+            graph_temp = getattr(request.state, 'graph_temperature', None)
+            if graph_temp is not None:
+                if "options" not in body: body["options"] = {}
+                body["options"]["temperature"] = graph_temp
+                
+            if "tools" in body:
+                if isinstance(body["tools"], list):
+                    body["tools"] = [t for t in body["tools"] if t]
+                if not (isinstance(body["tools"], list) and len(body["tools"]) > 0):
+                    del body["tools"]
+                    if "tool_choice" in body: del body["tool_choice"]
+
+            if "tool_choice" in body and "tools" not in body:
+                del body["tool_choice"]
+
+            # --- REFINED THINKING LOGIC ---
+            meta = await model_metadata_crud.get_metadata_by_model_name(db, model_name)
+            ui_allows_thinking = meta.supports_thinking if meta else False
+            
+            if "think" in body:
+                think_val = body.get("think")
+                if think_val is False:
+                    pass
+                elif ui_allows_thinking:
+                    if "gpt-oss" in model_name.lower() and think_val is True:
+                        body["think"] = "medium"
+                else:
+                    logger.warning(f"Think parameter stripped for {model_name} (UI Disabled)")
+                    if req_id:
+                        event_manager.emit(ProxyEvent(
+                            event_type="received",
+                            request_id=req_id,
+                            model=model_name,
+                            sender=api_key.user.username,
+                            error_message=f"NOTICE: 'think' parameter ignored for {model_name}."
+                        ))
+                    del body["think"]
+            
+            body_bytes = json.dumps(body).encode('utf-8')
+
+        # --- COGNITIVE MEMORY INJECTION ---
+        effective_user_id = api_key.user_id if api_key.user_id is not None else 0
+        memory_context = await CognitiveMemoryManager.get_memory_context(db, effective_user_id, model_name)
+        if "messages" in body:
+            sys_msg = next((m for m in body["messages"] if m["role"] == "system"), None)
+            if sys_msg:
+                sys_msg["content"] = f"{memory_context}\n\n{sys_msg['content']}"
             else:
-                # Warning path: Client asked to enable thinking, but Hub UI blocks it
-                warning_msg = (
-                    f"⚠️ Client requested 'think: true' for {model_name}, but 'Think (CoT)' "
-                    f"is DISABLED in Models Manager. Parameter stripped to prevent error."
-                )
-                logger.warning(warning_msg)
-                
-                # Notify the Admin via the Live Flow Telemetry
-                if req_id:
-                    event_manager.emit(ProxyEvent(
-                        event_type="received", # Yellow pulse
-                        request_id=req_id,
-                        model=model_name,
-                        sender=api_key.user.username,
-                        error_message=f"NOTICE: 'think' parameter ignored. To enable reasoning, go to 'Intelligence Layer > Models Manager' and check 'Think (CoT)' for {model_name}."
-                    ))
-                
-                # Strip the parameter to protect standard backends
-                del body["think"]
-        
-        # 4. Re-encode the optimized body
-        body_bytes = json.dumps(body).encode('utf-8')
+                body["messages"].insert(0, {"role": "system", "content": memory_context})
+            body_bytes = json.dumps(body).encode('utf-8')
 
-    # --- COGNITIVE MEMORY INJECTION ---
-    # Safe user ID for internal system calls or keys without direct DB users
-    effective_user_id = api_key.user_id if api_key.user_id is not None else 0
-    memory_context = await CognitiveMemoryManager.get_memory_context(db, effective_user_id, model_name)
-    if "messages" in body:
-        # Find system message or inject new one
-        sys_msg = next((m for m in body["messages"] if m["role"] == "system"), None)
-        if sys_msg:
-            sys_msg["content"] = f"{memory_context}\n\n{sys_msg['content']}"
-        else:
-            body["messages"].insert(0, {"role": "system", "content": memory_context})
-        body_bytes = json.dumps(body).encode('utf-8')
-
-    # Trigger maintenance from previous session idle time
-    asyncio.create_task(CognitiveMemoryManager.reorganize_memories(db, api_key.user_id, model_name))
-
-    # 4. Telemetry
+        # Trigger maintenance (Background task must not share request-scoped db session)
+        asyncio.create_task(CognitiveMemoryManager.reorganize_memories(api_key.user_id, model_name))
 
     # Determine Request Type
     req_type = path.upper()
@@ -2697,7 +2664,7 @@ async def _process_proxy_logic(
     log_id = None
     if is_token_trackable_endpoint:
         log_id = await _async_log_usage(
-            db, api_key.id, f"/api/{path}", 200, None, model_name,
+            api_key.id, f"/api/{path}", 200, None, model_name,
             None, None, None
         )
     
@@ -2747,7 +2714,7 @@ async def _process_proxy_logic(
     if not is_token_trackable_endpoint:
         try:
             asyncio.create_task(_async_log_usage(
-                db, api_key.id, f"/api/{path}", response.status_code, chosen_server.id, model_name
+                api_key.id, f"/api/{path}", response.status_code, chosen_server.id, model_name
             ))
         except Exception as e:
             logger.debug(f"Failed to queue usage log: {e}")
@@ -2760,7 +2727,6 @@ async def proxy_ollama(
     request: Request,
     path: str,
     api_key: APIKey = Depends(get_valid_api_key),
-    db: AsyncSession = Depends(get_db),
     settings: AppSettingsModel = Depends(get_settings),
     servers: List[OllamaServer] = Depends(get_active_servers),
 ):
@@ -2788,7 +2754,7 @@ async def proxy_ollama(
     client_wants_stream = body.get("stream", True) if isinstance(body, dict) else True
     
     if not client_wants_stream:
-        return await _process_proxy_logic(request, path, api_key, db, settings, servers, body, body_bytes, model_name, req_id)
+        return await _process_proxy_logic(request, path, api_key, settings, servers, body, body_bytes, model_name, req_id)
         
     stream_queue = asyncio.Queue()
     async def _stream_cb(text: str):
@@ -2812,7 +2778,7 @@ async def proxy_ollama(
                 chunk["response"] = content
             return (json.dumps(chunk) + "\n").encode()
             
-        task = asyncio.create_task(_process_proxy_logic(request, path, api_key, db, settings, servers, body, body_bytes, model_name, req_id))
+        task = asyncio.create_task(_process_proxy_logic(request, path, api_key, settings, servers, body, body_bytes, model_name, req_id))
         
         try:
             while not task.done():

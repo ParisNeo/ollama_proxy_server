@@ -299,7 +299,8 @@ class BotManager:
                     resp, _ = await _reverse_proxy(
                         self.app.state.dummy_request, "chat", servers, 
                         json.dumps({"model": real_model, "messages": final_msgs, "stream": False}).encode(),
-                        is_subrequest=True, request_id=req_id, model=config.target_workflow, sender=username
+                        is_subrequest=True, request_id=req_id, model=config.target_workflow, sender=username,
+                        user_id=hub_user.id if hub_user else None
                     )
                     
                     if hasattr(resp, 'body'):

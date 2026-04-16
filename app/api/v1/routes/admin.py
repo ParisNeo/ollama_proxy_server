@@ -3416,9 +3416,10 @@ async def api_memory_wipe(system: str = Form(...), user: str = Form(...), db: As
     return {"success": True}
 
 @router.post("/api/memory/trigger_dream", name="api_memory_dream", dependencies=[Depends(validate_csrf_token)])
-async def api_memory_dream(system: str = Form(...), user: str = Form(...), db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
+async def api_memory_dream(system: str = Form(...), user: str = Form(...), admin_user: User = Depends(require_admin_user)):
     from app.core.memory_manager import CognitiveMemoryManager
-    await CognitiveMemoryManager.reorganize_memories(db, user, system)
+    # Background logic now handles its own session
+    await CognitiveMemoryManager.reorganize_memories(user, system)
     return {"success": True}
 
 @router.post("/api/memory/import", name="api_memory_import", dependencies=[Depends(validate_csrf_token)])

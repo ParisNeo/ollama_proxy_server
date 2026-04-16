@@ -2,13 +2,16 @@ import os
 import json
 import secrets
 import logging
+import asyncio
 from pathlib import Path
+from typing import List, Optional
 from fastapi import APIRouter, Depends, Request, Form, UploadFile, File, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from fastapi.concurrency import run_in_threadpool
 
+from app.core import knowledge_importer as kit
 from app.database.session import get_db
 from app.database.models import User, DataStore
 from app.api.v1.routes.admin import require_admin_user, get_template_context, templates, flash
@@ -16,6 +19,8 @@ from app.api.v1.dependencies import validate_csrf_token
 from app.core.events import event_manager, ProxyEvent
 from ascii_colors import trace_exception
 from typing import List
+import asyncio
+
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -197,26 +202,30 @@ async def admin_boot_datastore(ds_id: int, request: Request, db: AsyncSession = 
     ds = await db.get(DataStore, ds_id)
     if not ds: return JSONResponse({"error": "Not found"}, status_code=404)
 
+    # Capture config before passing to thread
+    db_path = ds.db_path
+    v_name = ds.vectorizer_name
+    v_config = ds.vectorizer_config or {}
+    store_name = ds.name
+
     def _initialize_and_list():
         import pipmaster as pm
         pm.ensure_packages(["safe-store"])
         from safe_store import SafeStore
         
-        # Use v_key mapping (e.g. 'lollms' -> 'ollama', 'sentense_transformer' -> 'st')
-        v_key = VECTORIZER_MAP.get(ds.vectorizer_name, ds.vectorizer_name)
+        v_key = VECTORIZER_MAP.get(v_name, v_name)
+        logger.info(f"Booting SafeStore: {store_name} with binding: {v_key}")
         
-        logger.info(f"Booting SafeStore: {ds.name} with binding: {v_key}")
-        # Loading the store here triggers vectorizer load if needed
         s = SafeStore(
-            db_path=ds.db_path, 
+            db_path=db_path, 
             vectorizer_name=v_key, 
-            vectorizer_config=ds.vectorizer_config or {}
+            vectorizer_config=v_config
         )
         
         with s:
             docs = s.list_documents() if hasattr(s, "list_documents") else s.get_documents()
-            # Normalize list of strings to objects
-            if docs and isinstance(docs[0], str):
+            if not docs: return []
+            if isinstance(docs[0], str):
                 return [{"file_path": d, "chunk_count": "N/A"} for d in docs]
             return docs
 
@@ -254,38 +263,48 @@ async def _get_file_ai_metadata(request: Request, db: AsyncSession, content: str
         logger.warning(f"AI Metadata generation skipped: {e}")
     return ""
 
-async def _ingest_document_logic(request, db, ds, file_path, use_ai, admin_user):
+async def _ingest_document_logic(request, db, ds, file_path, use_ai, admin_user, is_upload=False):
     """Internal shared logic for file ingestion with AI metadata support."""
-    import pipmaster as pm
     from app.core.events import event_manager, ProxyEvent
-    from safe_store import SafeStore
-    
-    task_id = f"sys_ds_{ds.id}" # Matches the frontend EventSource listener
+
+    task_id = f"sys_ds_{ds.id}"
     fname = os.path.basename(file_path)
-    
+
     v_key = VECTORIZER_MAP.get(ds.vectorizer_name, "st")
     event_manager.emit(ProxyEvent("active", task_id, "Datastore", "Local", admin_user.username, error_message=f"Processing {fname}..."))
 
-    # Load content for AI metadata
+    # 1. Extract text if necessary (Async)
+    extracted_text = None
+    if is_upload or use_ai or file_path.lower().endswith(('.pdf', '.docx')):
+        class MockFile:
+            def __init__(self, p): self.filename = p; self.content_type = "app/binary"
+            async def read(self):
+                with open(self.filename, "rb") as f: return f.read()
+
+        try:
+            extracted_text = await kit.extract_local_file_content([MockFile(file_path)])
+        except Exception as e:
+            logger.error(f"Extraction failed for {fname}: {e}")
+
+    # 2. Generate AI summary (Async)
     ai_prefix = ""
-    if use_ai:
+    if use_ai and extracted_text:
         agent = request.app.state.settings.admin_agent_name
         if agent:
             event_manager.emit(ProxyEvent("active", task_id, "Datastore", "Local", admin_user.username, error_message=f"Generating cohesion summary for {fname} via {agent}..."))
             try:
-                # Basic reading for preview
-                with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
-                    preview = f.read(4000)
-                
-                meta = await _get_file_ai_metadata(request, db, preview, agent, admin_user.username)
+                meta = await _get_file_ai_metadata(request, db, extracted_text[:4000], agent, admin_user.username)
                 if meta: 
                     ai_prefix = f"[Context: {meta.replace('[', '').replace(']', '')}]\n\n"
-                    logger.info(f"Generated AI Cohesion Metadata for {fname}: {meta}")
             except Exception as e:
-                logger.error(f"Failed to generate metadata for {fname}: {e}")
+                logger.error(f"Failed to generate AI metadata for {fname}: {e}")
 
+    # 3. Synchronous Indexing (Threadpool)
     def _sync_store_op():
-        # Initialize store
+        import pipmaster as pm
+        pm.ensure_packages(["safe-store"])
+        from safe_store import SafeStore
+
         s = SafeStore(
             db_path=ds.db_path,
             vectorizer_name=v_key,
@@ -294,29 +313,19 @@ async def _ingest_document_logic(request, db, ds, file_path, use_ai, admin_user)
             chunk_size=ds.chunk_size,
             chunk_overlap=ds.chunk_overlap
         )
-        
+
         with s:
-            # FIX: If it's a PDF or binary-heavy file, we must extract text manually 
-            # before prepending the AI header.
-            # Using kit.extract_local_file_content logic inside the sync wrapper.
-            if ai_prefix or file_path.lower().endswith(('.pdf', '.docx')):
-                import textwrap
-                # Simulate a list for the extractor
-                class MockFile:
-                    def __init__(self, p): self.filename = p; self.content_type = "app/binary"
-                    async def read(self):
-                        with open(self.filename, "rb") as f: return f.read()
-                
-                # Get extracted text
-                extracted_text = asyncio.run(kit.extract_local_file_content([MockFile(file_path)]))
-                full_text = ai_prefix + extracted_text
-                
-                # Burn the metadata into the store using text-based ingestion
-                s.add_document_from_text(full_text, fname, force_reindex=True)
+            # If we have extracted text or AI prefix, use text-based indexing (add_text)
+            # to ensure the 'unique_id' is the filename, preventing "file not found" errors
+            # after the temporary upload file is deleted.
+            if extracted_text is not None or ai_prefix:
+                full_text = ai_prefix + (extracted_text or "")
+                # API check: unique_id is the first positional or kwarg 'unique_id'
+                s.add_text(unique_id=fname, text=full_text, force_reindex=True)
             else:
-                # Standard raw file ingestion
+                # Direct file path indexing for local folders
                 s.add_document(file_path, force_reindex=True)
-                
+
     await run_in_threadpool(_sync_store_op)
             
     event_manager.emit(ProxyEvent("completed", task_id, "Datastore", "Local", admin_user.username, error_message=f"Finished indexing: {fname}"))
@@ -347,9 +356,8 @@ async def admin_upload_datastore(
             f.write(content)
                 
         try:
-            # We use a background task for the ingestion logic so the UI doesn't time out on large folders
-            # but we await it here for simplicity since the user is in a management session
-            await _ingest_document_logic(request, db, ds, str(temp_path), use_ai_metadata, admin_user)
+            # Flag this as an upload so basename is used as ID
+            await _ingest_document_logic(request, db, ds, str(temp_path), use_ai_metadata, admin_user, is_upload=True)
         except Exception as e:
             logger.error(f"Upload failed for {safe_name}: {e}")
             flash(request, f"Error indexing {safe_name}: {e}", "error")
@@ -573,82 +581,51 @@ async def admin_view_datastore_doc(ds_id: int, file_path: str, request: Request,
     if not ds: raise HTTPException(status_code=404)
     
     def _read_doc():
-        import sqlite3
-        import numpy as np
-        from sklearn.decomposition import PCA
         from safe_store import SafeStore
         
         v_key = VECTORIZER_MAP.get(ds.vectorizer_name, ds.vectorizer_name)
+        s = SafeStore(db_path=ds.db_path, vectorizer_name=v_key, vectorizer_config=ds.vectorizer_config or {})
         
-        # Connect directly to the SQLite backend to get raw vectors
-        with sqlite3.connect(ds.db_path) as conn:
-            cursor = conn.cursor()
-            # 1. Get Document ID - Use rowid and check for 'path' (standard) or 'title' (legacy)
-            doc_row = None
-            try:
-                # SafeStore standard uses 'path'
-                cursor.execute("SELECT rowid FROM documents WHERE path = ?", (file_path,))
-                doc_row = cursor.fetchone()
-            except sqlite3.OperationalError:
-                # Fallback for older schemas using 'title'
-                try:
-                    cursor.execute("SELECT rowid FROM documents WHERE title = ?", (file_path,))
-                    doc_row = cursor.fetchone()
-                except sqlite3.OperationalError:
-                    pass
-
-            if not doc_row:
-                return {"error": f"Document '{file_path}' not found in storage index."}
-            doc_id = doc_row[0]
-            
-            # 2. Get Chunks and Embeddings - Use rowid for universal SQLite compatibility
-            cursor.execute("SELECT rowid, text, embedding FROM chunks WHERE document_id = ?", (doc_id,))
-            rows = cursor.fetchall()
-            
-        if not rows:
-            return {"content": "No chunks found.", "chunk_count": 0, "pca_points": []}
-
-        chunks_data = []
-        vectors = []
         full_text = ""
-        
-        for r in rows:
-            c_id, c_text, c_emb_raw = r
-            chunks_data.append({"id": c_id, "text": c_text})
-            full_text += c_text + "\n"
-            
-            # Handle both JSON strings and binary BLOBs
-            try:
-                if isinstance(c_emb_raw, (bytes, bytearray)):
-                    vec = np.frombuffer(c_emb_raw, dtype=np.float32)
-                else:
-                    vec = json.loads(c_emb_raw)
-                vectors.append(vec)
-            except:
-                continue
-                
         pca_points = []
-        # PCA requires at least 2 samples
-        if len(vectors) >= 2:
-            try:
-                vectors_np = np.array(vectors)
-                pca = PCA(n_components=2)
-                reduced = pca.fit_transform(vectors_np)
-                for i, point in enumerate(reduced):
+        chunk_count = 0
+        
+        with s:
+            # 1. Verify existence
+            docs = s.list_documents()
+            doc_found = False
+            for d in docs:
+                d_path = d['file_path'] if isinstance(d, dict) else d
+                if d_path == file_path:
+                    doc_found = True
+                    break
+            
+            if not doc_found:
+                return {"error": f"Document '{file_path}' not found in storage index."}
+
+            # 2. Reconstruct text using official API
+            full_text = s.reconstruct_document_text(file_path)
+            
+            # 3. Get visualization points using official export_point_cloud API
+            # This method already performs PCA/Dimensionality reduction internally.
+            all_points = s.export_point_cloud(output_format='dict')
+            
+            # Filter the global point cloud for chunks belonging to THIS document
+            for p in all_points:
+                # safe_store uses document_title as the key for filtering
+                if p.get('document_title') == file_path:
+                    chunk_count += 1
                     pca_points.append({
-                        "x": float(point[0]),
-                        "y": float(point[1]),
-                        "id": chunks_data[i]["id"],
-                        "label": f"Chunk #{i+1}",
-                        "preview": chunks_data[i]["text"][:100] + "..."
+                        "x": p['x'],
+                        "y": p['y'],
+                        "label": f"Chunk #{chunk_count}",
+                        "preview": p.get('chunk_text', '')[:100] + "..."
                     })
-            except Exception as pca_err:
-                logger.warning(f"PCA calculation failed: {pca_err}")
 
         return {
             "content": full_text,
             "file_path": file_path,
-            "chunk_count": len(chunks_data),
+            "chunk_count": chunk_count,
             "pca_points": pca_points
         }
                 

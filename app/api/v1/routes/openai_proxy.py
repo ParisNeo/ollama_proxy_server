@@ -108,7 +108,6 @@ async def openai_chat(request: Request, db: AsyncSession = Depends(get_db), api_
             request=request,
             path="chat",
             api_key=api_key,
-            db=db,
             settings=get_settings(request),
             servers=await get_active_servers(db)
         )

@@ -147,22 +147,24 @@ class CognitiveMemoryManager:
         return result
 
     @staticmethod
-    async def reorganize_memories(db, user_identifier: str, agent_name: str):
+    async def reorganize_memories(user_identifier: str, agent_name: str):
         """Decays importance, cleans up low-value entries, and logs a Dream."""
-        from app.database.models import DreamLog
+        from app.database.models import DreamLog, DreamLog
+        from app.database.session import AsyncSessionLocal
         
-        # Only decay memories that haven't been touched in the last 4 hours
-        four_hours_ago = datetime.datetime.utcnow() - datetime.timedelta(hours=4)
-        
-        # Find memories that will decay
-        res = await db.execute(
-            select(MemoryEntry).filter(
-                MemoryEntry.user_identifier == user_identifier, 
-                MemoryEntry.agent_name == agent_name,
-                MemoryEntry.last_accessed < four_hours_ago,
-                MemoryEntry.category != 'affective'
+        async with AsyncSessionLocal() as db:
+            # Only decay memories that haven't been touched in the last 4 hours
+            four_hours_ago = datetime.datetime.utcnow() - datetime.timedelta(hours=4)
+            
+            # Find memories that will decay
+            res = await db.execute(
+                select(MemoryEntry).filter(
+                    MemoryEntry.user_identifier == str(user_identifier), 
+                    MemoryEntry.agent_name == agent_name,
+                    MemoryEntry.last_accessed < four_hours_ago,
+                    MemoryEntry.category != 'affective'
+                )
             )
-        )
         decaying = res.scalars().all()
         
         decayed_count = len(decaying)
@@ -183,12 +185,16 @@ class CognitiveMemoryManager:
         )
         
         # Pruning
-        await db.execute(delete(MemoryEntry).filter(MemoryEntry.importance <= 0))
+        await db.execute(delete(MemoryEntry).filter(
+            MemoryEntry.user_identifier == str(user_identifier),
+            MemoryEntry.agent_name == agent_name,
+            MemoryEntry.importance <= 0
+        ))
         
         # Log the Dream
         summary = f"Dream Session: Reorganized neural pathways. Decayed {decayed_count} engrams."
         if forgotten_titles:
             summary += f" Completely forgot: {', '.join(forgotten_titles)}."
             
-        db.add(DreamLog(memory_system=agent_name, user_identifier=user_identifier, summary=summary))
+        db.add(DreamLog(memory_system=agent_name, user_identifier=str(user_identifier), summary=summary))
         await db.commit()
