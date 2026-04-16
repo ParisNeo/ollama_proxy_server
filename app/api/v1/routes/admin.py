@@ -3266,27 +3266,77 @@ async def admin_memory_systems(request: Request, db: AsyncSession = Depends(get_
         
     context["systems"] = systems
     
-    # Get distinct users who have memories
-    from app.database.models import MemoryEntry
-    res_users = await db.execute(select(MemoryEntry.user_identifier).distinct())
-    context["active_users"] = res_users.scalars().all()
+    # Get distinct user identifiers who have memories
+    from app.database.models import MemoryEntry, User
+    res_ids = await db.execute(select(MemoryEntry.user_identifier).distinct())
+    identifiers = res_ids.scalars().all()
+    
+    active_users_list = []
+    for uid in identifiers:
+        display_name = uid
+        # If it's a numeric ID, resolve the username for the UI
+        if uid.isdigit():
+            user_obj = await db.get(User, int(uid))
+            if user_obj:
+                display_name = f"{user_obj.username} (ID: {uid})"
+        
+        active_users_list.append({"id": uid, "display": display_name})
+
+    context["active_users"] = active_users_list
     
     context["csrf_token"] = await get_csrf_token(request)
     return templates.TemplateResponse("admin/memory_systems.html", context)
 
 @router.post("/api/memory/system/add", name="api_memory_add_system", dependencies=[Depends(validate_csrf_token)])
-async def api_memory_add_system(name: str = Form(...), desc: str = Form(""), db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
+async def api_memory_add_system(name: str = Form(...), desc: str = Form(""), use_aff: bool = Form(False), db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
     from app.database.models import MemorySystem
     safe_name = re.sub(r'[^a-zA-Z0-9_-]', '_', name.lower())
-    db.add(MemorySystem(name=safe_name, description=desc, system_instruction="Default"))
+    db.add(MemorySystem(name=safe_name, description=desc, use_affective=use_aff, system_instruction="Default"))
     await db.commit()
     return RedirectResponse(url="/admin/memory-systems", status_code=303)
 
+@router.post("/api/memory/system/toggle_affective", name="api_memory_toggle_affective")
+async def api_memory_toggle_affective(
+    request: Request,
+    system_name: str = Form(...),
+    db: AsyncSession = Depends(get_db),
+    admin_user: User = Depends(require_admin_user)
+):
+    from app.database.models import MemorySystem
+    res = await db.execute(select(MemorySystem).filter_by(name=system_name))
+    sys = res.scalars().first()
+    if sys:
+        sys.use_affective = not sys.use_affective
+        await db.commit()
+        return {"success": True, "state": sys.use_affective}
+    return JSONResponse({"error": "System not found"}, status_code=404)
+
+@router.post("/api/memory/importance", name="api_memory_update_importance")
+async def api_memory_update_importance(
+    request: Request,
+    m_id: int = Form(...),
+    importance: int = Form(...),
+    db: AsyncSession = Depends(get_db),
+    admin_user: User = Depends(require_admin_user)
+):
+    from app.database.models import MemoryEntry
+    entry = await db.get(MemoryEntry, m_id)
+    if entry:
+        entry.importance = max(0, min(100, importance))
+        await db.commit()
+        return {"success": True}
+    return JSONResponse({"error": "Entry not found"}, status_code=404)
+
 @router.get("/api/memory/data", name="api_memory_data")
 async def api_memory_data(system: str, user: str, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
-    from app.database.models import MemoryEntry, DreamLog
+    from app.database.models import MemoryEntry, DreamLog, MemorySystem
+    from sqlalchemy import desc
     
-    # Get standard memories
+    # Get System Config
+    res_sys = await db.execute(select(MemorySystem).filter_by(name=system))
+    sys_obj = res_sys.scalars().first()
+
+    # Get standard memories (all categories except affective)
     res_mem = await db.execute(
         select(MemoryEntry).filter(
             MemoryEntry.agent_name == system,
@@ -3311,7 +3361,12 @@ async def api_memory_data(system: str, user: str, db: AsyncSession = Depends(get
     )
     dreams =[{"summary": d.summary, "ts": d.created_at.strftime('%Y-%m-%d %H:%M')} for d in res_dreams.scalars().all()]
     
-    return {"memories": memories, "affective": affective_state, "dreams": dreams}
+    return {
+        "memories": memories, 
+        "affective": affective_state, 
+        "dreams": dreams,
+        "system_use_affective": sys_obj.use_affective if sys_obj else False
+    }
 
 @router.post("/api/memory/affective", name="api_memory_affective", dependencies=[Depends(validate_csrf_token)])
 async def api_memory_affective(
@@ -3334,7 +3389,20 @@ async def api_memory_affective(
 async def api_memory_delete(m_id: int, request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
     from app.database.models import MemoryEntry
     from sqlalchemy import delete
+    # CSRF check
+    if not await validate_csrf_token_header(request): raise HTTPException(status_code=403)
     await db.execute(delete(MemoryEntry).filter_by(id=m_id))
+    await db.commit()
+    return {"success": True}
+
+@router.post("/api/memory/entry", name="api_memory_add_entry", dependencies=[Depends(validate_csrf_token)])
+async def api_memory_add_entry(
+    system: str = Form(...), user: str = Form(...), category: str = Form(...),
+    title: str = Form(...), content: str = Form(...), importance: int = Form(50),
+    db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)
+):
+    from app.database.models import MemoryEntry
+    db.add(MemoryEntry(user_identifier=user, agent_name=system, category=category, title=title, content=content, importance=importance))
     await db.commit()
     return {"success": True}
 

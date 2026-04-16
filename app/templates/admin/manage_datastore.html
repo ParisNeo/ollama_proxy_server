@@ -57,21 +57,29 @@
         </div>
 
         <div class="lg:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-8">
-        <!-- Single File Upload -->
+        <!-- Bulk File / Folder Upload -->
         <div class="card-style">
-            <h2 class="card-header text-xl font-bold mb-4">Upload Document</h2>
+            <h2 class="card-header text-xl font-bold mb-4">Bulk Upload (Files or Folder)</h2>
             <form action="{{ url_for('admin_upload_datastore', ds_id=datastore.id) }}" method="post" enctype="multipart/form-data" class="space-y-4">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                <div>
-                    <label class="block text-xs text-gray-400 uppercase font-bold mb-2">Select File</label>
-                    <input type="file" name="file" required class="block w-full text-sm rounded-md border border-white/10 file:mr-4 file:py-2 file:px-4 file:rounded-l-md file:border-0 file:bg-teal-600 file:text-white hover:file:bg-teal-700 bg-black/20 text-gray-300">
+                <div class="space-y-4 p-4 bg-black/20 rounded-xl border border-white/5">
+                    <div>
+                        <label class="block text-[10px] font-black text-gray-500 uppercase tracking-widest mb-2">Source Selection</label>
+                        <input type="file" name="files" multiple webkitdirectory directory class="block w-full text-sm rounded-md border border-white/10 file:mr-4 file:py-2 file:px-4 file:rounded-l-md file:border-0 file:bg-indigo-600 file:text-white hover:file:bg-indigo-500 bg-black/40 text-gray-300 transition-all cursor-pointer">
+                        <p class="mt-2 text-[10px] text-gray-500 italic">Tip: You can select multiple files OR a whole folder.</p>
+                    </div>
+                    
+                    <div class="flex items-center gap-3 pt-2 border-t border-white/5">
+                        <input type="checkbox" name="use_ai_metadata" id="use_ai_1" value="true" class="h-5 w-5 rounded text-indigo-600 bg-black/40 border-white/10">
+                        <div class="flex flex-col">
+                            <label for="use_ai_1" class="text-xs font-bold text-indigo-400">Enable AI Metadata Preprocessing</label>
+                            <span class="text-[9px] text-gray-500">The Management Agent will summarize every document to create a "Context Header" prepended to every chunk.</span>
+                        </div>
+                    </div>
                 </div>
-                <div class="flex items-center gap-3">
-                    <input type="checkbox" name="use_ai_metadata" id="use_ai_1" value="true" class="h-4 w-4 rounded text-teal-600">
-                    <label for="use_ai_1" class="text-xs text-gray-400">Generate AI Metadata Cohesion (via lollms)</label>
-                </div>
-                <div class="flex justify-end">
-                    <button type="submit" onclick="this.innerHTML='Processing...'; this.classList.add('opacity-50')" class="bg-teal-600 hover:bg-teal-500 px-6 py-2 rounded font-bold text-sm transition-all">Upload & Index</button>
+                
+                <div class="flex justify-end pt-2">
+                    <button type="submit" onclick="this.innerHTML='<span class=\'animate-pulse\'>Processing Batch...</span>'; this.classList.add('opacity-50')" class="bg-indigo-600 hover:bg-indigo-500 px-8 py-3 rounded-xl font-black text-xs uppercase tracking-widest text-white shadow-lg transition-all transform active:scale-95">Deploy to Datastore</button>
                 </div>
             </form>
         </div>

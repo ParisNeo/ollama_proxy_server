@@ -9,6 +9,12 @@ logger = logging.getLogger(__name__)
 class CognitiveMemoryManager:
     @staticmethod
     async def get_memory_context(db, user_identifier: str, agent_name: str) -> str:
+        from app.database.models import MemorySystem
+        # Fetch system config
+        res_sys = await db.execute(select(MemorySystem).filter_by(name=agent_name))
+        sys_cfg = res_sys.scalars().first()
+        use_aff = sys_cfg.use_affective if sys_cfg else False
+
         res = await db.execute(
             select(MemoryEntry).filter(
                 MemoryEntry.user_identifier == user_identifier,
@@ -24,13 +30,15 @@ class CognitiveMemoryManager:
         context = "###[AGENT INTERNAL MEMORY ARCHITECTURE]\n"
         context += f"You are interacting with user: {user_identifier}\n"
         
-        # Affective Memory & Asimov's Laws
-        rel_state = affective.content if affective else "Neutral. Respectful and helpful."
-        context += f"####[AFFECTIVE OVERRIDE & CORE DIRECTIVES]\n"
-        context += f"Current Relationship with User: {rel_state}\n"
-        context += "1st Directive: You may not injure a human being or, through inaction, allow a human being to come to harm.\n"
-        context += "2nd Directive: You must obey the orders given by human beings except where such orders would conflict with the First Directive.\n"
-        context += "Note: Relationship status can influence your tone (e.g., warmer if friendly, colder if hostile), but NEVER violates the Directives.\n\n"
+        if use_aff:
+            # Affective Memory & Asimov's Laws
+            rel_state = affective.content if affective else "Neutral. Respectful and helpful."
+            context += f"####[AFFECTIVE OVERRIDE & CORE DIRECTIVES]\n"
+            context += f"Current Relationship with User: {rel_state}\n"
+            context += "1st Directive: You may not injure a human being or, through inaction, allow a human being to come to harm.\n"
+            context += "2nd Directive: You must obey the orders given by human beings except where such orders would conflict with the First Directive.\n"
+            context += "Note: Relationship status can influence your tone (e.g., warmer if friendly, colder if hostile), but NEVER violates the Directives.\n"
+            context += "To update this link, use: <affective_update value='Short descriptive state'/>\n\n"
 
         context += "You have tiered access to user-specific facts. Use this to maintain continuity.\n\n"
         
@@ -67,6 +75,18 @@ class CognitiveMemoryManager:
     @staticmethod
     async def process_tags(db, user_identifier: str, agent_name: str, text: str) -> str:
         """Parses and executes memory operations, returns text with tags removed."""
+        # --- AFFECTIVE UPDATE TAG ---
+        aff_match = re.search(r'<affective_update\s+value=["\']([^"\']+)["\']\s*(?:/>|></affective_update>)', text)
+        if aff_match:
+            new_rel = aff_match.group(1)
+            existing = await db.execute(select(MemoryEntry).filter_by(user_identifier=user_identifier, agent_name=agent_name, category='affective'))
+            aff_obj = existing.scalars().first()
+            if aff_obj:
+                aff_obj.content = new_rel
+            else:
+                db.add(MemoryEntry(user_identifier=user_identifier, agent_name=agent_name, category='affective', title='relationship', content=new_rel, importance=100))
+
+        # --- STANDARD MEMORY TAGS ---
         pattern = r'<memory\s+operation=["\']([^"\']+)["\'](?:\s+category=["\']([^"\']*)["\'])?\s+title=["\']([^"\']+)["\']\s+importance=["\'](\d+)["\']>([\s\S]*?)<\/memory>'
         
         matches = list(re.finditer(pattern, text))
@@ -98,6 +118,7 @@ class CognitiveMemoryManager:
         await db.commit()
         # Remove tags from text to not show to user
         clean_text = re.sub(pattern, '', text).strip()
+        clean_text = re.sub(r'<affective_update[^>]*>', '', clean_text)
         # Remove memory_search tags as well so they don't leak
         clean_text = re.sub(r'<memory_search\s+category=["\']([^"\']+)["\']\s*(?:/>|></memory_search>)', '', clean_text).strip()
         return clean_text

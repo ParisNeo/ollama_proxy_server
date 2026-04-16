@@ -59,10 +59,21 @@ class BotManager:
         import json, secrets, re, copy
         from app.api.v1.routes.proxy import _resolve_target, _reverse_proxy
         from app.core.memory_manager import CognitiveMemoryManager
-        
+        from app.crud import user_crud
+
         async with AsyncSessionLocal() as db:
             req_id = f"bot_{platform_name}_{secrets.token_hex(4)}"
-            user_identifier = f"{platform_name}_{username}"
+            
+            # --- CROSS-PLATFORM IDENTITY RESOLUTION ---
+            # Try to find a Hub user that matches the bot handle
+            hub_user = await user_crud.get_user_by_username(db, username)
+            if hub_user:
+                # Use the permanent database ID to sync memory across Web/API/Bots
+                user_identifier = str(hub_user.id)
+                logger.info(f"Bot Handshake: Resolved platform user '{username}' to Hub ID {user_identifier}")
+            else:
+                # Fallback to prefixed name if the user doesn't have a Hub account
+                user_identifier = f"{platform_name}_{username}"
             
             # 1. Update Short-Term Rolling Memory
             if user_identifier not in self.chat_histories:

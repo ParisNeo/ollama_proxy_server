@@ -15,6 +15,7 @@ from app.api.v1.routes.admin import require_admin_user, get_template_context, te
 from app.api.v1.dependencies import validate_csrf_token
 from app.core.events import event_manager, ProxyEvent
 from ascii_colors import trace_exception
+from typing import List
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -295,12 +296,25 @@ async def _ingest_document_logic(request, db, ds, file_path, use_ai, admin_user)
         )
         
         with s:
-            if ai_prefix:
-                # Prepend context to the text so every chunk inherits it
-                with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
-                    full_text = ai_prefix + f.read()
+            # FIX: If it's a PDF or binary-heavy file, we must extract text manually 
+            # before prepending the AI header.
+            # Using kit.extract_local_file_content logic inside the sync wrapper.
+            if ai_prefix or file_path.lower().endswith(('.pdf', '.docx')):
+                import textwrap
+                # Simulate a list for the extractor
+                class MockFile:
+                    def __init__(self, p): self.filename = p; self.content_type = "app/binary"
+                    async def read(self):
+                        with open(self.filename, "rb") as f: return f.read()
+                
+                # Get extracted text
+                extracted_text = asyncio.run(kit.extract_local_file_content([MockFile(file_path)]))
+                full_text = ai_prefix + extracted_text
+                
+                # Burn the metadata into the store using text-based ingestion
                 s.add_document_from_text(full_text, fname, force_reindex=True)
             else:
+                # Standard raw file ingestion
                 s.add_document(file_path, force_reindex=True)
                 
     await run_in_threadpool(_sync_store_op)
@@ -310,7 +324,7 @@ async def _ingest_document_logic(request, db, ds, file_path, use_ai, admin_user)
 @router.post("/datastores/{ds_id}/upload", name="admin_upload_datastore", dependencies=[Depends(validate_csrf_token)])
 async def admin_upload_datastore(
     ds_id: int, request: Request, 
-    file: UploadFile = File(...), 
+    files: List[UploadFile] = File(...), 
     use_ai_metadata: bool = Form(False),
     db: AsyncSession = Depends(get_db),
     admin_user: User = Depends(require_admin_user)
@@ -319,20 +333,30 @@ async def admin_upload_datastore(
     if not ds: raise HTTPException(status_code=404)
     
     UPLOADS_TEMP_DIR.mkdir(parents=True, exist_ok=True)
-    temp_path = UPLOADS_TEMP_DIR / file.filename
-    content = await file.read()
-    with open(temp_path, "wb") as f:
-        f.write(content)
+    
+    # Process each file in the batch
+    for file in files:
+        if not file.filename: continue
+        
+        # Security: Clean filename to prevent path injection
+        safe_name = os.path.basename(file.filename)
+        temp_path = UPLOADS_TEMP_DIR / safe_name
+        
+        content = await file.read()
+        with open(temp_path, "wb") as f:
+            f.write(content)
+                
+        try:
+            # We use a background task for the ingestion logic so the UI doesn't time out on large folders
+            # but we await it here for simplicity since the user is in a management session
+            await _ingest_document_logic(request, db, ds, str(temp_path), use_ai_metadata, admin_user)
+        except Exception as e:
+            logger.error(f"Upload failed for {safe_name}: {e}")
+            flash(request, f"Error indexing {safe_name}: {e}", "error")
+        finally:
+            if temp_path.exists(): os.remove(temp_path)
             
-    try:
-        await _ingest_document_logic(request, db, ds, str(temp_path), use_ai_metadata, admin_user)
-        flash(request, f"File '{file.filename}' indexed.", "success")
-    except Exception as e:
-        logger.error(f"Upload failed: {e}")
-        flash(request, f"Error: {e}", "error")
-    finally:
-        if temp_path.exists(): os.remove(temp_path)
-            
+    flash(request, f"Batch processing of {len(files)} items complete.", "success")
     return RedirectResponse(url=request.url_for("admin_manage_datastore", ds_id=ds.id), status_code=303)
 
 
@@ -559,15 +583,26 @@ async def admin_view_datastore_doc(ds_id: int, file_path: str, request: Request,
         # Connect directly to the SQLite backend to get raw vectors
         with sqlite3.connect(ds.db_path) as conn:
             cursor = conn.cursor()
-            # 1. Get Document ID
-            cursor.execute("SELECT id FROM documents WHERE title = ?", (file_path,))
-            doc_row = cursor.fetchone()
+            # 1. Get Document ID - Use rowid and check for 'path' (standard) or 'title' (legacy)
+            doc_row = None
+            try:
+                # SafeStore standard uses 'path'
+                cursor.execute("SELECT rowid FROM documents WHERE path = ?", (file_path,))
+                doc_row = cursor.fetchone()
+            except sqlite3.OperationalError:
+                # Fallback for older schemas using 'title'
+                try:
+                    cursor.execute("SELECT rowid FROM documents WHERE title = ?", (file_path,))
+                    doc_row = cursor.fetchone()
+                except sqlite3.OperationalError:
+                    pass
+
             if not doc_row:
-                return {"error": "Document not found in storage."}
+                return {"error": f"Document '{file_path}' not found in storage index."}
             doc_id = doc_row[0]
             
-            # 2. Get Chunks and Embeddings
-            cursor.execute("SELECT id, text, embedding FROM chunks WHERE document_id = ?", (doc_id,))
+            # 2. Get Chunks and Embeddings - Use rowid for universal SQLite compatibility
+            cursor.execute("SELECT rowid, text, embedding FROM chunks WHERE document_id = ?", (doc_id,))
             rows = cursor.fetchall()
             
         if not rows:

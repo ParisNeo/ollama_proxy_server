@@ -688,6 +688,7 @@ async def run_all_migrations(engine: AsyncEngine) -> None:
                 "description": "VARCHAR",
                 "system_instruction": "TEXT NOT NULL",
                 "importance_decay": "INTEGER DEFAULT 2",
+                "use_affective": "BOOLEAN DEFAULT 0 NOT NULL",
                 "is_active": "BOOLEAN DEFAULT 1 NOT NULL",
                 "created_at": "DATETIME",
             },

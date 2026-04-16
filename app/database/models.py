@@ -287,6 +287,7 @@ class MemorySystem(Base):
     description = Column(String, nullable=True)
     system_instruction = Column(TEXT, nullable=False) # The prompt telling the AI how to use tags
     importance_decay = Column(Integer, default=2) # Points lost per maintenance cycle
+    use_affective = Column(Boolean, default=False) # Default to deactivated
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
