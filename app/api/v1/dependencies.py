@@ -20,19 +20,23 @@ api_key_header = APIKeyHeader(name="Authorization", auto_error=False)
 async def get_settings(request: Request) -> AppSettingsModel:
     """
     Authoritative settings provider. 
-    If the in-memory state is missing critical values (like the admin agent),
-    it performs a hot-reload from the database to ensure worker synchronization.
+    Always prioritize the database values for critical orchestration fields 
+    to prevent desync between workers.
     """
+    # Check memory first
     settings_in_state = getattr(request.app.state, 'settings', None)
     
-    # If state is missing or the management agent isn't set in memory, check the DB
-    if not settings_in_state or not settings_in_state.admin_agent_name:
+    # If state is missing OR if we are in a POST/Admin context, force a DB check
+    # to ensure the "Master Agent" selection is fresh.
+    if not settings_in_state or request.url.path.startswith("/admin"):
         from app.database.session import AsyncSessionLocal
         from app.crud import settings_crud
         async with AsyncSessionLocal() as db:
             db_settings_obj = await settings_crud.get_app_settings(db)
             if db_settings_obj:
-                new_settings = AppSettingsModel.model_validate(db_settings_obj.settings_data)
+                settings_data = db_settings_obj.settings_data
+                # Ensure the Pydantic model is fresh
+                new_settings = AppSettingsModel.model_validate(settings_data)
                 request.app.state.settings = new_settings
                 return new_settings
                 

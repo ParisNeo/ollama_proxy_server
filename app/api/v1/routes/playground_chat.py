@@ -161,7 +161,7 @@ async def _process_playground_logic(
     else:
         target_server = servers_with_model[0]
     
-    if target_server.server_type == 'vllm':
+    if target_server.server_type in ('vllm', 'novita'):
         from app.core.vllm_translator import translate_ollama_to_vllm_chat, vllm_stream_to_ollama_stream
         
         chat_url = f"{target_server.url.rstrip('/')}/v1/chat/completions"

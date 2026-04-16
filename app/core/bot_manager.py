@@ -135,7 +135,27 @@ class BotManager:
                         logger.info(f"[DEBUG] BOT RAW RESPONSE (Turn {turn}):\n{raw_response}")
                     
                     clean_response = await CognitiveMemoryManager.process_tags(db, user_identifier, target_workflow, raw_response)
-                    
+
+                    # Handle internal ROM Digging (RLM Search)
+                    dig_match = re.search(r'<memory_dig\s+regex=["\']([^"\']+)["\']\s*(?:/>|></memory_dig>)', raw_response)
+                    if dig_match:
+                        pattern = dig_match.group(1)
+                        # Search Immutable ROM using Regex
+                        res_rom = await db.execute(
+                            select(MemoryEntry).filter(
+                                MemoryEntry.agent_name == "lollms",
+                                MemoryEntry.is_immutable == True,
+                                MemoryEntry.content.op('REGEXP')(pattern)
+                            ).limit(3)
+                        )
+                        found = res_rom.scalars().all()
+                        memory_text = "\n".join([f"RECOVERED ROM: {f.title} - {f.content}" for f in found])
+                        
+                        # Loop back into context
+                        messages.append({"role": "assistant", "content": raw_response})
+                        messages.append({"role": "user", "content": f"INTERNAL ROM SEARCH RESULTS:\n{memory_text}\n\nApply this knowledge to your final answer."})
+                        continue
+                                        
                     # Handle internal memory search requests
                     search_match = re.search(r'<memory_search\s+category=["\']([^"\']+)["\']\s*(?:/>|></memory_search>)', raw_response)
                     if search_match:

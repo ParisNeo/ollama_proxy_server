@@ -1056,15 +1056,18 @@ async def admin_models_manager_page(
     
     # 2. Metadata Sync: Ensure skeleton metadata exists for all discovered models
     # We do this purely in-DB to avoid hammering backend APIs on page load
+    sync_count = 0
     for model_name in all_model_names:
-        if not model_name or len(model_name) > 256 or not re.match(r'^[\w\.\-:@]+$', model_name):
+        if not model_name or len(model_name) > 512: # OpenAI models can be long
             continue
             
         existing_meta = await model_metadata_crud.get_metadata_by_model_name(db, model_name)
         if not existing_meta:
-            # Create a basic local entry. Real context length will be fetched 
-            # if the user clicks 'Refresh' in the UI or during background maintenance.
             await model_metadata_crud.get_or_create_metadata(db, model_name=model_name)
+            sync_count += 1
+    
+    if sync_count > 0:
+        await db.commit()
         
     # 3. Only fetch metadata for models that actually exist on a server
     full_metadata_list = await model_metadata_crud.get_all_metadata(db)
@@ -1221,9 +1224,9 @@ async def admin_ai_configure_models(
             progress = int((i / total_models) * 100)
 
             event_manager.emit(ProxyEvent(
-                "active", build_id, "Cluster Architect", target_agent, admin_user.username, 
+                "active", build_id, "Cluster Architect", "Local", admin_user.username, 
                 error_message=f"Batch {current_batch_num}/{total_batches}: Analyzing {len(batch)} models...",
-                token_count=progress # Use token_count field as a temporary progress carrier for UI
+                token_count=progress
             ))
 
             batch_prompt = (
@@ -1677,6 +1680,8 @@ async def admin_settings_post(
         await settings_crud.update_app_settings(db, settings_data=updated_settings_data)
         
         # Update local memory (for this worker only)
+        request.app.state.settings = updated_settings_data
+        # Ensure the authoritative state is updated for the whole app
         request.app.state.settings = updated_settings_data
         
         flash(request, "Settings updated successfully.", "success")
@@ -2797,10 +2802,8 @@ async def analyze_logs_ai(request: Request, db: AsyncSession = Depends(get_db), 
     from app.api.v1.routes.proxy import _resolve_target, _reverse_proxy
     
     app_settings: AppSettingsModel = request.app.state.settings
-    target_agent = app_settings.admin_agent_name
-    
-    if not target_agent:
-        return JSONResponse({"error": "No Management Agent set in Settings to perform analysis."}, status_code=400)
+    # FALLBACK LOGIC: Use selected agent, or default to bootstrapped 'lollms'
+    target_agent = app_settings.admin_agent_name or "lollms"
 
     log_file = Path("lollms_hub.log")
     if not log_file.exists():
@@ -2872,10 +2875,8 @@ async def analyze_logs_ai(request: Request, db: AsyncSession = Depends(get_db), 
     from app.api.v1.routes.proxy import _resolve_target, _reverse_proxy
     
     app_settings: AppSettingsModel = request.app.state.settings
-    target_agent = app_settings.admin_agent_name
-    
-    if not target_agent:
-        return JSONResponse({"error": "No Management Agent set in Settings to perform analysis."}, status_code=400)
+    # FALLBACK LOGIC: Use selected agent, or default to bootstrapped 'lollms'
+    target_agent = app_settings.admin_agent_name or "lollms"
 
     log_file = Path("lollms_hub.log")
     if not log_file.exists():

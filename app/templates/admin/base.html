@@ -235,6 +235,49 @@
         </label>
     </div>
 
+    <!-- Lollms Agent Summoning Zone -->
+    <div id="agent-zone-toggle" class="fixed bottom-6 right-6 z-[150] cursor-pointer group">
+        <div class="relative">
+            <div class="absolute inset-0 bg-indigo-600 rounded-full animate-ping opacity-20 group-hover:opacity-40"></div>
+            <div class="relative h-14 w-14 bg-indigo-600 rounded-full shadow-2xl flex items-center justify-center text-white border-2 border-white/20 transform transition-transform group-hover:scale-110 active:scale-95">
+                <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+            </div>
+        </div>
+    </div>
+
+    <div id="agent-chat-panel" class="fixed bottom-24 right-6 w-96 h-[500px] bg-[#0a0a0f]/95 backdrop-blur-xl border border-indigo-500/30 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.5)] z-[160] flex flex-col hidden overflow-hidden transition-all duration-300 transform translate-y-4 opacity-0">
+        <div class="p-4 border-b border-white/10 bg-indigo-600/10 flex justify-between items-center">
+            <div class="flex items-center gap-3">
+                <div class="h-8 w-8 rounded-lg bg-indigo-600 flex items-center justify-center text-white font-black text-xs">L</div>
+                <div>
+                    <h3 class="text-xs font-black text-white uppercase tracking-widest">Lollms Core</h3>
+                    <div class="flex items-center gap-1.5">
+                        <span class="h-1.5 w-1.5 rounded-full bg-green-500 animate-pulse"></span>
+                        <span class="text-[9px] text-gray-400 font-bold uppercase">Sentient ROM Active</span>
+                    </div>
+                </div>
+            </div>
+            <button id="agent-close" class="text-gray-500 hover:text-white transition-colors">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+            </button>
+        </div>
+        
+        <div id="agent-messages" class="flex-grow overflow-y-auto p-4 space-y-4 custom-scrollbar text-xs">
+            <div class="bg-indigo-600/10 border border-indigo-500/20 p-3 rounded-xl text-indigo-200 leading-relaxed">
+                Greetings, Architect. I am <b>Lollms</b>. I am grounded in the Hub ROM. How can I assist with your cluster today?
+            </div>
+        </div>
+
+        <div class="p-3 border-t border-white/10 bg-black/40">
+            <div class="flex gap-2">
+                <input type="text" id="agent-input" placeholder="Ask anything about the system..." class="flex-grow bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-xs text-white outline-none focus:border-indigo-500">
+                <button id="agent-send" class="bg-indigo-600 hover:bg-indigo-500 px-3 py-2 rounded-lg text-white transition-all">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"></path></svg>
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- Modal Structure -->
     <div id="modal-backdrop" class="fixed inset-0 bg-black bg-opacity-70 z-50 hidden"></div>
     <div id="modal" class="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50 card-style w-11/12 max-w-2xl hidden">
@@ -929,12 +972,12 @@
 
             window.startCustomTour = (steps, storageKey, tourSettingEnabled = true, force = false) => {
                 // 1. Check Global & Page Toggles
-                {% if not settings.enable_tours %} return; {% endif %}
+                const globalToursEnabled = {{ settings.enable_tours | tojson }};
+                if (!globalToursEnabled && !force) return;
                 if (!tourSettingEnabled && !force) return;
 
                 // 2. Check LocalStorage (Only block if not forced)
                 if (localStorage.getItem(storageKey) && !force) {
-                    console.log(`Tour ${storageKey} already seen. Use force=true to replay.`);
                     return;
                 }
 
@@ -985,6 +1028,101 @@
             if (urlParams.get('start_tour') === 'true') {
                 window.startCustomTour(ONBOARDING_TOUR, 'hub_wizard_complete', true, true);
             }
+
+            // --- LOLLMS AGENT SUMMONING LOGIC ---
+            const agentToggle = document.getElementById('agent-zone-toggle');
+            const agentPanel = document.getElementById('agent-chat-panel');
+            const agentClose = document.getElementById('agent-close');
+            const agentInput = document.getElementById('agent-input');
+            const agentSend = document.getElementById('agent-send');
+            const agentMessages = document.getElementById('agent-messages');
+
+            let agentHistory = [];
+
+            const toggleAgent = () => {
+                const isHidden = agentPanel.classList.contains('hidden');
+                if (isHidden) {
+                    agentPanel.classList.remove('hidden');
+                    setTimeout(() => {
+                        agentPanel.classList.remove('translate-y-4', 'opacity-0');
+                    }, 10);
+                } else {
+                    agentPanel.classList.add('translate-y-4', 'opacity-0');
+                    setTimeout(() => agentPanel.classList.add('hidden'), 300);
+                }
+            };
+
+            agentToggle.addEventListener('click', toggleAgent);
+            agentClose.addEventListener('click', toggleAgent);
+
+            const appendAgentMsg = (role, text) => {
+                const div = document.createElement('div');
+                div.className = role === 'user' 
+                    ? 'bg-white/5 border border-white/10 p-3 rounded-xl ml-8 text-right text-gray-300' 
+                    : 'bg-indigo-600/10 border border-indigo-500/20 p-3 rounded-xl mr-8 text-indigo-200';
+                div.innerHTML = marked.parse(text);
+                agentMessages.appendChild(div);
+                agentMessages.scrollTop = agentMessages.scrollHeight;
+            };
+
+            const runAgentSummon = async () => {
+                const text = agentInput.value.trim();
+                if (!text) return;
+
+                agentInput.value = '';
+                appendAgentMsg('user', text);
+                agentHistory.push({role: 'user', content: text});
+
+                const loadingDiv = document.createElement('div');
+                loadingDiv.className = 'text-[9px] font-black text-indigo-400 uppercase animate-pulse px-2';
+                loadingDiv.innerText = 'Consulting ROM...';
+                agentMessages.appendChild(loadingDiv);
+
+                try {
+                    const resp = await fetch("/api/chat", {
+                        method: 'POST',
+                        headers: { 
+                            'Content-Type': 'application/json',
+                            'Authorization': 'Bearer ' + '{{ bootstrap_settings.SECRET_KEY }}' 
+                        },
+                        body: JSON.stringify({
+                            model: 'lollms',
+                            messages: agentHistory,
+                            stream: false
+                        })
+                    });
+                    const data = await resp.json();
+                    loadingDiv.remove();
+
+                    let answer = data.message?.content || "Connection lost to ROM.";
+                    
+                    // --- UI REMOTE CONTROL INTERCEPTION ---
+                    if (answer.includes('<ui_move_to')) {
+                        const path = answer.match(/path=['"](.*?)['"]/)[1];
+                        setTimeout(() => window.location.href = path, 2000);
+                    }
+                    if (answer.includes('<ui_highlight')) {
+                        const selector = answer.match(/selector=['"](.*?)['"]/)[1];
+                        const el = document.querySelector(selector);
+                        if (el) {
+                            el.classList.add('wizard-highlight-zone');
+                            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                            setTimeout(() => el.classList.remove('wizard-highlight-zone'), 5000);
+                        }
+                    }
+                    if (answer.includes('<ui_tour_start')) {
+                        setTimeout(() => window.location.reload(), 1000);
+                    }
+
+                    appendAgentMsg('assistant', answer);
+                    agentHistory.push({role: 'assistant', content: answer});
+                } catch (e) {
+                    loadingDiv.innerText = "ERROR: ROM OFFLINE";
+                }
+            };
+
+            agentSend.addEventListener('click', runAgentSummon);
+            agentInput.addEventListener('keydown', (e) => { if(e.key === 'Enter') runAgentSummon(); });
 
             // Event listener for data-modal triggers
             document.addEventListener('click', (e) => {

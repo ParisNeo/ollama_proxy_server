@@ -508,8 +508,8 @@ async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer
                 enforce_strict=is_strict
             )
 
-        if chosen_server.server_type == 'vllm':
-            logger.info(f"Using vLLM branch for server '{chosen_server.name}'")
+        if chosen_server.server_type in ('vllm', 'novita'):
+            logger.info(f"Using OpenAI-Compatible branch for server '{chosen_server.name}'")
             try:
                 response = await _proxy_to_vllm(request, chosen_server, path, body_bytes, api_key_id, log_id, request_id, model, sender=sender)
                 _update_health_cache(chosen_server.id, True)

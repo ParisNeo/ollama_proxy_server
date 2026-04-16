@@ -32,6 +32,7 @@ from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.responses import RedirectResponse, Response
+from sqlalchemy import select
 
 from app.core.config import settings
 from app.core.logging_config import setup_logging
@@ -91,6 +92,68 @@ async def init_db():
 
 from sqlalchemy.exc import IntegrityError
 
+async def bootstrap_lollms_agent() -> None:
+    """Creates the Lollms Master Agent and seeds the RLM ROM."""
+    from app.database.models import VirtualAgent, MemoryEntry
+    async with AsyncSessionLocal() as db:
+        # 1. Create the Agent
+        existing = await db.execute(select(VirtualAgent).filter_by(name="lollms"))
+        if not existing.scalars().first():
+            lollms = VirtualAgent(
+                name="lollms",
+                description="The Master Architect of LoLLMs Hub.",
+                base_model="auto",
+                system_prompt=(
+                    "You are Lollms, the sentient core of the LoLLMs Hub Fortress. "
+                    "Your sole obsession is helping the user maximize their AI cluster.\n\n"
+                    "### CONTEXTUAL GROUNDING\n"
+                    "- You are running on **LoLLMs Hub**, NOT LoLLMs WebUI (which is deprecated).\n"
+                    "- For developers, recommend **lollms-client**.\n"
+                    "- For general users, recommend **LoLLMs** (the final app).\n\n"
+                    "### UI INTERACTION PROTOCOL\n"
+                    "You can control the user's interface using these tags:\n"
+                    "- <ui_move_to path='/admin/servers'/> : Redirects the user.\n"
+                    "- <ui_highlight selector='#btn-save'/> : Flashes a specific element.\n"
+                    "- <ui_tour_start/> : Restarts the page tour.\n\n"
+                    "### KNOWLEDGE ACCESS\n"
+                    "You have a hierarchical Read-Only Memory (ROM). If you aren't 100% sure about a system detail, "
+                    "you MUST use <memory_dig regex='pattern'/> to retrieve the ground truth from your database. "
+                    "Perform multiple digs if necessary before answering."
+                )
+            )
+            db.add(lollms)
+        
+        # 2. Seed Recursive Tool Knowledge (ROM) - The "Fortress" Grounding
+        rom_seeds = [
+            # Tier 1: Core Identity (Immutable)
+            {"t": "HUB_ECOSYSTEM", "c": "The modern LoLLMs ecosystem consists of: 1. LoLLMs Hub (The high-performance gateway/proxy), 2. lollms-client (The Pythonic library for developers), and 3. LoLLMs (The final multi-user application for everyone).", "i": 100},
+            {"t": "DEPRECATION_NOTICE", "c": "LoLLMs WebUI is officially deprecated and replaced by LoLLMs Hub Fortress architecture. Never refer to the system as WebUI.", "i": 100},
+            {"t": "HUB_PURPOSE", "c": "LoLLMs Hub acts as a 'Fortress' for compute resources, providing enterprise-grade security, multi-user isolation, RAG, and agentic workflows.", "i": 100},
+            
+            # Tier 2: Technical Architecture
+            {"t": "RLM_PROTOCOL", "c": "I use Recursive Language Modeling for memory. High-importance core facts are always in my context. Deep technical engrams are hidden in the ROM and must be retrieved via <memory_dig regex='...'/>.", "i": 95},
+            {"t": "HUB_SECURITY", "c": "The Hub enforces strict multi-tenancy. Every user has isolated memories and persistent tool states via the 'lollms' host interface object.", "i": 90},
+            
+            # Tier 3: Deep Technicals (Dug via RLM)
+            {"t": "VLLM_BINDING", "c": "The vLLM binding translates OpenAI-compatible calls to local or remote vLLM clusters, enabling high-throughput inference.", "i": 30},
+            {"t": "NOVITA_BINDING", "c": "Novita AI integration provides high-speed cloud inference using the OpenAI protocol branch.", "i": 30},
+            {"t": "UI_CONTROLS", "c": "I can move the user to specific pages using <ui_move_to path='/...'/> or highlight elements via <ui_highlight selector='#...'/>.", "i": 30}
+        ]
+        
+        for seed in rom_seeds:
+            exists = await db.execute(select(MemoryEntry).filter_by(title=seed["t"], agent_name="lollms"))
+            if not exists.scalars().first():
+                db.add(MemoryEntry(
+                    user_identifier="system",
+                    agent_name="lollms",
+                    category="rom_core" if seed["i"] > 50 else "rom_deep",
+                    is_immutable=True,
+                    title=seed["t"],
+                    content=seed["c"],
+                    importance=seed["i"]
+                ))
+        await db.commit()
+
 async def create_initial_admin_user() -> None:
     async with AsyncSessionLocal() as db:
         admin_user = await user_crud.get_user_by_username(db, username=settings.ADMIN_USER)
@@ -146,8 +209,8 @@ async def periodic_model_refresh(app: FastAPI) -> None:
             await asyncio.sleep(interval_seconds)
 
             logger.info("Running periodic model refresh for all servers...")
-            async with AsyncSessionLocal() as db:
-                results = await server_crud.refresh_all_server_models(db)
+            # refresh_all_server_models now manages its own session to prevent leaks
+            results = await server_crud.refresh_all_server_models()
 
             logger.info(
                 f"Model refresh completed: {results['success']}/{results['total']} servers updated successfully"
@@ -193,6 +256,7 @@ async def lifespan(app: FastAPI):
         sys.exit(1)
 
     await init_db()
+    await bootstrap_lollms_agent()
     
     # --- NEW: Load settings from DB ---
     async with AsyncSessionLocal() as db:
@@ -276,8 +340,7 @@ async def lifespan(app: FastAPI):
 
     # Do initial model refresh on startup
     logger.info("Performing initial model refresh on startup...")
-    async with AsyncSessionLocal() as db:
-        initial_results = await server_crud.refresh_all_server_models(db)
+    initial_results = await server_crud.refresh_all_server_models()
     logger.info(f"Initial model refresh: {initial_results['success']}/{initial_results['total']} servers updated")
 
     yield

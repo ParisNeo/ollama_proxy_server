@@ -4,8 +4,8 @@ from typing import Literal, Optional, List
 
 class ServerBase(BaseModel):
     name: str
-    url: AnyHttpUrl
-    server_type: Literal["ollama", "vllm", "cloud"] = "ollama"
+    url: Optional[AnyHttpUrl] = None
+    server_type: Literal["ollama", "vllm", "cloud", "novita", "openllm"] = "ollama"
     max_parallel_queries: int = Field(default=1, ge=1)
 
 class ServerCreate(ServerBase):
@@ -14,7 +14,7 @@ class ServerCreate(ServerBase):
 class ServerUpdate(BaseModel):
     name: Optional[str] = None
     url: Optional[AnyHttpUrl] = None
-    server_type: Optional[Literal["ollama", "vllm", "cloud"]] = None
+    server_type: Optional[Literal["ollama", "vllm", "cloud", "novita"]] = None
     api_key: Optional[str] = Field(None, description="Provide a new key to update, or an empty string to remove.")
     allowed_models: Optional[List[str]] = None
 

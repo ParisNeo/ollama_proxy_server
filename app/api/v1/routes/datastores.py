@@ -562,9 +562,7 @@ async def admin_delete_datastore_doc(ds_id: int, request: Request, file_path: st
         from safe_store import SafeStore
         s = SafeStore(db_path=ds.db_path, vectorizer_name=ds.vectorizer_name, vectorizer_config=ds.vectorizer_config or {})
         with s:
-            if hasattr(s, "remove_document"): s.remove_document(file_path)
-            elif hasattr(s, "delete_document"): s.delete_document(file_path)
-            else: raise Exception("Deletion not supported by installed safe-store version")
+            s.delete_document_by_path(file_path)
                 
     try:
         await run_in_threadpool(_del_doc)

@@ -698,6 +698,17 @@ async def run_all_migrations(engine: AsyncEngine) -> None:
                 "summary": "VARCHAR NOT NULL",
                 "created_at": "DATETIME",
             },
+            "memory_entries": {
+                "user_identifier": "VARCHAR NOT NULL",
+                "agent_name": "VARCHAR NOT NULL",
+                "category": "VARCHAR NOT NULL",
+                "is_immutable": "BOOLEAN DEFAULT 0 NOT NULL",
+                "title": "VARCHAR NOT NULL",
+                "content": "VARCHAR NOT NULL",
+                "importance": "INTEGER DEFAULT 50",
+                "last_accessed": "DATETIME",
+                "created_at": "DATETIME",
+            },
             "benchmark_datasets": {
                 "name": "VARCHAR NOT NULL",
                 "description": "VARCHAR",

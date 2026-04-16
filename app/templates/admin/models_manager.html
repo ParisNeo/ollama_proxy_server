@@ -85,13 +85,30 @@
         </div>
     </div>
 
-    <form id="metadata-form" action="{{ url_for('admin_update_model_metadata') }}" method="post" class="card-style">
+    <form id="metadata-form" action="{{ url_for('admin_update_model_metadata') }}" method="post" class="card-style flex flex-col h-[70vh]">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <h2 class="card-header text-2xl font-bold mb-4 pb-2">Configure Model Capabilities</h2>
         
-        <div class="overflow-x-auto">
-            <table class="min-w-full">
-                <thead>
+        <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6 flex-shrink-0">
+            <h2 class="text-2xl font-bold">Configure Model Capabilities</h2>
+            
+            <div class="flex items-center gap-4 w-full md:w-auto">
+                <!-- Search Bar -->
+                <div class="relative flex-grow md:w-80">
+                    <span class="absolute inset-y-0 left-0 pl-3 flex items-center text-gray-500">
+                        <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+                    </span>
+                    <input type="text" id="model-search" onkeyup="filterModels()" placeholder="Search names, tags, servers..." class="w-full pl-10 pr-4 py-2 bg-black/40 border border-white/10 rounded-xl text-sm focus:border-indigo-500 outline-none transition-all">
+                </div>
+                
+                <button type="button" onclick="window.location.reload()" class="p-2 bg-white/5 hover:bg-white/10 rounded-xl text-indigo-400 transition-colors" title="Refresh list from Database">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+                </button>
+            </div>
+        </div>
+        
+        <div class="flex-grow overflow-auto border border-white/5 rounded-xl bg-black/20 custom-scrollbar">
+            <table class="min-w-full" id="models-table">
+                <thead class="sticky top-0 bg-[#0f0f15] z-10 shadow-md">
                     <tr>
                         <th class="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Model Name</th>
                         <th class="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Servers</th>
@@ -225,6 +242,41 @@
 </div>
 
 <script>
+    /**
+     * Filters the table rows based on search input.
+     * Searches Name, Server Badges, Description, and Checkbox status.
+     */
+    function filterModels() {
+        const input = document.getElementById('model-search');
+        const filter = input.value.toLowerCase();
+        const rows = document.querySelectorAll('#metadata-tbody tr');
+
+        rows.forEach(row => {
+            const name = row.cells[0].textContent.toLowerCase();
+            const servers = row.cells[1].textContent.toLowerCase();
+            const desc = row.querySelector('input[name^="description_"]').value.toLowerCase();
+            
+            // Capability search (e.g., user types "vision")
+            const isVision = row.querySelector('input[name^="supports_images_"]').checked;
+            const isCode = row.querySelector('input[name^="is_code_model_"]').checked;
+            const isFast = row.querySelector('input[name^="is_fast_model_"]').checked;
+            const isReasoning = row.querySelector('input[name^="is_reasoning_model_"]').checked;
+            
+            const tags = [];
+            if(isVision) tags.push("vision", "images");
+            if(isCode) tags.push("code", "programming");
+            if(isFast) tags.push("fast", "small");
+            if(isReasoning) tags.push("reasoning", "logic");
+            const tagStr = tags.join(" ");
+
+            if (name.includes(filter) || servers.includes(filter) || desc.includes(filter) || tagStr.includes(filter)) {
+                row.style.display = "";
+            } else {
+                row.style.display = "none";
+            }
+        });
+    }
+
     /**
      * Calls the backend to fetch current context length for a model.
      */

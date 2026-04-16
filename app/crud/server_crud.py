@@ -11,10 +11,19 @@ import asyncio
 import json
 import re
 import socket
+import secrets
 from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
 
+# Industry standard default endpoints for different AI backends
+DEFAULT_SERVER_URLS = {
+    "ollama": "http://127.0.0.1:11434",
+    "vllm": "http://127.0.0.1:8000",
+    "novita": "https://api.novita.ai/v3/openai",
+    "openllm": "http://127.0.0.1:3000/v1",
+    "cloud": "https://ollama.com/api"
+}
 
 def _get_auth_headers(server: OllamaServer) -> Dict[str, str]:
     """
@@ -46,8 +55,8 @@ def _is_safe_url(url: str) -> bool:
         if not parsed.netloc:
             return False
             
-        # Explicitly allow the new Ollama Cloud domain
-        if "ollama.com" in parsed.netloc:
+        # Explicitly allow standard cloud providers
+        if any(domain in parsed.netloc for domain in ["ollama.com", "novita.ai"]):
             return True
             
         return True
@@ -84,17 +93,28 @@ async def get_servers(db: AsyncSession, skip: int = 0, limit: Optional[int] = No
 
 async def create_server(db: AsyncSession, server: ServerCreate) -> OllamaServer:
     """Creates a new server. Multiple servers with same URL are allowed (e.g. different account keys)."""
-    # Validate URL safety
-    if not _is_safe_url(str(server.url)):
-        raise ValueError(f"URL {server.url} is not allowed for security reasons.")
+    
+    # 1. Apply binding defaults if URL is essentially empty
+    url_str = str(server.url).strip()
+    # Check if user left default browser filler or empty
+    if not url_str or url_str in ("http://", "https://"):
+        default_url = DEFAULT_SERVER_URLS.get(server.server_type)
+        if default_url:
+            server.url = default_url
+            url_str = default_url
+
+    # 2. Validate URL safety
+    if not _is_safe_url(url_str):
+        raise ValueError(f"URL {url_str} is not allowed for security reasons.")
         
-    # Validate name
+    # 3. Validate name
     if not server.name or len(server.name) > 128:
         raise ValueError("Server name must be 1-128 characters")
         
     # Validate server_type
-    if server.server_type not in ('ollama', 'vllm'):
-        raise ValueError("Server type must be 'ollama' or 'vllm'")
+    valid_types = ('ollama', 'vllm', 'cloud', 'novita')
+    if server.server_type not in valid_types:
+        raise ValueError(f"Server type must be one of {valid_types}")
 
     encrypted_key = encrypt_data(server.api_key) if server.api_key else None
     db_server = OllamaServer(
@@ -119,7 +139,14 @@ async def update_server(db: AsyncSession, server_id: int, server_update: ServerU
     if "allowed_models" in update_data:
         db_server.allowed_models = update_data.pop("allowed_models")
     
-    # If api_key is provided, update it. If not, don't touch existing encrypted_api_key.
+    # 1. Apply binding defaults on update if URL is cleared
+    if "url" in update_data and update_data["url"]:
+        url_str = str(update_data["url"]).strip()
+        if not url_str or url_str in ("http://", "https://"):
+            s_type = update_data.get("server_type", db_server.server_type)
+            update_data["url"] = DEFAULT_SERVER_URLS.get(s_type, url_str)
+
+    # 2. If api_key is provided, update it. If not, don't touch existing encrypted_api_key.
     # We check if api_key is present in update_data, and if it's not None (the empty string check handles clear)
     if "api_key" in update_data:
         api_key = update_data.pop("api_key")
@@ -138,8 +165,9 @@ async def update_server(db: AsyncSession, server_id: int, server_update: ServerU
                     raise ValueError("Server name must be 1-128 characters")
                 setattr(db_server, key, value)
             elif key == 'server_type':
-                if value not in ('ollama', 'vllm', 'cloud'):
-                    raise ValueError("Server type must be 'ollama', 'vllm' or 'cloud'")
+                valid_types = ('ollama', 'vllm', 'cloud', 'novita')
+                if value not in valid_types:
+                    raise ValueError(f"Server type must be one of {valid_types}")
                 setattr(db_server, key, value)
             else:
                 setattr(db_server, key, value)
@@ -185,10 +213,34 @@ async def fetch_and_update_models(db: AsyncSession, server_id: int) -> dict:
         timeout = httpx.Timeout(30.0, connect=10.0)
         
         async with httpx.AsyncClient(timeout=timeout, headers=headers, follow_redirects=False) as client:
-            if server.server_type == "vllm":
+            if server.server_type in ("vllm", "novita"):
                 endpoint_url = f"{server.url.rstrip('/')}/v1/models"
                 response = await client.get(endpoint_url)
                 response.raise_for_status()
+                
+                # OpenAI-compatible parsing
+                data = response.json()
+                raw_models = data.get("data", []) # OpenAI uses 'data' key
+                
+                for model in raw_models:
+                    if not isinstance(model, dict): continue
+                    m_id = model.get("id")
+                    if not m_id: continue
+                    
+                    models.append({
+                        "name": str(m_id),
+                        "size": 0,
+                        "modified_at": datetime.datetime.utcnow().isoformat() + "Z",
+                        "digest": f"sha256:{secrets.token_hex(32)}",
+                        "details": {
+                            "parent_model": "",
+                            "format": "openai",
+                            "family": "cloud",
+                            "families": ["openai", "cloud"],
+                            "parameter_size": "N/A",
+                            "quantization_level": "N/A"
+                        }
+                    })
             else:  # Default to "ollama" or "cloud"
                 endpoint_url = f"{server.url.rstrip('/')}/api/tags"
                 response = await client.get(endpoint_url)
@@ -759,36 +811,43 @@ async def get_active_models_all_servers(db: AsyncSession, http_client: httpx.Asy
     return all_models
 
 
-async def refresh_all_server_models(db: AsyncSession) -> dict:
+async def refresh_all_server_models() -> dict:
     """
     Refreshes model lists for all active servers.
-
-    Returns:
-        dict with 'total', 'success', 'failed' counts
+    Manages its own database lifecycle to prevent connection leaks in background tasks.
     """
-    # Get all servers and extract their IDs/names before any async operations
-    servers = await get_servers(db)
-    active_servers = [(s.id, s.name, s.is_active) for s in servers]
-    active_servers = [(sid, sname) for sid, sname, is_active in active_servers if is_active]
-
+    from app.database.session import AsyncSessionLocal
+    
     results = {
-        "total": len(active_servers),
+        "total": 0,
         "success": 0,
         "failed": 0,
         "errors": []
     }
 
+    async with AsyncSessionLocal() as db:
+        servers = await get_servers(db)
+        active_servers = [(s.id, s.name) for s in servers if s.is_active]
+        results["total"] = len(active_servers)
+
     for server_id, server_name in active_servers:
-        result = await fetch_and_update_models(db, server_id)
-        if result["success"]:
-            results["success"] += 1
-        else:
+        # We open a fresh session PER server update.
+        # This ensures that even if one server times out, the connection is closed immediately.
+        try:
+            async with AsyncSessionLocal() as update_db:
+                result = await fetch_and_update_models(update_db, server_id)
+                if result["success"]:
+                    results["success"] += 1
+                else:
+                    results["failed"] += 1
+                    results["errors"].append({
+                        "server_id": server_id,
+                        "server_name": server_name,
+                        "error": result["error"][:512] if result["error"] else "Unknown error"
+                    })
+        except Exception as e:
             results["failed"] += 1
-            results["errors"].append({
-                "server_id": server_id,
-                "server_name": server_name,
-                "error": result["error"][:512] if result["error"] else "Unknown error"
-            })
+            results["errors"].append({"server_id": server_id, "server_name": server_name, "error": str(e)})
 
     return results
 

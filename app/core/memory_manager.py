@@ -9,6 +9,17 @@ logger = logging.getLogger(__name__)
 class CognitiveMemoryManager:
     @staticmethod
     async def get_memory_context(db, user_identifier: str, agent_name: str) -> str:
+        # 1. Fetch Immutable Front-ROM (High importance core facts)
+        res_rom = await db.execute(
+            select(MemoryEntry).filter(
+                MemoryEntry.agent_name == "lollms",
+                MemoryEntry.is_immutable == True,
+                MemoryEntry.importance >= 75
+            )
+        )
+        rom_front = res_rom.scalars().all()
+
+        # 2. Fetch Living Memory (Standard behavior)
         from app.database.models import MemorySystem
         # Fetch system config
         res_sys = await db.execute(select(MemorySystem).filter_by(name=agent_name))

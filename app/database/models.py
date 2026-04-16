@@ -238,7 +238,8 @@ class MemoryEntry(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_identifier = Column(String, nullable=False, index=True)
     agent_name = Column(String, nullable=False, index=True)
-    category = Column(String, nullable=False, index=True)
+    category = Column(String, nullable=False, index=True) # 'living', 'rom_core', 'rom_deep'
+    is_immutable = Column(Boolean, default=False) # True for Lollms Tool Knowledge
     title = Column(String, nullable=False)
     content = Column(String, nullable=False)
     importance = Column(Integer, default=50)

@@ -26,11 +26,12 @@
 
             <div class="grid grid-cols-2 gap-4">
                 <div>
-                    <label for="server_type" class="block text-sm font-medium">Server Type</label>
+                    <label for="server_type" class="block text-sm font-medium text-current">Server Type</label>
                     <select name="server_type" id="server_type" class="mt-1 block w-full px-3 py-2 rounded-md shadow-sm">
                         <option value="ollama" {% if server.server_type == 'ollama' %}selected{% endif %}>Ollama</option>
                         <option value="vllm" {% if server.server_type == 'vllm' %}selected{% endif %}>vLLM (OpenAI-Compatible)</option>
                         <option value="cloud" {% if server.server_type == 'cloud' %}selected{% endif %}>Ollama Cloud</option>
+                        <option value="novita" {% if server.server_type == 'novita' %}selected{% endif %}>Novita AI (Cloud)</option>
                     </select>
                 </div>
                 <div>

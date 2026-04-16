@@ -22,9 +22,10 @@
                 </div>
                 <div>
                     <label for="server_type" class="block text-sm font-medium text-current">Server Type</label>
-                    <select name="server_type" id="server_type" class="mt-1 block w-full px-3 py-2 rounded-md shadow-sm">
+                    <select name="server_type" id="server_type" class="mt-1 block w-full px-3 py-2 rounded-md shadow-sm" onchange="autoFillNovita(this)">
                         <option value="ollama" selected>Ollama</option>
                         <option value="vllm">vLLM (OpenAI-Compatible)</option>
+                        <option value="novita">Novita AI (Cloud)</option>
                     </select>
                 </div>
                 <div>
@@ -41,6 +42,18 @@
             </div>
         </form>
     </div>
+
+    <script>
+        /**
+         * Automatically fills the Novita AI API endpoint when selected.
+         */
+        function autoFillNovita(select) {
+            const urlInput = document.getElementById('server_url');
+            if (select.value === 'novita' && (!urlInput.value || urlInput.value === 'http://127.0.0.1:11434')) {
+                urlInput.value = 'https://api.novita.ai/v3/openai';
+            }
+        }
+    </script>
 
     <!-- Existing Servers List -->
     <div class="card-style">
@@ -65,7 +78,9 @@
                         <td class="px-6 py-4 whitespace-nowrap text-sm font-mono">{{ server.url }}</td>
                         <td class="px-6 py-4 whitespace-nowrap text-sm">
                             <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full 
-                                {% if server.server_type == 'vllm' %}bg-purple-200 text-purple-800{% else %}bg-blue-200 text-blue-800{% endif %}">
+                                {% if server.server_type == 'vllm' %}bg-purple-200 text-purple-800
+                                {% elif server.server_type == 'novita' %}bg-emerald-200 text-emerald-800
+                                {% else %}bg-blue-200 text-blue-800{% endif %}">
                                 {{ server.server_type | upper }}
                             </span>
                         </td>
