@@ -952,7 +952,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     ];
 
-    document.addEventListener('DOMContentLoaded', () => {
+    // Ensure tour triggers after all components are settled
+    window.addEventListener('load', () => {
         if (window.startCustomTour) {
             window.startCustomTour(DASHBOARD_TOUR, 'tour_dashboard_v1', {{ settings.tour_dashboard | tojson }});
         }

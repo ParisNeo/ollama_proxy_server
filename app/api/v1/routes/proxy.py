@@ -1608,18 +1608,31 @@ async def _select_auto_model(db: AsyncSession, body: Dict[str, Any], overrides: 
 
     # STRICT FILTER: Exclude embedding models for any non-embedding task.
     # This must be the foundation of our fallback pool to prevent catastrophic logic leaks.
-    is_chat = True
-    if request and hasattr(request, "url") and "embed" in request.url.path.lower():
-        is_chat = False
+    is_chat_request = True
+    if request and hasattr(request, "url"):
+        path = request.url.path.lower()
+        # If the endpoint is /api/embeddings or similar, we ARE looking for embedding models
+        if "embed" in path:
+            is_chat_request = False
         
-    if is_chat:
-        safe_fallback_pool =[
+    if is_chat_request:
+        # ABSOLUTE EXCLUSION: If it's a chat request, the model MUST NOT be an embedding model
+        safe_fallback_pool = [
             m for m in available_metadata 
-            if not m.is_embedding_model and 
-            not any(kw in m.model_name.lower() for kw in["embed", "embedding", "bge", "gte", "nomic", "snowflake"])
+            if not getattr(m, 'is_embedding_model', False) and 
+            not any(kw in m.model_name.lower() for kw in ["embed", "embedding", "bge", "gte", "nomic", "snowflake"])
         ]
+        if len(safe_fallback_pool) < len(available_metadata):
+            logger.debug(f"SB-MRA: Purged {len(available_metadata) - len(safe_fallback_pool)} embedding model(s) from chat candidate pool.")
     else:
-        safe_fallback_pool = available_metadata
+        # If it IS an embedding request, only include embedding models
+        safe_fallback_pool = [
+            m for m in available_metadata 
+            if getattr(m, 'is_embedding_model', False) or 
+            any(kw in m.model_name.lower() for kw in ["embed", "embedding", "bge", "gte", "nomic", "snowflake"])
+        ]
+
+    available_metadata = safe_fallback_pool
 
     candidate_models = safe_fallback_pool
 
@@ -2966,19 +2979,37 @@ async def _process_proxy_logic(
         trace_exception(ex)
     
     candidate_servers = servers
-    # Virtual models like 'auto' should not be checked against physical catalogs here.
-    # They are resolved to physical model candidates in the B-IRRA loop below.
-    if model_name and model_name != "auto":
+    if model_name:
         logger.info(f"proxy_ollama: Looking for servers with model '{model_name}'")
-        candidate_servers = await server_crud.get_servers_with_model(db, model_name)
+        # For internal system tasks, we look for PHYSICAL availability only, ignoring the admin whitelist
+        is_system = "sys_build_" in str(req_id) or "sys_ds_" in str(req_id)
+        
+        if is_system:
+            # Manual filter for physical presence
+            candidate_servers = []
+            for s in servers:
+                if s.is_active and s.available_models:
+                    m_list = s.available_models if isinstance(s.available_models, list) else json.loads(s.available_models)
+                    if any(m.get("name") == model_name or m.get("name") == f"{model_name}:latest" for m in m_list):
+                        candidate_servers.append(s)
+        else:
+            candidate_servers = await server_crud.get_servers_with_model(db, model_name)
 
         if candidate_servers:
             logger.info(f"Smart routing: Found {len(candidate_servers)} server(s) with model '{model_name}': {[s.name for s in candidate_servers]}")
         else:
             logger.warning(f"Model '{model_name}' not found in any server's catalog.")
 
-    if not candidate_servers and model_name != "auto":
+    if not candidate_servers:
         # --- SECURITY CHECK: Distinguish between 'Not Found' and 'Not Allowed' ---
+        # SYSTEM BYPASS: If this is an internal system task, we ignore the whitelist 
+        # to ensure RAG and Metadata synchronization never deadlocks.
+        is_system = (
+            getattr(request.state, "is_managed_agent", False) or 
+            "sys_build_" in str(req_id) or 
+            "sys_ds_" in str(req_id)
+        )
+
         physically_exists = False
         for s in servers:
             if s.available_models:
@@ -2991,13 +3022,16 @@ async def _process_proxy_logic(
                     physically_exists = True
                     break
         
-        if physically_exists:
+        if physically_exists and not is_system:
             logger.warning(f"Access Denied: Model '{model_name}' exists on backends but is blocked by administrative whitelists.")
             event_manager.emit(ProxyEvent("error", req_id, model_name, "none", sender=api_key.user.username, error_message="Model Not Allowed"))
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Access to model '{model_name}' is restricted by the administrator's whitelist policy."
             )
+        elif physically_exists and is_system:
+            logger.info(f"System Bypass: Allowing internal task to use whitelisted model '{model_name}' on all active nodes.")
+            candidate_servers = [s for s in servers if s.is_active]
         else:
             logger.error(f"proxy_ollama: No candidate servers available for model '{model_name}'")
             event_manager.emit(ProxyEvent("error", req_id, model_name, "none", sender=api_key.user.username, error_message="No servers found"))

@@ -54,10 +54,10 @@ async def get_or_create_metadata(db: AsyncSession, model_name: str, suggested_ct
         # Basic heuristic for auto-discovery
         m_lower = model_name.lower()
         # Explicitly define as embedding if name contains keywords
-        is_embedding_default = any(kw in m_lower for kw in ["embed", "embedding", "bge", "gte", "nomic", "snowflake"])
+        is_embedding_default = any(kw in m_lower for kw in ["embed", "embedding", "bge", "gte", "nomic", "snowflake", "bert"])
         
         # If it is an embedding model, it should NOT support chat, images or thinking by default
-        supports_images_default = not is_embedding_default and any(kw in m_lower for kw in ["llava", "bakllava", "vision", "vl"])
+        supports_images_default = not is_embedding_default and any(kw in m_lower for kw in ["llava", "bakllava", "vision", "vl", "moondream"])
         supports_thinking_default = not is_embedding_default and any(kw in m_lower for kw in ["qwen", "deepseek", "r1", "thought", "think", "gemma3", "phi-4"])
         
         metadata = ModelMetadata(

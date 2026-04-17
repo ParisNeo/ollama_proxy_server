@@ -915,32 +915,26 @@
             ];
 
             let currentStep = 0;
-            const overlay = document.getElementById('wizard-overlay');
-            const bubble = document.getElementById('wizard-bubble');
-            const text = document.getElementById('wizard-text');
-            const nextBtn = document.getElementById('wizard-next');
-            const prevBtn = document.getElementById('wizard-prev');
-            const skipBtn = document.getElementById('wizard-skip');
+            let currentTourSteps = [];
+            let currentStorageKey = "";
 
-            window.startWizard = () => {
-                currentStep = 0;
-                localStorage.removeItem('hub_wizard_complete');
-                showStep(0);
-            };
+            window.showStep = function(idx) {
+                const overlay = document.getElementById('wizard-overlay');
+                const bubble = document.getElementById('wizard-bubble');
+                const text = document.getElementById('wizard-text');
+                const nextBtn = document.getElementById('wizard-next');
+                const prevBtn = document.getElementById('wizard-prev');
 
-            function showStep(idx) {
-                const step = WIZARD_STEPS[idx];
-                if (!step) return endWizard();
+                const step = currentTourSteps[idx];
+                if (!step) return window.endWizard();
 
                 overlay.classList.remove('hidden');
                 bubble.classList.remove('hidden');
                 text.innerHTML = step.text;
                 
-                // Toggle navigation buttons
                 prevBtn.classList.toggle('hidden', idx === 0);
-                nextBtn.innerText = idx === WIZARD_STEPS.length - 1 ? "ENTER FORTRESS" : "NEXT STEP";
+                nextBtn.innerText = idx === currentTourSteps.length - 1 ? "FINISH" : "NEXT STEP";
 
-                // Cleanup previous highlights
                 document.querySelectorAll('.wizard-highlight-zone').forEach(el => {
                     el.classList.remove('wizard-highlight-zone', 'z-[210]', 'relative', 'bg-indigo-500/10');
                     el.style.zIndex = "";
@@ -948,38 +942,22 @@
                 
                 if (step.target) {
                     const targetEl = document.querySelector(step.target);
-                    
                     if (targetEl) {
-                        // AUTO-SCROLL: Ensure element is visible before highlighting
                         targetEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
-
-                        // Delay positioning until scroll is nearly finished for accurate rect calculation
                         setTimeout(() => {
                             targetEl.classList.add('wizard-highlight-zone', 'bg-indigo-500/10');
                             targetEl.style.zIndex = "210";
                             targetEl.style.position = "relative";
 
                             const rect = targetEl.getBoundingClientRect();
-                            const buffer = 25;
-                            const windowWidth = window.innerWidth;
-                            const windowHeight = window.innerHeight;
-
-                            // Security step styling
-                            bubble.style.borderColor = step.is_security ? "#ef4444" : "#6366f1";
-
-                            // Smart positioning
-                            let top = rect.top;
-                            if (top < 80) top = 80; 
-                            if (top + 280 > windowHeight) top = windowHeight - 320;
-
-                            let left = rect.right + buffer;
-                            if (left + 320 > windowWidth) {
-                                left = rect.left - 320 - buffer;
-                            }
-
                             bubble.style.transform = "none";
-                            bubble.style.top = `${top}px`;
-                            bubble.style.left = `${left}px`;
+                            bubble.style.top = `${rect.top + window.scrollY}px`;
+                            bubble.style.left = `${rect.right + 20}px`;
+                            
+                            // Prevent overflowing right
+                            if (rect.right + 340 > window.innerWidth) {
+                                bubble.style.left = `${rect.left - 340}px`;
+                            }
                         }, 300);
                     }
                 } else {
@@ -987,58 +965,43 @@
                     bubble.style.left = "50%";
                     bubble.style.transform = "translate(-50%, -50%)";
                 }
-            }
+            };
+
+            window.endWizard = function() {
+                document.getElementById('wizard-overlay').classList.add('hidden');
+                document.getElementById('wizard-bubble').classList.add('hidden');
+                document.querySelectorAll('.wizard-highlight-zone').forEach(el => {
+                    el.classList.remove('wizard-highlight-zone');
+                    el.style.zIndex = "";
+                });
+                if (currentStorageKey) localStorage.setItem(currentStorageKey, 'true');
+                if (document.getElementById('wizard-never').checked) {
+                    localStorage.setItem('hub_wizard_complete', 'true');
+                }
+            };
 
             window.startCustomTour = (steps, storageKey, tourSettingEnabled = true, force = false) => {
-                // 1. Check Global & Page Toggles
                 const globalToursEnabled = {{ settings.enable_tours | tojson }};
                 if (!globalToursEnabled && !force) return;
                 if (!tourSettingEnabled && !force) return;
+                if (localStorage.getItem(storageKey) && !force) return;
 
-                // 2. Check LocalStorage (Only block if not forced)
-                if (localStorage.getItem(storageKey) && !force) {
-                    return;
-                }
-
-                console.log(`Starting Tour: ${storageKey}`);
-                
-                // 3. Setup Wizard Session
-                WIZARD_STEPS.length = 0; // Clear array safely
-                steps.forEach(s => WIZARD_STEPS.push(s));
-                
-                const originalEnd = endWizard;
-                endWizard = function() {
-                    overlay.classList.add('hidden');
-                    bubble.classList.add('hidden');
-                    document.querySelectorAll('.wizard-highlight-zone').forEach(el => {
-                        el.classList.remove('wizard-highlight-zone', 'z-[210]', 'relative', 'bg-indigo-500/10');
-                    });
-                    localStorage.setItem(storageKey, 'true');
-                    // Restore original end logic
-                    endWizard = originalEnd;
-                };
-
+                currentTourSteps = steps;
+                currentStorageKey = storageKey;
                 currentStep = 0;
-                showStep(0);
+
+                // Re-bind controls to the current context
+                document.getElementById('wizard-next').onclick = () => { currentStep++; window.showStep(currentStep); };
+                document.getElementById('wizard-prev').onclick = () => { currentStep--; window.showStep(currentStep); };
+                document.getElementById('wizard-skip').onclick = window.endWizard;
+
+                window.showStep(0);
             };
 
-            function endWizard() {
-                overlay.classList.add('hidden');
-                bubble.classList.add('hidden');
-                document.querySelectorAll('.wizard-highlight-zone').forEach(el => {
-                    el.classList.remove('wizard-highlight-zone', 'z-[210]', 'relative', 'bg-indigo-500/10');
-                    el.style.zIndex = "";
-                });
-                
-                // Only mark as complete if the user finishes OR checks "never show again"
-                if (document.getElementById('wizard-never').checked || currentStep >= WIZARD_STEPS.length - 1) {
-                    localStorage.setItem('hub_wizard_complete', 'true');
-                }
-            }
-
-            nextBtn.onclick = () => { currentStep++; showStep(currentStep); };
-            prevBtn.onclick = () => { currentStep--; showStep(currentStep); };
-            skipBtn.onclick = endWizard;
+            window.startWizard = () => {
+                localStorage.removeItem('hub_wizard_complete');
+                window.startCustomTour(ONBOARDING_TOUR, 'hub_wizard_complete', true, true);
+            };
 
             // Global Onboarding steps for first-time use
             const ONBOARDING_TOUR = [...WIZARD_STEPS];

@@ -522,8 +522,8 @@
         }
     ];
 
-    document.addEventListener('DOMContentLoaded', () => {
-        // Trigger page-specific tour passing the independent setting flag
+    // Ensure tour triggers after all components are settled
+    window.addEventListener('load', () => {
         if (window.startCustomTour) {
             window.startCustomTour(MODELS_TOUR, 'tour_models_v1', {{ settings.tour_models | tojson }});
         }
