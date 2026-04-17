@@ -40,6 +40,26 @@
         </div>
     </div>
 
+    <!-- Server Filter Bar -->
+    <div class="card-style mb-6">
+        <div class="flex flex-col gap-4">
+            <div class="flex items-center justify-between">
+                <h3 class="text-xs font-black text-gray-500 uppercase tracking-widest">Filter by Infrastructure</h3>
+                <button onclick="clearServerFilters()" class="text-[10px] font-bold text-indigo-400 hover:text-white uppercase">Reset Filters</button>
+            </div>
+            <div class="flex flex-wrap gap-2" id="server-filter-container">
+                <button onclick="toggleServerFilter('all', this)" class="server-filter-btn px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest border border-indigo-500/30 bg-indigo-600 text-white shadow-lg shadow-indigo-900/20 transition-all" data-server-id="all">
+                    All Servers
+                </button>
+                {% for server in servers %}
+                <button onclick="toggleServerFilter({{ server.id }}, this)" class="server-filter-btn px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest border border-white/5 bg-white/5 text-gray-500 hover:text-indigo-300 transition-all" data-server-id="{{ server.id }}">
+                    {{ server.name }}
+                </button>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+
     <div class="card-style">
         <div class="flex justify-between items-center">
             <div class="flex items-center gap-4 cursor-pointer" onclick="document.getElementById('doc-body').classList.toggle('hidden'); this.querySelector('.arrow').classList.toggle('rotate-180')">
@@ -163,6 +183,8 @@
                             </div>
                         </th>
                         <th class="px-4 py-3 text-center text-xs font-medium text-gray-400 uppercase tracking-wider">Max Context</th>
+                        <th class="px-4 py-3 text-center text-xs font-medium text-gray-400 uppercase tracking-wider">Size (B)</th>
+                        <th class="px-4 py-3 text-center text-xs font-medium text-gray-400 uppercase tracking-wider">Scale</th>
                         <th class="px-4 py-3 text-center text-xs font-medium text-gray-400 uppercase tracking-wider">Priority</th>
                     </tr>
                 </thead>
@@ -220,6 +242,18 @@
                              </div>
                         </td>
                         <td class="px-4 py-4 whitespace-nowrap text-center">
+                            <input type="number" step="0.1" name="model_size_{{ meta.id }}" value="{{ meta.model_size }}" 
+                                   class="w-16 px-2 py-1 rounded-md shadow-sm sm:text-sm text-center {% if meta.model_size < 0 %}text-red-400 font-bold{% endif %}"
+                                   title="{{ 'Size Unknown - AI config or manual entry needed' if meta.model_size < 0 else 'Parameter count in Billions' }}">
+                        </td>
+                        <td class="px-4 py-4 whitespace-nowrap text-center">
+                            <select name="model_scale_{{ meta.id }}" class="bg-black/40 border border-white/10 rounded p-1 text-[10px] font-bold uppercase">
+                                <option value="1" {% if meta.model_scale == 1 %}selected{% endif %}>Small</option>
+                                <option value="2" {% if meta.model_scale == 2 %}selected{% endif %}>Medium</option>
+                                <option value="3" {% if meta.model_scale == 3 %}selected{% endif %}>Large</option>
+                            </select>
+                        </td>
+                        <td class="px-4 py-4 whitespace-nowrap text-center">
                              <input type="number" name="priority_{{ meta.id }}" value="{{ meta.priority }}" class="w-16 px-2 py-1 rounded-md shadow-sm sm:text-sm text-center">
                         </td>
                     </tr>
@@ -243,26 +277,76 @@
 </div>
 
 <script>
+    let activeServerFilters = new Set(['all']);
+
+    function toggleServerFilter(serverId, btn) {
+        if (serverId === 'all') {
+            activeServerFilters.clear();
+            activeServerFilters.add('all');
+            document.querySelectorAll('.server-filter-btn').forEach(b => {
+                b.className = "server-filter-btn px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest border border-white/5 bg-white/5 text-gray-500 hover:text-indigo-300 transition-all";
+            });
+            btn.className = "server-filter-btn px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest border border-indigo-500/30 bg-indigo-600 text-white shadow-lg shadow-indigo-900/20 transition-all";
+        } else {
+            // Remove 'all' if present
+            if (activeServerFilters.has('all')) {
+                activeServerFilters.delete('all');
+                const allBtn = document.querySelector('[data-server-id="all"]');
+                allBtn.className = "server-filter-btn px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest border border-white/5 bg-white/5 text-gray-500 hover:text-indigo-300 transition-all";
+            }
+
+            if (activeServerFilters.has(serverId)) {
+                activeServerFilters.delete(serverId);
+                btn.className = "server-filter-btn px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest border border-white/5 bg-white/5 text-gray-500 hover:text-indigo-300 transition-all";
+            } else {
+                activeServerFilters.add(serverId);
+                btn.className = "server-filter-btn px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest border border-indigo-500/30 bg-indigo-600 text-white shadow-lg shadow-indigo-900/20 transition-all";
+            }
+
+            // If nothing selected, reset to all
+            if (activeServerFilters.size === 0) {
+                toggleServerFilter('all', document.querySelector('[data-server-id="all"]'));
+                return;
+            }
+        }
+        filterModels();
+    }
+
+    function clearServerFilters() {
+        toggleServerFilter('all', document.querySelector('[data-server-id="all"]'));
+    }
+
     /**
-     * Filters the table rows based on search input.
-     * Searches Name, Server Badges, Description, and Checkbox status.
+     * Filters the table rows based on search input and server selection.
      */
     function filterModels() {
         const input = document.getElementById('model-search');
-        const filter = input.value.toLowerCase();
+        const searchFilter = input.value.toLowerCase();
         const rows = document.querySelectorAll('#metadata-tbody tr');
 
         rows.forEach(row => {
             const name = row.cells[0].textContent.toLowerCase();
-            const servers = row.cells[1].textContent.toLowerCase();
             const desc = row.querySelector('input[name^="description_"]').value.toLowerCase();
             
-            // Capability search (e.g., user types "vision")
+            // Server matching
+            let serverMatch = activeServerFilters.has('all');
+            if (!serverMatch) {
+                // Get server IDs from badges in the second cell
+                const badges = row.cells[1].querySelectorAll('.server-badge');
+                badges.forEach(badge => {
+                    // Extract ID from the onclick attribute: toggleModelOnServer(event, ID, 'name')
+                    const match = badge.getAttribute('onclick').match(/toggleModelOnServer\(event,\s*(\d+),/);
+                    if (match && activeServerFilters.has(parseInt(match[1]))) {
+                        serverMatch = true;
+                    }
+                });
+            }
+
+            // Capability search tags
             const isVision = row.querySelector('input[name^="supports_images_"]').checked;
             const isCode = row.querySelector('input[name^="is_code_model_"]').checked;
             const isFast = row.querySelector('input[name^="is_fast_model_"]').checked;
             const isReasoning = row.querySelector('input[name^="is_reasoning_model_"]').checked;
-            
             const tags = [];
             if(isVision) tags.push("vision", "images");
             if(isCode) tags.push("code", "programming");
@@ -270,7 +354,9 @@
             if(isReasoning) tags.push("reasoning", "logic");
             const tagStr = tags.join(" ");
 
-            if (name.includes(filter) || servers.includes(filter) || desc.includes(filter) || tagStr.includes(filter)) {
+            const textMatch = name.includes(searchFilter) || desc.includes(searchFilter) || tagStr.includes(searchFilter);
+
+            if (serverMatch && textMatch) {
                 row.style.display = "";
             } else {
                 row.style.display = "none";

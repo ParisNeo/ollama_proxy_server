@@ -2,6 +2,7 @@ import datetime
 from sqlalchemy import (
     Column,
     Integer,
+    Float,
     String,
     Boolean,
     DateTime,
@@ -148,6 +149,8 @@ class ModelMetadata(Base):
     is_reasoning_model = Column(Boolean, default=False, nullable=False)
     max_context = Column(Integer, default=4096, nullable=False)
     priority = Column(Integer, default=10, nullable=False)
+    model_scale = Column(Integer, default=1, nullable=False) # 1: Small, 2: Medium, 3: Large
+    model_size = Column(Float, default=-1.0, nullable=False) # Parameters in Billions (-1.0 for unknown)
     
     __table_args__ = (UniqueConstraint("model_name", name="uq_model_name"),)
 

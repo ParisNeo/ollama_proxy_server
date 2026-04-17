@@ -257,6 +257,53 @@
             </div>
         </div>
 
+        <!-- Auto-Routing Intelligence (SB-MRA) -->
+        <div class="card-style border-l-4 border-indigo-500 bg-indigo-500/5">
+            <h2 class="card-header text-xl font-bold mb-4 pb-2 flex items-center gap-2">
+                <svg class="w-6 h-6 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                Cluster Intelligence (SB-MRA)
+            </h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+                <div class="space-y-4">
+                    <label class="flex items-center gap-3 cursor-pointer group">
+                        <input type="checkbox" name="enable_sb_mra" value="true" class="h-5 w-5 rounded text-indigo-600" {% if settings.enable_sb_mra %}checked{% endif %}>
+                        <div>
+                            <span class="block font-bold group-hover:text-indigo-400">Activate Semantic-Bayesian Routing</span>
+                            <span class="text-[11px] text-gray-500 italic">Enables context-aware optimization and ecological penalties.</span>
+                        </div>
+                    </label>
+                    <div class="grid grid-cols-2 gap-4 pt-2">
+                        <div>
+                            <label class="block text-[10px] font-black text-gray-500 uppercase">Weight: Priority</label>
+                            <input type="number" step="0.1" name="routing_weight_priority" value="{{ settings.routing_weight_priority }}" class="w-full bg-black/20 rounded p-2 text-xs">
+                        </div>
+                        <div>
+                            <label class="block text-[10px] font-black text-gray-500 uppercase">Weight: Reliability</label>
+                            <input type="number" step="0.1" name="routing_weight_reliability" value="{{ settings.routing_weight_reliability }}" class="w-full bg-black/20 rounded p-2 text-xs">
+                        </div>
+                        <div>
+                            <label class="block text-[10px] font-black text-emerald-500 uppercase">Weight: Ecology (EPP)</label>
+                            <input type="number" step="0.1" name="routing_weight_ecology" value="{{ settings.routing_weight_ecology }}" class="w-full bg-black/20 rounded p-2 text-xs">
+                        </div>
+                        <div>
+                            <label class="block text-[10px] font-black text-purple-500 uppercase">Weight: Semantic (SAF)</label>
+                            <input type="number" step="0.1" name="routing_weight_semantic" value="{{ settings.routing_weight_semantic }}" class="w-full bg-black/20 rounded p-2 text-xs">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="space-y-4 border-l border-white/5 pl-6">
+                    <h4 class="text-xs font-bold text-gray-400 uppercase tracking-widest">Routing Vectorizer</h4>
+                    <select name="routing_vectorizer_name" class="w-full bg-black/20 border border-white/10 rounded p-2 text-sm">
+                        <option value="tf_idf" {% if settings.routing_vectorizer_name == 'tf_idf' %}selected{% endif %}>TF-IDF (Fast/CPU)</option>
+                        <option value="sentense_transformer" {% if settings.routing_vectorizer_name == 'sentense_transformer' %}selected{% endif %}>SentenceTransformer (High Quality)</option>
+                        <option value="ollama" {% if settings.routing_vectorizer_name == 'ollama' %}selected{% endif %}>Ollama Loopback</option>
+                    </select>
+                    <input type="text" name="routing_vectorizer_model" value="{{ settings.routing_vectorizer_model or '' }}" placeholder="Model name (e.g. all-MiniLM-L6-v2)" class="w-full bg-black/20 border border-white/10 rounded p-2 text-xs">
+                </div>
+            </div>
+        </div>
+
         <!-- Hub Orchestration -->
         <div>
             <h2 class="card-header text-xl font-bold mb-4 pb-2">Hub Orchestration</h2>

@@ -134,21 +134,29 @@ class MOENode(BaseNode):
         )
         
         sys_prompt = props.get("system_prompt", "Combine the ideas from the experts into a single high-quality response.")
-        final_messages = list(engine.initial_messages) + [{"role": "user", "content": f"### EXPERT PANEL FEEDBACK:\n{panel_data}\n\n### MANDATE:\n{sys_prompt}"}]
+        final_messages = list(engine.initial_messages) +[{"role": "user", "content": f"### EXPERT PANEL FEEDBACK:\n{panel_data}\n\n### MANDATE:\n{sys_prompt}"}]
         
-        servers = await server_crud.get_servers_with_model(engine.db, real_orchestrator)
-        if not servers: return f"[Error: Orchestrator model '{real_orchestrator}' offline]"
-
-        resp, _ = await engine.reverse_proxy_fn(
-            engine.request, "chat", servers, 
-            json.dumps({"model": real_orchestrator, "messages": final_messages, "stream": False}).encode(), 
-            is_subrequest=True, request_id=engine.request_id, model=real_orchestrator, sender=engine.sender
-        )
-        
+        candidates = real_orchestrator if isinstance(real_orchestrator, list) else [real_orchestrator]
         final_answer = "Error synthesis failed"
-        if hasattr(resp, 'body'):
-            data = json.loads(resp.body.decode())
-            final_answer = data.get("message", {}).get("content", "Error: Empty response.")
+        
+        for rm in candidates:
+            rm_str = str(rm)
+            servers = await server_crud.get_servers_with_model(engine.db, rm_str)
+            if not servers: continue
+
+            try:
+                resp, _ = await engine.reverse_proxy_fn(
+                    engine.request, "chat", servers, 
+                    json.dumps({"model": rm_str, "messages": final_messages, "stream": False}).encode(), 
+                    is_subrequest=True, request_id=engine.request_id, model=rm_str, sender=engine.sender
+                )
+                if hasattr(resp, 'body'):
+                    data = json.loads(resp.body.decode())
+                    if data.get("message", {}).get("content"):
+                        final_answer = data["message"]["content"]
+                        break
+            except Exception:
+                continue
 
         output = processing_block if props.get("send_status", True) else ""
         if props.get("show_intermediate", True):

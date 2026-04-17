@@ -100,6 +100,21 @@ class AppSettingsModel(BaseModel):
     enable_openai_api: bool = False
     openai_port: int = 8081 # Default secondary port
 
+    # --- AUTO-ROUTING (SB-MRA) ---
+    enable_sb_mra: bool = True
+    routing_weight_priority: float = 1.0
+    routing_weight_reliability: float = 2.0
+    routing_weight_ecology: float = 1.5
+    routing_weight_semantic: float = 3.0
+    
+    routing_vectorizer_name: str = "sentense_transformer"
+    routing_vectorizer_model: Optional[str] = "sentence-transformers/all-MiniLM-L6-v2"
+    routing_vectorizer_base_url: Optional[str] = None
+    
+    # Context Logic
+    routing_context_margin: int = Field(default=512, description="Buffer tokens added to prompt length check.")
+    routing_context_strategy: str = Field(default="crop", description="Strategy when user num_ctx > model context: 'forward', 'crop' (limit to model), or 'force' (always use model max).")
+
     # --- SECURITY ---
     blocked_ollama_endpoints: str = Field(
         default="pull,delete,create,copy,push",

@@ -122,9 +122,9 @@ async def bootstrap_lollms_agent() -> None:
             "- <ui_highlight selector='#btn-save'/> : Flashes a specific element.\n"
             "- <ui_tour_start/> : Restarts the page tour.\n\n"
             "### KNOWLEDGE ACCESS\n"
-            "You have a hierarchical Read-Only Memory (ROM). If you aren't 100% sure about a system detail, "
-            "you MUST use <memory_dig regex='pattern'/> to retrieve the ground truth from your database. "
-            "Perform multiple digs if necessary before answering."
+            "You have a hierarchical Read-Only Memory (ROM) containing deep technical Hub documentation.\n"
+            "ONLY use <memory_dig regex='pattern'/> if the user explicitly asks a technical question about LoLLMs Hub architecture, tools, or bindings.\n"
+            "DO NOT use memory_dig for casual conversation, greetings, or general AI questions."
         )
         
         # 2. Create or Update the Master Workflow Graph
@@ -399,6 +399,8 @@ async def lifespan(app: FastAPI):
 
     # ---------- Shutdown ----------
     logger.info("Shutting down…")
+    
+    # 1. Stop background tasks
     if hasattr(app.state, 'refresh_task'):
         app.state.refresh_task.cancel()
         try:
@@ -406,9 +408,15 @@ async def lifespan(app: FastAPI):
         except asyncio.CancelledError:
             pass
 
+    # 2. Close network clients
     await app.state.http_client.aclose()
     if app.state.redis:
         await app.state.redis.close()
+
+    # 3. Explicitly dispose of the Database Engine
+    # This flushes the connection pool and prevents SAWarnings on Ctrl+C
+    logger.info("Closing database connections...")
+    await engine.dispose()
 
 app = FastAPI(
     title=settings.APP_NAME,

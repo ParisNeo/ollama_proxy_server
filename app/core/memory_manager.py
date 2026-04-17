@@ -85,12 +85,15 @@ class CognitiveMemoryManager:
                 context += f"- {cat}: ({', '.join(titles)})\n"
         
         context += "\n#### [MEMORY CONTROL PROTOCOL - MANDATORY]\n"
-        context += "You possess a recursive memory system. You can save facts for this specific user or for the GLOBAL system.\n"
+        context += "You possess a recursive memory system. YOU MUST USE EXACT XML TAGS TO SAVE FACTS.\n"
+        context += "Saying 'I have remembered your name' DOES NOT WORK. You MUST output the <memory> tag.\n"
         context += "STRICT RULES:\n"
-        context += "1. For user-specific facts (name, age, preferences), use: <memory operation='add' scope='local' title='...' importance='...'>...</memory>\n"
-        context += "2. For system-wide facts (server updates, global instructions, Hub logic), use: <memory operation='add' scope='global' title='...' importance='...'>...</memory>\n"
-        context += "3. Tags must be at the VERY END of your message.\n"
-        context += "- <memory operation='alter' category='...' title='...' importance='...'>...</memory>\n"
+        context += "1. For user-specific facts (name, age, preferences), use: <memory operation='add' scope='local' title='...' importance='...'>[data to remember]</memory>\n"
+        context += "2. For system-wide facts (server updates, global instructions, Hub logic), use: <memory operation='add' scope='global' title='...' importance='...'>[data to remember]</memory>\n"
+        context += "3. ALWAYS include the closing </memory> tag. Do not use self-closing tags.\n"
+        context += "4. Tags must be at the VERY END of your message.\n"
+        context += "Other operations:\n"
+        context += "- <memory operation='alter' category='...' title='...' importance='...'>[new data]</memory>\n"
         context += "- <memory operation='remove' category='...' title='...' importance='0'></memory>\n"
         context += "- <memory operation='regrade' category='...' title='...' importance='100'></memory> (to reinforce used memory)\n"
         context += "\nIf you need to recall details from a 'LONG-TERM HANDLE' category, output this exact tag instead of an answer, and the system will reply with the contents:\n"
@@ -101,6 +104,8 @@ class CognitiveMemoryManager:
     @staticmethod
     async def process_tags(db, user_identifier: str, agent_name: str, text: str) -> str:
         """Parses and executes memory operations, returns text with tags removed."""
+        logger.info(f"🧠 [Memory Manager] Parsing text for User: '{user_identifier}', Agent: '{agent_name}'")
+        
         # --- AFFECTIVE UPDATE TAG ---
         aff_match = re.search(r'<affective_update\s+value=["\']([^"\']+)["\']\s*(?:/>|></affective_update>)', text)
         if aff_match:
@@ -113,21 +118,21 @@ class CognitiveMemoryManager:
                 db.add(MemoryEntry(user_identifier=user_identifier, agent_name=agent_name, category='affective', title='relationship', content=new_rel, importance=100))
 
         # --- STANDARD MEMORY TAGS ---
-        # ULTRA-ROBUST PARSER: 
-        # 1. Handles optional spaces: <  memory ... >
-        # 2. Handles varied quotes: operation="add" or operation='add' or operation=add
-        # 3. Handles markdown wrapping: ```xml <memory>...```
         pattern = r'<\s*memory\b([^>]*)>([\s\S]*?)<\s*/\s*memory\s*>'
-        
         matches = list(re.finditer(pattern, text))
+        
+        if matches:
+            logger.info(f"🧠 [Memory Manager] Found {len(matches)} standard <memory> tags.")
+        else:
+            if "<memory" in text:
+                logger.warning(f"🧠 [Memory Manager] Found '<memory' but it did not match regex. Malformed or self-closing? Excerpt: {text[-300:]}")
+        
         for m in matches:
             try:
                 attr_str = m.group(1)
                 content = m.group(2).strip()
                 
-                # Extract attributes via helper regex allowing optional quotes
                 def get_attr(name, default=None):
-                    # Pattern matches key="val", key='val', or key=val
                     m_attr = re.search(rf'{name}\s*=\s*(?:"([^"]*)"|\'([^\']*)\'|([^\s>]+))', attr_str, re.I)
                     if m_attr:
                         return m_attr.group(1) or m_attr.group(2) or m_attr.group(3)
@@ -136,39 +141,93 @@ class CognitiveMemoryManager:
                 op = get_attr('operation')
                 cat = get_attr('category', 'general')
                 title = get_attr('title')
-                scope = get_attr('scope', 'local') # Default to user-specific
+                scope = get_attr('scope', 'local')
                 imp_str = get_attr('importance', '50')
                 imp = int(imp_str) if imp_str.isdigit() else 50
                 
+                logger.info(f"🧠 [Memory] Tag: OP='{op}', TITLE='{title}', SCOPE='{scope}', CONTENT='{content[:30]}...'")
+
                 if not op or not title:
-                    logger.warning(f"Malformed memory tag skipped: {m.group(0)}")
+                    logger.warning(f"🧠 [Memory Manager] Malformed tag skipped: {m.group(0)}")
                     continue
 
-                # Determine effective target user ID based on scope
                 target_uid = "shared_knowledge" if scope == "global" else user_identifier
                 
                 if op == "add":
                     existing = await db.execute(select(MemoryEntry).filter_by(user_identifier=target_uid, agent_name=agent_name, title=title))
-                    if not existing.scalars().first():
+                    existing_entry = existing.scalars().first()
+                    if not existing_entry:
                         db.add(MemoryEntry(user_identifier=target_uid, agent_name=agent_name, category=cat, title=title, importance=imp, content=content))
+                        logger.info(f"🧠 [Memory] ADDED: {title} for {target_uid}")
+                    else:
+                        existing_entry.content = content
+                        existing_entry.importance = imp
+                        existing_entry.category = cat
+                        existing_entry.last_accessed = datetime.datetime.utcnow()
+                        logger.info(f"🧠 [Memory] UPDATED: {title} for {target_uid}")
                 elif op == "alter":
-                    await db.execute(update(MemoryEntry).filter_by(user_identifier=user_identifier, agent_name=agent_name, title=title).values(content=content, importance=imp, category=cat, last_accessed=datetime.datetime.utcnow()))
+                    await db.execute(update(MemoryEntry).filter_by(user_identifier=target_uid, agent_name=agent_name, title=title).values(content=content, importance=imp, category=cat, last_accessed=datetime.datetime.utcnow()))
+                    logger.info(f"🧠 [Memory] ALTERED: {title} for {target_uid}")
                 elif op == "regrade":
-                    # Only update if the importance is actually different to save DB cycles
-                    existing_q = await db.execute(select(MemoryEntry.importance).filter_by(user_identifier=user_identifier, agent_name=agent_name, title=title))
+                    existing_q = await db.execute(select(MemoryEntry.importance).filter_by(user_identifier=target_uid, agent_name=agent_name, title=title))
                     existing_imp = existing_q.scalar()
                     if existing_imp != imp:
-                        await db.execute(update(MemoryEntry).filter_by(user_identifier=user_identifier, agent_name=agent_name, title=title).values(importance=imp, last_accessed=datetime.datetime.utcnow()))
+                        await db.execute(update(MemoryEntry).filter_by(user_identifier=target_uid, agent_name=agent_name, title=title).values(importance=imp, last_accessed=datetime.datetime.utcnow()))
+                        logger.info(f"🧠 [Memory] REGRADED: {title} for {target_uid}")
                 elif op == "remove":
-                    await db.execute(delete(MemoryEntry).filter_by(user_identifier=user_identifier, agent_name=agent_name, title=title))
+                    await db.execute(delete(MemoryEntry).filter_by(user_identifier=target_uid, agent_name=agent_name, title=title))
+                    logger.info(f"🧠 [Memory] REMOVED: {title} for {target_uid}")
             except Exception as e:
-                logger.error(f"Error processing memory tag: {e}")
-        
+                logger.error(f"🧠 [Memory Manager] Error processing memory tag: {e}", exc_info=True)
+
+        # Fallback for self-closing tags just in case
+        pattern_sc = r'<\s*memory\b([^>]*?)/\s*>'
+        matches_sc = list(re.finditer(pattern_sc, text))
+        if matches_sc:
+            logger.info(f"🧠 [Memory Manager] Found {len(matches_sc)} self-closing <memory/> tags.")
+            for m in matches_sc:
+                try:
+                    attr_str = m.group(1)
+                    def get_attr(name, default=None):
+                        m_attr = re.search(rf'{name}\s*=\s*(?:"([^"]*)"|\'([^\']*)\'|([^\s>]+))', attr_str, re.I)
+                        if m_attr:
+                            return m_attr.group(1) or m_attr.group(2) or m_attr.group(3)
+                        return default
+
+                    op = get_attr('operation')
+                    cat = get_attr('category', 'general')
+                    title = get_attr('title')
+                    scope = get_attr('scope', 'local')
+                    content = get_attr('content', '')
+                    imp_str = get_attr('importance', '50')
+                    imp = int(imp_str) if imp_str.isdigit() else 50
+                    
+                    logger.info(f"🧠 [Memory] SC Tag: OP='{op}', TITLE='{title}', SCOPE='{scope}'")
+
+                    if not op or not title: continue
+
+                    target_uid = "shared_knowledge" if scope == "global" else user_identifier
+                    if op == "add":
+                        existing = await db.execute(select(MemoryEntry).filter_by(user_identifier=target_uid, agent_name=agent_name, title=title))
+                        existing_entry = existing.scalars().first()
+                        if not existing_entry:
+                            db.add(MemoryEntry(user_identifier=target_uid, agent_name=agent_name, category=cat, title=title, importance=imp, content=content))
+                            logger.info(f"🧠 [Memory] SC ADDED: {title} for {target_uid}")
+                        else:
+                            existing_entry.content = content
+                            existing_entry.importance = imp
+                            existing_entry.category = cat
+                            existing_entry.last_accessed = datetime.datetime.utcnow()
+                            logger.info(f"🧠 [Memory] SC UPDATED: {title} for {target_uid}")
+                except Exception as e:
+                    logger.error(f"🧠 [Memory Manager] Error processing SC memory tag: {e}")
+
         await db.commit()
-        # Remove tags from text to not show to user
+        
+        # Strip all tags from final output
         clean_text = re.sub(pattern, '', text).strip()
+        clean_text = re.sub(pattern_sc, '', clean_text).strip()
         clean_text = re.sub(r'<affective_update[^>]*>', '', clean_text)
-        # Remove memory_search tags as well so they don't leak
         clean_text = re.sub(r'<memory_search\s+category=["\']([^"\']+)["\']\s*(?:/>|></memory_search>)', '', clean_text).strip()
         return clean_text
 

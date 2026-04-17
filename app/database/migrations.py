@@ -143,7 +143,7 @@ def validate_column_definition(definition: str) -> str:
         r'^TEXT(\s+DEFAULT\s+\'[^\']*\')?(\s+NOT\s+NULL)?$',  # TEXT type (Large strings/Markdown)
         r'^DATETIME(\s+DEFAULT\s+CURRENT_TIMESTAMP)?(\s+NOT\s+NULL)?$',  # DATETIME
         r'^VARCHAR(\s*\(\s*\d+\s*\))?(\s+DEFAULT\s+\'[^\']*\')?(\s+NOT\s+NULL)?$',  # VARCHAR
-        r'^INTEGER(\s+DEFAULT\s+\d+)?(\s+NOT\s+NULL)?$',  # INTEGER
+        r'^(INTEGER|FLOAT|REAL)(\s+DEFAULT\s+-?\d+(\.\d+)?)?(\s+NOT\s+NULL)?$',  # Numeric types with Float/Neg support
         r'^INTEGER\s+NOT\s+NULL\s+PRIMARY\s+KEY$',  # INTEGER NOT NULL PRIMARY KEY
         r'^BOOLEAN(\s+DEFAULT\s+(0|1))?(\s+NOT\s+NULL)?$',  # BOOLEAN
         r'^BOOLEAN\s+DEFAULT\s+(0|1|TRUE|FALSE)\s+NOT\s+NULL$',  # BOOLEAN constraints
@@ -157,9 +157,9 @@ def validate_column_definition(definition: str) -> str:
     # Special case: check for simple type with DEFAULT and NOT NULL
     # Only allow specific safe default values
     safe_default_pattern = re.compile(
-        r'^(INTEGER|VARCHAR|TEXT|BOOLEAN)\s+'
+        r'^(INTEGER|FLOAT|REAL|VARCHAR|TEXT|BOOLEAN)\s+'
         r'DEFAULT\s+'
-        r'(\d+|\'[^\']*\'|NULL)\s*'
+        r'(-?\d+(\.\d+)?|\'[^\']*\'|NULL)\s*'
         r'(NOT\s+NULL)?$',
         re.IGNORECASE
     )
@@ -361,16 +361,25 @@ async def migrate_app_settings_data(engine: AsyncEngine) -> None:
         import json
         settings_data = json.loads(settings_json) if settings_json else {}
 
-        # Default values for new retry settings
-        default_retry_settings = {
-            "max_retries": 2,
-            "retry_total_timeout_seconds": 1.0,
-            "retry_base_delay_ms": 10
+        # Default values for new retry and SB-MRA settings
+        default_new_settings = {
+            "max_retries": 10,
+            "retry_total_timeout_seconds": 600.0,
+            "retry_base_delay_ms": 10,
+            "enable_sb_mra": True,
+            "routing_weight_priority": 1.0,
+            "routing_weight_reliability": 2.0,
+            "routing_weight_ecology": 1.5,
+            "routing_weight_semantic": 3.0,
+            "routing_vectorizer_name": "sentense_transformer",
+            "routing_vectorizer_model": "sentence-transformers/all-MiniLM-L6-v2",
+            "routing_context_margin": 512,
+            "routing_context_strategy": "crop"
         }
 
         # Add missing fields
         updated = False
-        for key, default_value in default_retry_settings.items():
+        for key, default_value in default_new_settings.items():
             if key not in settings_data:
                 settings_data[key] = default_value
                 updated = True
@@ -631,6 +640,8 @@ async def run_all_migrations(engine: AsyncEngine) -> None:
                 "is_reasoning_model": "BOOLEAN DEFAULT 0 NOT NULL",
                 "max_context": "INTEGER DEFAULT 4096 NOT NULL",
                 "priority": "INTEGER DEFAULT 10 NOT NULL",
+                "model_scale": "INTEGER DEFAULT 1 NOT NULL",
+                "model_size": "FLOAT DEFAULT -1.0 NOT NULL",
             },
             "managed_instances": {
                 "backend_type": "VARCHAR DEFAULT 'ollama'",

@@ -153,17 +153,19 @@ async def scrape_url(url: str, depth: int = 0) -> Dict[str, Any]:
         scraper = ScrapeMaster(url)
         
         # Scrape to Markdown (best for LLM context)
-        # This automatically cycles through Requests -> Selenium -> Undetected if blocked
         content_md = scraper.scrape_markdown()
         
         if not content_md and scraper.last_error:
             logger.error(f"ScrapeMaster failed: {scraper.last_error}")
             return {"title": url, "content": f"Error: {scraper.last_error}"}
 
+        # Defensive attribute access
+        title = getattr(scraper, 'title', url)
+
         return {
-            "title": scraper.title or url,
+            "title": title,
             "content": content_md or "",
-            "strategy": scraper.last_strategy_used
+            "strategy": getattr(scraper, 'last_strategy_used', 'unknown')
         }
     except Exception as e:
         logger.error(f"ScrapeMaster exception: {e}")

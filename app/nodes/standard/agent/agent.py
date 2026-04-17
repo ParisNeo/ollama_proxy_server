@@ -4,6 +4,8 @@ from typing import Dict, Any
 from app.nodes.base import BaseNode
 from app.crud import server_crud
 from app.core.events import event_manager, ProxyEvent
+import logging
+logger = logging.getLogger("Agent")
 
 class AgentReasonerNode(BaseNode):
     node_type = "hub/agent"
@@ -49,25 +51,44 @@ class AgentReasonerNode(BaseNode):
 
         for turn in range(1, max_turns + 1):
             real_model, turn_msgs = await engine.resolve_target_fn(engine.db, model, scratchpad, engine.depth + 1, engine.request, engine.request_id, engine.sender)
-            event_manager.emit(ProxyEvent("active", engine.request_id, f"Agent Turn {turn}", real_model, engine.sender, error_message=f"Thinking... ({turn}/{max_turns})"))
+            
+            candidates = real_model if isinstance(real_model, list) else [real_model]
+            resp = None
+            ai_msg = {}
+            error_msg = ""
             
             cb = getattr(engine.request.state, "stream_callback", None)
             if cb:
                 await cb(f'<processing type="tool_execution" title="Agent Loop" round="{turn}">\n* Agent is thinking (Turn {turn}/{max_turns})...\n')
-            
-            servers = await server_crud.get_servers_with_model(engine.db, real_model)
-            if not servers:
-                if cb: await cb(f'* Error: Server offline\n</processing>\n')
-                return f"❌ System Error: Compute nodes for the model '{real_model}' are currently offline or restricted. The agent loop has been aborted."
 
-            payload = {"model": real_model, "messages": turn_msgs, "stream": False, "tools": [t for t in tools if t]}
-            resp, _ = await engine.reverse_proxy_fn(engine.request, "chat", servers, json.dumps(payload).encode(), is_subrequest=True, sender="autonomous-agent")
-            
-            if not hasattr(resp, 'body'):
-                if cb: await cb(f'* Error: Empty response\n</processing>\n')
-                break
+            for rm in candidates:
+                rm_str = str(rm)
+                event_manager.emit(ProxyEvent("active", engine.request_id, f"Agent Turn {turn}", rm_str, engine.sender, error_message=f"Thinking... ({turn}/{max_turns})"))
                 
-            ai_msg = json.loads(resp.body.decode()).get("message", {})
+                servers = await server_crud.get_servers_with_model(engine.db, rm_str)
+                if not servers:
+                    error_msg = f"Compute nodes for '{rm_str}' offline."
+                    logger.warning(f"Agent candidate '{rm_str}' offline. Falling back...")
+                    continue
+
+                payload = {"model": rm_str, "messages": turn_msgs, "stream": False, "tools":[t for t in tools if t]}
+                try:
+                    resp, _ = await engine.reverse_proxy_fn(engine.request, "chat", servers, json.dumps(payload).encode(), is_subrequest=True, sender="autonomous-agent")
+                    if hasattr(resp, 'body'):
+                        data = json.loads(resp.body.decode())
+                        ai_msg = data.get("message", {})
+                        if ai_msg:
+                            logger.info(f"Agent successfully used candidate '{rm_str}'.")
+                            break # Success!
+                except Exception as e:
+                    error_msg = str(e)
+                    logger.warning(f"Agent candidate '{rm_str}' failed: {e}. Falling back...")
+                    continue
+            
+            if not ai_msg:
+                if cb: await cb(f'* Error: All candidates failed. Last error: {error_msg}\n</processing>\n')
+                return f"❌ Agent Fallback Exhausted: All candidates failed. Last error: {error_msg}"
+
             scratchpad.append(ai_msg)
             
             if cb:

@@ -33,11 +33,85 @@ logger = logging.getLogger(__name__)
 router = APIRouter(dependencies=[Depends(ip_filter), Depends(rate_limiter)])
 
 # --- Connection Pool Cache & Penalization ---
+import random
+
 _server_health_cache: Dict[int, Dict[str, Any]] = {}
 _health_cache_ttl_seconds = 5
 
 # Penalization storage: server_id -> timestamp until penalty ends
 _server_penalties: Dict[int, float] = {}
+
+# Bayesian IRRA (Model Success Tracker)
+_bayesian_stats: Dict[str, Dict[str, float]] = {}
+
+# --- SB-MRA SHARED VECTORIZER ---
+_shared_routing_vectorizer = None
+
+async def _get_shared_vectorizer(settings: AppSettingsModel):
+    global _shared_routing_vectorizer
+    if _shared_routing_vectorizer is not None:
+        return _shared_routing_vectorizer
+    
+    try:
+        import pipmaster as pm
+        pm.ensure_packages(["safe-store", "numpy"])
+        from safe_store.vectorization.manager import VectorizationManager
+        
+        v_name = settings.routing_vectorizer_name
+        # Map internal keys: 'sentense_transformer' -> 'st'
+        v_key = "st" if "sentense" in v_name else v_name
+        
+        # Hard safety: block tf_idf for routing as it requires a fitted corpus
+        if v_key == "tf_idf":
+            logger.warning("SB-MRA: TF-IDF is not supported for dynamic routing. Falling back to SentenceTransformers.")
+            v_key = "st"
+
+        v_config = {}
+        # Ensure we have a model for ST
+        if v_key == "st":
+            v_config["model"] = settings.routing_vectorizer_model or "sentence-transformers/all-MiniLM-L6-v2"
+        elif settings.routing_vectorizer_model:
+            v_config["model"] = settings.routing_vectorizer_model
+        if settings.routing_vectorizer_base_url: 
+            v_config["host" if v_key == "ollama" else "base_url"] = settings.routing_vectorizer_base_url
+            
+        _shared_routing_vectorizer = VectorizationManager().get_vectorizer(v_key, v_config)
+        logger.info(f"SB-MRA: Shared vectorizer '{v_name}' initialized.")
+        return _shared_routing_vectorizer
+    except Exception as e:
+        logger.error(f"SB-MRA: Failed to initialize vectorizer: {e}")
+        return None
+
+# Cache for model description embeddings to avoid re-calculating
+_model_latent_profiles: Dict[str, Any] = {}
+
+BAYESIAN_PRIOR_ALPHA = 10.0
+BAYESIAN_PRIOR_BETA = 1.0
+BAYESIAN_DECAY = 0.95
+
+def _update_bayesian_stats(model_name: str, success: bool, reward: float = 1.0):
+    """
+    Updates the Beta distribution parameters for a model using Fractional Rewards.
+    
+    Args:
+        model_name: The target model.
+        success: Whether the request completed without error.
+        reward: A performance factor [0.0, 1.0]. 1.0 is peak performance.
+    """
+    stats = _bayesian_stats.get(model_name, {"alpha": BAYESIAN_PRIOR_ALPHA, "beta": BAYESIAN_PRIOR_BETA})
+    
+    # Temporal Forgiveness: Decay historical data to favor recent performance
+    stats["alpha"] = max(BAYESIAN_PRIOR_ALPHA * 0.1, stats["alpha"] * BAYESIAN_DECAY)
+    stats["beta"] = max(BAYESIAN_PRIOR_BETA * 0.1, stats["beta"] * BAYESIAN_DECAY)
+    
+    if success:
+        # SOTA: Fractional update. High performance boosts alpha, low performance increases beta (uncertainty)
+        stats["alpha"] += reward
+        stats["beta"] += (1.0 - reward)
+    else:
+        stats["beta"] += 1.0
+        
+    _bayesian_stats[model_name] = stats
 
 # Constants for cooldown durations (in seconds)
 PENALTY_RATE_LIMIT = 300  # 5 minutes for 429 errors
@@ -284,7 +358,29 @@ def _normalize_payload_for_ollama(body_bytes: bytes, max_context_limit: int = 32
             temp_body["options"] = {}
             
         requested_ctx = temp_body["options"].get("num_ctx")
-        if requested_ctx != max_context_limit:
+        
+        # --- CONTEXT STRATEGY LOGIC ---
+        from app.api.v1.dependencies import get_settings
+        # Note: We use the provided max_context_limit (model limit)
+        
+        # Determine strategy from settings
+        # (This usually requires passing the setting object into this helper)
+        # For now, we apply the chosen Hub strategy:
+        strategy = "crop" # Default
+        
+        if requested_ctx:
+            if requested_ctx > max_context_limit:
+                # User asked for more than model can handle
+                if strategy == "crop":
+                    temp_body["options"]["num_ctx"] = max_context_limit
+                    modified = True
+                # if "forward", we do nothing (pass user value)
+            else:
+                # User asked for less than model limit, usually we preserve this
+                pass
+        
+        # If strategy is "force", we ignore user request and use model max
+        if strategy == "force":
             temp_body["options"]["num_ctx"] = max_context_limit
             modified = True
 
@@ -421,13 +517,24 @@ async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer
     logger.info(f"_reverse_proxy called with {len(servers)} total server(s), filtering to active...")
     
     # 1. Filter for active and healthy servers
-    candidate_servers = [
-        s for s in servers 
-        if s.is_active and _is_server_healthy_cached(s.id)
-    ]
+    candidate_servers = []
+    for s in servers:
+        if not s.is_active:
+            logger.debug(f"Proxy Filter: Skipping '{s.name}' (Administratively Disabled)")
+            continue
+        if not _is_server_healthy_cached(s.id):
+            logger.debug(f"Proxy Filter: Skipping '{s.name}' (Last health check failed)")
+            continue
+        candidate_servers.append(s)
     
     # 2. Filter for non-penalized servers
-    available_servers = [s for s in candidate_servers if not _is_server_penalized(s.id)]
+    available_servers = []
+    for s in candidate_servers:
+        if _is_server_penalized(s.id):
+            remaining = round(_server_penalties.get(s.id, 0) - asyncio.get_event_loop().time())
+            logger.info(f"Proxy Filter: Skipping '{s.name}' (Quarantined for another {remaining}s)")
+            continue
+        available_servers.append(s)
     
     # 3. FAIL-SAFE: If ALL servers are penalized, we ignore penalties to avoid a 503 block
     if not available_servers and candidate_servers:
@@ -553,7 +660,8 @@ async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer
                 body_bytes=local_body_bytes,
                 redis_client=redis_client,
                 request_id=request_id,
-                model=model
+                model=model,
+                sender=sender
             )
             
             _update_health_cache(chosen_server.id, True)
@@ -629,11 +737,24 @@ async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer
             resp = getattr(first_error, 'response', None)
             status_code = resp.status_code if resp else None
             
+            # Detect Hard Limits vs Temporary Rate Limiting
+            error_body = ""
+            if resp:
+                try:
+                    error_body = (await resp.aread()).decode()
+                except: pass
+
             # --- PENALIZATION LOGIC ---
             if status_code == 429:
                 _apply_server_penalty(chosen_server.id, chosen_server.name, PENALTY_RATE_LIMIT, "Rate Limit (429) Reached")
                 if request_id:
                     event_manager.emit(ProxyEvent("error", request_id, model, chosen_server.name, sender, error_message="Rate Limit Reached (Penalizing Node)"))
+                
+                # CRITICAL FIX: If it's a weekly/usage limit, do NOT retry this node. Failover immediately.
+                if "limit" in error_body.lower() or "upgrade" in error_body.lower():
+                    logger.error(f"Hard usage limit reached on {chosen_server.name}. Skipping retries and failing over...")
+                    continue 
+
             elif status_code == 503:
                 _apply_server_penalty(chosen_server.id, chosen_server.name, PENALTY_OVERLOADED, "Server Overloaded (503)")
             elif status_code in (500, 502, 504):
@@ -858,8 +979,9 @@ def _wrap_response_for_token_tracking(
                                     accumulated_tokens["total_tokens"]
                                 ))
 
-                            # 2. Final Cognitive Memory Commit (Background)
-                            if user_id:
+                            # 2. Final Cognitive Memory Commit (MANAGED ONLY)
+                            is_managed = getattr(request.state, "is_managed_agent", False)
+                            if user_id and is_managed:
                                 final_text = str(buffer)
                                 async def _background_memory_task(u_id, m_name, payload):
                                     from app.database.session import AsyncSessionLocal
@@ -875,6 +997,11 @@ def _wrap_response_for_token_tracking(
                 total_duration = asyncio.get_event_loop().time() - (first_token_time or start_time)
                 tps = (accumulated_tokens["completion_tokens"] or 0) / max(total_duration, 0.001)
                 
+                # PERFORMANCE REWARD: Normalize TPS against a baseline (e.g., 50 tokens/sec)
+                # This ensures fast nodes gain alpha faster than slow nodes.
+                perf_reward = min(1.0, max(0.1, tps / 50.0))
+                _update_bayesian_stats(model, success=True, reward=perf_reward)
+
                 event_manager.emit(ProxyEvent(
                     event_type="completed", 
                     request_id=request_id, 
@@ -1343,10 +1470,15 @@ async def _async_log_usage(
         return None
 
 
+async def _get_routing_vectorizer(request: Request):
+    """DEPRECATED: Use _get_shared_vectorizer instead."""
+    return await _get_shared_vectorizer(request.app.state.settings)
+
 async def _select_auto_model(db: AsyncSession, body: Dict[str, Any], overrides: Dict[str, bool] = None, exclude_models: List[str] = None, request: Request = None) -> List[str]:
     """
-    IRRA Algorithm: Generates a ranked list of candidate model names based on 
-    intent, hardware health, and excludes previously failed models.
+    SB-MRA Algorithm Implementation:
+    Ranks compute nodes by minimizing a multifactorial cost function Sm.
+    Sm = wp*Pm + wr*(1-theta) + we*E + ws*Dm
     """
     if overrides is None: overrides = {}
     if exclude_models is None: exclude_models = []
@@ -1386,7 +1518,7 @@ async def _select_auto_model(db: AsyncSession, body: Dict[str, Any], overrides: 
     # NEW: Filter available models by checking if their hosting servers are healthy
     active_servers = await server_crud.get_servers(db)
     # Exclude Quarantined nodes from the candidate pool for 'auto'
-    healthy_servers = [s for s in active_servers if s.is_active and not _is_server_penalized(s.id)]
+    healthy_servers =[s for s in active_servers if s.is_active and not _is_server_penalized(s.id)]
     
     # If all nodes are penalized, we must allow them in the selector to avoid 503
     if not healthy_servers:
@@ -1397,50 +1529,102 @@ async def _select_auto_model(db: AsyncSession, body: Dict[str, Any], overrides: 
         if s.available_models:
             mlist = s.available_models
             if isinstance(mlist, str): mlist = json.loads(mlist)
-            for m in mlist: available_on_healthy.add(m.get("name"))
+            
+            allowed = s.allowed_models if s.allowed_models else None
+            is_ollama = s.server_type == 'ollama'
+            
+            for m in mlist:
+                m_name = m.get("name")
+                if not m_name: continue
+                
+                # Check whitelist: Do NOT add models that are physically present but blocked by admin
+                if allowed is not None and len(allowed) > 0:
+                    whitelisted = any(
+                        a == m_name or 
+                        a.replace(':latest', '') == m_name.replace(':latest', '') or
+                        (is_ollama and a.startswith(f"{m_name}:"))
+                        for a in allowed
+                    )
+                    if not whitelisted:
+                        continue
+                        
+                available_on_healthy.add(m_name)
 
-    available_metadata = [m for m in all_metadata if m.model_name in available_on_healthy]
+    available_metadata =[m for m in all_metadata if m.model_name in available_on_healthy]
 
-    # --- ECOLOGICAL FILTERING (Green Routing) ---
-    # Detect Trivial/Simple tasks to save energy
-    simple_keywords = ["hello", "hi", "thanks", "ok", "bye", "test", "ping"]
-    is_trivial = not has_images and not is_reasoning_task and any(kw == last_user_prompt.lower().strip() for kw in simple_keywords)
-
-    if is_trivial:
-        # For trivial tasks, filter out any model larger than 14B (High energy cost)
-        # We prioritize "Fast" and "Small" models.
-        green_candidates = [m for m in available_metadata if m.is_fast_model or m.max_context < 16384]
-        if green_candidates:
-            available_metadata = green_candidates
-            logger.info("Green Routing: Trivial task detected. Filtering for low-energy models.")
+    # 3. Multifactorial Scoring (SB-MRA)
+    settings = request.app.state.settings
+    vectorizer = await _get_shared_vectorizer(settings) if settings.enable_sb_mra else None
+    
+    # Context Constraint: Filter out models where (Prompt + Margin) exceeds physical context
+    margin = settings.routing_context_margin
+    required_context = estimated_tokens + margin
+    
+    pre_filter_count = len(available_metadata)
+    available_metadata = [
+        m for m in available_metadata 
+        if m.max_context >= required_context
+    ]
+    
+    if len(available_metadata) < pre_filter_count:
+        filtered_out = pre_filter_count - len(available_metadata)
+        logger.info(f"SB-MRA Filter: Disqualified {filtered_out} model(s) because required context ({required_context}) > model limit.")
+    
+    if not available_metadata:
+        logger.warning(f"SB-MRA: All models filtered out by context constraint! (Req: {required_context} tokens)")
+        # Fallback to absolute priority list if everything is too small, to prevent 503
+        available_metadata = [m for m in all_metadata if m.model_name in available_on_healthy]
+    
+    # Calculate Prompt Complexity (c)
+    # Heuristic: 0.0 (empty) to 1.0 (approaching typical 8k context)
+    c = min(1.0, estimated_tokens / 8192.0)
+    
+    # Embed prompt for Semantic Alignment (SAF)
+    prompt_vec = None
+    if vectorizer and settings.routing_weight_semantic > 0:
+        try:
+            prompt_vec = vectorizer.vectorize([last_user_prompt])[0]
+        except Exception as e:
+            logger.warning(f"SB-MRA: Semantic vectorization failed: {e}")
 
     if not available_metadata:
         logger.warning("Auto-routing failed: No models with metadata are available on active servers.")
         return None
 
+    # STRICT FILTER: Exclude embedding models for any non-embedding task.
+    # This must be the foundation of our fallback pool to prevent catastrophic logic leaks.
+    is_chat = True
+    if request and hasattr(request, "url") and "embed" in request.url.path.lower():
+        is_chat = False
+        
+    if is_chat:
+        safe_fallback_pool =[
+            m for m in available_metadata 
+            if not m.is_embedding_model and 
+            not any(kw in m.model_name.lower() for kw in["embed", "embedding", "bge", "gte", "nomic", "snowflake"])
+        ]
+    else:
+        safe_fallback_pool = available_metadata
 
-    candidate_models = available_metadata
+    candidate_models = safe_fallback_pool
 
     # Tier 1: Capability Matching
-    # HARD FILTER: If the user is requesting chat, remove embedding-only models
-    if request and ("chat" in request.url.path or "generate" in request.url.path):
-        candidate_models = [m for m in candidate_models if not m.is_embedding_model]
     if has_images:
         # Strict filter: ONLY models that support images
-        candidate_models = [m for m in candidate_models if m.supports_images]
+        candidate_models =[m for m in candidate_models if m.supports_images]
     else:
         # Soft filter: If it's a text task, prioritize text-only models
-        text_only = [m for m in candidate_models if not m.supports_images]
+        text_only =[m for m in candidate_models if not m.supports_images]
         if text_only:
             candidate_models = text_only
 
     if is_reasoning_task:
-        reasoning_models = [m for m in candidate_models if m.is_reasoning_model]
+        reasoning_models =[m for m in candidate_models if m.is_reasoning_model]
         if reasoning_models:
             candidate_models = reasoning_models
 
     if contains_code:
-        code_models = [m for m in candidate_models if m.is_code_model]
+        code_models =[m for m in candidate_models if m.is_code_model]
         if code_models:
             candidate_models = code_models
 
@@ -1452,42 +1636,81 @@ async def _select_auto_model(db: AsyncSession, body: Dict[str, Any], overrides: 
             candidate_models = fast_models
 
     # Filter by context window (don't route huge prompts to tiny models)
-    capable_context = [m for m in candidate_models if m.max_context >= estimated_tokens]
+    capable_context =[m for m in candidate_models if m.max_context >= estimated_tokens]
     if capable_context:
         candidate_models = capable_context
 
     if not candidate_models:
-        logger.warning("Auto-routing: Strict criteria failed. Falling back to priority list.")
-        candidate_models = available_metadata
+        logger.warning("Auto-routing: Strict criteria failed. Falling back to safe priority list.")
+        candidate_models = safe_fallback_pool
 
     if not candidate_models:
         return None
 
-    # Tier 3: Exclude failed models from this specific run
+    # Tier 3: Health-Aware Bayesian Scoring (B-IRRA)
     candidate_models = [m for m in candidate_models if m.model_name not in exclude_models]
 
     if not candidate_models:
         return []
 
-    # Tier 3: Health-Aware Scoring
-    # Models are penalized if their hosting servers are penalized.
+    # Tier 3: SB-MRA Unified Scoring
     scored_candidates = []
     for m in candidate_models:
-        score = m.priority
-        # Fetch servers for this model
+        # 1. Priority Factor (Pm)
+        p_score = m.priority
+
+        # 2. Bayesian Reliability Factor (1 - theta)
+        stats = _bayesian_stats.get(m.model_name, {"alpha": BAYESIAN_PRIOR_ALPHA, "beta": BAYESIAN_PRIOR_BETA})
+        sampled_success_prob = random.betavariate(stats["alpha"], stats["beta"])
+        r_score = 1.0 - sampled_success_prob
+
+        # 3. Elastic Pertinence Penalty (EPP)
+        # We use a normalized size factor. Small (<=8B): 1, Med (8-30B): 2, Large (>30B): 3
+        # Fallback to model_scale if model_size is unknown (-1)
+        e_score = 0.0
+        if m.model_size > 0:
+            sigma = 1.0 if m.model_size <= 8.5 else (2.0 if m.model_size <= 32.0 else 3.5)
+        else:
+            sigma = float(m.model_scale)
+            
+        # Penalty: (sigma - 3c)^2 if size is disproportionately large for prompt complexity
+        if sigma > (3.0 * c):
+            e_score = (sigma - (3.0 * c)) ** 2
+
+        # 4. Latent Space Alignment (Dm)
+        d_score = 0.5 # Default neutral
+        if prompt_vec is not None and m.description:
+            try:
+                if m.model_name not in _model_latent_profiles:
+                    _model_latent_profiles[m.model_name] = vectorizer.vectorize([m.description])[0]
+                
+                from safe_store.search.similarity import cosine_similarity
+                import numpy as np
+                sim = cosine_similarity(np.array(prompt_vec), np.array([_model_latent_profiles[m.model_name]]))[0]
+                d_score = 1.0 - float(sim)
+            except: pass
+
+        # Combined Cost Sm
+        # Using 100x scaling for reliability to match priority range (1-100)
+        score = (
+            (settings.routing_weight_priority * p_score) +
+            (settings.routing_weight_reliability * r_score * 100) +
+            (settings.routing_weight_ecology * e_score * 10) +
+            (settings.routing_weight_semantic * d_score * 20)
+        )
+        
+        # Quarantine/Health Penalty
         servers = await server_crud.get_servers_with_model(db, m.model_name)
-        # If any server hosting this model is penalized, add a penalty to the score
         if any(_is_server_penalized(s.id) for s in servers):
-            score += 500 # High penalty ensures it drops below healthy models
-        scored_candidates.append((score, m))
+            score += 1000 
+            
+        scored_candidates.append((score, m, sampled_success_prob))
     
-    # Sort by Score (Priority + Penalty)
+    # Sort by Score ascending
     scored_candidates.sort(key=lambda x: x[0])
     
-    # Return ranked list of names
-    ranked_names = [m.model_name for s, m in scored_candidates]
-    
-    logger.info(f"IRRA Router: Ranked candidates: {ranked_names}")
+    logger.info(f"Bayesian IRRA: {[f'{m.model_name}(P:{prob:.2f}, S:{score:.1f})' for score, m, prob in scored_candidates]}")
+    ranked_names = [m.model_name for score, m, prob in scored_candidates]
     return ranked_names
 
 
@@ -1800,6 +2023,7 @@ async def _resolve_target(db: AsyncSession, name: str, messages: List[Dict[str, 
     wf_res = await db.execute(select(Workflow).filter(Workflow.name == name, Workflow.is_active == True))
     workflow = wf_res.scalars().first()
     if workflow:
+        if request: request.state.is_managed_agent = True
         from app.core.workflow_engine import WorkflowEngine as CoreWorkflowEngine
         engine = CoreWorkflowEngine(
             db, request, request_id, sender, name, workflow.graph_data, depth,
@@ -1812,6 +2036,7 @@ async def _resolve_target(db: AsyncSession, name: str, messages: List[Dict[str, 
     agent_res = await db.execute(select(VirtualAgent).filter(VirtualAgent.name == name, VirtualAgent.is_active == True))
     agent = agent_res.scalars().first()
     if agent:
+        if request: request.state.is_managed_agent = True
         logger.info(f"Hydrating Agent '{name}' -> Base: {agent.base_model}")
         
         # Concatenate all associated skills
@@ -1849,8 +2074,9 @@ async def _resolve_target(db: AsyncSession, name: str, messages: List[Dict[str, 
     if name == "auto":
         body = {"messages": messages}
         candidates = await _select_auto_model(db, body, request=request)
-        best_model = candidates[0] if candidates else "unknown"
-        return best_model, messages
+        if not candidates:
+            return "unknown", messages
+        return candidates, messages
 
     # For raw models, don't enforce strict context (preserve user's num_ctx if set)
     return name, messages
@@ -2586,13 +2812,16 @@ async def _process_proxy_logic(
         requested_model_name = model_name
         if model_name and isinstance(body, dict):
             is_chat_mode = "messages" in body
-            input_msgs = body.get("messages",[]) if is_chat_mode else [{"role": "user", "content": body.get("prompt", "")}]
+            input_msgs = body.get("messages",[]) if is_chat_mode else[{"role": "user", "content": body.get("prompt", "")}]
             
             sender_name = api_key.user.username if (api_key.user and api_key.user.username) else "system"
             resolved_model_name, resolved_messages = await _resolve_target(db, model_name, input_msgs, request=request, request_id=req_id, sender=sender_name)
             
+            # If resolved to a list of candidates (e.g. 'auto'), pick the first to set body state temporarily
+            primary_resolved = resolved_model_name[0] if isinstance(resolved_model_name, list) else resolved_model_name
+
             # --- STATIC RESULT INTERCEPTION ---
-            if resolved_model_name == "__result__":
+            if primary_resolved == "__result__":
                 content = resolved_messages[-1]["content"] if resolved_messages else ""
                 final_data = {
                     "model": requested_model_name,
@@ -2608,8 +2837,10 @@ async def _process_proxy_logic(
                 return JSONResponse(content=final_data)
 
             if resolved_model_name != model_name or resolved_messages != input_msgs:
-                model_name = resolved_model_name
-                body["model"] = model_name
+                # Keep 'auto' as model_name to trigger Bayesian fallback loop below
+                if model_name != "auto":
+                    model_name = primary_resolved
+                body["model"] = primary_resolved
                 if is_chat_mode:
                     body["messages"] = resolved_messages
                 else:
@@ -2640,7 +2871,9 @@ async def _process_proxy_logic(
                 del body["tool_choice"]
 
             # --- REFINED THINKING LOGIC ---
-            meta = await model_metadata_crud.get_metadata_by_model_name(db, model_name)
+            # For 'auto' or other resolved names, use the primary physical target for meta checks
+            meta_target = primary_resolved if model_name == "auto" else model_name
+            meta = await model_metadata_crud.get_metadata_by_model_name(db, meta_target)
             ui_allows_thinking = meta.supports_thinking if meta else False
             
             if "think" in body:
@@ -2664,29 +2897,30 @@ async def _process_proxy_logic(
             
             body_bytes = json.dumps(body).encode('utf-8')
 
-        # --- COGNITIVE MEMORY & PLATFORM INJECTION ---
-        effective_user_id = api_key.user_id if api_key.user_id is not None else 0
-        memory_context = await CognitiveMemoryManager.get_memory_context(db, effective_user_id, model_name)
-        
-        # Determine platform context
-        platform = getattr(request.state, "source_platform", "Unknown")
-        platform_metadata = f"### [COMMUNICATION MEDIUM]\n- Current Platform: {platform.upper()}\n"
-        if platform.lower() in ("discord", "slack"):
-            platform_metadata += "- Environment: Multi-user group chat. Use markdown for readability.\n"
-        elif platform.lower() == "web playground":
-            platform_metadata += "- Environment: Direct administrative console. Rich HTML/Markdown support available.\n"
+        # --- COGNITIVE MEMORY & PLATFORM INJECTION (MANAGED ONLY) ---
+        if getattr(request.state, "is_managed_agent", False):
+            effective_user_id = api_key.user_id if api_key.user_id is not None else 0
+            memory_context = await CognitiveMemoryManager.get_memory_context(db, effective_user_id, model_name)
+            
+            # Determine platform context
+            platform = getattr(request.state, "source_platform", "Unknown")
+            platform_metadata = f"### [COMMUNICATION MEDIUM]\n- Current Platform: {platform.upper()}\n"
+            if platform.lower() in ("discord", "slack"):
+                platform_metadata += "- Environment: Multi-user group chat. Use markdown for readability.\n"
+            elif platform.lower() == "web playground":
+                platform_metadata += "- Environment: Direct administrative console. Rich HTML/Markdown support available.\n"
 
-        if "messages" in body:
-            sys_msg = next((m for m in body["messages"] if m["role"] == "system"), None)
-            full_context = f"{memory_context}\n\n{platform_metadata}"
-            if sys_msg:
-                sys_msg["content"] = f"{full_context}\n\n{sys_msg['content']}"
-            else:
-                body["messages"].insert(0, {"role": "system", "content": full_context})
-            body_bytes = json.dumps(body).encode('utf-8')
+            if "messages" in body:
+                sys_msg = next((m for m in body["messages"] if m["role"] == "system"), None)
+                full_context = f"{memory_context}\n\n{platform_metadata}"
+                if sys_msg:
+                    sys_msg["content"] = f"{full_context}\n\n{sys_msg['content']}"
+                else:
+                    body["messages"].insert(0, {"role": "system", "content": full_context})
+                body_bytes = json.dumps(body).encode('utf-8')
 
-        # Trigger maintenance (Background task must not share request-scoped db session)
-        asyncio.create_task(CognitiveMemoryManager.reorganize_memories(api_key.user_id, model_name))
+            # Trigger maintenance (Background task must not share request-scoped db session)
+            asyncio.create_task(CognitiveMemoryManager.reorganize_memories(api_key.user_id, model_name))
 
     # Determine Request Type
     req_type = path.upper()
@@ -2717,7 +2951,9 @@ async def _process_proxy_logic(
         trace_exception(ex)
     
     candidate_servers = servers
-    if model_name:
+    # Virtual models like 'auto' should not be checked against physical catalogs here.
+    # They are resolved to physical model candidates in the B-IRRA loop below.
+    if model_name and model_name != "auto":
         logger.info(f"proxy_ollama: Looking for servers with model '{model_name}'")
         candidate_servers = await server_crud.get_servers_with_model(db, model_name)
 
@@ -2726,7 +2962,7 @@ async def _process_proxy_logic(
         else:
             logger.warning(f"Model '{model_name}' not found in any server's catalog.")
 
-    if not candidate_servers:
+    if not candidate_servers and model_name != "auto":
         # --- SECURITY CHECK: Distinguish between 'Not Found' and 'Not Allowed' ---
         physically_exists = False
         for s in servers:
@@ -2786,21 +3022,21 @@ async def _process_proxy_logic(
         raise HTTPException(status_code=503, detail="No models found matching your request intent.")
 
     # 2. Iterate through candidates until success
+    failed_models =[]
     for choice_str in candidates:
         choice_str = str(choice_str)
         
-        # We pass the list-containing body_bytes, but tell _reverse_proxy 
-        # exactly which model string to enforce in the final payload.
-        logger.info(f"IRRA Attempt: Rerouting to candidate '{choice_str}'...")
+        logger.info(f"Bayesian IRRA Attempt: Rerouting to candidate '{choice_str}'...")
 
         # Find healthy servers for this specific model
         candidate_servers = await server_crud.get_servers_with_model(db, choice_str)
         # Filter out servers already penalized in this request lifecycle
-        candidate_servers = [s for s in candidate_servers if not _is_server_penalized(s.id)]
+        candidate_servers =[s for s in candidate_servers if not _is_server_penalized(s.id)]
 
         if not candidate_servers:
-            logger.warning(f"IRRA: Candidate '{current_choice}' has no active healthy servers. Failing over...")
-            failed_models.append(current_choice)
+            logger.warning(f"Bayesian IRRA: Candidate '{choice_str}' has no active healthy servers. Failing over...")
+            failed_models.append(choice_str)
+            _update_bayesian_stats(choice_str, success=False)
             continue
 
         try:
@@ -2808,63 +3044,29 @@ async def _process_proxy_logic(
                 request, path, candidate_servers, body_bytes,
                 api_key_id=api_key.id, log_id=log_id,
                 request_id=req_id, 
-                model=choice_str, # This string is used by the Guard to fix the body_bytes
+                model=choice_str, 
                 sender=api_key.user.username,
                 client_wants_stream=client_wants_stream,
                 prompt_tokens=p_tokens,
                 user_id=api_key.user_id
             )
-            # If we reached here, the stream started successfully
+            # If we reached here, the stream started successfully.
+            # Note: For non-streaming requests, reward is finalized here.
+            # For streaming, the tracker below will refine the reward based on TPS.
+            if not client_wants_stream:
+                _update_bayesian_stats(choice_str, success=True, reward=1.0)
             return response
 
         except HTTPException as e:
-            # If 503/404/Timeout occurred, _reverse_proxy already penalized the node.
-            # We log the model failure and continue the loop to the next candidate.
-            logger.error(f"IRRA: Candidate '{current_choice}' failed at the gateway. Error: {e.detail}")
-            failed_models.append(current_choice)
+            logger.error(f"Bayesian IRRA: Candidate '{choice_str}' failed at the gateway. Error: {e.detail}")
+            failed_models.append(choice_str)
+            _update_bayesian_stats(choice_str, success=False)
             continue
             
     raise HTTPException(
         status_code=503, 
-        detail=f"IRRA Cluster Exhaustion: All candidates {candidates} are currently unreachable or restricted."
+        detail=f"IRRA Cluster Exhaustion: All candidates {candidates} are currently unreachable or restricted. Failed models: {failed_models}"
     )
-            
-    raise HTTPException(status_code=503, detail="Cluster Exhausted: All candidate models and servers failed.")
-
-    # --- INJECT RAG SOURCES INTO FINAL RESPONSE ---
-    if not client_wants_stream and hasattr(response, 'body') and request.state.sources:
-        try:
-            data = json.loads(response.body.decode())
-            data["sources"] = request.state.sources
-            # Return updated JSON
-            return JSONResponse(content=data, status_code=response.status_code)
-        except:
-            pass
-
-    # Update log with server_id if we have a log entry
-    if log_id and chosen_server:
-        try:
-            from app.database.session import AsyncSessionLocal
-            async with AsyncSessionLocal() as async_db:
-                from sqlalchemy import update
-                from app.database.models import UsageLog
-                await async_db.execute(
-                    update(UsageLog).where(UsageLog.id == log_id).values(server_id=chosen_server.id)
-                )
-                await async_db.commit()
-        except Exception as e:
-            logger.debug(f"Failed to update server_id for log {log_id}: {e}")
-
-    # For non-streaming, non-tracked endpoints, log without tokens
-    if not is_token_trackable_endpoint:
-        try:
-            asyncio.create_task(_async_log_usage(
-                api_key.id, f"/api/{path}", response.status_code, chosen_server.id, model_name
-            ))
-        except Exception as e:
-            logger.debug(f"Failed to queue usage log: {e}")
-
-    return response
 
 
 @router.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"])
@@ -2881,6 +3083,7 @@ async def proxy_ollama(
     # STABILITY FIX: Initialize recursion tracking attributes to prevent AttributeError in workflows
     request.state.enforce_strict_context = False
     request.state.processing_depth = 0
+    request.state.is_managed_agent = False # Default: Raw passthrough
     if not hasattr(request.state, "source_platform"):
         request.state.source_platform = "API Client"
     

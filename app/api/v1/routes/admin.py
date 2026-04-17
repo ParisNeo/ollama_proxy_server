@@ -1100,6 +1100,7 @@ async def admin_models_manager_page(
             filtered_metadata.append(meta)
 
     context["metadata_list"] = filtered_metadata
+    context["servers"] = [s for s in servers if s.is_active] # Only show active servers as filters
     context["csrf_token"] = await get_csrf_token(request)
     return templates.TemplateResponse("admin/models_manager.html", context)
 
@@ -1218,17 +1219,21 @@ async def admin_ai_configure_models(
     active_background_tasks.add(build_id)
     
     async def run_ai_config_task():
+        from app.database.session import AsyncSessionLocal
         try:
             event_manager.emit(ProxyEvent("received", build_id, "Cluster Architect", "Local", admin_user.username, error_message=f"Accessing Scorecard: {url}..."))
             # 1. Scrape the external data
             scraped = await kit.scrape_url(url)
             scorecard_text = scraped.get('content', "")
             if not scorecard_text:
-                return JSONResponse({"error": "Could not extract content from the provided URL."}, status_code=400)
+                logger.error("AI Config: Scraper returned no content.")
+                return
 
-            # 2. Get the list of models we actually have
-            all_meta = await model_metadata_crud.get_all_metadata(db)
-            hub_model_names = [m.model_name for m in all_meta]
+            # 2. Open fresh session for background work
+            async with AsyncSessionLocal() as bg_db:
+                # Get the list of models we actually have
+                all_meta = await model_metadata_crud.get_all_metadata(bg_db)
+                hub_model_names = [m.model_name for m in all_meta]
             
             # 3. Pre-filter scorecard to only relevant rows to save tokens and focus the AI
             event_manager.emit(ProxyEvent("active", build_id, "Cluster Architect", "Local", admin_user.username, error_message=f"Filtering scorecard for {len(hub_model_names)} local models..."))
@@ -1276,27 +1281,31 @@ async def admin_ai_configure_models(
                     "STRICT: Ignore any other models in the scorecard. Return JSON with 'updates' list."
                 )
 
-                # AI Call for this specific batch
-                result = await MasterArchitect.execute_build(db, request, "cluster_config", batch_prompt, "", admin_user.username)
+                # 3. AI Call for this specific batch
+                # Re-fetch bg_db inside loop if needed, but since we are in one task, we use the context manager session
+                async with AsyncSessionLocal() as sub_db:
+                    result = await MasterArchitect.execute_build(sub_db, request, "cluster_config", batch_prompt, "", admin_user.username)
 
-                # Apply updates for this batch
-                if "updates" in result and isinstance(result["updates"], list):
-                    for update_data in result["updates"]:
-                        m_name = update_data.get("model_name")
-                        if m_name in batch: # Ensure model belongs to current batch
-                            fields = {
-                                "max_context": int(update_data.get("max_context", 4096)),
-                                "supports_images": bool(update_data.get("supports_images", False)),
-                                "is_reasoning_model": bool(update_data.get("is_reasoning", False)),
-                                "is_code_model": bool(update_data.get("is_code", False)),
-                                "description": str(update_data.get("description", "Auto-configured profile."))[:1024],
-                                "priority": int(update_data.get("priority", 10))
-                            }
-                            await model_metadata_crud.update_metadata(db, model_name=m_name, **fields)
-                            update_count += 1
-                    
-                    # Commit batch transaction to release connections and persist progress
-                    await db.commit()
+                    # Apply updates for this batch
+                    if "updates" in result and isinstance(result["updates"], list):
+                        for update_data in result["updates"]:
+                            m_name = update_data.get("model_name")
+                            if m_name in batch: # Ensure model belongs to current batch
+                                fields = {
+                                    "max_context": int(update_data.get("max_context", 4096)),
+                                    "supports_images": bool(update_data.get("supports_images", False)),
+                                    "is_reasoning_model": bool(update_data.get("is_reasoning", False)),
+                                    "is_code_model": bool(update_data.get("is_code", False)),
+                                    "is_embedding_model": bool(update_data.get("is_embedding", False)),
+                                    "model_scale": int(update_data.get("model_scale", 1)),
+                                    "description": str(update_data.get("description", "Auto-configured profile."))[:1024],
+                                    "priority": int(update_data.get("priority", 10))
+                                }
+                                await model_metadata_crud.update_metadata(sub_db, model_name=m_name, **fields)
+                                update_count += 1
+                        
+                        # Commit batch transaction
+                        await sub_db.commit()
 
             event_manager.emit(ProxyEvent("completed", build_id, "Cluster Architect", "Local", admin_user.username, error_message=f"Successfully configured {update_count} models.", token_count=100))
             if build_id in active_background_tasks: active_background_tasks.remove(build_id)
@@ -1353,6 +1362,8 @@ async def admin_update_model_metadata(
                 "is_reasoning_model": f"is_reasoning_model_{meta_id}" in form_data,
                 "max_context": int(form_data.get(f"max_context_{meta_id}", 4096)),
                 "priority": int(form_data.get(f"priority_{meta_id}", 10)),
+                "model_scale": int(form_data.get(f"model_scale_{meta_id}", 1)),
+                "model_size": float(form_data.get(f"model_size_{meta_id}", -1.0)),
             }
             await model_metadata_crud.update_metadata(db, model_name=metadata.model_name, **update_data)
 
@@ -1710,6 +1721,14 @@ async def admin_settings_post(
         "enable_ollama_api": form_data.get("enable_ollama_api") == "true",
         "enable_openai_api": form_data.get("enable_openai_api") == "true",
         "openai_port": safe_int("openai_port", current_settings.openai_port),
+        "enable_sb_mra": form_data.get("enable_sb_mra") == "true",
+        "routing_weight_priority": float(form_data.get("routing_weight_priority", 1.0)),
+        "routing_weight_reliability": float(form_data.get("routing_weight_reliability", 2.0)),
+        "routing_weight_ecology": float(form_data.get("routing_weight_ecology", 1.5)),
+        "routing_weight_semantic": float(form_data.get("routing_weight_semantic", 3.0)),
+        "routing_vectorizer_name": form_data.get("routing_vectorizer_name", "tf_idf"),
+        "routing_vectorizer_model": form_data.get("routing_vectorizer_model") or None,
+        "routing_vectorizer_base_url": form_data.get("routing_vectorizer_base_url") or None,
     })
     
     if new_redis_password:

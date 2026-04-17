@@ -23,15 +23,23 @@ class LLMChatNode(BaseNode):
             engine.db, target_model, msgs, engine.depth + 1, engine.request, engine.request_id, engine.sender
         )
         
-        payload = {"model": real_model, "messages": final_msgs, "stream": False, "options": settings}
-        if tools: payload["tools"] = [t for t in tools if t]
-
-        servers = await server_crud.get_servers_with_model(engine.db, real_model)
-        if not servers: return f"[Error: Model {real_model} offline]"
-
-        resp, _ = await engine.reverse_proxy_fn(engine.request, "chat", servers, json.dumps(payload).encode(), is_subrequest=True, request_id=engine.request_id, model=real_model, sender=engine.sender)
+        candidates = real_model if isinstance(real_model, list) else [real_model]
         
-        if hasattr(resp, 'body'):
-            data = json.loads(resp.body.decode())
-            return data.get("message", {}).get("content", "")
-        return "[Error: Empty response]"
+        for rm in candidates:
+            rm_str = str(rm)
+            payload = {"model": rm_str, "messages": final_msgs, "stream": False, "options": settings}
+            if tools: payload["tools"] = [t for t in tools if t]
+
+            servers = await server_crud.get_servers_with_model(engine.db, rm_str)
+            if not servers: continue
+
+            try:
+                resp, _ = await engine.reverse_proxy_fn(engine.request, "chat", servers, json.dumps(payload).encode(), is_subrequest=True, request_id=engine.request_id, model=rm_str, sender=engine.sender)
+                if hasattr(resp, 'body'):
+                    data = json.loads(resp.body.decode())
+                    if data.get("message", {}).get("content"):
+                        return data["message"]["content"]
+            except Exception:
+                continue
+                
+        return "[Error: All candidate models failed or returned empty responses]"
