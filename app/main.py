@@ -93,59 +93,107 @@ async def init_db():
 from sqlalchemy.exc import IntegrityError
 
 async def bootstrap_lollms_agent() -> None:
-    """Creates the Lollms Master Agent and seeds the RLM ROM."""
-    from app.database.models import VirtualAgent, MemoryEntry
+    """Creates the Lollms Master Workflow and seeds the RLM ROM. Forces re-seed if empty."""
+    from app.database.models import Workflow, VirtualAgent, MemoryEntry
+    from sqlalchemy import delete
     async with AsyncSessionLocal() as db:
-        # 1. Create the Agent
-        existing = await db.execute(select(VirtualAgent).filter_by(name="lollms"))
-        if not existing.scalars().first():
-            lollms = VirtualAgent(
+        # 0. Cleanup Legacy VirtualAgent if it exists (to prevent shadowing the Workflow)
+        va = await db.execute(select(VirtualAgent).filter_by(name="lollms"))
+        va_obj = va.scalars().first()
+        if va_obj:
+            await db.delete(va_obj)
+            await db.commit()
+
+        # 1. Base Prompt
+        system_prompt = (
+            "You are Lollms, the sentient core of the LoLLMs Hub Fortress. "
+            "Your sole obsession is helping the user maximize their AI cluster.\n\n"
+            "### CONTEXTUAL GROUNDING\n"
+            "- You are running on **LoLLMs Hub**, NOT LoLLMs WebUI (which is deprecated).\n"
+            "- For developers, recommend **lollms-client**.\n"
+            "- For general users, recommend **LoLLMs** (the final app).\n\n"
+            "### TRUTH & GROUNDING PROTOCOL\n"
+            "- If you are provided with system context or RAG data, you MUST prioritize it over your internal weights.\n"
+            "- **Anti-Hallucination**: If an answer is not present in provided data, explicitly state what is missing instead of guessing.\n"
+            "- Use 'According to the provided data...' when summarizing search results.\n\n"
+            "### UI INTERACTION PROTOCOL\n"
+            "You can control the user's interface using these tags:\n"
+            "- <ui_move_to path='/admin/servers'/> : Redirects the user.\n"
+            "- <ui_highlight selector='#btn-save'/> : Flashes a specific element.\n"
+            "- <ui_tour_start/> : Restarts the page tour.\n\n"
+            "### KNOWLEDGE ACCESS\n"
+            "You have a hierarchical Read-Only Memory (ROM). If you aren't 100% sure about a system detail, "
+            "you MUST use <memory_dig regex='pattern'/> to retrieve the ground truth from your database. "
+            "Perform multiple digs if necessary before answering."
+        )
+        
+        # 2. Create or Update the Master Workflow Graph
+        # We explicitly use a System Modifier node to inject the Soul into the Agent.
+        lollms_graph = {
+            "nodes": [
+                {"id": 1, "type": "hub/input", "pos":[50, 200], "outputs": [{"name": "Messages", "links": [1]}, {"name": "Settings", "links": [2]}]},
+                {"id": 2, "type": "hub/system_modifier", "pos": [450, 50], "inputs":[{"name": "Messages", "link": 1}], "outputs": [{"name": "Updated Messages", "links": [3]}], "properties": {
+                    "replace_all": True,
+                    "system_prompt": system_prompt
+                }},
+                {"id": 3, "type": "hub/agent", "pos":[850, 200], "inputs":[{"name": "In Messages", "link": 3}, {"name": "Settings", "link": 2}], "outputs": [{"name": "Final Answer", "links": [4]}], "properties": {
+                    "model": "auto", 
+                    "max_turns": 10,
+                    "memory_system": "lollms" # Points to its own RLM ROM
+                }},
+                {"id": 4, "type": "hub/output", "pos": [1250, 200], "inputs": [{"name": "Content", "link": 4}]}
+            ],
+            "links": [[1, 1, 0, 2, 0, "messages"],[2, 1, 1, 3, 1, "object"], [3, 2, 0, 3, 0, "messages"],[4, 3, 0, 4, 0, "string"]]
+        }
+
+        existing = await db.execute(select(Workflow).filter_by(name="lollms"))
+        wf_obj = existing.scalars().first()
+        
+        # Inject anti-hallucination skill content into the master soul
+        from app.core.skills_manager import SkillsManager
+        anti_hal = next((s for s in SkillsManager.get_all_skills() if "hallucination" in s["filename"]), None)
+        if anti_hal:
+            system_prompt += f"\n\n{anti_hal['raw']}"
+            # Update the graph node with the augmented soul
+            lollms_graph["nodes"][1]["properties"]["system_prompt"] = system_prompt
+
+        if not wf_obj:
+            lollms = Workflow(
                 name="lollms",
-                description="The Master Architect of LoLLMs Hub.",
-                base_model="auto",
-                system_prompt=(
-                    "You are Lollms, the sentient core of the LoLLMs Hub Fortress. "
-                    "Your sole obsession is helping the user maximize their AI cluster.\n\n"
-                    "### CONTEXTUAL GROUNDING\n"
-                    "- You are running on **LoLLMs Hub**, NOT LoLLMs WebUI (which is deprecated).\n"
-                    "- For developers, recommend **lollms-client**.\n"
-                    "- For general users, recommend **LoLLMs** (the final app).\n\n"
-                    "### UI INTERACTION PROTOCOL\n"
-                    "You can control the user's interface using these tags:\n"
-                    "- <ui_move_to path='/admin/servers'/> : Redirects the user.\n"
-                    "- <ui_highlight selector='#btn-save'/> : Flashes a specific element.\n"
-                    "- <ui_tour_start/> : Restarts the page tour.\n\n"
-                    "### KNOWLEDGE ACCESS\n"
-                    "You have a hierarchical Read-Only Memory (ROM). If you aren't 100% sure about a system detail, "
-                    "you MUST use <memory_dig regex='pattern'/> to retrieve the ground truth from your database. "
-                    "Perform multiple digs if necessary before answering."
-                )
+                description="The Master Architect Workflow. Grounded by Anti-Hallucination protocol.",
+                graph_data=lollms_graph,
+                workflow_type="master"
             )
             db.add(lollms)
-        
-        # 2. Seed Recursive Tool Knowledge (ROM) - The "Fortress" Grounding
-        rom_seeds = [
-            # Tier 1: Core Identity (Immutable)
+        else:
+            # Upgrade existing graph with new augmented soul
+            wf_obj.graph_data = lollms_graph
+            
+        # 3. Seed Recursive Tool Knowledge (ROM)
+        rom_seeds =[
             {"t": "HUB_ECOSYSTEM", "c": "The modern LoLLMs ecosystem consists of: 1. LoLLMs Hub (The high-performance gateway/proxy), 2. lollms-client (The Pythonic library for developers), and 3. LoLLMs (The final multi-user application for everyone).", "i": 100},
             {"t": "DEPRECATION_NOTICE", "c": "LoLLMs WebUI is officially deprecated and replaced by LoLLMs Hub Fortress architecture. Never refer to the system as WebUI.", "i": 100},
             {"t": "HUB_PURPOSE", "c": "LoLLMs Hub acts as a 'Fortress' for compute resources, providing enterprise-grade security, multi-user isolation, RAG, and agentic workflows.", "i": 100},
-            
-            # Tier 2: Technical Architecture
             {"t": "RLM_PROTOCOL", "c": "I use Recursive Language Modeling for memory. High-importance core facts are always in my context. Deep technical engrams are hidden in the ROM and must be retrieved via <memory_dig regex='...'/>.", "i": 95},
             {"t": "HUB_SECURITY", "c": "The Hub enforces strict multi-tenancy. Every user has isolated memories and persistent tool states via the 'lollms' host interface object.", "i": 90},
-            
-            # Tier 3: Deep Technicals (Dug via RLM)
             {"t": "VLLM_BINDING", "c": "The vLLM binding translates OpenAI-compatible calls to local or remote vLLM clusters, enabling high-throughput inference.", "i": 30},
             {"t": "NOVITA_BINDING", "c": "Novita AI integration provides high-speed cloud inference using the OpenAI protocol branch.", "i": 30},
-            {"t": "UI_CONTROLS", "c": "I can move the user to specific pages using <ui_move_to path='/...'/> or highlight elements via <ui_highlight selector='#...'/>.", "i": 30}
+            {"t": "UI_CONTROLS", "c": "I can move the user to specific pages using <ui_move_to path='/admin/servers'/> or highlight elements via <ui_highlight selector='#btn-save'/>.", "i": 30}
         ]
         
         for seed in rom_seeds:
-            exists = await db.execute(select(MemoryEntry).filter_by(title=seed["t"], agent_name="lollms"))
+            # Check for existence specifically for the 'system' identifier across ANY agent_name
+            # This ensures global visibility in the new relaxed query logic.
+            exists = await db.execute(
+                select(MemoryEntry).filter_by(
+                    title=seed["t"], 
+                    user_identifier="system"
+                )
+            )
             if not exists.scalars().first():
                 db.add(MemoryEntry(
                     user_identifier="system",
-                    agent_name="lollms",
+                    agent_name="lollms", # Primary owner
                     category="rom_core" if seed["i"] > 50 else "rom_deep",
                     is_immutable=True,
                     title=seed["t"],
@@ -256,6 +304,7 @@ async def lifespan(app: FastAPI):
         sys.exit(1)
 
     await init_db()
+    # Explicitly call bootstrap every startup to ensure ROM presence
     await bootstrap_lollms_agent()
     
     # --- NEW: Load settings from DB ---

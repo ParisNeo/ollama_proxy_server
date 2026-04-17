@@ -92,7 +92,9 @@
                             {% endif %}
                         </td>
                         <td class="px-6 py-4 whitespace-nowrap text-sm">
-                             {% if server.last_error %}
+                            {% if not server.is_active %}
+                                <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-gray-500/20 text-gray-400 border border-gray-500/30">Disabled</span>
+                            {% elif server.last_error %}
                                 <button
                                     class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-yellow-100 text-yellow-800 cursor-pointer hover:bg-yellow-200"
                                     data-modal-title="Server Error Details"
@@ -111,7 +113,14 @@
                             {% endif %}
                         </td>
                         <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                            <div class="flex justify-end gap-4">
+                            <div class="flex justify-end gap-3 items-center">
+                                <form action="{{ url_for('admin_toggle_server_active', server_id=server.id) }}" method="post" class="inline">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                    <button type="submit" class="{% if server.is_active %}text-orange-400 hover:text-orange-500{% else %}text-emerald-400 hover:text-emerald-500{% endif %}" title="Toggle active status">
+                                        {% if server.is_active %}Disable{% else %}Enable{% endif %}
+                                    </button>
+                                </form>
+                                <span class="text-gray-600">|</span>
                                 <a href="{{ url_for('admin_edit_server_form', server_id=server.id) }}" class="text-yellow-400 hover:text-yellow-600">Edit</a>
                                 <a href="{{ url_for('admin_manage_server_models', server_id=server.id) }}" class="text-[var(--color-primary-500)] hover:text-[var(--color-primary-700)]">Manage Models</a>
                                 <form action="{{ url_for('admin_refresh_models', server_id=server.id) }}" method="post" class="inline">

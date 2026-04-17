@@ -17,6 +17,7 @@ class ServerUpdate(BaseModel):
     server_type: Optional[Literal["ollama", "vllm", "cloud", "novita"]] = None
     api_key: Optional[str] = Field(None, description="Provide a new key to update, or an empty string to remove.")
     allowed_models: Optional[List[str]] = None
+    is_active: Optional[bool] = None
 
 
 class Server(ServerBase):

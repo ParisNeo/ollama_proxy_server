@@ -54,15 +54,19 @@ class BotManager:
             except asyncio.CancelledError:
                 pass
 
-    async def _process_bot_request(self, user_text, username, platform_name, target_workflow):
+    async def _process_bot_request(self, user_text, username, platform_name, target_workflow, attachments=None):
         """Shared logic to route bot messages through the workflow engine."""
         import json, secrets, re, copy
+        import base64
         from app.api.v1.routes.proxy import _resolve_target, _reverse_proxy
         from app.core.memory_manager import CognitiveMemoryManager
         from app.crud import user_crud
+        from app.core import knowledge_importer as kit
 
         async with AsyncSessionLocal() as db:
             req_id = f"bot_{platform_name}_{secrets.token_hex(4)}"
+            # Set platform context for the agent
+            self.app.state.dummy_request.state.source_platform = platform_name
             
             # --- CROSS-PLATFORM IDENTITY RESOLUTION ---
             # Try to find a Hub user that matches the bot handle
@@ -77,9 +81,44 @@ class BotManager:
             
             # 1. Update Short-Term Rolling Memory
             if user_identifier not in self.chat_histories:
-                self.chat_histories[user_identifier] = []
+                self.chat_histories[user_identifier] =[]
                 
-            self.chat_histories[user_identifier].append({"role": "user", "content": user_text})
+            # Format message content (handle potential multimodal data)
+            if attachments:
+                content =[]
+                if user_text:
+                    content.append({"type": "text", "text": user_text})
+                
+                doc_files =[]
+                class MockFile:
+                    def __init__(self, name, data, ct):
+                        self.filename = name
+                        self._data = data
+                        self.content_type = ct
+                    async def read(self): return self._data
+
+                for att in attachments:
+                    if att['type'] == 'image':
+                        b64 = base64.b64encode(att['data']).decode('utf-8')
+                        mime = att.get('mime', 'image/jpeg')
+                        content.append({"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}})
+                    elif att['type'] == 'doc':
+                        doc_files.append(MockFile(att['filename'], att['data'], att.get('mime', 'application/octet-stream')))
+                
+                if doc_files:
+                    try:
+                        extracted = await kit.extract_local_file_content(doc_files)
+                        if extracted:
+                            content.insert(0, {"type": "text", "text": f"Attached Documents:\n{extracted}\n\n"})
+                    except Exception as e:
+                        logger.error(f"Doc extraction failed: {e}")
+                
+                if not content:
+                    content = user_text
+            else:
+                content = user_text
+
+            self.chat_histories[user_identifier].append({"role": "user", "content": content})
             if len(self.chat_histories[user_identifier]) > 10:
                 self.chat_histories[user_identifier] = self.chat_histories[user_identifier][-10:]
             
@@ -208,12 +247,21 @@ class BotManager:
         async def on_message(message):
             if message.author == client.user: return
             
+            attachments =[]
+            for att in message.attachments:
+                try:
+                    data = await att.read()
+                    mime = att.content_type or 'application/octet-stream'
+                    if mime.startswith('image/'):
+                        attachments.append({"type": "image", "data": data, "mime": mime})
+                    else:
+                        attachments.append({"type": "doc", "data": data, "filename": att.filename, "mime": mime})
+                except Exception as e:
+                    logger.error(f"Failed to read discord attachment: {e}")
+
             # --- PERMISSION SAFETY: TYPING INDICATOR ---
-            # We manually enter/exit the typing context to handle Forbidden errors gracefully
             typing_active = False
             try:
-                # Use a dummy context or check permissions if possible
-                # But a try/except on __aenter__ is the most reliable "Self-Healing" path
                 typing_ctx = message.channel.typing()
                 await typing_ctx.__aenter__()
                 typing_active = True
@@ -223,14 +271,33 @@ class BotManager:
                 logger.error(f"Unexpected error in typing indicator: {e}")
 
             try:
-                response = await self._process_bot_request(message.content, message.author.name, "discord", config.target_workflow)
+                response = await self._process_bot_request(message.content, message.author.name, "discord", config.target_workflow, attachments)
                 
+                import re, os
+                artifacts = re.findall(r'<artifact\s+.*?path=["\'](.*?)["\'].*?>', response)
+                clean_response = re.sub(r'<artifact\s+.*?/>', '', response).strip()
+                clean_response = re.sub(r'<artifact\s+.*?>.*?</artifact>', '', clean_response).strip()
+
+                discord_files =[]
+                for path in artifacts:
+                    local_path = path
+                    if path.startswith('/static/'):
+                        local_path = os.path.join("app", path.lstrip('/'))
+                    if os.path.exists(local_path):
+                        discord_files.append(discord.File(local_path))
+
+                if not clean_response and discord_files:
+                    clean_response = "Here are your files:"
+
                 # CHUNKING LOGIC: Prevent Discord API 'Content too long' errors
-                message_parts = split_message(response)
-                for part in message_parts:
-                    if part:
+                message_parts = split_message(clean_response)
+                for i, part in enumerate(message_parts):
+                    if part or (i == len(message_parts)-1 and discord_files):
                         try:
-                            await message.reply(part)
+                            if i == len(message_parts) - 1 and discord_files:
+                                await message.reply(part, files=discord_files)
+                            else:
+                                await message.reply(part)
                         except discord.errors.Forbidden:
                             logger.error(f"CRITICAL: Failed to reply to {message.author}. Check bot permissions in this channel.")
                             break 
@@ -269,8 +336,20 @@ class BotManager:
                     await client.send_socket_mode_response(SocketModeResponse(envelope_id=req.envelope_id))
                     
                     # Process
-                    response = await self._process_bot_request(event["text"], event["user"], "slack", config.target_workflow)
-                    await web_client.chat_postMessage(channel=event["channel"], text=response, thread_ts=event.get("ts"))
+                    response = await self._process_bot_request(event.get("text", ""), event["user"], "slack", config.target_workflow, None)
+                    
+                    import re, os
+                    artifacts = re.findall(r'<artifact\s+.*?path=["\'](.*?)["\'].*?>', response)
+                    clean_response = re.sub(r'<artifact\s+.*?/>', '', response).strip()
+                    clean_response = re.sub(r'<artifact\s+.*?>.*?</artifact>', '', clean_response).strip()
+                    
+                    await web_client.chat_postMessage(channel=event["channel"], text=clean_response or "Files attached:", thread_ts=event.get("ts"))
+                    
+                    for path in artifacts:
+                        local_path = path
+                        if path.startswith('/static/'): local_path = os.path.join("app", path.lstrip('/'))
+                        if os.path.exists(local_path):
+                            await web_client.files_upload_v2(channel=event["channel"], file=local_path, thread_ts=event.get("ts"))
 
         sm_client.socket_mode_request_listeners.append(process)
         await sm_client.connect()
@@ -285,48 +364,55 @@ class BotManager:
         from fastapi import Request
 
         async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-            if not update.message or not update.message.text: return
+            if not update.message: return
             
-            user_text = update.message.text
+            user_text = update.message.caption or update.message.text or ""
             chat_id = update.message.chat_id
             username = update.message.from_user.username or "tg_user"
+
+            attachments =[]
+            if update.message.photo:
+                try:
+                    photo_file = await update.message.photo[-1].get_file()
+                    data = await photo_file.download_as_bytearray()
+                    attachments.append({"type": "image", "data": data, "mime": "image/jpeg"})
+                except Exception as e: logger.error(f"TG Photo error: {e}")
+            if update.message.document:
+                try:
+                    doc_file = await update.message.document.get_file()
+                    data = await doc_file.download_as_bytearray()
+                    attachments.append({"type": "doc", "data": data, "filename": update.message.document.file_name, "mime": update.message.document.mime_type or 'application/octet-stream'})
+                except Exception as e: logger.error(f"TG Doc error: {e}")
+
+            if not user_text and not attachments: return
             
             # Send placeholder
             placeholder = await update.message.reply_text("✨ Thinking...")
 
             try:
-                async with AsyncSessionLocal() as db:
-                    # 1. Resolve target (recursive agent/workflow logic)
-                    req_id = f"bot_tg_{secrets.token_hex(4)}"
-                    messages = [{"role": "user", "content": user_text}]
-                    
-                    # Resolve logic (passing dummy request state)
-                    resolution = await _resolve_target(db, config.target_workflow, messages, sender=f"Bot:{config.name}")
-                    real_model, final_msgs = resolution
-                    
-                    from app.crud import server_crud
-                    servers = await server_crud.get_servers_with_model(db, real_model)
-                    
-                    if not servers:
-                        await placeholder.edit_text("❌ Error: Workflow compute nodes are offline.")
-                        return
+                response = await self._process_bot_request(user_text, username, "telegram", config.target_workflow, attachments)
+                
+                import re, os
+                artifacts = re.findall(r'<artifact\s+.*?path=["\'](.*?)["\'].*?>', response)
+                clean_response = re.sub(r'<artifact\s+.*?/>', '', response).strip()
+                clean_response = re.sub(r'<artifact\s+.*?>.*?</artifact>', '', clean_response).strip()
 
-                    # Create a synthetic request object to satisfy the proxy logic
-                    from starlette.requests import Request as StarletteRequest
-                    # (Note: In a bot context, we bypass some HTTP specific middlewares)
-                    
-                    # Call Backend (Non-streaming for bots usually works best)
-                    resp, _ = await _reverse_proxy(
-                        self.app.state.dummy_request, "chat", servers, 
-                        json.dumps({"model": real_model, "messages": final_msgs, "stream": False}).encode(),
-                        is_subrequest=True, request_id=req_id, model=config.target_workflow, sender=username,
-                        user_id=hub_user.id if hub_user else None
-                    )
-                    
-                    if hasattr(resp, 'body'):
-                        data = json.loads(resp.body.decode())
-                        answer = data.get("message", {}).get("content", "Empty response.")
-                        await placeholder.edit_text(answer, parse_mode='Markdown')
+                if not clean_response and artifacts: clean_response = "Here are your files:"
+
+                if clean_response:
+                    await placeholder.edit_text(clean_response, parse_mode='Markdown')
+                else:
+                    await placeholder.delete()
+                
+                for path in artifacts:
+                    local_path = path
+                    if path.startswith('/static/'): local_path = os.path.join("app", path.lstrip('/'))
+                    if os.path.exists(local_path):
+                        with open(local_path, 'rb') as f:
+                            if local_path.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.webp')):
+                                await context.bot.send_photo(chat_id=chat_id, photo=f)
+                            else:
+                                await context.bot.send_document(chat_id=chat_id, document=f)
             except Exception as e:
                 logger.error(f"Bot execution error: {e}")
                 await placeholder.edit_text(f"⚠️ Internal Error: {str(e)[:100]}...")

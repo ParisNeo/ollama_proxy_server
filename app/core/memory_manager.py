@@ -19,16 +19,23 @@ class CognitiveMemoryManager:
         )
         rom_front = res_rom.scalars().all()
 
-        # 2. Fetch Living Memory (Standard behavior)
+        # 2. Fetch Living Memory (Standard behavior + Shared Knowledge)
         from app.database.models import MemorySystem
         # Fetch system config
         res_sys = await db.execute(select(MemorySystem).filter_by(name=agent_name))
         sys_cfg = res_sys.scalars().first()
         use_aff = sys_cfg.use_affective if sys_cfg else False
 
+        # SCOPE LOGIC: 
+        # If agent is 'lollms', it always sees 'shared_knowledge' + current user.
+        # Otherwise, standard agents only see their assigned user memory.
+        search_ids = [user_identifier]
+        if agent_name == "lollms" or user_identifier == "shared_knowledge":
+            search_ids.append("shared_knowledge")
+
         res = await db.execute(
             select(MemoryEntry).filter(
-                MemoryEntry.user_identifier == user_identifier,
+                MemoryEntry.user_identifier.in_(search_ids),
                 MemoryEntry.agent_name == agent_name
             ).order_by(MemoryEntry.importance.desc())
         )
@@ -40,6 +47,11 @@ class CognitiveMemoryManager:
 
         context = "###[AGENT INTERNAL MEMORY ARCHITECTURE]\n"
         context += f"You are interacting with user: {user_identifier}\n"
+        
+        if rom_front:
+            context += "#### [TIER 0: CORE Hub ROM]\n"
+            for r in rom_front:
+                context += f"- {r.title}: {r.content}\n"
         
         if use_aff:
             # Affective Memory & Asimov's Laws
@@ -72,9 +84,12 @@ class CognitiveMemoryManager:
             for cat, titles in cats.items():
                 context += f"- {cat}: ({', '.join(titles)})\n"
         
-        context += "\n#### [MEMORY CONTROL PROTOCOL]\n"
-        context += "To update your internal state, append memory tags at the END of your response (these are hidden from the user):\n"
-        context += "- <memory operation='add' category='user_info' title='name' importance='90'>User name is X.</memory>\n"
+        context += "\n#### [MEMORY CONTROL PROTOCOL - MANDATORY]\n"
+        context += "You possess a recursive memory system. You can save facts for this specific user or for the GLOBAL system.\n"
+        context += "STRICT RULES:\n"
+        context += "1. For user-specific facts (name, age, preferences), use: <memory operation='add' scope='local' title='...' importance='...'>...</memory>\n"
+        context += "2. For system-wide facts (server updates, global instructions, Hub logic), use: <memory operation='add' scope='global' title='...' importance='...'>...</memory>\n"
+        context += "3. Tags must be at the VERY END of your message.\n"
         context += "- <memory operation='alter' category='...' title='...' importance='...'>...</memory>\n"
         context += "- <memory operation='remove' category='...' title='...' importance='0'></memory>\n"
         context += "- <memory operation='regrade' category='...' title='...' importance='100'></memory> (to reinforce used memory)\n"
@@ -98,21 +113,44 @@ class CognitiveMemoryManager:
                 db.add(MemoryEntry(user_identifier=user_identifier, agent_name=agent_name, category='affective', title='relationship', content=new_rel, importance=100))
 
         # --- STANDARD MEMORY TAGS ---
-        pattern = r'<memory\s+operation=["\']([^"\']+)["\'](?:\s+category=["\']([^"\']*)["\'])?\s+title=["\']([^"\']+)["\']\s+importance=["\'](\d+)["\']>([\s\S]*?)<\/memory>'
+        # ULTRA-ROBUST PARSER: 
+        # 1. Handles optional spaces: <  memory ... >
+        # 2. Handles varied quotes: operation="add" or operation='add' or operation=add
+        # 3. Handles markdown wrapping: ```xml <memory>...```
+        pattern = r'<\s*memory\b([^>]*)>([\s\S]*?)<\s*/\s*memory\s*>'
         
         matches = list(re.finditer(pattern, text))
         for m in matches:
             try:
-                op = m.group(1)
-                cat = m.group(2) or "general"
-                title = m.group(3)
-                imp = int(m.group(4))
-                content = m.group(5).strip()
+                attr_str = m.group(1)
+                content = m.group(2).strip()
+                
+                # Extract attributes via helper regex allowing optional quotes
+                def get_attr(name, default=None):
+                    # Pattern matches key="val", key='val', or key=val
+                    m_attr = re.search(rf'{name}\s*=\s*(?:"([^"]*)"|\'([^\']*)\'|([^\s>]+))', attr_str, re.I)
+                    if m_attr:
+                        return m_attr.group(1) or m_attr.group(2) or m_attr.group(3)
+                    return default
+
+                op = get_attr('operation')
+                cat = get_attr('category', 'general')
+                title = get_attr('title')
+                scope = get_attr('scope', 'local') # Default to user-specific
+                imp_str = get_attr('importance', '50')
+                imp = int(imp_str) if imp_str.isdigit() else 50
+                
+                if not op or not title:
+                    logger.warning(f"Malformed memory tag skipped: {m.group(0)}")
+                    continue
+
+                # Determine effective target user ID based on scope
+                target_uid = "shared_knowledge" if scope == "global" else user_identifier
                 
                 if op == "add":
-                    existing = await db.execute(select(MemoryEntry).filter_by(user_identifier=user_identifier, agent_name=agent_name, title=title))
+                    existing = await db.execute(select(MemoryEntry).filter_by(user_identifier=target_uid, agent_name=agent_name, title=title))
                     if not existing.scalars().first():
-                        db.add(MemoryEntry(user_identifier=user_identifier, agent_name=agent_name, category=cat, title=title, importance=imp, content=content))
+                        db.add(MemoryEntry(user_identifier=target_uid, agent_name=agent_name, category=cat, title=title, importance=imp, content=content))
                 elif op == "alter":
                     await db.execute(update(MemoryEntry).filter_by(user_identifier=user_identifier, agent_name=agent_name, title=title).values(content=content, importance=imp, category=cat, last_accessed=datetime.datetime.utcnow()))
                 elif op == "regrade":

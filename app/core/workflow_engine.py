@@ -99,6 +99,7 @@ class WorkflowEngine:
                 return await self.resolve_target_fn(self.db, "auto", messages, self.depth + 1, self.request, self.request_id, self.sender)
         except Exception as ex:
             trace_exception(ex)
+            raise
         finally:
             # UI FIX: Close the block ONLY at the root level after all nodes finish
             if cb and self.depth == 0:

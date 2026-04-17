@@ -644,6 +644,7 @@ async def run_all_migrations(engine: AsyncEngine) -> None:
                 "name": "VARCHAR NOT NULL",
                 "base_model": "VARCHAR NOT NULL",
                 "system_prompt": "TEXT NOT NULL",
+                "skills": "JSON",
                 "mcp_servers": "JSON",
                 "is_active": "BOOLEAN DEFAULT 1 NOT NULL",
             },

@@ -228,6 +228,8 @@ class VirtualAgent(Base):
     description = Column(String, nullable=True)
     base_model = Column(String, nullable=False)
     system_prompt = Column(String, nullable=False) # The "Soul"
+    # List of SKILL filenames to inject
+    skills = Column(JSON, nullable=True, default=list)
     # MCP: List of Model Context Protocol server configurations (Includes RAG, Tools, etc)
     mcp_servers = Column(JSON, nullable=True)
     is_active = Column(Boolean, default=True)

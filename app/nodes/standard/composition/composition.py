@@ -11,6 +11,11 @@ class SystemModifierNode(BaseNode):
     async def execute(self, engine, node: Dict[str, Any], output_slot_idx: int) -> Any:
         history = await engine._resolve_input(node, 0) or engine.initial_messages
         sys_prompt = await engine._resolve_input(node, 1)
+        
+        # Fallback to hardcoded property if the input slot is unconnected
+        if not sys_prompt:
+            sys_prompt = node["properties"].get("system_prompt")
+            
         if not sys_prompt: return history
         
         updated = copy.deepcopy(history)

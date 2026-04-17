@@ -52,10 +52,16 @@ async def conception_page(request: Request, db: AsyncSession = Depends(get_db), 
         res_ds = await db.execute(select(DataStore.name).order_by(DataStore.name))
         context["datastores"] = res_ds.scalars().all()
         
-        # Memory Systems for Agent nodes
+        # Memory Systems for Agent nodes (Include all configured cores)
         from app.database.models import MemorySystem
-        res_ms = await db.execute(select(MemorySystem.name).filter(MemorySystem.is_active == True))
-        context["memory_systems"] = res_ms.scalars().all()
+        res_ms = await db.execute(select(MemorySystem.name))
+        m_systems = res_ms.scalars().all()
+        # Ensure 'lollms' and 'default' are always present and at the top
+        core_list = ["lollms", "default"]
+        for m in m_systems:
+            if m not in core_list:
+                core_list.append(m)
+        context["memory_systems"] = core_list
         
         # Metadata for the sidebar
         context["registered_nodes"] = NodeRegistry.get_node_list()

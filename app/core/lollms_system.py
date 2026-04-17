@@ -27,15 +27,13 @@ class LollmsSystem:
         self._settings = settings_override or {}
 
     def set(self, key: str, value: Any, persistent: bool = True):
-        """Standard setter for per-user tool data."""
+        """Standard setter for per-user tool data with robust loop handling."""
         if not persistent:
             self._volatile[key] = value
             return
 
-        # Handle async DB call in a sync-friendly way for tool developers
         async def _set():
             async with AsyncSessionLocal() as db:
-                # Upsert logic for SQLite / Agnostic
                 stmt = insert(UserToolData).values(
                     user_id=self.user["id"],
                     library_name=self.library_name,
@@ -52,10 +50,12 @@ class LollmsSystem:
         try:
             loop = asyncio.get_event_loop()
             if loop.is_running():
-                loop.create_task(_set())
+                # Correct way to schedule from sync to running async loop
+                asyncio.run_coroutine_threadsafe(_set(), loop)
             else:
                 loop.run_until_complete(_set())
         except RuntimeError:
+            # No loop in this thread, standard run
             asyncio.run(_set())
 
     def get(self, key: str, default: Any = None) -> Any:

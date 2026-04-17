@@ -1,0 +1,30 @@
+{
+  "name": "Fact-Verification Pipeline",
+  "description": "Multi-agent loop that drafts an answer, audits it for hallucinations, and performs a correction pass.",
+  "graph": {
+    "nodes": [
+      { "id": 100, "type": "hub/note", "pos": [50, -180], "properties": { "content": "# Reflexion Architecture\n1. **Draft**: Generate initial response.\n2. **Audit**: A specialist agent identifies claims not found in context.\n3. **Sanitize**: The final pass removes or fixes hallucinations." } },
+      { "id": 1, "type": "hub/input", "pos": [50, 50], "outputs": [{ "name": "Messages", "links": [1] }, { "name": "Input", "links": [2] }] },
+      { "id": 2, "type": "hub/datastore", "pos": [50, 350], "inputs": [{ "name": "Query", "links": [2] }], "outputs": [{ "name": "Context", "links": [3, 4] }], "properties": { "top_k": 5 } },
+      { "id": 3, "type": "hub/system_composer", "pos": [450, 50], "inputs": [{ "name": "A", "link": 3 }], "outputs": [{ "name": "Merged", "links": [5] }], "properties": { "template": "### CONTEXT:\n{A}\n\n### INSTRUCTION:\nAnswer the user query based ONLY on the context. Cite sources. Do not guess." } },
+      { "id": 4, "type": "hub/llm_chat", "pos": [850, 50], "inputs": [{ "name": "Messages", "link": 1 }, { "name": "Override", "link": 5 }], "outputs": [{ "name": "Content", "links": [6] }], "properties": { "title": "Drafting Agent" } },
+      { "id": 5, "type": "hub/composer", "pos": [850, 400], "inputs": [{ "name": "A", "link": 4 }, { "name": "B", "link": 6 }], "outputs": [{ "name": "Merged", "links": [7] }], "properties": { "template": "### REFERENCE CONTEXT:\n{A}\n\n### DRAFT RESPONSE:\n{B}\n\n### TASK:\nIdentify every claim in the draft that IS NOT supported by the context. Be aggressive. Output a list of errors." } },
+      { "id": 6, "type": "hub/llm_chat", "pos": [1250, 400], "inputs": [{ "name": "Messages", "link": 7 }], "outputs": [{ "name": "Content", "links": [8] }], "properties": { "title": "Verification Auditor" } },
+      { "id": 7, "type": "hub/composer", "pos": [1250, 50], "inputs": [{ "name": "A", "link": 6 }, { "name": "B", "link": 8 }], "outputs": [{ "name": "Merged", "links": [9] }], "properties": { "template": "### ORIGINAL DRAFT:\n{A}\n\n### AUDIT FINDINGS:\n{B}\n\n### TASK:\nRewrite the draft to remove all identified hallucinations. If a claim is dubious, delete it. Return only the sanitized answer." } },
+      { "id": 8, "type": "hub/llm_chat", "pos": [1650, 50], "inputs": [{ "name": "Messages", "link": 9 }], "outputs": [{ "name": "Content", "links": [10] }], "properties": { "title": "Sanitizer Agent" } },
+      { "id": 9, "type": "hub/output", "pos": [2050, 50], "inputs": [{ "name": "Source", "link": 10 }] }
+    ],
+    "links": [
+      [1, 1, 0, 4, 0, "messages"],
+      [2, 1, 2, 2, 0, "string"],
+      [3, 2, 0, 3, 0, "string"],
+      [4, 2, 0, 5, 0, "string"],
+      [5, 3, 0, 4, 2, "string"],
+      [6, 4, 0, 5, 1, "string"],
+      [7, 5, 0, 6, 0, "string"],
+      [8, 6, 0, 7, 1, "string"],
+      [9, 7, 0, 8, 0, "string"],
+      [10, 8, 0, 9, 0, "string"]
+    ]
+  }
+}

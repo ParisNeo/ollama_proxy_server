@@ -21,6 +21,7 @@
             <div class="flex flex-grow max-w-xl gap-2">
                 <input type="text" id="ai-config-url" value="https://grumpified-oggvct.github.io/model-trust-scorecard/" class="flex-grow bg-black/40 border border-purple-500/30 rounded-xl px-4 py-2 text-sm text-white outline-none focus:border-purple-500">
                 <button onclick="runAIConfig()" id="ai-config-btn" class="bg-purple-600 hover:bg-purple-500 text-white px-6 py-2 rounded-xl font-black text-xs uppercase tracking-widest transition-all transform active:scale-95 shadow-lg shadow-purple-900/20">Sync Metadata</button>
+                <button onclick="stopAIConfig()" id="ai-stop-btn" class="hidden bg-red-600 hover:bg-red-500 text-white px-4 py-2 rounded-xl font-black text-xs uppercase transition-all shadow-lg">STOP</button>
             </div>
         </div>
         
@@ -442,8 +443,20 @@
         }
     });
 
+    let currentConfigTaskId = null;
+
+    window.stopAIConfig = async () => {
+        if (!currentConfigTaskId) return;
+        const resp = await fetch(`/admin/system/stop-task/${currentConfigTaskId}`, { 
+            method: 'POST', 
+            headers: { 'X-CSRF-Token': "{{ csrf_token }}" } 
+        });
+        document.getElementById('ai-stop-btn').classList.add('hidden');
+    };
+
     window.runAIConfig = async () => {
         const btn = document.getElementById('ai-config-btn');
+        const stopBtn = document.getElementById('ai-stop-btn');
         const console = document.getElementById('ai-config-console');
         const url = document.getElementById('ai-config-url').value;
         
@@ -465,8 +478,9 @@
             });
             const data = await resp.json();
             if(data.success) {
-                console.innerHTML += `<div class="text-green-400 font-bold">[Success] Logic applied. Refreshing in 3s...</div>`;
-                setTimeout(() => window.location.reload(), 3000);
+                currentConfigTaskId = data.task_id;
+                stopBtn.classList.remove('hidden');
+                console.innerHTML += `<div class="text-indigo-400">[System] Task ${data.task_id} shifted to background. You can navigate away.</div>`;
             } else {
                 console.innerHTML += `<div class="text-red-400">[Error] ${data.error}</div>`;
                 btn.disabled = false;
@@ -479,9 +493,23 @@
     };
 
     // SSE Listener for Config Trace & Progress
+    window.showNotification = (text) => {
+        const toast = document.getElementById('global-notification');
+        document.getElementById('notif-text').innerText = text;
+        toast.classList.remove('translate-x-full');
+        setTimeout(hideNotification, 6000);
+    };
+
+    window.hideNotification = () => {
+        document.getElementById('global-notification').classList.add('translate-x-full');
+    };
+
     const configSource = new EventSource("{{ url_for('sse_events') }}");
     configSource.onmessage = (e) => {
         const msg = JSON.parse(e.data);
+        if (msg.type === 'completed' && msg.id.startsWith('sys_')) {
+            window.showNotification(msg.error || "System background task finished.");
+        }
         if(msg.id && msg.id.startsWith('sys_build_config_')) {
             const consoleEl = document.getElementById('ai-config-console');
             const progressContainer = document.getElementById('ai-config-progress-container');

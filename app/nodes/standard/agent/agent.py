@@ -58,7 +58,7 @@ class AgentReasonerNode(BaseNode):
             servers = await server_crud.get_servers_with_model(engine.db, real_model)
             if not servers:
                 if cb: await cb(f'* Error: Server offline\n</processing>\n')
-                break
+                return f"❌ System Error: Compute nodes for the model '{real_model}' are currently offline or restricted. The agent loop has been aborted."
 
             payload = {"model": real_model, "messages": turn_msgs, "stream": False, "tools": [t for t in tools if t]}
             resp, _ = await engine.reverse_proxy_fn(engine.request, "chat", servers, json.dumps(payload).encode(), is_subrequest=True, sender="autonomous-agent")

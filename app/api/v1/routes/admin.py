@@ -15,7 +15,7 @@ import os
 import re
 from pydantic import AnyHttpUrl, ValidationError
 
-from fastapi import APIRouter, Depends, Request, Form, HTTPException, status, Query, UploadFile, File, BackgroundTasks
+from fastapi import APIRouter, Depends, Request, Form, HTTPException, status, Query, UploadFile, File, BackgroundTasks, Response
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.concurrency import run_in_threadpool
@@ -674,6 +674,25 @@ async def admin_add_server(
 
     return RedirectResponse(url=request.url_for("admin_servers"), status_code=status.HTTP_303_SEE_OTHER)
 
+@router.post("/servers/{server_id}/toggle-active", name="admin_toggle_server_active", dependencies=[Depends(validate_csrf_token)])
+async def admin_toggle_server_active(request: Request, server_id: int, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
+    try:
+        server_id = int(server_id)
+        if server_id <= 0: raise ValueError
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail="Invalid server ID")
+        
+    server = await server_crud.get_server_by_id(db, server_id=server_id)
+    if not server:
+        raise HTTPException(status_code=404, detail="Server not found")
+        
+    server.is_active = not server.is_active
+    await db.commit()
+    
+    status_str = "enabled" if server.is_active else "disabled"
+    flash(request, f"Server '{server.name}' has been {status_str}.", "success")
+    return RedirectResponse(url=request.url_for("admin_servers"), status_code=status.HTTP_303_SEE_OTHER)
+
 @router.post("/servers/{server_id}/delete", name="admin_delete_server", dependencies=[Depends(validate_csrf_token)])
 async def admin_delete_server(request: Request, server_id: int, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
     # Validate server_id
@@ -735,7 +754,8 @@ async def admin_edit_server_post(
     server_type: str = Form(...),
     api_key: Optional[str] = Form(None),
     remove_api_key: Optional[bool] = Form(False),
-    allowed_models: List[str] = Form(default=None)
+    allowed_models: List[str] = Form(default=None),
+    is_active: Optional[bool] = Form(False)
 ):
     # Validate server_id
     try:
@@ -769,7 +789,8 @@ async def admin_edit_server_post(
         "name": name, 
         "url": url, 
         "server_type": server_type,
-        "allowed_models": allowed_models # This will be [] if nothing is selected
+        "allowed_models": allowed_models, # This will be[] if nothing is selected
+        "is_active": is_active
     }
 
     if remove_api_key:
@@ -1168,103 +1189,125 @@ async def admin_refresh_model_context(
     }
 
 
+# Global registry for cancellable background tasks
+active_background_tasks = set()
+
+@router.post("/system/stop-task/{task_id}", name="admin_stop_background_task")
+async def stop_background_task(task_id: str, admin_user: User = Depends(require_admin_user)):
+    if task_id in active_background_tasks:
+        active_background_tasks.remove(task_id)
+        logger.info(f"Cancellation signal sent to task: {task_id}")
+        return {"success": True}
+    return {"success": False, "error": "Task not found or already finished."}
+
 @router.post("/models-manager/ai-configure", name="admin_ai_configure_models")
 async def admin_ai_configure_models(
     request: Request,
+    background_tasks: BackgroundTasks,
     url: str = Form(...),
     db: AsyncSession = Depends(get_db),
     admin_user: User = Depends(require_admin_user)
 ):
-    """Uses the Management Agent to scrape a URL and auto-configure model metadata."""
+    """Orchestrates the AI Auto-Config in a persistent background task."""
     from app.core import knowledge_importer as kit
     from app.core.architect_manager import MasterArchitect
     from app.core.events import event_manager, ProxyEvent
     import secrets
 
     build_id = f"sys_build_config_{secrets.token_hex(4)}"
-    event_manager.emit(ProxyEvent("received", build_id, "Cluster Architect", "Local", admin_user.username, error_message=f"Accessing Scorecard: {url}..."))
+    active_background_tasks.add(build_id)
+    
+    async def run_ai_config_task():
+        try:
+            event_manager.emit(ProxyEvent("received", build_id, "Cluster Architect", "Local", admin_user.username, error_message=f"Accessing Scorecard: {url}..."))
+            # 1. Scrape the external data
+            scraped = await kit.scrape_url(url)
+            scorecard_text = scraped.get('content', "")
+            if not scorecard_text:
+                return JSONResponse({"error": "Could not extract content from the provided URL."}, status_code=400)
 
-    try:
-        # 1. Scrape the external data
-        scraped = await kit.scrape_url(url)
-        scorecard_text = scraped.get('content', "")
-        if not scorecard_text:
-            return JSONResponse({"error": "Could not extract content from the provided URL."}, status_code=400)
+            # 2. Get the list of models we actually have
+            all_meta = await model_metadata_crud.get_all_metadata(db)
+            hub_model_names = [m.model_name for m in all_meta]
+            
+            # 3. Pre-filter scorecard to only relevant rows to save tokens and focus the AI
+            event_manager.emit(ProxyEvent("active", build_id, "Cluster Architect", "Local", admin_user.username, error_message=f"Filtering scorecard for {len(hub_model_names)} local models..."))
+            
+            relevant_lines = []
+            lines = scorecard_text.split('\n')
+            for line in lines:
+                # If the line mentions any of our local model names (fuzzy check)
+                if any(m.lower() in line.lower() for m in hub_model_names):
+                    relevant_lines.append(line)
+            
+            filtered_scorecard = "\n".join(relevant_lines)
+            
+            # If filtering failed (no matches), fall back to partial scorecard but warn
+            if not filtered_scorecard:
+                filtered_scorecard = scorecard_text[:8000]
+                logger.warning("No direct fuzzy matches found in scorecard, sending raw snippet.")
 
-        # 2. Get the list of models we actually have
-        all_meta = await model_metadata_crud.get_all_metadata(db)
-        hub_model_names = [m.model_name for m in all_meta]
-        
-        # 3. Pre-filter scorecard to only relevant rows to save tokens and focus the AI
-        event_manager.emit(ProxyEvent("active", build_id, "Cluster Architect", "Local", admin_user.username, error_message=f"Filtering scorecard for {len(hub_model_names)} local models..."))
-        
-        relevant_lines = []
-        lines = scorecard_text.split('\n')
-        for line in lines:
-            # If the line mentions any of our local model names (fuzzy check)
-            if any(m.lower() in line.lower() for m in hub_model_names):
-                relevant_lines.append(line)
-        
-        filtered_scorecard = "\n".join(relevant_lines)
-        
-        # If filtering failed (no matches), fall back to partial scorecard but warn
-        if not filtered_scorecard:
-            filtered_scorecard = scorecard_text[:8000]
-            logger.warning("No direct fuzzy matches found in scorecard, sending raw snippet.")
+            # 4. BATCH PROCESSING LOOP
+            batch_size = 20
+            total_models = len(hub_model_names)
+            update_count = 0
 
-        # 4. BATCH PROCESSING LOOP
-        batch_size = 20
-        total_models = len(hub_model_names)
-        update_count = 0
+            for i in range(0, total_models, batch_size):
+                # Check for cancellation signal
+                if build_id not in active_background_tasks:
+                    event_manager.emit(ProxyEvent("error", build_id, "Cluster Architect", "Local", admin_user.username, error_message="Task cancelled by user."))
+                    return
 
-        for i in range(0, total_models, batch_size):
-            batch = hub_model_names[i : i + batch_size]
-            current_batch_num = (i // batch_size) + 1
-            total_batches = (total_models + batch_size - 1) // batch_size
-            progress = int((i / total_models) * 100)
+                batch = hub_model_names[i : i + batch_size]
+                current_batch_num = (i // batch_size) + 1
+                total_batches = (total_models + batch_size - 1) // batch_size
+                progress = int((i / total_models) * 100)
 
-            event_manager.emit(ProxyEvent(
-                "active", build_id, "Cluster Architect", "Local", admin_user.username, 
-                error_message=f"Batch {current_batch_num}/{total_batches}: Analyzing {len(batch)} models...",
-                token_count=progress
-            ))
+                event_manager.emit(ProxyEvent(
+                    "active", build_id, "Cluster Architect", "Local", admin_user.username, 
+                    error_message=f"Batch {current_batch_num}/{total_batches}: Analyzing {len(batch)} models...",
+                    token_count=progress
+                ))
 
-            batch_prompt = (
-                f"SCORECARD EXCERPT:\n{filtered_scorecard}\n\n"
-                f"TARGET BATCH:\n{', '.join(batch)}\n\n"
-                "INSTRUCTION: Extract metadata ONLY for models in the TARGET BATCH. "
-                "STRICT: Ignore any other models in the scorecard. Return JSON with 'updates' list."
-            )
+                batch_prompt = (
+                    f"SCORECARD EXCERPT:\n{filtered_scorecard}\n\n"
+                    f"TARGET BATCH:\n{', '.join(batch)}\n\n"
+                    "INSTRUCTION: Extract metadata ONLY for models in the TARGET BATCH. "
+                    "STRICT: Ignore any other models in the scorecard. Return JSON with 'updates' list."
+                )
 
-            # AI Call for this specific batch
-            result = await MasterArchitect.execute_build(db, request, "cluster_config", batch_prompt, "", admin_user.username)
+                # AI Call for this specific batch
+                result = await MasterArchitect.execute_build(db, request, "cluster_config", batch_prompt, "", admin_user.username)
 
-            # Apply updates for this batch
-            if "updates" in result and isinstance(result["updates"], list):
-                for update_data in result["updates"]:
-                    m_name = update_data.get("model_name")
-                    if m_name in batch: # Ensure model belongs to current batch
-                        fields = {
-                            "max_context": int(update_data.get("max_context", 4096)),
-                            "supports_images": bool(update_data.get("supports_images", False)),
-                            "is_reasoning_model": bool(update_data.get("is_reasoning", False)),
-                            "is_code_model": bool(update_data.get("is_code", False)),
-                            "description": str(update_data.get("description", "Auto-configured profile."))[:1024],
-                            "priority": int(update_data.get("priority", 10))
-                        }
-                        await model_metadata_crud.update_metadata(db, model_name=m_name, **fields)
-                        update_count += 1
-                
-                # Commit batch transaction to release connections and persist progress
-                await db.commit()
+                # Apply updates for this batch
+                if "updates" in result and isinstance(result["updates"], list):
+                    for update_data in result["updates"]:
+                        m_name = update_data.get("model_name")
+                        if m_name in batch: # Ensure model belongs to current batch
+                            fields = {
+                                "max_context": int(update_data.get("max_context", 4096)),
+                                "supports_images": bool(update_data.get("supports_images", False)),
+                                "is_reasoning_model": bool(update_data.get("is_reasoning", False)),
+                                "is_code_model": bool(update_data.get("is_code", False)),
+                                "description": str(update_data.get("description", "Auto-configured profile."))[:1024],
+                                "priority": int(update_data.get("priority", 10))
+                            }
+                            await model_metadata_crud.update_metadata(db, model_name=m_name, **fields)
+                            update_count += 1
+                    
+                    # Commit batch transaction to release connections and persist progress
+                    await db.commit()
 
-        event_manager.emit(ProxyEvent("completed", build_id, "Cluster Architect", "Local", admin_user.username, error_message=f"Successfully configured {update_count} models.", token_count=100))
-        return {"success": True, "count": update_count}
+            event_manager.emit(ProxyEvent("completed", build_id, "Cluster Architect", "Local", admin_user.username, error_message=f"Successfully configured {update_count} models.", token_count=100))
+            if build_id in active_background_tasks: active_background_tasks.remove(build_id)
 
-    except Exception as e:
-        logger.error(f"AI Config Failed: {e}")
-        event_manager.emit(ProxyEvent("error", build_id, "Cluster Architect", "Local", admin_user.username, error_message=str(e)))
-        return JSONResponse({"error": str(e)}, status_code=500)
+        except Exception as e:
+            logger.error(f"AI Config Failed: {e}")
+            event_manager.emit(ProxyEvent("error", build_id, "Cluster Architect", "Local", admin_user.username, error_message=str(e)))
+            if build_id in active_background_tasks: active_background_tasks.remove(build_id)
+
+    background_tasks.add_task(run_ai_config_task)
+    return {"success": True, "task_id": build_id}
 
 
 @router.post("/models-manager/update", name="admin_update_model_metadata", dependencies=[Depends(validate_csrf_token)])
@@ -3059,7 +3102,7 @@ async def generate_system_report(request: Request, db: AsyncSession = Depends(ge
                 await db.commit()
                 await db.refresh(new_report)
 
-                return {"report": report_text, "timestamp": new_report.timestamp.strftime("%Y-%m-%d %H:%M")}
+                return {"id": new_report.id, "report": report_text, "timestamp": new_report.timestamp.strftime("%Y-%m-%d %H:%M"), "type": "system"}
                 
         except HTTPException as he:
             # Re-raise FastAPIs own HTTP exceptions to be handled by the middleware
@@ -3136,7 +3179,7 @@ async def generate_eco_report(request: Request, db: AsyncSession = Depends(get_d
             await db.commit()
             await db.refresh(new_report)
 
-            return {"report": report_text, "timestamp": new_report.timestamp.strftime("%Y-%m-%d %H:%M")}
+            return {"id": new_report.id, "report": report_text, "timestamp": new_report.timestamp.strftime("%Y-%m-%d %H:%M"), "type": "eco"}
             
     except Exception as e:
         logger.error(f"Generate Eco Report Failed: {e}")
@@ -3153,7 +3196,7 @@ async def get_latest_eco_report(db: AsyncSession = Depends(get_db), admin_user: 
         return JSONResponse({"error": "No eco reports found. Generate your first audit."}, status_code=404)
         
     clean_content = latest.content.replace("ECO_AUDIT_REPORT\n", "", 1)
-    return {"report": clean_content, "timestamp": latest.timestamp.strftime("%Y-%m-%d %H:%M")}
+    return {"id": latest.id, "report": clean_content, "timestamp": latest.timestamp.strftime("%Y-%m-%d %H:%M"), "type": "eco"}
 
 @router.get("/system/report/latest", name="admin_get_latest_report")
 async def get_latest_report(db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
@@ -3168,7 +3211,76 @@ async def get_latest_report(db: AsyncSession = Depends(get_db), admin_user: User
         
     # Strip the internal tag before returning
     clean_content = latest.content.replace("SYSTEM_AUDIT_REPORT\n", "", 1)
-    return {"report": clean_content, "timestamp": latest.timestamp.strftime("%Y-%m-%d %H:%M")}
+    return {"id": latest.id, "report": clean_content, "timestamp": latest.timestamp.strftime("%Y-%m-%d %H:%M"), "type": "system"}
+
+@router.get("/system/report/history", name="admin_get_report_history")
+async def get_report_history(type: str = Query("system"), db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
+    prefix = "SYSTEM_AUDIT_REPORT%" if type == "system" else "ECO_AUDIT_REPORT%"
+    stmt = select(LogAnalysis).filter(LogAnalysis.content.like(prefix)).order_by(LogAnalysis.timestamp.desc()).limit(20)
+    res = await db.execute(stmt)
+    reports = res.scalars().all()
+    return[{"id": r.id, "timestamp": r.timestamp.strftime("%Y-%m-%d %H:%M")} for r in reports]
+
+@router.get("/system/report/{report_id}", name="admin_get_specific_report")
+async def get_specific_report(report_id: int, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
+    report = await db.get(LogAnalysis, report_id)
+    if not report: raise HTTPException(status_code=404)
+    
+    is_system = "SYSTEM_AUDIT_REPORT\n" in report.content
+    clean_content = report.content.replace("SYSTEM_AUDIT_REPORT\n", "", 1).replace("ECO_AUDIT_REPORT\n", "", 1)
+    type_str = "system" if is_system else "eco"
+    return {"id": report.id, "report": clean_content, "timestamp": report.timestamp.strftime("%Y-%m-%d %H:%M"), "type": type_str}
+
+@router.post("/system/report/export-pdf", name="admin_export_report_pdf_post")
+async def export_report_pdf_post(
+    request: Request,
+    html_content: str = Form(...),
+    title: str = Form("System Report"),
+    timestamp: str = Form(""),
+    admin_user: User = Depends(require_admin_user)
+):
+    from xhtml2pdf import pisa
+    import io
+    from fastapi.concurrency import run_in_threadpool
+    
+    full_html = f"""
+    <html><head><style>
+        @page {{ margin: 2cm; }}
+        body {{ font-family: Helvetica, Arial, sans-serif; color: #333; line-height: 1.5; font-size: 12px; }}
+        h1, h2, h3 {{ color: #4f46e5; margin-bottom: 10px; margin-top: 20px; }}
+        p {{ margin-bottom: 10px; }}
+        code {{ background-color: #f3f4f6; padding: 2px 4px; border-radius: 4px; font-family: Courier, monospace; font-size: 10px; }}
+        pre {{ background-color: #f3f4f6; padding: 10px; border-radius: 8px; font-family: Courier, monospace; font-size: 10px; white-space: pre-wrap; }}
+        ul, ol {{ margin-bottom: 10px; margin-left: 20px; }}
+        li {{ margin-bottom: 5px; }}
+        hr {{ border: 0; border-top: 1px solid #e5e7eb; margin: 20px 0; }}
+    </style></head><body>
+    <h1>{title}</h1>
+    <p style="color: #6b7280; font-size: 10px;">Generated on: {timestamp}</p>
+    <hr>
+    {html_content}
+    </body></html>
+    """
+    
+    def generate_pdf(content):
+        pdf_buffer = io.BytesIO()
+        pisa_status = pisa.CreatePDF(content, dest=pdf_buffer)
+        if pisa_status.err:
+            return None
+        return pdf_buffer.getvalue()
+
+    pdf_data = await run_in_threadpool(generate_pdf, full_html)
+    if pdf_data is None:
+        raise HTTPException(status_code=500, detail="PDF Generation Failed")
+        
+    safe_title = "".join(c if c.isalnum() else "_" for c in title)
+    safe_ts = "".join(c if c.isalnum() else "_" for c in timestamp)
+    
+    return Response(
+        pdf_data, 
+        media_type="application/pdf", 
+        headers={"Content-Disposition": f"attachment; filename={safe_title}_{safe_ts}.pdf"}
+    )
 
 # Add this new route for prompt enhancement
 @router.post("/enhance-prompt", name="admin_enhance_prompt")
@@ -3252,7 +3364,8 @@ async def admin_enhance_prompt(
 
 @router.get("/memory-systems", response_class=HTMLResponse, name="admin_memory_systems")
 async def admin_memory_systems(request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
-    from app.database.models import MemorySystem
+    from app.database.models import MemorySystem, MemoryEntry, DreamLog, User
+    from sqlalchemy import delete
     context = get_template_context(request)
     
     # Check if default system exists, if not create it
@@ -3267,26 +3380,46 @@ async def admin_memory_systems(request: Request, db: AsyncSession = Depends(get_
         
     context["systems"] = systems
     
-    # Get distinct user identifiers who have memories
-    from app.database.models import MemoryEntry, User
-    res_ids = await db.execute(select(MemoryEntry.user_identifier).distinct())
-    identifiers = res_ids.scalars().all()
+    # 1. Fetch Real Users
+    res_users = await db.execute(select(User).order_by(User.username))
+    real_users = res_users.scalars().all()
     
-    active_users_list = []
-    for uid in identifiers:
-        display_name = uid
-        # If it's a numeric ID, resolve the username for the UI
-        if uid.isdigit():
-            user_obj = await db.get(User, int(uid))
-            if user_obj:
-                display_name = f"{user_obj.username} (ID: {uid})"
-        
-        active_users_list.append({"id": uid, "display": display_name})
+    active_users_list =[{"id": "system", "display": "System (Global/ROM)"}]
+    for u in real_users:
+        active_users_list.append({"id": str(u.id), "display": f"{u.username}"})
 
     context["active_users"] = active_users_list
     
+    # 2. Cleanup Ghost Users from Database
+    # This purges any memory entry whose user_identifier is not 'system', 'anonymous', or a real user ID.
+    valid_ids = ["system", "anonymous"] + [str(u.id) for u in real_users]
+    await db.execute(delete(MemoryEntry).filter(MemoryEntry.user_identifier.notin_(valid_ids)))
+    await db.execute(delete(DreamLog).filter(DreamLog.user_identifier.notin_(valid_ids)))
+    await db.commit()
+    
     context["csrf_token"] = await get_csrf_token(request)
     return templates.TemplateResponse("admin/memory_systems.html", context)
+
+@router.delete("/api/memory/system/{system_name}", name="api_memory_delete_system")
+async def api_memory_delete_system(system_name: str, request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
+    from app.database.models import MemorySystem, MemoryEntry, DreamLog
+    from sqlalchemy import delete
+    
+    # CSRF check
+    if not await validate_csrf_token_header(request): raise HTTPException(status_code=403)
+    
+    if system_name in ["lollms", "default"]:
+        return JSONResponse({"error": f"Cannot delete the foundational '{system_name}' core."}, status_code=400)
+        
+    sys_obj = await db.execute(select(MemorySystem).filter_by(name=system_name))
+    sys_obj = sys_obj.scalars().first()
+    if sys_obj:
+        await db.execute(delete(MemoryEntry).filter_by(agent_name=system_name))
+        await db.execute(delete(DreamLog).filter_by(memory_system=system_name))
+        await db.delete(sys_obj)
+        await db.commit()
+        return {"success": True}
+    return JSONResponse({"error": "Memory system not found"}, status_code=404)
 
 @router.post("/api/memory/system/add", name="api_memory_add_system", dependencies=[Depends(validate_csrf_token)])
 async def api_memory_add_system(name: str = Form(...), desc: str = Form(""), use_aff: bool = Form(False), db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
@@ -3338,14 +3471,21 @@ async def api_memory_data(system: str, user: str, db: AsyncSession = Depends(get
     sys_obj = res_sys.scalars().first()
 
     # Get standard memories (all categories except affective)
-    res_mem = await db.execute(
-        select(MemoryEntry).filter(
+    # Special Case: If user is 'system', we treat it as a GLOBAL view (ignore agent_name)
+    if user == "system":
+        stmt = select(MemoryEntry).filter(
+            MemoryEntry.user_identifier == "system",
+            MemoryEntry.category != 'affective'
+        ).order_by(MemoryEntry.is_immutable.desc(), MemoryEntry.importance.desc())
+    else:
+        stmt = select(MemoryEntry).filter(
             MemoryEntry.agent_name == system,
             MemoryEntry.user_identifier == user,
             MemoryEntry.category != 'affective'
         ).order_by(MemoryEntry.importance.desc())
-    )
-    memories =[{"id": m.id, "cat": m.category, "title": m.title, "content": m.content, "imp": m.importance, "ts": m.created_at.strftime('%Y-%m-%d %H:%M')} for m in res_mem.scalars().all()]
+
+    res_mem = await db.execute(stmt)
+    memories =[{"id": m.id, "user_id": m.user_identifier, "cat": m.category, "title": m.title, "content": m.content, "imp": m.importance, "is_immutable": m.is_immutable, "ts": m.created_at.strftime('%Y-%m-%d %H:%M')} for m in res_mem.scalars().all()]
     
     # Get Affective memory
     res_aff = await db.execute(

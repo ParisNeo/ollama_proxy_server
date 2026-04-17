@@ -518,11 +518,12 @@ async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer
                 _update_health_cache(chosen_server.id, False)
                 raise
             except Exception as e:
-                logger.warning(f"vLLM server '{chosen_server.name}' failed: {e}. Trying next server.")
+                srv_type = chosen_server.server_type.upper()
+                logger.warning(f"{srv_type} server '{chosen_server.name}' failed: {e}. Trying next server.")
                 _update_health_cache(chosen_server.id, False)
-                candidate_servers = [s for s in candidate_servers if s.id != chosen_server.id]
+                candidate_servers =[s for s in candidate_servers if s.id != chosen_server.id]
                 if not candidate_servers:
-                    logger.error("No more candidate servers after vLLM failure")
+                    logger.error(f"No more candidate servers after {srv_type} failure")
                     break
                 continue
 
@@ -802,21 +803,10 @@ def _wrap_response_for_token_tracking(
                 # Process for token tracking (after yielding to not block)
                 buffer += chunk_text
 
-                # Intercept memory tags to process in background
-                # We use the accumulated buffer in the streaming wrapper
-                if "</memory>" in buffer:
-                    # Capture current buffer for background processing
-                    # Use a copy to avoid race conditions with the buffer clear logic
-                    tag_payload = str(buffer)
-                    
-                    # Background process memory updates
-                    async def _background_memory_task(u_id, m_name, payload):
-                        from app.database.session import AsyncSessionLocal
-                        async with AsyncSessionLocal() as b_db:
-                            await CognitiveMemoryManager.process_tags(b_db, str(u_id), m_name, payload)
-                            
-                    if user_id:
-                        asyncio.create_task(_background_memory_task(user_id, model, tag_payload))
+                # Intercept memory tags to process in background only when the block is definitely closed
+                if "</memory>" in buffer or "</affective_update>" in buffer:
+                    # Logic moved to the 'done' block below to ensure we process the FINAL complete buffer
+                    pass
                 
                 # Process complete lines
                 lines = buffer.split('\n')
@@ -844,16 +834,27 @@ def _wrap_response_for_token_tracking(
                             if chunk_tokens.get(key) is not None:
                                 accumulated_tokens[key] = chunk_tokens[key]
                         
-                        # If this is the final chunk, update the log
-                        if data.get("done") and log_id and not tokens_finalized:
+                        # If this is the final chunk, update log AND process cognitive memory
+                        if data.get("done") and not tokens_finalized:
                             tokens_finalized = True
-                            # Fire-and-forget token update
-                            asyncio.create_task(_update_log_with_tokens_async(
-                                log_id,
-                                accumulated_tokens["prompt_tokens"],
-                                accumulated_tokens["completion_tokens"],
-                                accumulated_tokens["total_tokens"]
-                            ))
+                            
+                            # 1. Update Usage Tokens
+                            if log_id:
+                                asyncio.create_task(_update_log_with_tokens_async(
+                                    log_id,
+                                    accumulated_tokens["prompt_tokens"],
+                                    accumulated_tokens["completion_tokens"],
+                                    accumulated_tokens["total_tokens"]
+                                ))
+
+                            # 2. Final Cognitive Memory Commit (Background)
+                            if user_id:
+                                final_text = str(buffer)
+                                async def _background_memory_task(u_id, m_name, payload):
+                                    from app.database.session import AsyncSessionLocal
+                                    async with AsyncSessionLocal() as b_db:
+                                        await CognitiveMemoryManager.process_tags(b_db, str(u_id), m_name, payload)
+                                asyncio.create_task(_background_memory_task(user_id, model, final_text))
                         
                     except json.JSONDecodeError:
                         pass  # Not JSON, skip token extraction
@@ -982,6 +983,40 @@ async def _proxy_to_vllm(
 
     model_name = ollama_payload.get("model")
     
+    # FIX: Resolve loose model name matches (e.g. user requests "llama3" but server has "meta-llama/Llama-3-8b")
+    # This prevents 404 Model Not Found errors from strict backends like Novita or vLLM.
+    if model_name and server.available_models:
+        models_list = server.available_models
+        if isinstance(models_list, str):
+            try: models_list = json.loads(models_list)
+            except: models_list =[]
+        
+        if isinstance(models_list, list):
+            norm_req = model_name.replace(':latest', '')
+            best_match = None
+            # 1. Try exact match first
+            for m in models_list:
+                if isinstance(m, dict) and "name" in m:
+                    avail_name = m["name"]
+                    norm_avail = avail_name.replace(':latest', '')
+                    if avail_name == model_name or norm_avail == norm_req:
+                        best_match = avail_name
+                        break
+            # 2. Try substring match (aligns with get_servers_with_model selection logic)
+            if not best_match:
+                for m in models_list:
+                    if isinstance(m, dict) and "name" in m:
+                        avail_name = m["name"]
+                        norm_avail = avail_name.replace(':latest', '')
+                        if norm_req in norm_avail:
+                            best_match = avail_name
+                            break
+            
+            if best_match and best_match != model_name:
+                logger.info(f"Translating requested model '{model_name}' to physical model '{best_match}' for server '{server.name}'")
+                model_name = best_match
+                ollama_payload["model"] = best_match
+
     headers = {}
     if server.encrypted_api_key:
         api_key = decrypt_data(server.encrypted_api_key)
@@ -989,10 +1024,10 @@ async def _proxy_to_vllm(
             headers["Authorization"] = f"Bearer {api_key}"
 
     if path == "chat":
-        vllm_path = "v1/chat/completions"
+        vllm_path = "chat/completions"
         vllm_payload = translate_ollama_to_vllm_chat(ollama_payload)
     elif path == "embeddings":
-        vllm_path = "v1/embeddings"
+        vllm_path = "embeddings"
         vllm_payload = translate_ollama_to_vllm_embeddings(ollama_payload)
     else:
         raise HTTPException(status_code=404, detail=f"Endpoint '/api/{path}' not supported for vLLM servers.")
@@ -1016,8 +1051,9 @@ async def _proxy_to_vllm(
                 async with http_client.stream("POST", backend_url, json=vllm_payload, timeout=timeout, headers=headers) as vllm_response:
                     if vllm_response.status_code != 200:
                         error_body = await vllm_response.aread()
-                        logger.error(f"vLLM server error ({vllm_response.status_code}): {error_body.decode()}")
-                        error_chunk = {"error": f"vLLM server error: {error_body.decode()}"}
+                        srv_type = server.server_type.upper()
+                        logger.error(f"{srv_type} server error ({vllm_response.status_code}): {error_body.decode()}")
+                        error_chunk = {"error": f"{srv_type} server error: {error_body.decode()}"}
                         yield (json.dumps(error_chunk) + '\n').encode('utf-8')
                         return
                     
@@ -1121,11 +1157,13 @@ async def _proxy_to_vllm(
 
     except httpx.HTTPStatusError as e:
         error_detail = e.response.text
-        logger.error(f"vLLM request failed with status {e.response.status_code}: {error_detail}")
-        raise HTTPException(status_code=e.response.status_code, detail=f"vLLM server error: {error_detail}")
+        srv_type = server.server_type.upper()
+        logger.error(f"{srv_type} request failed with status {e.response.status_code}: {error_detail}")
+        raise HTTPException(status_code=e.response.status_code, detail=f"{srv_type} server error: {error_detail}")
     except Exception as e:
-        logger.error(f"Error proxying to vLLM server {server.name}: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to communicate with vLLM server: {e}")
+        srv_type = server.server_type.upper()
+        logger.error(f"Error proxying to {srv_type} server {server.name}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to communicate with {srv_type} server: {e}")
 
 
 @router.get("/tags")
@@ -1294,9 +1332,13 @@ async def _async_log_usage(
         return None
 
 
-async def _select_auto_model(db: AsyncSession, body: Dict[str, Any], overrides: Dict[str, bool] = None) -> Optional[str]:
-    """Selects the best model based on metadata, request content, and context length."""
+async def _select_auto_model(db: AsyncSession, body: Dict[str, Any], overrides: Dict[str, bool] = None, exclude_models: List[str] = None) -> List[str]:
+    """
+    IRRA Algorithm: Generates a ranked list of candidate model names based on 
+    intent, hardware health, and excludes previously failed models.
+    """
     if overrides is None: overrides = {}
+    if exclude_models is None: exclude_models = []
     
     has_images = overrides.get("require_vision", False) or ("images" in body and body["images"])
     
@@ -1329,8 +1371,24 @@ async def _select_auto_model(db: AsyncSession, body: Dict[str, Any], overrides: 
 
     # 2. Filter Candidates
     all_metadata = await model_metadata_crud.get_all_metadata(db)
-    all_available_models = await server_crud.get_all_available_model_names(db)
-    available_metadata = [m for m in all_metadata if m.model_name in all_available_models]
+    
+    # NEW: Filter available models by checking if their hosting servers are healthy
+    active_servers = await server_crud.get_servers(db)
+    # Exclude Quarantined nodes from the candidate pool for 'auto'
+    healthy_servers = [s for s in active_servers if s.is_active and not _is_server_penalized(s.id)]
+    
+    # If all nodes are penalized, we must allow them in the selector to avoid 503
+    if not healthy_servers:
+        healthy_servers = [s for s in active_servers if s.is_active]
+
+    available_on_healthy = set()
+    for s in healthy_servers:
+        if s.available_models:
+            mlist = s.available_models
+            if isinstance(mlist, str): mlist = json.loads(mlist)
+            for m in mlist: available_on_healthy.add(m.get("name"))
+
+    available_metadata = [m for m in all_metadata if m.model_name in available_on_healthy]
 
     # --- ECOLOGICAL FILTERING (Green Routing) ---
     # Detect Trivial/Simple tasks to save energy
@@ -1391,16 +1449,18 @@ async def _select_auto_model(db: AsyncSession, body: Dict[str, Any], overrides: 
     if not candidate_models:
         return None
 
-    # Sort by priority
+    # Tier 3: Exclude failed models from this specific run
+    candidate_models = [m for m in candidate_models if m.model_name not in exclude_models]
+
+    if not candidate_models:
+        return []
+
+    # Sort by priority (asc)
     candidate_models.sort(key=lambda x: x.priority)
-    top_priority = candidate_models[0].priority
     
-    # Tier 3: Load Balancing (Random choice among tied top-priority models)
-    best_tier = [m for m in candidate_models if m.priority == top_priority]
-    best_model = secrets.choice(best_tier)
-    
-    logger.info(f"Auto-routing: Detected [Tokens: ~{estimated_tokens}, Reasoning: {is_reasoning_task}, Code: {contains_code}]. Selected '{best_model.model_name}'.")
-    return best_model.model_name
+    ranked_names = [m.model_name for m in candidate_models]
+    logger.info(f"IRRA Router: Intent identified. Ranked Candidates: {ranked_names}")
+    return ranked_names
 
 
 class WorkflowEngine:
@@ -1720,20 +1780,29 @@ async def _resolve_target(db: AsyncSession, name: str, messages: List[Dict[str, 
         )
         return await engine.execute(messages)
 
-    # 1. Resolve Virtual Agent (Persona + RAG + MCP)
+    # 1. Resolve Virtual Agent (Persona + Multiple Skills + MCP)
     agent_res = await db.execute(select(VirtualAgent).filter(VirtualAgent.name == name, VirtualAgent.is_active == True))
     agent = agent_res.scalars().first()
     if agent:
         logger.info(f"Hydrating Agent '{name}' -> Base: {agent.base_model}")
+        
+        # Concatenate all associated skills
+        full_skills_prompt = ""
+        if agent.skills:
+            from app.core.skills_manager import SkillsManager
+            all_available_skills = {s["filename"]: s for s in SkillsManager.get_all_skills()}
+            for skill_file in agent.skills:
+                skill_data = all_available_skills.get(skill_file)
+                if skill_data:
+                    full_skills_prompt += f"\n\n### [SKILL: {skill_data['name'].upper()}]\n{skill_data['raw']}"
 
         import copy
-        # Ensure deep copy of input messages
         updated_messages = copy.deepcopy(messages)
 
-        # Soul Injection: Always ensure the agent system prompt is the first message
-        # We strip existing system prompts to ensure the Agent's soul takes precedence
+        # Soul + Skills Injection
+        combined_prompt = f"{agent.system_prompt}\n{full_skills_prompt}".strip()
         updated_messages = [m for m in updated_messages if m.get("role") != "system"]
-        updated_messages.insert(0, {"role": "system", "content": agent.system_prompt})
+        updated_messages.insert(0, {"role": "system", "content": combined_prompt})
 
         return await _resolve_target(db, agent.base_model, updated_messages, depth + 1, request=request, request_id=request_id, sender=sender, call_stack=new_stack)
 
@@ -2574,15 +2643,25 @@ async def _process_proxy_logic(
             
             body_bytes = json.dumps(body).encode('utf-8')
 
-        # --- COGNITIVE MEMORY INJECTION ---
+        # --- COGNITIVE MEMORY & PLATFORM INJECTION ---
         effective_user_id = api_key.user_id if api_key.user_id is not None else 0
         memory_context = await CognitiveMemoryManager.get_memory_context(db, effective_user_id, model_name)
+        
+        # Determine platform context
+        platform = getattr(request.state, "source_platform", "Unknown")
+        platform_metadata = f"### [COMMUNICATION MEDIUM]\n- Current Platform: {platform.upper()}\n"
+        if platform.lower() in ("discord", "slack"):
+            platform_metadata += "- Environment: Multi-user group chat. Use markdown for readability.\n"
+        elif platform.lower() == "web playground":
+            platform_metadata += "- Environment: Direct administrative console. Rich HTML/Markdown support available.\n"
+
         if "messages" in body:
             sys_msg = next((m for m in body["messages"] if m["role"] == "system"), None)
+            full_context = f"{memory_context}\n\n{platform_metadata}"
             if sys_msg:
-                sys_msg["content"] = f"{memory_context}\n\n{sys_msg['content']}"
+                sys_msg["content"] = f"{full_context}\n\n{sys_msg['content']}"
             else:
-                body["messages"].insert(0, {"role": "system", "content": memory_context})
+                body["messages"].insert(0, {"role": "system", "content": full_context})
             body_bytes = json.dumps(body).encode('utf-8')
 
         # Trigger maintenance (Background task must not share request-scoped db session)
@@ -2618,16 +2697,12 @@ async def _process_proxy_logic(
     candidate_servers = servers
     if model_name:
         logger.info(f"proxy_ollama: Looking for servers with model '{model_name}'")
-        servers_with_model = await server_crud.get_servers_with_model(db, model_name)
+        candidate_servers = await server_crud.get_servers_with_model(db, model_name)
 
-        if servers_with_model:
-            candidate_servers = servers_with_model
-            logger.info(f"Smart routing: Found {len(servers_with_model)} server(s) with model '{model_name}': {[s.name for s in servers_with_model]}")
+        if candidate_servers:
+            logger.info(f"Smart routing: Found {len(candidate_servers)} server(s) with model '{model_name}': {[s.name for s in candidate_servers]}")
         else:
-            logger.warning(
-                f"Model '{model_name}' not found in any server's catalog. "
-                f"Falling back to round-robin across all {len(servers)} active server(s)."
-            )
+            logger.warning(f"Model '{model_name}' not found in any server's catalog.")
 
     if not candidate_servers:
         # --- SECURITY CHECK: Distinguish between 'Not Found' and 'Not Allowed' ---
@@ -2674,17 +2749,68 @@ async def _process_proxy_logic(
     # Initialize sources list in request state
     request.state.sources = []
 
-    # Proxy to one of the candidate servers
-    response, chosen_server = await _reverse_proxy(
-        request, path, candidate_servers, body_bytes,
-        api_key_id=api_key.id, log_id=log_id,
-        request_id=req_id, 
-        model=model_name or "unknown",
-        sender=api_key.user.username,
-        client_wants_stream=client_wants_stream,
-        prompt_tokens=p_tokens,
-        user_id=api_key.user_id
+    # --- IRRA CLUSTER RESILIENCE LOOP ---
+    failed_models = []
+    
+    # 1. Get Initial Candidates
+    candidates = []
+    if model_name == "auto":
+        candidates = await _select_auto_model(db, body)
+    else:
+        candidates = [model_name]
+
+    if not candidates:
+        event_manager.emit(ProxyEvent("error", req_id, "IRRA", "none", api_key.user.username, error_message="Cluster Empty: No models match intent."))
+        raise HTTPException(status_code=503, detail="No models found matching your request intent.")
+
+    for current_choice in candidates:
+        # Ensure current_choice is treated as a string
+        choice_str = str(current_choice)
+        
+        # FINAL FLATTENING: Ensure body['model'] is never a list
+        body["model"] = choice_str
+        logger.info(f"IRRA Attempt: Dispatching candidate '{choice_str}'...")
+        
+        # Determine if we should enforce strict context for this specific attempt
+        body_bytes = json.dumps(body).encode('utf-8')
+
+        # Find healthy servers for this specific model
+        candidate_servers = await server_crud.get_servers_with_model(db, choice_str)
+        # Filter out servers already penalized in this request lifecycle
+        candidate_servers = [s for s in candidate_servers if not _is_server_penalized(s.id)]
+
+        if not candidate_servers:
+            logger.warning(f"IRRA: Candidate '{current_choice}' has no active healthy servers. Failing over...")
+            failed_models.append(current_choice)
+            continue
+
+        try:
+            response, chosen_server = await _reverse_proxy(
+                request, path, candidate_servers, body_bytes,
+                api_key_id=api_key.id, log_id=log_id,
+                request_id=req_id, 
+                model=current_choice,
+                sender=api_key.user.username,
+                client_wants_stream=client_wants_stream,
+                prompt_tokens=p_tokens,
+                user_id=api_key.user_id
+            )
+            # If we reached here, the stream started successfully
+            return response
+
+        except HTTPException as e:
+            # If 503/404/Timeout occurred, _reverse_proxy already penalized the node.
+            # We log the model failure and continue the loop to the next candidate.
+            logger.error(f"IRRA: Candidate '{current_choice}' failed at the gateway. Error: {e.detail}")
+            failed_models.append(current_choice)
+            continue
+            
+    raise HTTPException(
+        status_code=503, 
+        detail=f"IRRA Cluster Exhaustion: All candidates {candidates} are currently unreachable or restricted."
     )
+            
+    raise HTTPException(status_code=503, detail="Cluster Exhausted: All candidate models and servers failed.")
 
     # --- INJECT RAG SOURCES INTO FINAL RESPONSE ---
     if not client_wants_stream and hasattr(response, 'body') and request.state.sources:
@@ -2736,6 +2862,8 @@ async def proxy_ollama(
     # STABILITY FIX: Initialize recursion tracking attributes to prevent AttributeError in workflows
     request.state.enforce_strict_context = False
     request.state.processing_depth = 0
+    if not hasattr(request.state, "source_platform"):
+        request.state.source_platform = "API Client"
     
     req_id = secrets.token_hex(4)
     

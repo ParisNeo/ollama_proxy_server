@@ -42,8 +42,17 @@ NodeAgent.prototype.onConfigure = function() {
     if (!this.title || this.title === "NodeAgent") this.title = "🧠 AUTONOMOUS AGENT";
 };
 NodeAgent.prototype.onAdded = function() {
+    // Dynamic loading of memory systems from the context provided by Conception route
     if (this.msWidget && window.memory_systems_list) {
-        this.msWidget.options.values = ["none"].concat(window.memory_systems_list);
+        // Filter out duplicates and ensure "none" is always first
+        const values = ["none", ...new Set(window.memory_systems_list)];
+        this.msWidget.options.values = values;
+        
+        // If the current value is not in the new list, reset to none
+        if (!values.includes(this.properties.memory_system)) {
+            this.properties.memory_system = "none";
+            this.msWidget.value = "none";
+        }
     }
 };
 LiteGraph.registerNodeType("hub/agent", NodeAgent);

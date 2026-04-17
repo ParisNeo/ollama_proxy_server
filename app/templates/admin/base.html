@@ -278,6 +278,20 @@
         </div>
     </div>
 
+    <!-- Global Task Notification Toast -->
+    <div id="global-notification" class="fixed top-6 right-6 z-[300] w-80 transform translate-x-full transition-transform duration-500 pointer-events-none">
+        <div class="bg-[#0f111a] border-l-4 border-indigo-500 shadow-2xl rounded-r-xl p-4 flex items-start gap-4 pointer-events-auto">
+            <div class="p-2 bg-indigo-600/20 rounded-lg text-indigo-400">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+            </div>
+            <div class="flex-grow">
+                <div class="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">System Task Update</div>
+                <div id="notif-text" class="text-xs text-white font-bold leading-tight">Task completed successfully.</div>
+            </div>
+            <button onclick="hideNotification()" class="text-gray-600 hover:text-white">&times;</button>
+        </div>
+    </div>
+
     <!-- Modal Structure -->
     <div id="modal-backdrop" class="fixed inset-0 bg-black bg-opacity-70 z-50 hidden"></div>
     <div id="modal" class="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50 card-style w-11/12 max-w-2xl hidden">

@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 # Industry standard default endpoints for different AI backends
 DEFAULT_SERVER_URLS = {
     "ollama": "http://127.0.0.1:11434",
-    "vllm": "http://127.0.0.1:8000",
+    "vllm": "http://127.0.0.1:8000/v1",
     "novita": "https://api.novita.ai/v3/openai",
     "openllm": "http://127.0.0.1:3000/v1",
     "cloud": "https://ollama.com/api"
@@ -213,8 +213,9 @@ async def fetch_and_update_models(db: AsyncSession, server_id: int) -> dict:
         timeout = httpx.Timeout(30.0, connect=10.0)
         
         async with httpx.AsyncClient(timeout=timeout, headers=headers, follow_redirects=False) as client:
-            if server.server_type in ("vllm", "novita"):
-                endpoint_url = f"{server.url.rstrip('/')}/v1/models"
+            if server.server_type in ("vllm", "novita", "openllm"):
+                # Append exactly /models to the base URL (e.g. .../v3/openai/models)
+                endpoint_url = f"{server.url.rstrip('/')}/models"
                 response = await client.get(endpoint_url)
                 response.raise_for_status()
                 
@@ -510,10 +511,17 @@ async def get_servers_with_model(db: AsyncSession, model_name: str) -> list[Olla
     Get all active servers that have the specified model available, 
     respecting the admin whitelist (allowed_models).
     """
-    if not model_name or len(model_name) > 256:
+    if not model_name:
         return []
+    
+    # Defensive fix for IRRA: Ensure model_name is a string before regex
+    if isinstance(model_name, list):
+        if len(model_name) > 0:
+            model_name = str(model_name[0])
+        else:
+            return []
         
-    model_name = re.sub(r'[^\w\.\-:@]', '', model_name)[:256]
+    model_name = re.sub(r'[^\w\.\-:@]', '', str(model_name))[:256]
 
     servers = await get_servers(db)
     active_servers = [s for s in servers if s.is_active]
@@ -559,7 +567,7 @@ async def get_servers_with_model(db: AsyncSession, model_name: str) -> list[Olla
                         norm_avail == norm_req or
                         (is_ollama and available_model_name.startswith(f"{model_name}:")) or
                         (is_ollama and model_name.startswith(f"{available_model_name}:")) or
-                        (server.server_type == 'vllm' and norm_req in norm_avail)
+                        (server.server_type in ('vllm', 'novita', 'openllm') and norm_req in norm_avail)
                     )
                     
                     if is_match:

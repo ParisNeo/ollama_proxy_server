@@ -24,6 +24,14 @@
                 <input type="url" name="url" id="url" required value="{{ server.url }}" class="mt-1 block w-full px-3 py-2 rounded-md shadow-sm">
             </div>
 
+            <div>
+                <label class="flex items-center space-x-2 cursor-pointer">
+                    <input type="checkbox" name="is_active" value="true" class="h-4 w-4 rounded text-[var(--color-primary-600)] focus:ring-[var(--color-primary-500)]" {% if server.is_active %}checked{% endif %}>
+                    <span class="text-sm font-medium">Server is Active</span>
+                </label>
+                <p class="mt-1 text-xs text-gray-400">If unchecked, the proxy will temporarily ignore this server.</p>
+            </div>
+
             <div class="grid grid-cols-2 gap-4">
                 <div>
                     <label for="server_type" class="block text-sm font-medium text-current">Server Type</label>

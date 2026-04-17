@@ -7,24 +7,41 @@
         <!-- Sidebar Controls -->
         <div class="lg:col-span-1 space-y-6">
             <div class="card-style bg-indigo-500/5 border-indigo-500/20">
-                <h3 class="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-4">Target Matrix</h3>
+                <div class="flex justify-between items-center mb-4">
+                    <h3 class="text-[10px] font-black text-indigo-400 uppercase tracking-widest">Target Matrix</h3>
+                    <div class="flex items-center gap-2">
+                        <label class="flex items-center gap-2 text-[9px] text-gray-500 uppercase font-bold cursor-pointer group">
+                            <input type="checkbox" id="auto-refresh-memory" class="h-3 w-3 rounded text-indigo-600 bg-black border-white/20">
+                            <span class="group-hover:text-indigo-300">Live</span>
+                        </label>
+                        <button onclick="loadMemoryData()" class="p-1.5 bg-white/5 hover:bg-white/10 rounded-lg text-indigo-400 transition-all" title="Manual Refresh">
+                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+                        </button>
+                    </div>
+                </div>
                 <div class="space-y-4">
+                    <div class="mb-4">
+                        <label class="block text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1 px-1">1. Select Subject (Scope)</label>
+                        <select id="user-selector" onchange="loadMemoryData()" class="w-full p-2.5 rounded-lg bg-indigo-600/10 border border-indigo-500/30 text-indigo-400 font-black uppercase text-[10px] tracking-widest outline-none transition-all focus:border-indigo-400">
+                            <optgroup label="System Scopes">
+                                <option value="system">System (Immutable ROM)</option>
+                                <option value="shared_knowledge">Global Collective (Shared)</option>
+                            </optgroup>
+                            <optgroup label="User Identities">
+                                {% for u in active_users %}{% if u.id != 'system' %}
+                                <option value="{{ u.id }}">{{ u.display }}</option>
+                                {% endif %}{% endfor %}
+                            </optgroup>
+                        </select>
+                    </div>
                     <div>
-                        <label class="block text-[9px] text-gray-500 uppercase font-bold mb-1">Select Memory Core</label>
+                        <label class="block text-[9px] text-gray-500 uppercase font-bold mb-1 px-1">2. Target Memory Core</label>
                         <div class="flex gap-2">
-                            <select id="sys-select" class="flex-grow bg-black/40 border border-white/10 p-2 rounded text-xs" onchange="loadMemoryData()">
+                            <select id="sys-select" class="flex-grow bg-black/40 border border-white/10 p-2 rounded text-xs outline-none focus:border-indigo-500" onchange="loadMemoryData()">
                                 {% for s in systems %}<option value="{{ s.name }}">{{ s.name }}</option>{% endfor %}
                             </select>
-                            <button class="px-2 bg-indigo-600 rounded text-white">+</button>
+                            <button onclick="addMemorySystemModal()" class="px-2 bg-white/5 border border-white/10 rounded text-indigo-400 hover:bg-white/10 transition-colors">+</button>
                         </div>
-                    </div>
-                    <div class="mb-4">
-                        <label class="block text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1 px-1">Select Subject (User)</label>
-                        <select id="user-selector" onchange="loadMemoryData()" class="w-full p-2.5 rounded-lg bg-black/40 border border-white/10 text-indigo-400 font-bold outline-none">
-                            {% for u in active_users %}
-                            <option value="{{ u.id }}">{{ u.display }}</option>
-                            {% endfor %}
-                        </select>
                     </div>
                 </div>
             </div>
@@ -143,6 +160,63 @@
 <script>
     let currentView = 'engrams';
 
+    function addMemorySystemModal() {
+        const body = `
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-[10px] font-black text-gray-500 uppercase mb-1">Core Name</label>
+                    <input type="text" id="new-sys-name" placeholder="e.g. specialized_agent_core" class="w-full bg-black/40 border border-white/10 p-2 rounded-lg text-sm">
+                </div>
+                <div>
+                    <label class="block text-[10px] font-black text-gray-500 uppercase mb-1">Description</label>
+                    <input type="text" id="new-sys-desc" placeholder="What is this core used for?" class="w-full bg-black/40 border border-white/10 p-2 rounded-lg text-sm">
+                </div>
+                <label class="flex items-center gap-2 cursor-pointer mt-4">
+                    <input type="checkbox" id="new-sys-aff" class="h-4 w-4 rounded text-indigo-600 bg-black border-white/20">
+                    <span class="text-xs font-bold text-gray-400">Enable Affective Matrix</span>
+                </label>
+                <div class="flex justify-end pt-4 border-t border-white/5">
+                    <button onclick="submitNewSystem()" class="bg-indigo-600 hover:bg-indigo-500 px-8 py-2 rounded-xl text-xs font-black uppercase text-white shadow-lg transition-all">Create Core</button>
+                </div>
+            </div>
+        `;
+        window.showModal("Construct Memory Core", body);
+    }
+
+    async function submitNewSystem() {
+        const fd = new FormData();
+        fd.append('name', document.getElementById('new-sys-name').value);
+        fd.append('desc', document.getElementById('new-sys-desc').value);
+        fd.append('use_aff', document.getElementById('new-sys-aff').checked);
+        fd.append('csrf_token', '{{ csrf_token }}');
+        await fetch('/admin/api/memory/system/add', { method: 'POST', body: fd });
+        window.location.reload();
+    }
+
+    async function deleteMemorySystem() {
+        const system = document.getElementById('sys-select').value;
+        if (system === 'lollms' || system === 'default') {
+            alert(`Cannot delete the foundational '${system}' core.`);
+            return;
+        }
+        if(!confirm(`Are you sure you want to completely destroy the '${system}' memory core and ALL its engrams? This is irreversible.`)) return;
+        
+        try {
+            const resp = await fetch(`/admin/api/memory/system/${system}`, { 
+                method: 'DELETE',
+                headers: { 'X-CSRF-Token': '{{ csrf_token }}' }
+            });
+            if (resp.ok) {
+                window.location.reload();
+            } else {
+                const data = await resp.json();
+                alert(data.error || "Failed to delete core.");
+            }
+        } catch(e) {
+            alert("Error: " + e.message);
+        }
+    }
+
     function switchTab(tab) {
         ['engrams', 'deep', 'dreams'].forEach(t => {
             const el = document.getElementById(`view-${t}`);
@@ -228,7 +302,9 @@
             // 2. Render Engrams (Active & Deep)
             const renderRow = m => `
                 <tr class="group/row">
-                    <td class="p-3 text-[9px] font-bold text-indigo-500 uppercase">${m.cat}</td>
+                    <td class="p-3 text-[9px] font-bold text-indigo-500 uppercase">
+                        ${m.is_immutable ? '<span class="text-amber-500">[ROM]</span> ' : (m.user_id === 'shared_knowledge' ? '<span class="text-emerald-400">[SHARED]</span> ' : '')}${m.cat}
+                    </td>
                     <td class="p-3 text-sm">
                         <div class="font-black text-white text-[11px] mb-0.5">${m.title}</div>
                         <div class="text-xs text-gray-400 leading-relaxed">${m.content}</div>
@@ -274,6 +350,22 @@
             console.error("Failed to load memory data:", e);
         }
     }
+
+    // --- AUTO-REFRESH LOGIC ---
+    let refreshInterval = null;
+    const setupAutoRefresh = () => {
+        const cb = document.getElementById('auto-refresh-memory');
+        cb.addEventListener('change', (e) => {
+            if (e.target.checked) {
+                console.log("Memory Auto-refresh active (3s)");
+                refreshInterval = setInterval(loadMemoryData, 3000);
+            } else {
+                clearInterval(refreshInterval);
+                refreshInterval = null;
+            }
+        });
+    };
+    document.addEventListener('DOMContentLoaded', setupAutoRefresh);
 
     async function triggerDream() {
         const btn = document.getElementById('btn-dream');

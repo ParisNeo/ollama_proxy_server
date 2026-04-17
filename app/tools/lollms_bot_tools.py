@@ -7,10 +7,12 @@ TOOL_LIBRARY_NAME = 'LoLLMs Bot Tools'
 TOOL_LIBRARY_DESC = 'Core filesystem and execution primitives for the LoLLMs Bot Agent.'
 TOOL_LIBRARY_ICON = '🤖'
 
+WORKSPACE_DIR = Path("app/static/uploads/workspace")
+
 def init_tool_library() -> None:
     '''Ensure basic system permissions are understood.'''
-    # We create a local workspace folder if it doesn't exist
-    Path("workspace").mkdir(exist_ok=True)
+    # We create a publicly accessible workspace folder if it doesn't exist
+    WORKSPACE_DIR.mkdir(parents=True, exist_ok=True)
 
 def tool_read_file(args: dict, lollms=None):
     '''
@@ -21,7 +23,7 @@ def tool_read_file(args: dict, lollms=None):
             - path (str): Path to the file relative to the workspace.
     '''
     try:
-        path = Path("workspace") / args.get('path', '').lstrip('/\\')
+        path = WORKSPACE_DIR / args.get('path', '').lstrip('/\\')
         if not path.exists():
             return f"Error: File '{args.get('path')}' not found."
         
@@ -40,13 +42,31 @@ def tool_write_file(args: dict, lollms=None):
             - content (str): The text content to write.
     '''
     try:
-        path = Path("workspace") / args.get('path', '').lstrip('/\\')
+        path = WORKSPACE_DIR / args.get('path', '').lstrip('/\\')
         path.parent.mkdir(parents=True, exist_ok=True)
         
         path.write_text(args.get('content', ''), encoding='utf-8')
         return f"Success: Wrote {len(args.get('content', ''))} characters to '{args.get('path')}'."
     except Exception as e:
         return f"Error writing file: {str(e)}"
+
+def tool_send_artifact_to_user(args: dict, lollms=None):
+    '''
+    Send a file from the workspace to the user. Use this when the user asks to see a generated file, image, or document.
+    
+    Args:
+        args: dict with keys:
+            - path (str): Path to the file relative to the workspace.
+    '''
+    try:
+        path = WORKSPACE_DIR / args.get('path', '').lstrip('/\\')
+        if not path.exists():
+            return f"Error: File '{args.get('path')}' not found."
+            
+        public_path = f"/static/uploads/workspace/{args.get('path', '').lstrip('/\\\\')}"
+        return f"File sent successfully.\n<artifact type=\"file\" path=\"{public_path}\"/>"
+    except Exception as e:
+        return f"Error sending file: {str(e)}"
 
 def tool_execute_command(args: dict, lollms=None):
     '''
@@ -63,7 +83,7 @@ def tool_execute_command(args: dict, lollms=None):
             shell=True,
             capture_output=True,
             text=True,
-            cwd="workspace",
+            cwd=str(WORKSPACE_DIR.absolute()),
             timeout=30 # Safety timeout
         )
         

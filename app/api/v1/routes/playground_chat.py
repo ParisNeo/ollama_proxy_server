@@ -153,13 +153,10 @@ async def _process_playground_logic(
     
     servers_with_model = await server_crud.get_servers_with_model(db, model_name)
     if not servers_with_model:
-        active_servers = [s for s in await server_crud.get_servers(db) if s.is_active]
-        if not active_servers:
-            error_payload = {"error": "No active backend servers available."}
-            return Response(json.dumps(error_payload), media_type="application/x-ndjson", status_code=503)
-        target_server = active_servers[0]
-    else:
-        target_server = servers_with_model[0]
+        error_payload = {"error": f"Model '{model_name}' is not available on any active backend server."}
+        return Response(json.dumps(error_payload), media_type="application/x-ndjson", status_code=503)
+        
+    target_server = servers_with_model[0]
     
     if target_server.server_type in ('vllm', 'novita'):
         from app.core.vllm_translator import translate_ollama_to_vllm_chat, vllm_stream_to_ollama_stream
@@ -185,17 +182,19 @@ async def _process_playground_logic(
                     if response.status_code != 200:
                         error_body = await response.aread()
                         error_text = error_body.decode('utf-8')
-                        logger.error(f"vLLM backend returned error {response.status_code}: {error_text}")
-                        error_payload = {"error": f"vLLM server error: {error_text}"}
+                        srv_type = target_server.server_type.upper()
+                        logger.error(f"{srv_type} backend returned error {response.status_code}: {error_text}")
+                        error_payload = {"error": f"{srv_type} server error: {error_text}"}
                         yield json.dumps(error_payload).encode('utf-8')
                         return
-                    
+
                     async for chunk in vllm_stream_to_ollama_stream(response.aiter_text(), model_name):
                         yield chunk
             except (httpx.ReadError, asyncio.CancelledError):
                 logger.warning("Stream interrupted (client disconnected or server shutdown).")
             except Exception as e:
-                logger.error(f"Error streaming from vLLM backend: {e}", exc_info=True)
+                srv_type = target_server.server_type.upper()
+                logger.error(f"Error streaming from {srv_type} backend: {e}", exc_info=True)
                 error_payload = {"error": "Failed to stream from backend server.", "details": str(e)}
                 yield (json.dumps(error_payload) + '\n').encode('utf-8')
         
@@ -332,6 +331,7 @@ async def admin_playground_stream(
         # STABILITY FIX: Initialize recursion tracking attributes for playground sessions
         request.state.processing_depth = 0
         request.state.enforce_strict_context = True
+        request.state.source_platform = "Web Playground"
         data = await request.json()
         model_name = data.get("model")
         messages = data.get("messages")
