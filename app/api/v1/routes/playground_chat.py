@@ -68,12 +68,12 @@ async def _process_playground_logic(
         
     # 1. Handle 'auto' model
     if model_name == "auto":
-        resolved_model = await _select_auto_model(db, data)
-        if not resolved_model:
+        candidates = await _select_auto_model(db, data, request=request)
+        if not candidates:
             event_manager.emit(ProxyEvent("error", req_id, model_name, "none", sender, error_message="Auto-routing failed"))
             return Response(json.dumps({"error": "Auto-routing could not find a suitable model."}), 
                             media_type="application/x-ndjson", status_code=503)
-        model_name = resolved_model
+        model_name = candidates[0]
         data["model"] = model_name
 
     # 2. Handle Smart Routers (Pools)

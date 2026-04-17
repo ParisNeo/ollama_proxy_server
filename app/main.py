@@ -180,6 +180,7 @@ async def bootstrap_lollms_agent() -> None:
             {"t": "NOVITA_BINDING", "c": "Novita AI integration provides high-speed cloud inference using the OpenAI protocol branch.", "i": 30},
             {"t": "IRRA_PROTOCOL", "c": "The Intricate Routing & Recovery Algorithm (IRRA) is my core failover engine. It uses intent vectoring to generate a ranked priority queue of candidate models. If a chosen model/server returns a 404 or 503, I automatically trip a global circuit breaker for that node and fail over to the next candidate in the queue without user intervention.", "i": 95},
             {"t": "IRRA_FAILOVER", "c": "IRRA prevents 'Cluster Exhaustion' by dynamically re-routing requests across non-penalized nodes. Each failure during a request lifecycle results in the (Server, Model) pair being blacklisted for that specific turn, evolving the routing path in real-time.", "i": 90},
+            {"t": "IRRA_PRIORITY_LOGIC", "c": "In the IRRA hierarchy, numerical priority is inverse: LOWER values indicate HIGHER importance. A model with Priority 1 will always be attempted before a model with Priority 10. This allows administrators to 'pin' preferred hardware or cost-effective models as primary targets.", "i": 95},
             {"t": "UI_CONTROLS", "c": "I can move the user to specific pages using <ui_move_to path='/admin/servers'/> or highlight elements via <ui_highlight selector='#btn-save'/>.", "i": 30}
         ]
         

@@ -570,6 +570,15 @@ async def get_servers_with_model(db: AsyncSession, model_name: str) -> list[Olla
                         (server.server_type in ('vllm', 'novita', 'openllm') and norm_req in norm_avail)
                     )
                     
+                    # HARD SAFETY: If this is an embedding model, reject it for chat requests
+                    # We infer this from the name if the metadata is stale
+                    if is_match and is_embedding_model(available_model_name):
+                        # Only allow if the user *specifically* asked for an embedding endpoint
+                        # but block it for chat routes.
+                        # This logic is best-effort since we don't know the route here, 
+                        # but we can filter it out of the general "servers_with_model" list.
+                        is_match = False
+                    
                     if is_match:
                         servers_with_model.append(server)
                         break

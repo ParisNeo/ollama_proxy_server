@@ -496,8 +496,19 @@ async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer
 
         servers_tried.append(chosen_server.name)
 
-        # --- RE-ENCODING FOR OLLAMA ---
+        # --- ABSOLUTE TYPE GUARD: Ensure model is string, not list ---
         local_body_bytes = body_bytes
+        try:
+            # Ensure 'model' is a single string. IRRA candidates list must be flattened here.
+            temp_json = json.loads(body_bytes)
+            if isinstance(temp_json.get("model"), list):
+                # Force use the 'model' argument passed to _reverse_proxy, which is the current candidate string
+                temp_json["model"] = str(model)
+                local_body_bytes = json.dumps(temp_json).encode('utf-8')
+        except:
+            pass
+
+        # --- RE-ENCODING FOR OLLAMA ---
         # Apply normalization to both local Ollama and Ollama Cloud instances
         if chosen_server.server_type in ('ollama', 'cloud'):
             # Use strict context enforcement for bundles/orchestrators, lenient for raw models
@@ -1332,7 +1343,7 @@ async def _async_log_usage(
         return None
 
 
-async def _select_auto_model(db: AsyncSession, body: Dict[str, Any], overrides: Dict[str, bool] = None, exclude_models: List[str] = None) -> List[str]:
+async def _select_auto_model(db: AsyncSession, body: Dict[str, Any], overrides: Dict[str, bool] = None, exclude_models: List[str] = None, request: Request = None) -> List[str]:
     """
     IRRA Algorithm: Generates a ranked list of candidate model names based on 
     intent, hardware health, and excludes previously failed models.
@@ -1407,15 +1418,18 @@ async def _select_auto_model(db: AsyncSession, body: Dict[str, Any], overrides: 
         logger.warning("Auto-routing failed: No models with metadata are available on active servers.")
         return None
 
+
     candidate_models = available_metadata
 
     # Tier 1: Capability Matching
+    # HARD FILTER: If the user is requesting chat, remove embedding-only models
+    if request and ("chat" in request.url.path or "generate" in request.url.path):
+        candidate_models = [m for m in candidate_models if not m.is_embedding_model]
     if has_images:
         # Strict filter: ONLY models that support images
         candidate_models = [m for m in candidate_models if m.supports_images]
     else:
-        # Soft filter: If it's a text task, prioritize text-only models 
-        # (models that don't support images) to save the vision experts for vision tasks.
+        # Soft filter: If it's a text task, prioritize text-only models
         text_only = [m for m in candidate_models if not m.supports_images]
         if text_only:
             candidate_models = text_only
@@ -1455,11 +1469,25 @@ async def _select_auto_model(db: AsyncSession, body: Dict[str, Any], overrides: 
     if not candidate_models:
         return []
 
-    # Sort by priority (asc)
-    candidate_models.sort(key=lambda x: x.priority)
+    # Tier 3: Health-Aware Scoring
+    # Models are penalized if their hosting servers are penalized.
+    scored_candidates = []
+    for m in candidate_models:
+        score = m.priority
+        # Fetch servers for this model
+        servers = await server_crud.get_servers_with_model(db, m.model_name)
+        # If any server hosting this model is penalized, add a penalty to the score
+        if any(_is_server_penalized(s.id) for s in servers):
+            score += 500 # High penalty ensures it drops below healthy models
+        scored_candidates.append((score, m))
     
-    ranked_names = [m.model_name for m in candidate_models]
-    logger.info(f"IRRA Router: Intent identified. Ranked Candidates: {ranked_names}")
+    # Sort by Score (Priority + Penalty)
+    scored_candidates.sort(key=lambda x: x[0])
+    
+    # Return ranked list of names
+    ranked_names = [m.model_name for s, m in scored_candidates]
+    
+    logger.info(f"IRRA Router: Ranked candidates: {ranked_names}")
     return ranked_names
 
 
@@ -1820,8 +1848,9 @@ async def _resolve_target(db: AsyncSession, name: str, messages: List[Dict[str, 
     # 3. Fallback: It's a raw model name
     if name == "auto":
         body = {"messages": messages}
-        best_model = await _select_auto_model(db, body)
-        return best_model or "unknown", messages
+        candidates = await _select_auto_model(db, body, request=request)
+        best_model = candidates[0] if candidates else "unknown"
+        return best_model, messages
 
     # For raw models, don't enforce strict context (preserve user's num_ctx if set)
     return name, messages
@@ -2553,15 +2582,7 @@ async def _process_proxy_logic(
         )
 
     async with AsyncSessionLocal() as db:
-        # 1. Handle 'auto' model routing FIRST            
-        if model_name == "auto":
-            chosen_model_name = await _select_auto_model(db, body)
-            if not chosen_model_name:
-                raise HTTPException(status_code=503, detail="Auto-routing failed.")
-            model_name = chosen_model_name
-            body["model"] = model_name
-
-        # 2. Resolve Workflow / Graph Tools
+        # 1. Resolve Workflow / Graph Tools
         requested_model_name = model_name
         if model_name and isinstance(body, dict):
             is_chat_mode = "messages" in body
@@ -2754,8 +2775,9 @@ async def _process_proxy_logic(
     # 1. Generate Ranked Candidates
     # We keep the original 'model_name' for telemetry and use 'candidates' for routing.
     candidates = []
+ 
     if model_name == "auto":
-        candidates = await _select_auto_model(db, body)
+        candidates = await _select_auto_model(db, body, request=request)
     else:
         candidates = [model_name]
 
@@ -2765,15 +2787,11 @@ async def _process_proxy_logic(
 
     # 2. Iterate through candidates until success
     for choice_str in candidates:
-        # Ensure it's a string
         choice_str = str(choice_str)
         
-        # CLONE & FLATTEN BODY: Guarantee the backend sees a string, never a list.
-        local_body = body.copy()
-        local_body["model"] = choice_str
-        
-        logger.info(f"IRRA Attempt: Dispatching candidate '{choice_str}'...")
-        current_body_bytes = json.dumps(local_body).encode('utf-8')
+        # We pass the list-containing body_bytes, but tell _reverse_proxy 
+        # exactly which model string to enforce in the final payload.
+        logger.info(f"IRRA Attempt: Rerouting to candidate '{choice_str}'...")
 
         # Find healthy servers for this specific model
         candidate_servers = await server_crud.get_servers_with_model(db, choice_str)
@@ -2787,10 +2805,10 @@ async def _process_proxy_logic(
 
         try:
             response, chosen_server = await _reverse_proxy(
-                request, path, candidate_servers, current_body_bytes,
+                request, path, candidate_servers, body_bytes,
                 api_key_id=api_key.id, log_id=log_id,
                 request_id=req_id, 
-                model=current_choice,
+                model=choice_str, # This string is used by the Guard to fix the body_bytes
                 sender=api_key.user.username,
                 client_wants_stream=client_wants_stream,
                 prompt_tokens=p_tokens,
