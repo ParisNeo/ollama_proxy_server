@@ -987,8 +987,24 @@ def _wrap_response_for_token_tracking(
                                 async def _background_memory_task(u_id, m_name, payload):
                                     try:
                                         from app.database.session import AsyncSessionLocal
+                                        from safe_store import SafeStore
+                                        
+                                        settings = request.app.state.settings
                                         async with AsyncSessionLocal() as b_db:
                                             await CognitiveMemoryManager.process_tags(b_db, str(u_id), m_name, payload)
+                                        
+                                        # If vector mode is on, we mirror the update to SafeStore
+                                        if settings.memory_recovery_mode == "vector":
+                                            vectorizer = await _get_shared_vectorizer(settings)
+                                            if vectorizer:
+                                                db_path = "app/static/datastores/managed_memory.db"
+                                                s = SafeStore(db_path=db_path, vectorizer_name=settings.routing_vectorizer_name, 
+                                                              vectorizer_config=vectorizer.config)
+                                                with s:
+                                                    # Extract tags manually for indexing
+                                                    matches = re.findall(r'<memory[^>]*>(.*?)</memory>', payload, re.DOTALL)
+                                                    for content in matches:
+                                                        s.add_text(unique_id=f"mem_{secrets.token_hex(4)}", text=content.strip())
                                     except asyncio.CancelledError:
                                         # Re-raise to ensure the task finishes correctly
                                         raise
@@ -2982,7 +2998,7 @@ async def _process_proxy_logic(
     if model_name:
         logger.info(f"proxy_ollama: Looking for servers with model '{model_name}'")
         # For internal system tasks, we look for PHYSICAL availability only, ignoring the admin whitelist
-        is_system = "sys_build_" in str(req_id) or "sys_ds_" in str(req_id)
+        is_system = "sys_" in str(req_id) or (api_key and api_key.key_prefix == "sys_internal")
         
         if is_system:
             # Manual filter for physical presence
@@ -3004,10 +3020,11 @@ async def _process_proxy_logic(
         # --- SECURITY CHECK: Distinguish between 'Not Found' and 'Not Allowed' ---
         # SYSTEM BYPASS: If this is an internal system task, we ignore the whitelist 
         # to ensure RAG and Metadata synchronization never deadlocks.
+        # We detect system status via ID prefix OR if the API Key belongs to the internal system user.
         is_system = (
             getattr(request.state, "is_managed_agent", False) or 
-            "sys_build_" in str(req_id) or 
-            "sys_ds_" in str(req_id)
+            "sys_" in str(req_id) or 
+            (api_key and api_key.key_prefix == "sys_internal")
         )
 
         physically_exists = False

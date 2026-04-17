@@ -1729,6 +1729,9 @@ async def admin_settings_post(
         "routing_vectorizer_name": form_data.get("routing_vectorizer_name", "tf_idf"),
         "routing_vectorizer_model": form_data.get("routing_vectorizer_model") or None,
         "routing_vectorizer_base_url": form_data.get("routing_vectorizer_base_url") or None,
+        "memory_recovery_mode": form_data.get("memory_recovery_mode", "handles"),
+        "memory_vector_top_k": safe_int("memory_vector_top_k", 3),
+        "memory_vector_threshold": float(form_data.get("memory_vector_threshold", 0.6)),
     })
     
     if new_redis_password:

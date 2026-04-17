@@ -8,7 +8,34 @@ logger = logging.getLogger(__name__)
 
 class CognitiveMemoryManager:
     @staticmethod
-    async def get_memory_context(db, user_identifier: str, agent_name: str) -> str:
+    async def _get_vector_memories(request, user_id, agent_name, query, top_k, threshold):
+        """Internal RAG search for deep memory engrams."""
+        try:
+            from app.api.v1.routes.proxy import _get_shared_vectorizer
+            from safe_store import SafeStore
+            import os
+            
+            settings = request.app.state.settings
+            vectorizer = await _get_shared_vectorizer(settings)
+            if not vectorizer: return ""
+
+            # Memory DB path: app/static/datastores/managed_memory.db
+            db_path = "app/static/datastores/managed_memory.db"
+            
+            s = SafeStore(db_path=db_path, vectorizer_name=settings.routing_vectorizer_name, 
+                          vectorizer_config=vectorizer.config)
+            
+            with s:
+                # We filter by metadata: {user_id: ..., agent: ...}
+                results = s.query(query, top_k=top_k)
+                filtered = [r for r in results if r.get('similarity', 0) >= threshold]
+                return "\n".join([f"- {r['chunk_text']}" for r in filtered])
+        except Exception as e:
+            logger.warning(f"Vector memory retrieval failed: {e}")
+            return ""
+
+    @staticmethod
+    async def get_memory_context(db, user_identifier: str, agent_name: str, request=None) -> str:
         # 1. Fetch Immutable Front-ROM (High importance core facts)
         res_rom = await db.execute(
             select(MemoryEntry).filter(
@@ -33,10 +60,18 @@ class CognitiveMemoryManager:
         if agent_name == "lollms" or user_identifier == "shared_knowledge":
             search_ids.append("shared_knowledge")
 
+        settings = request.app.state.settings if request else None
+        recovery_mode = settings.memory_recovery_mode if settings else "handles"
+
+        # If vector mode is on, we only fetch Tier 1 (Working) from SQL, 
+        # and pull Tier 2 (Deep) from Vector Store.
+        importance_floor = 25 if recovery_mode == "vector" else 0
+
         res = await db.execute(
             select(MemoryEntry).filter(
                 MemoryEntry.user_identifier.in_(search_ids),
-                MemoryEntry.agent_name == agent_name
+                MemoryEntry.agent_name == agent_name,
+                MemoryEntry.importance >= importance_floor
             ).order_by(MemoryEntry.importance.desc())
         )
         all_entries = res.scalars().all()

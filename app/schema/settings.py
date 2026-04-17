@@ -115,6 +115,11 @@ class AppSettingsModel(BaseModel):
     routing_context_margin: int = Field(default=512, description="Buffer tokens added to prompt length check.")
     routing_context_strategy: str = Field(default="crop", description="Strategy when user num_ctx > model context: 'forward', 'crop' (limit to model), or 'force' (always use model max).")
 
+    # --- MEMORY RECOVERY ---
+    memory_recovery_mode: str = Field(default="handles", description="How to recover deep memories: 'handles' (AI must search) or 'vector' (Auto-RAG).")
+    memory_vector_top_k: int = 3
+    memory_vector_threshold: float = 0.6
+
     # --- SECURITY ---
     blocked_ollama_endpoints: str = Field(
         default="pull,delete,create,copy,push",

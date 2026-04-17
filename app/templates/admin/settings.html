@@ -245,6 +245,34 @@
             <p class="mt-2 text-xs text-gray-400">Controls the automatic cleanup of application logs. Current file: <code class="text-indigo-400">lollms_hub.log</code></p>
         </div>
 
+        <!-- Neural Memory Recovery -->
+        <div class="card-style border-l-4 border-fuchsia-500 bg-fuchsia-500/5" id="memory-settings-zone">
+            <h2 class="card-header text-xl font-bold mb-4 pb-2 flex items-center gap-2">
+                <svg class="w-6 h-6 text-fuchsia-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                Neural Memory Recovery
+            </h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+                <div class="space-y-4">
+                    <label class="block text-[10px] font-black text-gray-500 uppercase">Recovery Logic</label>
+                    <select name="memory_recovery_mode" class="w-full bg-black/20 border border-white/10 rounded p-2 text-sm">
+                        <option value="handles" {% if settings.memory_recovery_mode == 'handles' %}selected{% endif %}>Handles (AI Manual Search - Saves Context)</option>
+                        <option value="vector" {% if settings.memory_recovery_mode == 'vector' %}selected{% endif %}>Vector (Automatic RAG - High Fidelity)</option>
+                    </select>
+                    <p class="text-[10px] text-gray-500 italic">Vector mode uses the Shared Routing Vectorizer defined in SB-MRA settings.</p>
+                </div>
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-[10px] font-black text-gray-500 uppercase">Memory Top K</label>
+                        <input type="number" name="memory_vector_top_k" value="{{ settings.memory_vector_top_k }}" class="w-full bg-black/20 rounded p-2 text-xs">
+                    </div>
+                    <div>
+                        <label class="block text-[10px] font-black text-gray-500 uppercase">Similarity Min</label>
+                        <input type="number" step="0.05" name="memory_vector_threshold" value="{{ settings.memory_vector_threshold }}" class="w-full bg-black/20 rounded p-2 text-xs">
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- External Integration Settings -->
         <div>
             <h2 class="card-header text-xl font-bold mb-4 pb-2">External Search & AI Tools</h2>
@@ -535,6 +563,36 @@
                 <button type="submit" form="refresh-assets-form" class="px-4 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded text-xs font-black uppercase">Update Libraries</button>
             </div>
         </div>
+
+        <!-- Final Page Tour Definitions -->
+        <script>
+            const SETTINGS_TOUR = [
+                {
+                    target: null,
+                    text: "Welcome to the <b>Fortress Engine Room</b>. Let's calibrate your cluster settings."
+                },
+                {
+                    target: '#memory-settings-zone',
+                    text: "<b>Neural Memory</b>: Choose between 'Handles' (where the AI manually fetches old memories) or 'Vector' (which uses SafeStore RAG to automatically inject relevant facts into the prompt)."
+                },
+                {
+                    target: '[name="enable_sb_mra"]',
+                    text: "<b>SB-MRA Logic</b>: This is the brain of the Gateway. It balances Bayesian reliability with ecological impact. Adjust the weights to prioritize speed over carbon savings, or vice versa."
+                },
+                {
+                    target: '[name="routing_vectorizer_name"]',
+                    text: "<b>Shared Vectorizer</b>: Used for both SB-MRA semantic routing and Vector Memory recovery. Using <b>SentenceTransformer</b> is recommended for high-fidelity local execution."
+                },
+                {
+                    target: '[name="admin_agent_name"]',
+                    text: "<b>Management Agent</b>: Select an agent to act as the Hub's internal 'Architect'. This agent will help build new tools, nodes, and fix code bugs."
+                }
+            ];
+
+            window.addEventListener('load', () => {
+                window.startCustomTour(SETTINGS_TOUR, 'tour_settings_v1', true);
+            });
+        </script>
 
         <!-- Save Button (Properly inside the main form) -->
         <div class="flex justify-end pt-8 border-t border-white/10 mt-8">

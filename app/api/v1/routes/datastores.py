@@ -117,17 +117,17 @@ async def admin_add_datastore(
     
     # --- INTERNAL KEY MANAGEMENT ---
     # --- INTERNAL KEY MANAGEMENT ---
-    if vectorizer_api_key:
+    # We always prioritize the Hub's own SECRET_KEY for local loopbacks
+    # to ensure SafeStore has bypass privileges for embeddings.
+    url_str = target_url.lower()
+    is_loopback = "localhost" in url_str or "127.0.0.1" in url_str
+    
+    if is_loopback:
+        from app.core.config import settings as bootstrap_settings
+        v_config["api_key"] = bootstrap_settings.SECRET_KEY.strip().strip('"').strip("'")
+        logger.info(f"Datastore '{name}': Loopback detected. Injecting Hub SECRET_KEY for internal authentication.")
+    elif vectorizer_api_key:
         v_config["api_key"] = vectorizer_api_key.strip().strip('"').strip("'")
-    else:
-        # If pointing to self (localhost/127.0.0.1), inject the Hub's loopback auth key
-        url_str = target_url.lower()
-        if "localhost" in url_str or "127.0.0.1" in url_str:
-            # We use the Hub's SECRET_KEY to authenticate against its own API
-            from app.core.config import settings as bootstrap_settings
-            # Ensure we send the clean key
-            v_config["api_key"] = bootstrap_settings.SECRET_KEY.strip().strip('"').strip("'")
-            logger.info(f"Datastore '{name}': Loopback detected. Injecting Hub SECRET_KEY for internal authentication.")
     
     try:
         ds = DataStore(

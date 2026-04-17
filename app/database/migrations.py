@@ -374,7 +374,10 @@ async def migrate_app_settings_data(engine: AsyncEngine) -> None:
             "routing_vectorizer_name": "sentense_transformer",
             "routing_vectorizer_model": "sentence-transformers/all-MiniLM-L6-v2",
             "routing_context_margin": 512,
-            "routing_context_strategy": "crop"
+            "routing_context_strategy": "crop",
+            "memory_recovery_mode": "handles",
+            "memory_vector_top_k": 3,
+            "memory_vector_threshold": 0.6
         }
 
         # Add missing fields
