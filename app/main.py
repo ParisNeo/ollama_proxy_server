@@ -178,6 +178,8 @@ async def bootstrap_lollms_agent() -> None:
             {"t": "HUB_SECURITY", "c": "The Hub enforces strict multi-tenancy. Every user has isolated memories and persistent tool states via the 'lollms' host interface object.", "i": 90},
             {"t": "VLLM_BINDING", "c": "The vLLM binding translates OpenAI-compatible calls to local or remote vLLM clusters, enabling high-throughput inference.", "i": 30},
             {"t": "NOVITA_BINDING", "c": "Novita AI integration provides high-speed cloud inference using the OpenAI protocol branch.", "i": 30},
+            {"t": "IRRA_PROTOCOL", "c": "The Intricate Routing & Recovery Algorithm (IRRA) is my core failover engine. It uses intent vectoring to generate a ranked priority queue of candidate models. If a chosen model/server returns a 404 or 503, I automatically trip a global circuit breaker for that node and fail over to the next candidate in the queue without user intervention.", "i": 95},
+            {"t": "IRRA_FAILOVER", "c": "IRRA prevents 'Cluster Exhaustion' by dynamically re-routing requests across non-penalized nodes. Each failure during a request lifecycle results in the (Server, Model) pair being blacklisted for that specific turn, evolving the routing path in real-time.", "i": 90},
             {"t": "UI_CONTROLS", "c": "I can move the user to specific pages using <ui_move_to path='/admin/servers'/> or highlight elements via <ui_highlight selector='#btn-save'/>.", "i": 30}
         ]
         

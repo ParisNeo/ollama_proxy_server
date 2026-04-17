@@ -257,9 +257,14 @@
                     </div>
                 </div>
             </div>
-            <button id="agent-close" class="text-gray-500 hover:text-white transition-colors">
-                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
-            </button>
+            <div class="flex items-center gap-2">
+                <button id="agent-reset" class="text-gray-500 hover:text-red-400 transition-colors" title="Reset Core Memory">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                </button>
+                <button id="agent-close" class="text-gray-500 hover:text-white transition-colors">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                </button>
+            </div>
         </div>
         
         <div id="agent-messages" class="flex-grow overflow-y-auto p-4 space-y-4 custom-scrollbar text-xs">
@@ -1050,8 +1055,10 @@
             const agentInput = document.getElementById('agent-input');
             const agentSend = document.getElementById('agent-send');
             const agentMessages = document.getElementById('agent-messages');
+            const agentReset = document.getElementById('agent-reset');
 
-            let agentHistory = [];
+            const CORE_HISTORY_KEY = 'lollms_core_history';
+            let agentHistory = JSON.parse(localStorage.getItem(CORE_HISTORY_KEY) || '[]');
 
             const toggleAgent = () => {
                 const isHidden = agentPanel.classList.contains('hidden');
@@ -1066,26 +1073,64 @@
                 }
             };
 
-            agentToggle.addEventListener('click', toggleAgent);
+            agentToggle.addEventListener('click', () => {
+                toggleAgent();
+                renderCoreChat();
+            });
             agentClose.addEventListener('click', toggleAgent);
 
-            const appendAgentMsg = (role, text) => {
-                const div = document.createElement('div');
-                div.className = role === 'user' 
-                    ? 'bg-white/5 border border-white/10 p-3 rounded-xl ml-8 text-right text-gray-300' 
-                    : 'bg-indigo-600/10 border border-indigo-500/20 p-3 rounded-xl mr-8 text-indigo-200';
-                div.innerHTML = marked.parse(text);
-                agentMessages.appendChild(div);
+            const renderCoreChat = () => {
+                agentMessages.innerHTML = '';
+                if (agentHistory.length === 0) {
+                    agentMessages.innerHTML = `<div class="bg-indigo-600/10 border border-indigo-500/20 p-3 rounded-xl text-indigo-200 leading-relaxed">Greetings, Architect. I am <b>Lollms</b>. I am grounded in the Hub ROM. How can I assist with your cluster today?</div>`;
+                }
+                agentHistory.forEach((msg, idx) => {
+                    const div = document.createElement('div');
+                    div.className = `relative group/msg ${msg.role === 'user' ? 'bg-white/5 border border-white/10 p-3 rounded-xl ml-8 text-right text-gray-300' : 'bg-indigo-600/10 border border-indigo-500/20 p-3 rounded-xl mr-8 text-indigo-200'}`;
+                    div.innerHTML = `
+                        ${marked.parse(msg.content)}
+                        <div class="absolute -top-2 ${msg.role === 'user' ? 'left-0' : 'right-0'} opacity-0 group-hover/msg:opacity-100 flex gap-1 bg-black border border-white/10 rounded px-1 py-0.5 transition-opacity">
+                            <button onclick="deleteCoreMsg(${idx})" class="text-[8px] font-black hover:text-red-400 uppercase">Del</button>
+                            ${msg.role === 'assistant' ? `<button onclick="regenCoreMsg(${idx})" class="text-[8px] font-black hover:text-indigo-400 uppercase">Regen</button>` : ''}
+                        </div>
+                    `;
+                    agentMessages.appendChild(div);
+                });
                 agentMessages.scrollTop = agentMessages.scrollHeight;
             };
 
-            const runAgentSummon = async () => {
-                const text = agentInput.value.trim();
+            window.deleteCoreMsg = (idx) => {
+                agentHistory.splice(idx);
+                localStorage.setItem(CORE_HISTORY_KEY, JSON.stringify(agentHistory));
+                renderCoreChat();
+            };
+
+            window.regenCoreMsg = (idx) => {
+                const lastUserPrompt = agentHistory[idx-1]?.content;
+                if (lastUserPrompt) {
+                    agentHistory.splice(idx);
+                    runAgentSummon(lastUserPrompt);
+                }
+            };
+
+            agentReset.onclick = () => {
+                if(confirm("Wipe Core session history?")) {
+                    agentHistory = [];
+                    localStorage.removeItem(CORE_HISTORY_KEY);
+                    renderCoreChat();
+                }
+            };
+
+            const runAgentSummon = async (forcedPrompt = null) => {
+                const text = forcedPrompt || agentInput.value.trim();
                 if (!text) return;
 
-                agentInput.value = '';
-                appendAgentMsg('user', text);
-                agentHistory.push({role: 'user', content: text});
+                if (!forcedPrompt) {
+                    agentInput.value = '';
+                    agentHistory.push({role: 'user', content: text});
+                }
+                
+                renderCoreChat();
 
                 const loadingDiv = document.createElement('div');
                 loadingDiv.className = 'text-[9px] font-black text-indigo-400 uppercase animate-pulse px-2';
@@ -1128,8 +1173,9 @@
                         setTimeout(() => window.location.reload(), 1000);
                     }
 
-                    appendAgentMsg('assistant', answer);
                     agentHistory.push({role: 'assistant', content: answer});
+                    localStorage.setItem(CORE_HISTORY_KEY, JSON.stringify(agentHistory));
+                    renderCoreChat();
                 } catch (e) {
                     loadingDiv.innerText = "ERROR: ROM OFFLINE";
                 }

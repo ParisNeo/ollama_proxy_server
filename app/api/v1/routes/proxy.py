@@ -2676,12 +2676,13 @@ async def _process_proxy_logic(
     # Estimate input tokens
     p_tokens = len(str(body)) // 4
 
-    # --- CRITICAL: Emit 'received' event BEFORE routing logic ---
-    # This ensures particles appear for Ensembles and Routers immediately.
+    # --- TELEMETRY ---
+    # Emit 'received' event with the ORIGINAL requested name (e.g., 'auto' or 'kimi')
+    # This prevents the list from appearing in the UI.
     event_manager.emit(ProxyEvent(
         event_type="received", 
         request_id=req_id, 
-        model=requested_model_name or model_name or "unknown",
+        model=str(requested_model_name or "unknown"),
         sender=api_key.user.username,
         request_type=req_type,
         prompt_tokens=p_tokens
@@ -2750,9 +2751,8 @@ async def _process_proxy_logic(
     request.state.sources = []
 
     # --- IRRA CLUSTER RESILIENCE LOOP ---
-    failed_models = []
-    
-    # 1. Get Initial Candidates
+    # 1. Generate Ranked Candidates
+    # We keep the original 'model_name' for telemetry and use 'candidates' for routing.
     candidates = []
     if model_name == "auto":
         candidates = await _select_auto_model(db, body)
@@ -2760,19 +2760,20 @@ async def _process_proxy_logic(
         candidates = [model_name]
 
     if not candidates:
-        event_manager.emit(ProxyEvent("error", req_id, "IRRA", "none", api_key.user.username, error_message="Cluster Empty: No models match intent."))
+        event_manager.emit(ProxyEvent("error", req_id, model_name or "auto", "none", api_key.user.username, error_message="Cluster Empty: No models match intent."))
         raise HTTPException(status_code=503, detail="No models found matching your request intent.")
 
-    for current_choice in candidates:
-        # Ensure current_choice is treated as a string
-        choice_str = str(current_choice)
+    # 2. Iterate through candidates until success
+    for choice_str in candidates:
+        # Ensure it's a string
+        choice_str = str(choice_str)
         
-        # FINAL FLATTENING: Ensure body['model'] is never a list
-        body["model"] = choice_str
+        # CLONE & FLATTEN BODY: Guarantee the backend sees a string, never a list.
+        local_body = body.copy()
+        local_body["model"] = choice_str
+        
         logger.info(f"IRRA Attempt: Dispatching candidate '{choice_str}'...")
-        
-        # Determine if we should enforce strict context for this specific attempt
-        body_bytes = json.dumps(body).encode('utf-8')
+        current_body_bytes = json.dumps(local_body).encode('utf-8')
 
         # Find healthy servers for this specific model
         candidate_servers = await server_crud.get_servers_with_model(db, choice_str)
@@ -2786,7 +2787,7 @@ async def _process_proxy_logic(
 
         try:
             response, chosen_server = await _reverse_proxy(
-                request, path, candidate_servers, body_bytes,
+                request, path, candidate_servers, current_body_bytes,
                 api_key_id=api_key.id, log_id=log_id,
                 request_id=req_id, 
                 model=current_choice,
