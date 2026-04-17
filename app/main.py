@@ -400,21 +400,24 @@ async def lifespan(app: FastAPI):
     # ---------- Shutdown ----------
     logger.info("Shutting down…")
     
-    # 1. Stop background tasks
+    # 1. Stop known background tasks
     if hasattr(app.state, 'refresh_task'):
         app.state.refresh_task.cancel()
-        try:
-            await app.state.refresh_task
-        except asyncio.CancelledError:
-            pass
 
-    # 2. Close network clients
+    # 2. Gracefully handle all pending background tasks (logging, memory, etc.)
+    # This prevents SAWarning: non-checked-in connection
+    pending = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
+    if pending:
+        logger.info(f"Waiting for {len(pending)} background tasks to settle...")
+        # Shield tasks from immediate destruction and give them 2 seconds to close sessions
+        await asyncio.wait(pending, timeout=2.0)
+
+    # 3. Close network clients
     await app.state.http_client.aclose()
     if app.state.redis:
         await app.state.redis.close()
 
-    # 3. Explicitly dispose of the Database Engine
-    # This flushes the connection pool and prevents SAWarnings on Ctrl+C
+    # 4. Explicitly dispose of the Database Engine
     logger.info("Closing database connections...")
     await engine.dispose()
 

@@ -985,9 +985,16 @@ def _wrap_response_for_token_tracking(
                             if user_id and is_managed:
                                 final_text = str(buffer)
                                 async def _background_memory_task(u_id, m_name, payload):
-                                    from app.database.session import AsyncSessionLocal
-                                    async with AsyncSessionLocal() as b_db:
-                                        await CognitiveMemoryManager.process_tags(b_db, str(u_id), m_name, payload)
+                                    try:
+                                        from app.database.session import AsyncSessionLocal
+                                        async with AsyncSessionLocal() as b_db:
+                                            await CognitiveMemoryManager.process_tags(b_db, str(u_id), m_name, payload)
+                                    except asyncio.CancelledError:
+                                        # Re-raise to ensure the task finishes correctly
+                                        raise
+                                    except Exception as e:
+                                        logger.debug(f"Background memory task suppressed during shutdown: {e}")
+                                
                                 asyncio.create_task(_background_memory_task(user_id, model, final_text))
                         
                     except json.JSONDecodeError:

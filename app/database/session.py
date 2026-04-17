@@ -1,10 +1,21 @@
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from app.core.config import settings
 
+from sqlalchemy.pool import QueuePool
+
 engine = create_async_engine(
     settings.DATABASE_URL, 
     pool_pre_ping=True,
-    connect_args={"timeout": 30} # Wait longer if disk is slow
+    # SQLite works best with a dedicated pool size in high-concurrency gateway scenarios
+    pool_size=20,
+    max_overflow=10,
+    pool_timeout=30,
+    # Use a faster checkout for SQLite
+    pool_recycle=3600,
+    connect_args={
+        "timeout": 30,
+        "check_same_thread": False # Required for aiosqlite/multithreading
+    }
 )
 
 # --- SPACE OPTIMIZATION ---
