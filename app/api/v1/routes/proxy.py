@@ -673,7 +673,7 @@ async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer
             if is_streaming and client_wants_stream and log_id and not is_subrequest:
                 # Wrap for token tracking and live visualization
                 wrapped_response = _wrap_response_for_token_tracking(
-                    backend_response, chosen_server, api_key_id, log_id, path, request_id, model, sender, prompt_tokens, user_id
+                    request, backend_response, chosen_server, api_key_id, log_id, path, request_id, model, sender, prompt_tokens, user_id
                 )
                 return wrapped_response, chosen_server
             else:
@@ -826,7 +826,7 @@ async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer
                 
                 if is_streaming and log_id:
                     wrapped_response = _wrap_response_for_token_tracking(
-                        backend_response, chosen_server, api_key_id, log_id, path, request_id, model, sender, prompt_tokens, user_id
+                        request, backend_response, chosen_server, api_key_id, log_id, path, request_id, model, sender, prompt_tokens, user_id
                     )
                     return wrapped_response, chosen_server
                 else:
@@ -882,6 +882,7 @@ async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer
 
 
 def _wrap_response_for_token_tracking(
+    request: Request,
     backend_response: Response,
     server: OllamaServer,
     api_key_id: Optional[int] = None,
