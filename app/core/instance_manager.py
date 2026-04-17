@@ -175,6 +175,36 @@ class InstanceSupervisor:
         """Checks if vLLM is installed in the current Python environment."""
         return pm.is_installed("vllm")
 
+    def is_openllm_installed(self) -> bool:
+        """Checks if OpenLLM is installed in the current Python environment."""
+        return pm.is_installed("openllm")
+
+    async def install_openllm(self, upgrade=False) -> Tuple[bool, str]:
+        """Attempts to install or update OpenLLM."""
+        from app.core.events import event_manager, ProxyEvent
+        import sys, asyncio
+        task_name = "Updating" if upgrade else "Installing"
+        req_id = "sys_openllm"
+        try:
+            event_manager.emit(ProxyEvent("received", req_id, "OpenLLM", "Local", "Admin", error_message=f"{task_name} OpenLLM..."))
+            cmd = f"{sys.executable} -m pip install {'--upgrade' if upgrade else ''} openllm"
+            process = await asyncio.create_subprocess_shell(cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
+            while True:
+                line = await process.stdout.readline()
+                if not line: break
+                event_manager.emit(ProxyEvent("active", req_id, "OpenLLM", "Local", "Admin", error_message=line.decode().strip()))
+            await process.wait()
+            if process.returncode == 0:
+                msg = f"OpenLLM {'updated' if upgrade else 'installed'} successfully."
+                event_manager.emit(ProxyEvent("completed", req_id, "OpenLLM", "Local", "Admin", error_message=msg))
+                return True, msg
+            err = "pip install failed."
+            event_manager.emit(ProxyEvent("error", req_id, "OpenLLM", "Local", "Admin", error_message=err))
+            return False, err
+        except Exception as e:
+            event_manager.emit(ProxyEvent("error", req_id, "OpenLLM", "Local", "Admin", error_message=str(e)))
+            return False, str(e)
+
     async def install_vllm(self, upgrade=False) -> Tuple[bool, str]:
         """Attempts to install or update vLLM."""
         from app.core.events import event_manager, ProxyEvent

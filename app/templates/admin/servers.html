@@ -22,9 +22,12 @@
                 </div>
                 <div>
                     <label for="server_type" class="block text-sm font-medium text-current">Server Type</label>
-                    <select name="server_type" id="server_type" class="mt-1 block w-full px-3 py-2 rounded-md shadow-sm" onchange="autoFillNovita(this)">
-                        <option value="ollama" selected>Ollama</option>
+                    <select name="server_type" id="server_type" class="mt-1 block w-full px-3 py-2 rounded-md shadow-sm" onchange="updateFormDefaults(this)">
+                        <option value="ollama" selected>Ollama (Local)</option>
+                        <option value="cloud">Ollama Cloud</option>
                         <option value="vllm">vLLM (OpenAI-Compatible)</option>
+                        <option value="openllm">OpenLLM (BentoML)</option>
+                        <option value="open_webui">Open WebUI (Gateway)</option>
                         <option value="novita">Novita AI (Cloud)</option>
                     </select>
                 </div>
@@ -51,6 +54,58 @@
             const urlInput = document.getElementById('server_url');
             if (select.value === 'novita' && (!urlInput.value || urlInput.value === 'http://127.0.0.1:11434')) {
                 urlInput.value = 'https://api.novita.ai/v3/openai';
+            }
+        }
+    </script>
+
+    <!-- Detailed Deployment & Backend Help -->
+    <div class="card-style border-l-4 border-indigo-500 bg-indigo-500/5">
+        <h2 class="card-header text-xl font-bold mb-4">Deployment & Backend Guide</h2>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-8 text-sm">
+            <div class="space-y-3">
+                <h3 class="font-black text-indigo-400 uppercase tracking-widest text-xs">🦙 Ollama (Local/Cloud)</h3>
+                <p class="text-gray-400">The industry standard for local LLMs.</p>
+                <ul class="space-y-2 list-disc list-inside text-gray-500">
+                    <li><b class="text-gray-300">Install:</b> Use the <a href="/admin/instances" class="underline">Instance Manager</a> or visit <code>ollama.com</code>.</li>
+                    <li><b class="text-gray-300">Cloud:</b> Use <code>https://ollama.com/api</code> with your Ollama Cloud API key.</li>
+                    <li><b class="text-gray-300">Config:</b> Hub handles the <code>/api/tags</code> and <code>/api/chat</code> endpoints automatically.</li>
+                </ul>
+            </div>
+            <div class="space-y-3">
+                <h3 class="font-black text-emerald-400 uppercase tracking-widest text-xs">🚀 vLLM & OpenLLM</h3>
+                <p class="text-gray-400">High-throughput serving for production.</p>
+                <ul class="space-y-2 list-disc list-inside text-gray-500">
+                    <li><b class="text-gray-300">vLLM:</b> Optimized for PagedAttention. Install via Instance Manager.</li>
+                    <li><b class="text-gray-300">OpenLLM:</b> Built on BentoML. To install: <code>pip install openllm</code> or use our auto-installer.</li>
+                    <li><b class="text-gray-300">Usage:</b> <code>openllm start llama3</code>. Default port: 3000.</li>
+                </ul>
+            </div>
+            <div class="space-y-3">
+                <h3 class="font-black text-purple-400 uppercase tracking-widest text-xs">🌐 Gateways (Open WebUI)</h3>
+                <p class="text-gray-400">Connecting to other AI frontends.</p>
+                <ul class="space-y-2 list-disc list-inside text-gray-500">
+                    <li><b class="text-gray-300">Purpose:</b> Use the models already configured in your Open WebUI instance.</li>
+                    <li><b class="text-gray-300">API:</b> Ensure "API Key" is enabled in Open WebUI settings.</li>
+                    <li><b class="text-gray-300">URL:</b> Usually <code>http://127.0.0.1:3000/api</code>.</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function updateFormDefaults(select) {
+            const urlInput = document.getElementById('server_url');
+            const defaults = {
+                "ollama": "http://127.0.0.1:11434",
+                "cloud": "https://ollama.com/api",
+                "vllm": "http://127.0.0.1:8000/v1",
+                "openllm": "http://127.0.0.1:3000/v1",
+                "open_webui": "http://127.0.0.1:3000/api",
+                "novita": "https://api.novita.ai/v3/openai"
+            };
+            if (defaults[select.value]) {
+                urlInput.value = defaults[select.value];
+                urlInput.placeholder = defaults[select.value];
             }
         }
     </script>

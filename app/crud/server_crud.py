@@ -22,7 +22,8 @@ DEFAULT_SERVER_URLS = {
     "vllm": "http://127.0.0.1:8000/v1",
     "novita": "https://api.novita.ai/v3/openai",
     "openllm": "http://127.0.0.1:3000/v1",
-    "cloud": "https://ollama.com/api"
+    "cloud": "https://ollama.com/api",
+    "open_webui": "http://127.0.0.1:3000/api"
 }
 
 def _get_auth_headers(server: OllamaServer) -> Dict[str, str]:
