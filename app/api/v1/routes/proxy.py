@@ -1021,10 +1021,12 @@ def _wrap_response_for_token_tracking(
                 total_duration = asyncio.get_event_loop().time() - (first_token_time or start_time)
                 tps = (accumulated_tokens["completion_tokens"] or 0) / max(total_duration, 0.001)
                 
-                # PERFORMANCE REWARD: Normalize TPS against a baseline (e.g., 50 tokens/sec)
-                # This ensures fast nodes gain alpha faster than slow nodes.
-                perf_reward = min(1.0, max(0.1, tps / 50.0))
-                _update_bayesian_stats(model, success=True, reward=perf_reward)
+                # Only update B-IRRA stats if this request was part of an 'auto' selection
+                # We check the 'model_name' from the original scope vs the physical 'model'
+                if getattr(request.state, "is_auto_selection", False):
+                    # PERFORMANCE REWARD: Normalize TPS against a baseline (e.g., 50 tokens/sec)
+                    perf_reward = min(1.0, max(0.1, tps / 50.0))
+                    _update_bayesian_stats(model, success=True, reward=perf_reward)
 
                 event_manager.emit(ProxyEvent(
                     event_type="completed", 
@@ -2976,8 +2978,6 @@ async def _process_proxy_logic(
     p_tokens = len(str(body)) // 4
 
     # --- TELEMETRY ---
-    # Emit 'received' event with the ORIGINAL requested name (e.g., 'auto' or 'kimi')
-    # This prevents the list from appearing in the UI.
     event_manager.emit(ProxyEvent(
         event_type="received", 
         request_id=req_id, 
@@ -2986,76 +2986,6 @@ async def _process_proxy_logic(
         request_type=req_type,
         prompt_tokens=p_tokens
     ))
-
-    # Legacy Pool, Ensemble, and Chain checks removed.
-
-    try:
-        logger.info(f"proxy_ollama: Received {len(servers)} server(s) from get_active_servers dependency: {[s.name for s in servers]}")
-    except Exception as ex:
-        trace_exception(ex)
-    
-    candidate_servers = servers
-    if model_name:
-        logger.info(f"proxy_ollama: Looking for servers with model '{model_name}'")
-        # For internal system tasks, we look for PHYSICAL availability only, ignoring the admin whitelist
-        is_system = "sys_" in str(req_id) or (api_key and api_key.key_prefix == "sys_internal")
-        
-        if is_system:
-            # Manual filter for physical presence
-            candidate_servers = []
-            for s in servers:
-                if s.is_active and s.available_models:
-                    m_list = s.available_models if isinstance(s.available_models, list) else json.loads(s.available_models)
-                    if any(m.get("name") == model_name or m.get("name") == f"{model_name}:latest" for m in m_list):
-                        candidate_servers.append(s)
-        else:
-            candidate_servers = await server_crud.get_servers_with_model(db, model_name)
-
-        if candidate_servers:
-            logger.info(f"Smart routing: Found {len(candidate_servers)} server(s) with model '{model_name}': {[s.name for s in candidate_servers]}")
-        else:
-            logger.warning(f"Model '{model_name}' not found in any server's catalog.")
-
-    if not candidate_servers:
-        # --- SECURITY CHECK: Distinguish between 'Not Found' and 'Not Allowed' ---
-        # SYSTEM BYPASS: If this is an internal system task, we ignore the whitelist 
-        # to ensure RAG and Metadata synchronization never deadlocks.
-        # We detect system status via ID prefix OR if the API Key belongs to the internal system user.
-        is_system = (
-            getattr(request.state, "is_managed_agent", False) or 
-            "sys_" in str(req_id) or 
-            (api_key and api_key.key_prefix == "sys_internal")
-        )
-
-        physically_exists = False
-        for s in servers:
-            if s.available_models:
-                models_list = s.available_models
-                if isinstance(models_list, str):
-                    try: models_list = json.loads(models_list)
-                    except: continue
-                
-                if any(m.get("name") == model_name or (s.server_type == 'ollama' and m.get("name", "").startswith(f"{model_name}:")) for m in models_list):
-                    physically_exists = True
-                    break
-        
-        if physically_exists and not is_system:
-            logger.warning(f"Access Denied: Model '{model_name}' exists on backends but is blocked by administrative whitelists.")
-            event_manager.emit(ProxyEvent("error", req_id, model_name, "none", sender=api_key.user.username, error_message="Model Not Allowed"))
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Access to model '{model_name}' is restricted by the administrator's whitelist policy."
-            )
-        elif physically_exists and is_system:
-            logger.info(f"System Bypass: Allowing internal task to use whitelisted model '{model_name}' on all active nodes.")
-            candidate_servers = [s for s in servers if s.is_active]
-        else:
-            logger.error(f"proxy_ollama: No candidate servers available for model '{model_name}'")
-            event_manager.emit(ProxyEvent("error", req_id, model_name, "none", sender=api_key.user.username, error_message="No servers found"))
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=f"No servers available for model '{model_name}'. Please check server status and model availability."
-            )
 
     # Create initial usage log entry (without tokens - will be updated later for streaming)
     is_token_trackable_endpoint = path in ("generate", "chat", "embeddings")
@@ -3075,12 +3005,21 @@ async def _process_proxy_logic(
 
     # --- IRRA CLUSTER RESILIENCE LOOP ---
     # 1. Generate Ranked Candidates
-    # We keep the original 'model_name' for telemetry and use 'candidates' for routing.
+    # B-IRRA is a Virtual Resolver. It is ONLY triggered for 'auto'.
+    # For specific model names or embedding requests, we bypass candidate generation.
+    is_embedding_req = "embed" in path.lower()
+    is_auto_request = (model_name == "auto") and not is_embedding_req
+    
+    # Store this state for the performance tracker
+    request.state.is_auto_selection = is_auto_request
+    
     candidates = []
  
-    if model_name == "auto":
+    if is_auto_request:
+        # Activate SB-MRA / B-IRRA to find the best physical model
         candidates = await _select_auto_model(db, body, request=request)
     else:
+        # Specific model requested: No candidate swapping allowed.
         candidates = [model_name]
 
     if not candidates:
@@ -3088,21 +3027,44 @@ async def _process_proxy_logic(
         raise HTTPException(status_code=503, detail="No models found matching your request intent.")
 
     # 2. Iterate through candidates until success
-    failed_models =[]
+    failed_models = []
     for choice_str in candidates:
         choice_str = str(choice_str)
         
-        logger.info(f"Bayesian IRRA Attempt: Rerouting to candidate '{choice_str}'...")
+        if is_auto_request:
+            logger.info(f"SB-MRA Attempt: Rerouting to candidate '{choice_str}'...")
 
-        # Find healthy servers for this specific model
-        candidate_servers = await server_crud.get_servers_with_model(db, choice_str)
-        # Filter out servers already penalized in this request lifecycle
-        candidate_servers =[s for s in candidate_servers if not _is_server_penalized(s.id)]
+        # --- DYNAMIC SERVER DISCOVERY & SECURITY CHECK ---
+        is_system = "sys_" in str(req_id) or (api_key and api_key.key_prefix == "sys_internal")
+        
+        candidate_servers = []
+        if is_system:
+            # System tasks ignore the admin whitelist and look for physical presence
+            for s in servers:
+                if s.is_active and s.available_models:
+                    m_list = s.available_models if isinstance(s.available_models, list) else json.loads(s.available_models)
+                    if any(m.get("name") == choice_str or m.get("name") == f"{choice_str}:latest" for m in m_list):
+                        candidate_servers.append(s)
+        else:
+            # Regular users must respect the whitelist
+            candidate_servers = await server_crud.get_servers_with_model(db, choice_str)
 
         if not candidate_servers:
-            logger.warning(f"Bayesian IRRA: Candidate '{choice_str}' has no active healthy servers. Failing over...")
+            # Check if it was blocked by the whitelist vs just not existing
+            physically_exists = False
+            for s in servers:
+                if s.available_models:
+                    m_list = s.available_models if isinstance(s.available_models, list) else json.loads(s.available_models)
+                    if any(m.get("name") == choice_str or m.get("name") == f"{choice_str}:latest" for m in m_list):
+                        physically_exists = True; break
+            
+            if physically_exists and not is_system:
+                logger.warning(f"Access Denied: '{choice_str}' is whitelisted-off. Skipping candidate.")
+            else:
+                logger.warning(f"Resilience: Candidate '{choice_str}' not found on any active nodes. Skipping.")
+            
             failed_models.append(choice_str)
-            _update_bayesian_stats(choice_str, success=False)
+            if is_auto_request: _update_bayesian_stats(choice_str, success=False)
             continue
 
         try:
@@ -3117,17 +3079,21 @@ async def _process_proxy_logic(
                 user_id=api_key.user_id
             )
             # If we reached here, the stream started successfully.
-            # Note: For non-streaming requests, reward is finalized here.
-            # For streaming, the tracker below will refine the reward based on TPS.
-            if not client_wants_stream:
+            if is_auto_request and not client_wants_stream:
+                # Update B-IRRA stats only if it was an auto-selected model
                 _update_bayesian_stats(choice_str, success=True, reward=1.0)
             return response
 
         except HTTPException as e:
-            logger.error(f"Bayesian IRRA: Candidate '{choice_str}' failed at the gateway. Error: {e.detail}")
-            failed_models.append(choice_str)
-            _update_bayesian_stats(choice_str, success=False)
-            continue
+            if is_auto_request:
+                logger.error(f"Bayesian IRRA: Candidate '{choice_str}' failed at the gateway. Error: {e.detail}")
+                failed_models.append(choice_str)
+                _update_bayesian_stats(choice_str, success=False)
+                continue
+            else:
+                # Specific model failed: Do not attempt to swap to a different candidate.
+                # Re-raise the exception so the caller knows the specific model is unreachable.
+                raise e
             
     raise HTTPException(
         status_code=503, 
