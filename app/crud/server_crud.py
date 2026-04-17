@@ -565,6 +565,9 @@ async def get_servers_with_model(db: AsyncSession, model_name: str) -> list[Olla
                     is_match = (
                         available_model_name == model_name or
                         norm_avail == norm_req or
+                        # Allow "model" to match "model:latest" and vice versa
+                        available_model_name == f"{model_name}:latest" or
+                        model_name == f"{available_model_name}:latest" or
                         (is_ollama and available_model_name.startswith(f"{model_name}:")) or
                         (is_ollama and model_name.startswith(f"{available_model_name}:")) or
                         (server.server_type in ('vllm', 'novita', 'openllm') and norm_req in norm_avail)

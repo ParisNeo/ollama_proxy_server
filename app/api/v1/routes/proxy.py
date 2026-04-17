@@ -1565,18 +1565,25 @@ async def _select_auto_model(db: AsyncSession, body: Dict[str, Any], overrides: 
     vectorizer = await _get_shared_vectorizer(settings) if settings.enable_sb_mra else None
     
     # Context Constraint: Filter out models where (Prompt + Margin) exceeds physical context
+    # EXCEPTION: System tasks (Architect/Builder) bypass this to prevent deadlocks on large context tasks.
+    is_system_task = request and "sys_build_" in str(request.state.request_id if hasattr(request.state, "request_id") else "")
+    
     margin = settings.routing_context_margin
     required_context = estimated_tokens + margin
     
     pre_filter_count = len(available_metadata)
-    available_metadata = [
-        m for m in available_metadata 
-        if m.max_context >= required_context
-    ]
     
-    if len(available_metadata) < pre_filter_count:
-        filtered_out = pre_filter_count - len(available_metadata)
-        logger.info(f"SB-MRA Filter: Disqualified {filtered_out} model(s) because required context ({required_context}) > model limit.")
+    if not is_system_task:
+        available_metadata = [
+            m for m in available_metadata 
+            if m.max_context >= required_context
+        ]
+        
+        if len(available_metadata) < pre_filter_count:
+            filtered_out = pre_filter_count - len(available_metadata)
+            logger.info(f"SB-MRA Filter: Disqualified {filtered_out} model(s) because required context ({required_context}) > model limit.")
+    else:
+        logger.info(f"SB-MRA: Bypassing context filter for System Task '{request.state.request_id}'.")
     
     if not available_metadata:
         logger.warning(f"SB-MRA: All models filtered out by context constraint! (Req: {required_context} tokens)")
