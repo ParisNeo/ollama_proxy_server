@@ -34,6 +34,25 @@
 
     <!-- VIEW: FILE MANAGER -->
     <div id="ds-view-files" class="space-y-8">
+        <!-- GLOBAL INGESTION POLICY -->
+        <div class="card-style border-l-4 border-amber-500 bg-amber-500/5">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-xs font-black text-amber-400 uppercase tracking-widest flex items-center gap-2">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"></path></svg>
+                    Master Ingestion Filter
+                </h3>
+                <div class="flex gap-4">
+                    <button onclick="toggleAllExtensions(true)" class="text-[9px] font-bold text-gray-500 hover:text-white uppercase">Select All</button>
+                    <button onclick="toggleAllExtensions(false)" class="text-[9px] font-bold text-gray-500 hover:text-white uppercase">Clear All</button>
+                </div>
+            </div>
+            
+            <div id="master-extension-grid" class="grid grid-cols-4 md:grid-cols-8 lg:grid-cols-12 gap-2 p-3 bg-black/40 rounded-xl border border-white/5">
+                <!-- Populated via Javascript -->
+            </div>
+            <p class="mt-3 text-[10px] text-gray-500 italic">This filter applies to Direct Uploads, Folder Uploads, and Server-side scans.</p>
+        </div>
+
         <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
         <!-- Search/Test Interface -->
         <div class="lg:col-span-1">
@@ -115,18 +134,7 @@
                             <label for="use_ai_remote" class="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Generate AI Metadata Cohesion</label>
                         </div>
                     </div>
-                    <div>
-                        <label class="block text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1 px-1">Supported File Types</label>
-                        <div class="grid grid-cols-3 gap-2 p-2 bg-black/40 rounded-lg border border-white/10">
-                            {% for ext in ['.txt', '.md', '.pdf', '.py', '.js', '.html', '.docx', '.json', '.sh'] %}
-                            <label class="flex items-center gap-2 cursor-pointer hover:bg-white/5 p-1 rounded transition-colors">
-                                <input type="checkbox" name="ext_choice" value="{{ ext }}" class="h-3 w-3 rounded text-indigo-600" {% if ext in ['.txt', '.md', '.pdf'] %}checked{% endif %}>
-                                <span class="text-[9px] font-mono text-gray-400">{{ ext }}</span>
-                            </label>
-                            {% endfor %}
-                        </div>
-                        <input type="hidden" name="extensions" id="final-extensions-input">
-                    </div>
+
                     <div class="md:col-span-2 flex justify-end">
                         <button type="submit" onclick="compileExtensions(this.form)" class="bg-indigo-600 hover:bg-indigo-500 px-10 py-2 rounded-xl font-black text-xs uppercase tracking-widest transition-all shadow-lg">Start Indexing</button>
                     </div>
@@ -164,6 +172,66 @@
 
 <script>
     (function() {
+        const SUPPORTED_EXTS = {
+            "Documents": [".pdf", ".docx", ".txt", ".rtf", ".odt", ".epub", ".tex"],
+            "Web/Data": [".html", ".htm", ".xml", ".json", ".yaml", ".yml", ".csv", ".tsv"],
+            "Programming": [".py", ".js", ".ts", ".c", ".cpp", ".h", ".hpp", ".java", ".go", ".rs", ".php", ".rb", ".pl", ".sh", ".bat", ".ps1", ".sql", ".css", ".scss", ".less"],
+            "Config": [".ini", ".toml", ".conf", ".env", ".dockerfile", ".jsonl"],
+            "Markdown": [".md", ".markdown", ".mdown"]
+        };
+
+        const grid = document.getElementById('master-extension-grid');
+        Object.entries(SUPPORTED_EXTS).forEach(([cat, exts]) => {
+            exts.forEach(ext => {
+                const isDefault = [".pdf", ".md", ".txt", ".py"].includes(ext);
+                grid.innerHTML += `
+                    <label class="flex items-center gap-1.5 cursor-pointer hover:bg-white/5 p-1 rounded transition-colors group" title="${cat}">
+                        <input type="checkbox" name="master_ext" value="${ext}" class="master-ext-cb h-3 w-3 rounded text-indigo-600 bg-black border-white/20" ${isDefault ? 'checked' : ''}>
+                        <span class="text-[9px] font-mono text-gray-500 group-hover:text-indigo-300">${ext.replace('.','')}</span>
+                    </label>
+                `;
+            });
+        });
+
+        window.toggleAllExtensions = (state) => {
+            document.querySelectorAll('.master-ext-cb').forEach(cb => cb.checked = state);
+        };
+
+        window.getIngestionFilter = () => {
+            return Array.from(document.querySelectorAll('.master-ext-cb:checked')).map(cb => cb.value);
+        };
+
+        // Hook into forms to inject the filter
+        document.querySelectorAll('form').forEach(form => {
+            form.addEventListener('submit', (e) => {
+                const filter = window.getIngestionFilter();
+                // Add hidden input if missing
+                let hidden = form.querySelector('input[name="extensions"]');
+                if(!hidden) {
+                    hidden = document.createElement('input');
+                    hidden.type = 'hidden';
+                    hidden.name = 'extensions';
+                    form.appendChild(hidden);
+                }
+                hidden.value = filter.join(',');
+                
+                // If it's a file upload, we can't truly filter the FormData after the fact,
+                // but we can warn or prevent upload of non-matched items.
+                const fileInput = form.querySelector('input[type="file"]');
+                if(fileInput && fileInput.files.length > 0) {
+                    const invalidFiles = Array.from(fileInput.files).filter(f => {
+                        const ext = '.' + f.name.split('.').pop().toLowerCase();
+                        return !filter.includes(ext);
+                    });
+                    if(invalidFiles.length > 0) {
+                        if(!confirm(`Warning: ${invalidFiles.length} file(s) do not match your filter. They will be uploaded but might be skipped by the indexer. Continue?`)) {
+                            e.preventDefault();
+                        }
+                    }
+                }
+            });
+        });
+
         // Use a locally scoped variable and check for existing value
         let currentDsId = document.getElementById('ds-id-hidden').value;
         let network = null;

@@ -46,7 +46,6 @@ _bayesian_stats: Dict[str, Dict[str, float]] = {}
 
 # --- SB-MRA SHARED VECTORIZER ---
 _shared_routing_vectorizer = None
-
 async def _get_shared_vectorizer(settings: AppSettingsModel):
     global _shared_routing_vectorizer
     if _shared_routing_vectorizer is not None:
@@ -600,6 +599,9 @@ async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer
 
     for server_attempt, chosen_server in enumerate(candidate_servers):
         logger.info(f"Server attempt {server_attempt + 1}/{len(candidate_servers)}: selected '{chosen_server.name}' (Limit: {model_limit})")
+        
+        from ascii_colors import ASCIIColors
+        ASCIIColors.rich_print(f"--- Model is Generating [{model}] on [{chosen_server.name}] ---")
 
         servers_tried.append(chosen_server.name)
 
@@ -1506,6 +1508,15 @@ async def _select_auto_model(db: AsyncSession, body: Dict[str, Any], overrides: 
     Ranks compute nodes by minimizing a multifactorial cost function Sm.
     Sm = wp*Pm + wr*(1-theta) + we*E + ws*Dm
     """
+    from ascii_colors import ASCIIColors
+    settings = request.app.state.settings if request else None
+    debug = settings.enable_debug_mode if settings else False
+
+    if debug:
+        ASCIIColors.info("\n" + "="*40)
+        ASCIIColors.info("🚀 SB-MRA: STARTING AUTO-SELECTION")
+        ASCIIColors.info("="*40)
+
     if overrides is None: overrides = {}
     if exclude_models is None: exclude_models = []
     
@@ -1583,25 +1594,44 @@ async def _select_auto_model(db: AsyncSession, body: Dict[str, Any], overrides: 
     vectorizer = await _get_shared_vectorizer(settings) if settings.enable_sb_mra else None
     
     # Context Constraint: Filter out models where (Prompt + Margin) exceeds physical context
-    # EXCEPTION: System tasks (Architect/Builder) bypass this to prevent deadlocks on large context tasks.
-    is_system_task = request and "sys_build_" in str(request.state.request_id if hasattr(request.state, "request_id") else "")
+    is_system_task = request and "sys_" in str(request.state.request_id if hasattr(request.state, "request_id") else "")
     
     margin = settings.routing_context_margin
     required_context = estimated_tokens + margin
     
     pre_filter_count = len(available_metadata)
     
+    if debug:
+        ASCIIColors.info(f"🧐 Initial Pool: {pre_filter_count} discovered models.")
+        ASCIIColors.info(f"📏 Request Complexity: ~{estimated_tokens} tokens (Req. Window: {required_context})")
+
     if not is_system_task:
-        available_metadata = [
-            m for m in available_metadata 
-            if m.max_context >= required_context
-        ]
+        # HARD FILTER 1: Context Size
+        new_pool = []
+        for m in available_metadata:
+            if m.max_context >= required_context:
+                new_pool.append(m)
+            elif debug:
+                ASCIIColors.warning(f"❌ Dropping '{m.model_name}': Context limit {m.max_context} < required {required_context}")
+        available_metadata = new_pool
         
-        if len(available_metadata) < pre_filter_count:
-            filtered_out = pre_filter_count - len(available_metadata)
-            logger.info(f"SB-MRA Filter: Disqualified {filtered_out} model(s) because required context ({required_context}) > model limit.")
+        # HARD FILTER 2: Capability matching
+        if has_images:
+            new_pool = []
+            for m in available_metadata:
+                if m.supports_images: new_pool.append(m)
+                elif debug: ASCIIColors.warning(f"❌ Dropping '{m.model_name}': Request has images but model does not support vision.")
+            available_metadata = new_pool
+
+        if is_reasoning_task:
+            # We treat this as a preference, not a hard-drop unless other models exist
+            reasoners = [m for m in available_metadata if m.is_reasoning_model]
+            if reasoners:
+                available_metadata = reasoners
+                if debug: ASCIIColors.cyan(f"🎯 Focusing on {len(reasoners)} reasoning specialists.")
+
     else:
-        logger.info(f"SB-MRA: Bypassing context filter for System Task '{request.state.request_id}'.")
+        if debug: ASCIIColors.cyan(f"⚡ System Task '{request.state.request_id}': Bypassing hard context constraints.")
     
     if not available_metadata:
         logger.warning(f"SB-MRA: All models filtered out by context constraint! (Req: {required_context} tokens)")
@@ -1711,20 +1741,17 @@ async def _select_auto_model(db: AsyncSession, body: Dict[str, Any], overrides: 
         r_score = 1.0 - sampled_success_prob
 
         # 3. Elastic Pertinence Penalty (EPP)
-        # We use a normalized size factor. Small (<=8B): 1, Med (8-30B): 2, Large (>30B): 3
-        # Fallback to model_scale if model_size is unknown (-1)
         e_score = 0.0
         if m.model_size > 0:
             sigma = 1.0 if m.model_size <= 8.5 else (2.0 if m.model_size <= 32.0 else 3.5)
         else:
             sigma = float(m.model_scale)
             
-        # Penalty: (sigma - 3c)^2 if size is disproportionately large for prompt complexity
         if sigma > (3.0 * c):
             e_score = (sigma - (3.0 * c)) ** 2
 
         # 4. Latent Space Alignment (Dm)
-        d_score = 0.5 # Default neutral
+        d_score = 0.5 
         if prompt_vec is not None and m.description:
             try:
                 if m.model_name not in _model_latent_profiles:
@@ -1737,7 +1764,6 @@ async def _select_auto_model(db: AsyncSession, body: Dict[str, Any], overrides: 
             except: pass
 
         # Combined Cost Sm
-        # Using 100x scaling for reliability to match priority range (1-100)
         score = (
             (settings.routing_weight_priority * p_score) +
             (settings.routing_weight_reliability * r_score * 100) +
@@ -1745,18 +1771,37 @@ async def _select_auto_model(db: AsyncSession, body: Dict[str, Any], overrides: 
             (settings.routing_weight_semantic * d_score * 20)
         )
         
-        # Quarantine/Health Penalty
+        # Health Penalty
         servers = await server_crud.get_servers_with_model(db, m.model_name)
-        if any(_is_server_penalized(s.id) for s in servers):
+        is_quarantined = any(_is_server_penalized(s.id) for s in servers)
+        if is_quarantined:
             score += 1000 
             
+        # Logging individual score breakdown
+        if debug:
+            ASCIIColors.rich_print({
+                "model": m.model_name,
+                "score_total": round(score, 2),
+                "factors": {
+                    "priority": p_score,
+                    "reliability": round(r_score, 3),
+                    "ecology_epp": round(e_score, 2),
+                    "semantic_dist": round(d_score, 3),
+                    "quarantined": is_quarantined
+                }
+            })
+
         scored_candidates.append((score, m, sampled_success_prob))
     
     # Sort by Score ascending
     scored_candidates.sort(key=lambda x: x[0])
     
-    logger.info(f"Bayesian IRRA: {[f'{m.model_name}(P:{prob:.2f}, S:{score:.1f})' for score, m, prob in scored_candidates]}")
     ranked_names = [m.model_name for score, m, prob in scored_candidates]
+    
+    if debug:
+        ASCIIColors.info(f"🏆 Ranked Result: {ranked_names}")
+        ASCIIColors.info("="*40 + "\n")
+
     return ranked_names
 
 
@@ -2976,6 +3021,9 @@ async def _process_proxy_logic(
 
     # Estimate input tokens
     p_tokens = len(str(body)) // 4
+
+    from ascii_colors import ASCIIColors
+    ASCIIColors.cyan(f"User '{api_key.user.username}' requested model '{requested_model_name}' (ID: {req_id})")
 
     # --- TELEMETRY ---
     event_manager.emit(ProxyEvent(

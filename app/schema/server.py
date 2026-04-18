@@ -5,7 +5,7 @@ from typing import Literal, Optional, List
 class ServerBase(BaseModel):
     name: str
     url: Optional[AnyHttpUrl] = None
-    server_type: Literal["ollama", "vllm", "cloud", "novita", "openllm", "open_webui"] = "ollama"
+    server_type: Literal["ollama", "vllm", "cloud", "novita", "openllm", "open_webui", "openrouter"] = "ollama"
     max_parallel_queries: int = Field(default=1, ge=1)
 
 class ServerCreate(ServerBase):

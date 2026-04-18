@@ -262,8 +262,9 @@ class BotManager:
             # --- PERMISSION SAFETY: TYPING INDICATOR ---
             typing_active = False
             try:
+                # Use a timeout for the typing context to prevent hanging if the loop is laggy
                 typing_ctx = message.channel.typing()
-                await typing_ctx.__aenter__()
+                await asyncio.wait_for(typing_ctx.__aenter__(), timeout=2.0)
                 typing_active = True
             except discord.errors.Forbidden:
                 logger.warning(f"Bot lacks 'Send Messages' or 'Read History' in {message.channel}. Continuing without typing indicator.")

@@ -20,10 +20,11 @@ logger = logging.getLogger(__name__)
 DEFAULT_SERVER_URLS = {
     "ollama": "http://127.0.0.1:11434",
     "vllm": "http://127.0.0.1:8000/v1",
-    "novita": "https://api.novita.ai/v3/openai",
+    "novita": "https://api.novita.ai/v3/openai/v1",
     "openllm": "http://127.0.0.1:3000/v1",
     "cloud": "https://ollama.com/api",
-    "open_webui": "http://127.0.0.1:3000/api"
+    "open_webui": "http://127.0.0.1:3000/api",
+    "openrouter": "https://openrouter.ai/api/v1"
 }
 
 def _get_auth_headers(server: OllamaServer) -> Dict[str, str]:
@@ -35,9 +36,14 @@ def _get_auth_headers(server: OllamaServer) -> Dict[str, str]:
     if server.encrypted_api_key:
         api_key = decrypt_data(server.encrypted_api_key)
         if api_key:
-            # Most cloud providers (including Ollama Cloud) expect Bearer format
             headers["Authorization"] = f"Bearer {api_key}"
-            # Some specific local Ollama setups might expect X-Token; Bearer is safer as a default
+            
+            # --- OPENROUTER IDENTIFICATION ---
+            if server.server_type == 'openrouter':
+                # These headers help OpenRouter track the app and show it in their rankings
+                headers["HTTP-Referer"] = "https://github.com/ParisNeo/lollms_hub"
+                headers["X-Title"] = "LoLLMs Hub Fortress"
+                
     return headers
 
 
@@ -874,7 +880,7 @@ async def refresh_all_server_models() -> dict:
 
 
 async def check_server_health(http_client: httpx.AsyncClient, server: OllamaServer) -> Dict[str, Any]:
-    """Performs a quick health check on a single Ollama server."""
+    """Performs a quick health check on a single server."""
     # Security check
     if not _is_safe_url(server.url):
         return {"server_id": server.id, "name": server.name[:128], "url": server.url[:256], "status": "Blocked", "reason": "URL blocked for security"}
@@ -882,12 +888,19 @@ async def check_server_health(http_client: httpx.AsyncClient, server: OllamaServ
     headers = _get_auth_headers(server)
     try:
         ping_url = server.url.rstrip('/')
-        # vLLM servers have a /health endpoint, Ollama root is enough
-        if server.server_type == 'vllm':
-            ping_url += '/health'
-            
-        response = await http_client.get(ping_url, timeout=5.0, headers=headers)
         
+        # PROVIDER-SPECIFIC PROBING
+        if server.server_type in ('novita', 'vllm', 'open_webui', 'openrouter'):
+            # These providers usually require a models list check or specific health path
+            # We try /models as it verifies the API Key is also valid.
+            ping_url += '/models'
+        elif server.server_type == 'cloud':
+            # Ollama Cloud health check
+            ping_url = "https://ollama.com/api/tags" # Verified endpoint
+            
+        response = await http_client.get(ping_url, timeout=8.0, headers=headers)
+        
+        # Handle 401/403 as "Online but unauthorized" vs 404/500 as "Offline"
         if response.status_code == 200:
             return {"server_id": server.id, "name": server.name[:128], "url": server.url[:256], "status": "Online", "reason": None}
         else:

@@ -335,6 +335,7 @@ async def admin_upload_datastore(
     ds_id: int, request: Request, 
     files: List[UploadFile] = File(...), 
     use_ai_metadata: bool = Form(False),
+    extensions: Optional[str] = Form(None),
     db: AsyncSession = Depends(get_db),
     admin_user: User = Depends(require_admin_user)
 ):
@@ -343,10 +344,18 @@ async def admin_upload_datastore(
     
     UPLOADS_TEMP_DIR.mkdir(parents=True, exist_ok=True)
     
+    allowed_exts = [e.strip().lower() for e in extensions.split(",")] if extensions else []
+    
     # Process each file in the batch
     for file in files:
         if not file.filename: continue
         
+        # Filter by master extension list
+        ext = "." + file.filename.split(".")[-1].lower()
+        if allowed_exts and ext not in allowed_exts:
+            logger.debug(f"Datastore: Skipping {file.filename} (Type {ext} not in filter)")
+            continue
+
         # Security: Clean filename to prevent path injection
         safe_name = os.path.basename(file.filename)
         temp_path = UPLOADS_TEMP_DIR / safe_name
