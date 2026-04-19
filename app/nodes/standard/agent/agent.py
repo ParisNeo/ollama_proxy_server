@@ -7,6 +7,8 @@ from app.core.tools_manager import ToolsManager
 from app.core.events import event_manager, ProxyEvent
 from fastapi.concurrency import run_in_threadpool
 import logging
+import re
+
 logger = logging.getLogger("Agent")
 
 class AgentReasonerNode(BaseNode):
