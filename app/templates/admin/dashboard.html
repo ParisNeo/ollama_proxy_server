@@ -54,6 +54,9 @@
                     <p class="text-xs text-purple-300 font-bold uppercase tracking-widest">Deploy Management Agent to audit cluster state</p>
                 </div>
             </div>
+            <div id="report-console" class="hidden h-24 bg-black/60 rounded-xl p-3 border border-purple-500/20 mb-4 overflow-y-auto custom-scrollbar font-mono text-[10px] text-purple-300 space-y-1">
+                <div class="text-gray-600 italic">Initializing Audit Protocol...</div>
+            </div>
             <div class="flex gap-2 w-full mt-auto">
                 <button onclick="generateSystemReport()" id="report-btn" class="flex-grow bg-purple-600 hover:bg-purple-500 text-white px-8 py-3 rounded-2xl font-black text-xs uppercase tracking-widest transition-all shadow-lg shadow-purple-900/20 transform active:scale-95">Generate Audit Report</button>
                 <button onclick="showReportHistory('system')" class="bg-purple-600/20 hover:bg-purple-600/40 text-purple-300 px-6 py-3 rounded-2xl font-black text-xs uppercase tracking-widest transition-all border border-purple-500/30">History</button>
@@ -117,36 +120,7 @@
 
 <!-- System Assessment & Sustainability -->
 <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
-    <!-- Health Scorecard -->
-    <div class="card-style border-l-4 border-indigo-500 bg-indigo-500/5 flex flex-col justify-center relative overflow-hidden">
-        <div class="absolute -right-4 -top-4 opacity-5 rotate-12">
-            <svg class="w-32 h-32" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2L4.5 20.29l.71.71L12 18l6.79 3 .71-.71z"/></svg>
-        </div>
-        <div class="flex items-center justify-between mb-4">
-            <div class="flex items-center gap-2">
-                <h3 class="text-xs font-black uppercase tracking-widest text-indigo-400">System Assessment</h3>
-                <button onclick="showLatestEcoReport()" class="text-indigo-600 hover:text-indigo-400 transition-colors" title="View Latest Eco Assessment">
-                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                    </button>
-                    <button onclick="window.startCustomTour(DASHBOARD_TOUR, 'tour_dashboard_v1', true, true)" class="text-gray-600 hover:text-indigo-400" title="Restart Dashboard Tour">
-                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                    </button>
-                </div>
-                <span id="health-status-badge" class="px-2 py-0.5 rounded text-[10px] font-black uppercase">Loading...</span>
-            </div>
-            <div class="flex items-end gap-4">
-                <div class="text-6xl font-black text-white" id="health-score">--</div>
-                <div class="flex-grow pb-2">
-                    <div class="flex justify-between text-[9px] font-bold text-gray-500 uppercase mb-1">
-                        <span>Reliability Index</span>
-                        <span id="health-percent">--%</span>
-                    </div>
-                    <div class="h-2 bg-black/40 rounded-full overflow-hidden">
-                        <div id="health-progress" class="h-full bg-indigo-500 transition-all duration-1000" style="width: 0%"></div>
-                    </div>
-                </div>
-            </div>
-        </div>
+    <!-- Health Scorecard (Already included above, can be removed or kept as per preference) -->
 
         <!-- Sustainability & Green Intelligence -->
         <div class="card-style border-l-4 border-emerald-500 bg-emerald-500/5 relative overflow-hidden group">
@@ -331,33 +305,51 @@ document.addEventListener('DOMContentLoaded', () => {
     const systemInfoUrl = "{{ url_for('admin_system_info') }}";
 
     function updateSystemInfo(data) {
-        const health = data.health;
-        const scoreEl = document.getElementById('health-score');
-        const badgeEl = document.getElementById('health-status-badge');
-        const progressEl = document.getElementById('health-progress');
-        
-        scoreEl.innerText = health.score;
-        badgeEl.innerText = health.status;
-        badgeEl.className = `px-2 py-0.5 rounded text-[10px] font-black uppercase bg-${health.color}-500/20 text-${health.color}-400`;
-        progressEl.style.width = `${health.score}%`;
-        progressEl.className = `h-full bg-${health.color}-500 transition-all duration-1000`;
-        document.getElementById('health-percent').innerText = `${health.score}%`;
+        try {
+            if (!data || !data.health) return;
+            const health = data.health;
 
-        const sys = data.system_info;
+            const scoreEl = document.getElementById('health-score');
+            if (scoreEl) scoreEl.innerText = health.score || "0";
+
+            const badgeEl = document.getElementById('health-status-badge');
+            if (badgeEl && health.status && health.color) {
+                badgeEl.innerText = health.status;
+                const color = health.color;
+                badgeEl.className = `px-2 py-0.5 rounded text-[10px] font-black uppercase bg-${color}-500/20 text-${color}-400`;
+            }
+
+            const progressEl = document.getElementById('health-progress');
+            if (progressEl && health.score !== undefined && health.color) {
+                progressEl.style.width = `${health.score}%`;
+                const color = health.color;
+                progressEl.className = `h-full bg-${color}-500 transition-all duration-1000`;
+            }
+            const pctEl = document.getElementById('health-percent');
+            if (pctEl) pctEl.innerText = `${health.score}%`;
+
+            const sys = data.system_info;
+            if (!sys) return;
         const gpu = data.gpu_stats;
-        document.getElementById('cpu-percent').textContent = `${sys.cpu.percent.toFixed(1)}%`;
-        document.getElementById('cpu-progress').style.strokeDasharray = `${sys.cpu.percent.toFixed(1)}, 100`;
-        document.getElementById('mem-percent').textContent = `${sys.memory.percent.toFixed(1)}%`;
-        document.getElementById('mem-progress').style.strokeDasharray = `${sys.memory.percent.toFixed(1)}, 100`;
+        if (document.getElementById('cpu-percent')) document.getElementById('cpu-percent').textContent = `${sys.cpu.percent.toFixed(1)}%`;
+        if (document.getElementById('cpu-progress')) document.getElementById('cpu-progress').style.strokeDasharray = `${sys.cpu.percent.toFixed(1)}, 100`;
+        if (document.getElementById('mem-percent')) document.getElementById('mem-percent').textContent = `${sys.memory.percent.toFixed(1)}%`;
+        if (document.getElementById('mem-progress')) document.getElementById('mem-progress').style.strokeDasharray = `${sys.memory.percent.toFixed(1)}, 100`;
         document.getElementById('mem-details').textContent = `${sys.memory.used_gb} / ${sys.memory.total_gb} GB`;
         document.getElementById('disk-percent').textContent = `${sys.disk.percent.toFixed(1)}%`;
         document.getElementById('disk-progress').style.strokeDasharray = `${sys.disk.percent.toFixed(1)}, 100`;
         document.getElementById('disk-details').textContent = `${sys.disk.used_gb} / ${sys.disk.total_gb} GB`;
         
-        const vramPercent = (gpu.vram_used_gb / gpu.vram_total_gb) * 100;
-        document.getElementById('vram-percent').textContent = `${vramPercent.toFixed(1)}%`;
-        document.getElementById('vram-progress').style.strokeDasharray = `${vramPercent.toFixed(1)}, 100`;
-        document.getElementById('vram-details').textContent = `${gpu.vram_used_gb} / ${gpu.vram_total_gb} GB`;
+            const vramPercent = (gpu.vram_used_gb / gpu.vram_total_gb) * 100;
+            const vpEl = document.getElementById('vram-percent');
+            if (vpEl) vpEl.textContent = `${vramPercent.toFixed(1)}%`;
+            const vprEl = document.getElementById('vram-progress');
+            if (vprEl) vprEl.style.strokeDasharray = `${vramPercent.toFixed(1)}, 100`;
+            const vdEl = document.getElementById('vram-details');
+            if (vdEl) vdEl.textContent = `${gpu.vram_used_gb} / ${gpu.vram_total_gb} GB`;
+        } catch (err) {
+            console.warn("Dashboard update suppressed null element:", err);
+        }
     }
 
     function updateRunningModels(data) {
@@ -366,7 +358,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const csrfToken = "{{ csrf_token }}";
         tbody.innerHTML = '';
         if (models.length === 0) {
-            tbody.innerHTML = `<tr><td colspan="6" class="px-6 py-10 text-center text-gray-400">No models are currently running or available on active servers.</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="7" class="px-6 py-10 text-center text-current">No models currently in VRAM.</td></tr>`;
             return;
         }
         models.forEach(model => {
@@ -480,14 +472,16 @@ document.addEventListener('DOMContentLoaded', () => {
         const tbody = document.getElementById('live-sessions-tbody');
         
         // Update Sustainability Gauges
-        document.getElementById('session-co2').textContent = `${sustain.session_co2_g.toFixed(3)}g`;
-        document.getElementById('total-co2').textContent = `${sustain.total_co2_g.toLocaleString()}g`;
-        document.getElementById('session-gain').textContent = `+${sustain.carbon_saved_g}g`;
-        
-        // Update Equivalents
-        document.getElementById('eq-phones').textContent = Math.round(sustain.equivalents.smartphone_charges);
-        document.getElementById('eq-km').textContent = sustain.equivalents.kilometers_driven.toFixed(2);
-        document.getElementById('eq-liters').textContent = Math.round(sustain.equivalents.liters_boiled);
+        if (sustain) {
+            document.getElementById('session-co2').textContent = `${sustain.session_co2_g.toFixed(3)}g`;
+            document.getElementById('total-co2').textContent = `${sustain.total_co2_g.toLocaleString()}g`;
+            document.getElementById('session-gain').textContent = `+${sustain.carbon_saved_g}g`;
+            
+            // Update Equivalents
+            document.getElementById('eq-phones').textContent = Math.round(sustain.equivalents.smartphone_charges);
+            document.getElementById('eq-km').textContent = sustain.equivalents.kilometers_driven.toFixed(2);
+            document.getElementById('eq-liters').textContent = Math.round(sustain.equivalents.liters_boiled);
+        }
 
         if (sessions.length === 0) {
             container.classList.add('hidden');
@@ -665,11 +659,12 @@ document.addEventListener('DOMContentLoaded', () => {
             const data = await resp.json();
             if (data.success) {
                 fetchData(); // Refresh immediately
+                window.showToast(`Process ${pid} terminated.`, 'info');
             } else {
-                alert("Error: " + (data.error || "Could not terminate process. Check server logs."));
+                window.showErrorModal("Termination Failed", data);
             }
         } catch(e) {
-            alert("Connection error: " + e.message);
+            window.showErrorModal("Network Fault", { error: e.message });
         }
     };
 
@@ -715,7 +710,7 @@ document.addEventListener('DOMContentLoaded', () => {
     window.copyAuditToClipboard = () => {
         const text = document.getElementById('audit-report-raw').innerText;
         navigator.clipboard.writeText(text).then(() => {
-            alert("Report copied to clipboard.");
+            window.showToast("Report copied to clipboard.", 'success');
         });
     };
 
@@ -729,45 +724,33 @@ document.addEventListener('DOMContentLoaded', () => {
                 headers: { 'X-CSRF-Token': '{{ csrf_token }}' }
             });
             document.getElementById('modal-close-btn').click();
-            alert("Report deleted.");
+            window.showToast("Report deleted.", 'info');
         } catch(e) {
-            alert("Failed to delete report.");
+            window.showErrorModal("Delete Failed", { error: e.message });
         }
     };
 
     window.downloadPdfReport = (title, ts) => {
         const htmlContent = document.getElementById('audit-report-md').innerHTML;
-        
-        // Create a dynamic form to submit the POST request and download the file
         const form = document.createElement('form');
         form.method = 'POST';
         form.action = '{{ url_for("admin_export_report_pdf_post") }}';
-        form.target = '_blank'; // Optional: open in new tab so it doesn't interrupt dashboard
+        form.target = '_blank';
         
-        const htmlInput = document.createElement('input');
-        htmlInput.type = 'hidden';
-        htmlInput.name = 'html_content';
-        htmlInput.value = htmlContent;
-        
-        const titleInput = document.createElement('input');
-        titleInput.type = 'hidden';
-        titleInput.name = 'title';
-        titleInput.value = title;
-        
-        const tsInput = document.createElement('input');
-        tsInput.type = 'hidden';
-        tsInput.name = 'timestamp';
-        tsInput.value = ts;
-        
-        const csrfInput = document.createElement('input');
-        csrfInput.type = 'hidden';
-        csrfInput.name = 'csrf_token';
-        csrfInput.value = '{{ csrf_token }}';
-        
-        form.appendChild(htmlInput);
-        form.appendChild(titleInput);
-        form.appendChild(tsInput);
-        form.appendChild(csrfInput);
+        const fields = {
+            html_content: htmlContent,
+            title: title,
+            timestamp: ts,
+            csrf_token: '{{ csrf_token }}'
+        };
+
+        Object.entries(fields).forEach(([k, v]) => {
+            const input = document.createElement('input');
+            input.type = 'hidden';
+            input.name = k;
+            input.value = v;
+            form.appendChild(input);
+        });
         
         document.body.appendChild(form);
         form.submit();
@@ -802,7 +785,7 @@ document.addEventListener('DOMContentLoaded', () => {
             listHtml += '</div>';
             window.showModal(title, listHtml);
         } catch(e) {
-            window.showModal(title, '<div class="p-10 text-center text-red-500">Failed to load history.</div>');
+            window.showErrorModal("History Load Failed", { error: e.message });
         }
     };
 
@@ -813,10 +796,10 @@ document.addEventListener('DOMContentLoaded', () => {
             if (resp.ok) {
                 window.openAuditModal(data);
             } else {
-                alert(data.error || "Failed to load report.");
+                window.showErrorModal("Load Failed", data);
             }
         } catch (e) {
-            alert("Connection error.");
+            window.showErrorModal("Network Fault", { error: e.message });
         }
     };
 
@@ -838,9 +821,9 @@ document.addEventListener('DOMContentLoaded', () => {
             if (resp.ok) {
                 window.openAuditModal(data);
             } else {
-                alert(data.error || "No previous eco report found.");
+                window.showToast("No previous eco report found.", 'info');
             }
-        } catch (e) { alert("Failed to fetch history."); }
+        } catch (e) { window.showErrorModal("Sync Fault", { error: e.message }); }
     };
 
     window.showLatestReport = async () => {
@@ -850,9 +833,9 @@ document.addEventListener('DOMContentLoaded', () => {
             if (resp.ok) {
                 window.openAuditModal(data);
             } else {
-                alert(data.error || "No previous report found.");
+                window.showToast("No previous report found.", 'info');
             }
-        } catch (e) { alert("Failed to fetch history."); }
+        } catch (e) { window.showErrorModal("Sync Fault", { error: e.message }); }
     };
 
     window.generateEcoReport = async () => {
@@ -860,24 +843,17 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!btn) return;
         const originalText = btn.innerHTML;
         btn.disabled = true;
-        btn.innerHTML = `
-            <svg class="animate-spin -ml-1 mr-3 h-4 w-4 text-white inline-block" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-            </svg>
-            AUDITING ECOLOGY...
-        `;
+        btn.innerHTML = `<svg class="animate-spin -ml-1 mr-3 h-4 w-4 text-white inline-block" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg> AUDITING ECOLOGY...`;
 
         try {
             const resp = await fetch("{{ url_for('admin_generate_eco_report') }}", { 
                 method: 'POST', 
                 headers: { 'X-CSRF-Token': "{{ csrf_token }}" } 
             });
-            const data = await resp.json();
+            const data = await resp.json(); // Read ONCE here
             
             if (!resp.ok) {
-                // Return an alert with detailed issue string
-                alert(data.error || "Generation failed.");
+                window.showErrorModal("Eco Audit Failed", data);
                 return;
             }
 
@@ -885,7 +861,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 window.openAuditModal(data);
             }
         } catch (e) {
-            alert("Connection error: " + e.message);
+            window.showErrorModal("Client/Network Fault", { error: e.message });
         } finally {
             btn.disabled = false;
             btn.innerHTML = originalText;
@@ -894,35 +870,70 @@ document.addEventListener('DOMContentLoaded', () => {
 
     window.generateSystemReport = async () => {
         const btn = document.getElementById('report-btn');
+        const consoleEl = document.getElementById('report-console');
         if (!btn) return;
+        
         const originalText = btn.innerHTML;
         btn.disabled = true;
-        btn.innerHTML = `
-            <svg class="animate-spin -ml-1 mr-3 h-4 w-4 text-white inline-block" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-            </svg>
-            AUDITING...
-        `;
+        btn.innerHTML = "AUDITING CLUSTER...";
+        consoleEl.classList.remove('hidden');
+        consoleEl.innerHTML = '<div class="text-purple-400 font-bold">[Architect] Protocol Handshake...</div>';
 
         try {
-            const resp = await fetch("{{ url_for('admin_generate_system_report') }}", { 
+            const response = await fetch("{{ url_for('admin_generate_system_report') }}", { 
                 method: 'POST', 
                 headers: { 'X-CSRF-Token': "{{ csrf_token }}" } 
             });
-            const data = await resp.json();
-            
-            if (!resp.ok) {
-                // ... handle error logic (omitted for brevity, keep existing logic)
-                // (Note: Re-inject error modal logic here if needed)
-                return;
-            }
 
-            if (data.report) {
-                window.openAuditModal(data);
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop();
+
+                for (const line of lines) {
+                    if (!line.trim()) continue;
+                    const data = JSON.parse(line);
+
+                    if (data.type === 'trace' && data.content) {
+                        const entry = document.createElement('div');
+                        entry.className = "text-indigo-300 opacity-80 animate-in fade-in slide-in-from-left-1 duration-300";
+                        // Clean XML tags from the display string
+                        const cleanText = data.content.replace(/<[^>]*>?/gm, '').trim();
+                        if (cleanText) {
+                            entry.innerText = cleanText;
+                            consoleEl.appendChild(entry);
+                            consoleEl.scrollTop = consoleEl.scrollHeight;
+                        }
+                    } else if (data.error) {
+                        window.showErrorModal("System Audit Failed", data);
+                        consoleEl.classList.add('hidden');
+                    } else if (data.report) {
+                        // SUCCESS: Report received
+                        window.openAuditModal(data);
+                        consoleEl.classList.add('hidden');
+                        
+                        // FIX: Only attempt to update health UI if the data was included in this packet
+                        if (data.health) {
+                            updateSystemInfo(data);
+                        }
+                        
+                        window.showToast("Audit complete. Report saved to archive.", "success");
+                        return; // Exit stream reader
+                    } else if (data.done && !data.report) {
+                        // We hit done but no report text came?
+                        console.warn("Audit stream ended without report content.");
+                    }
+                }
             }
         } catch (e) {
-            alert("Connection error: " + e.message);
+            window.showErrorModal("Cluster Connectivity Error", { error: e.message });
         } finally {
             btn.disabled = false;
             btn.innerHTML = originalText;

@@ -16,7 +16,7 @@ import re
 from pydantic import AnyHttpUrl, ValidationError
 
 from fastapi import APIRouter, Depends, Request, Form, HTTPException, status, Query, UploadFile, File, BackgroundTasks, Response
-from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.concurrency import run_in_threadpool
 import sqlalchemy
@@ -26,7 +26,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.core.config import settings
 from app.core.security import verify_password
-from app.database.session import get_db
+from app.database.session import get_db, AsyncSessionLocal
 from app.database.models import User, LogAnalysis, Workflow, BotConfig
 from app.crud import user_crud, apikey_crud, log_crud, server_crud, settings_crud, model_metadata_crud
 from app.core.events import event_manager
@@ -284,7 +284,14 @@ async def get_current_user_from_cookie(request: Request, db: AsyncSession = Depe
         return user
     return None
 async def require_admin_user(request: Request, current_user: Union[User, None] = Depends(get_current_user_from_cookie)) -> User:
-    if not current_user or not current_user.is_admin: raise HTTPException(status_code=status.HTTP_303_SEE_OTHER, detail="Not authorized", headers={"Location": str(request.url_for("admin_login"))})
+    if not current_user or not current_user.is_admin:
+        raise HTTPException(status_code=status.HTTP_303_SEE_OTHER, detail="Not authorized", headers={"Location": str(request.url_for("admin_login"))})
+    
+    # Check if wizard is required
+    app_settings = getattr(request.app.state, 'settings', None)
+    if app_settings and not app_settings.wizard_completed and not request.url.path.startswith("/admin/setup-wizard"):
+        raise HTTPException(status_code=status.HTTP_303_SEE_OTHER, detail="Setup Required", headers={"Location": str(request.url_for("admin_setup_wizard"))})
+        
     request.state.user = current_user
     return current_user
     
@@ -339,6 +346,74 @@ async def admin_logout(request: Request):
     request.session.clear()
     return RedirectResponse(url=request.url_for("admin_login"), status_code=status.HTTP_303_SEE_OTHER)
     
+@router.get("/setup-wizard", response_class=HTMLResponse, name="admin_setup_wizard")
+async def admin_setup_wizard(request: Request, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user_from_cookie)):
+    if not current_user or not current_user.is_admin:
+        return RedirectResponse(url=request.url_for("admin_login"))
+    
+    # If already completed, don't show again
+    app_settings = request.app.state.settings
+    if app_settings.wizard_completed:
+        return RedirectResponse(url=request.url_for("admin_dashboard"))
+
+    context = get_template_context(request)
+    context["csrf_token"] = await get_csrf_token(request)
+    context["is_default_password"] = verify_password("changeme", current_user.hashed_password)
+    
+    # Discover existing local instances to suggest
+    context["discovered_instances"] = await supervisor.discover_local_instances(
+        [], start_port=11434, end_port=11436
+    )
+    
+    return templates.TemplateResponse("admin/setup_wizard.html", context)
+
+@router.post("/setup-wizard", name="admin_setup_wizard_post", dependencies=[Depends(validate_csrf_token)])
+async def admin_setup_wizard_post(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    admin_user: User = Depends(get_current_user_from_cookie),
+    new_password: Optional[str] = Form(None),
+    signed_coc: bool = Form(...),
+    first_server_url: Optional[str] = Form(None),
+    first_server_name: Optional[str] = Form(None)
+):
+    if not admin_user or not admin_user.is_admin:
+        raise HTTPException(status_code=401)
+    
+    if not signed_coc:
+        flash(request, "You must agree to the Code of Conduct to proceed.", "error")
+        return RedirectResponse(url=request.url_for("admin_setup_wizard"), status_code=303)
+
+    # 1. Update Password if changed
+    if new_password:
+        if len(new_password) < 8:
+            flash(request, "Password must be at least 8 characters.", "error")
+            return RedirectResponse(url=request.url_for("admin_setup_wizard"), status_code=303)
+        await user_crud.update_user(db, user_id=admin_user.id, username=admin_user.username, password=new_password)
+
+    # 2. Configure first server if provided
+    if first_server_url:
+        try:
+            from app.schema.server import ServerCreate
+            name = first_server_name or "Primary Node"
+            await server_crud.create_server(db, ServerCreate(name=name, url=first_server_url, server_type="ollama"))
+            # Trigger background model fetch
+            server = await server_crud.get_server_by_url(db, first_server_url)
+            if server:
+                asyncio.create_task(server_crud.fetch_and_update_models(db, server.id))
+        except Exception as e:
+            logger.warning(f"Wizard: Failed to add first server: {e}")
+
+    # 3. Mark wizard as completed
+    db_settings_obj = await settings_crud.get_app_settings(db)
+    current_settings = AppSettingsModel.model_validate(db_settings_obj.settings_data)
+    updated_settings = current_settings.model_copy(update={"wizard_completed": True})
+    await settings_crud.update_app_settings(db, updated_settings)
+    request.app.state.settings = updated_settings
+
+    flash(request, "Fortress successfully initialized. Welcome, Architect.", "success")
+    return RedirectResponse(url=request.url_for("admin_dashboard"), status_code=303)
+
 @router.get("/dashboard", response_class=HTMLResponse, name="admin_dashboard")
 async def admin_dashboard(request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
     context = get_template_context(request)
@@ -3057,7 +3132,7 @@ async def delete_analysis(aid: int, db: AsyncSession = Depends(get_db), admin_us
 
 @router.post("/system/report", name="admin_generate_system_report")
 async def generate_system_report(request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
-    """Generates a comprehensive AI audit of the cluster's current state."""
+    """Generates a comprehensive AI audit with real-time debug traces."""
     from app.api.v1.routes.proxy import _resolve_target, _reverse_proxy
     
     app_settings = request.app.state.settings
@@ -3065,11 +3140,15 @@ async def generate_system_report(request: Request, db: AsyncSession = Depends(ge
     if not target_agent:
         return JSONResponse({"error": "No Management Agent set for report generation."}, status_code=400)
 
+    # Initialize stream capture for Workflow Debug Mode
+    stream_queue = asyncio.Queue()
+    async def _stream_cb(text: str):
+        await stream_queue.put(text)
+    request.state.stream_callback = _stream_cb
+
     # Gather data context
     info_resp = await get_system_and_ollama_info(request, db, admin_user)
     health_data = info_resp["health"]
-    
-    # Fetch recent errors
     stmt = select(UsageLog.endpoint, UsageLog.status_code, UsageLog.model).filter(UsageLog.status_code >= 400).limit(10)
     error_res = await db.execute(stmt)
     errors = error_res.all()
@@ -3080,62 +3159,80 @@ async def generate_system_report(request: Request, db: AsyncSession = Depends(ge
         f"INFRASTRUCTURE: {len(info_resp['load_balancer_status'])} nodes configured.\n"
         f"VRAM USAGE: {info_resp['gpu_stats']['vram_used_gb']} GB used.\n"
         f"RECENT ERRORS: {errors}\n\n"
-        "Analyze this data. Identify performance leaks, security risks, or hardware bottlenecks. "
-        "Provide 3 actionable recommendations to improve system reliability. Format with clean Markdown."
+        "Analyze this data. Identify performance leaks, security risks, or hardware bottlenecks. Format with clean Markdown."
     )
 
-    try:
-        req_id = f"sys_report_{secrets.token_hex(4)}"
-        # Wrap the call to ensure we don't crash on unpacking if proxy logic fails
-        real_model, final_msgs = await _resolve_target(db, target_agent, [{"role": "user", "content": report_prompt}], request=request, request_id=req_id, sender=admin_user.username)
-        
-        servers = await server_crud.get_servers_with_model(db, real_model)
-        if not servers: return JSONResponse({"error": "No backend available to run report generation."}, status_code=503)
-
+    async def report_generator():
         try:
-            # Wrap the call to ensure we don't crash on unpacking if proxy logic fails
-            proxy_result = await _reverse_proxy(
-                request, "chat", servers, 
-                json.dumps({"model": real_model, "messages": final_msgs, "stream": False}).encode(), 
-                is_subrequest=True, request_id=req_id, model=real_model, sender=admin_user.username
-            )
+            req_id = f"sys_report_{secrets.token_hex(4)}"
             
-            if not proxy_result or not isinstance(proxy_result, tuple):
-                raise HTTPException(status_code=502, detail="Invalid response from proxy engine.")
-                
-            resp, chosen_server = proxy_result
+            # 1. Resolve Target while yielding background trace
+            res_task = asyncio.create_task(_resolve_target(db, target_agent, [{"role": "user", "content": report_prompt}], request=request, request_id=req_id, sender=admin_user.username))
+            
+            while not res_task.done() or not stream_queue.empty():
+                try:
+                    text = await asyncio.wait_for(stream_queue.get(), timeout=0.1)
+                    yield (json.dumps({"type": "trace", "content": text}) + "\n").encode()
+                except (asyncio.TimeoutError, asyncio.QueueEmpty):
+                    if res_task.done(): break
+                    continue
 
-            if hasattr(resp, 'body'):
-                data = json.loads(resp.body.decode())
+            real_model, final_msgs = await res_task
+            report_text = ""
 
-                if resp.status_code >= 400:
-                    error_detail = data.get("error", "Unknown backend error")
-                    suggestion = "Suggestion: This model/provider is currently unavailable. Try switching to a locally hosted model or another cloud provider in Settings."
-                    if "limit" in error_detail.lower():
-                        suggestion = "Suggestion: Your usage limit for this provider has been reached. Please switch to a local instance or a different backend server."
+            # 1. Determine Report Text (Direct from Workflow or from Proxy)
+            if real_model == "__result__":
+                report_text = final_msgs[-1]["content"] if final_msgs else "Empty report."
+            else:
+                target_model_str = real_model[0] if isinstance(real_model, list) and real_model else real_model
+                servers = await server_crud.get_servers_with_model(db, str(target_model_str))
 
-                    return JSONResponse({"error": error_detail, "suggestion": suggestion}, status_code=resp.status_code)
+                if not servers:
+                    yield (json.dumps({"error": f"Compute node for model '{target_model_str}' is offline."}) + "\n").encode()
+                    return
 
-                report_text = data.get("message", {}).get("content", "Report generation failed.")
+                yield (json.dumps({"type": "trace", "content": f"* Finalizing audit via: {target_model_str}...\n"}) + "\n").encode()
 
-                # --- PERSISTENCE: Save report to Archive ---
-                new_report = LogAnalysis(content=f"SYSTEM_AUDIT_REPORT\n{report_text}")
-                db.add(new_report)
-                await db.commit()
-                await db.refresh(new_report)
+                proxy_result = await _reverse_proxy(
+                    request, "chat", servers, 
+                    json.dumps({"model": target_model_str, "messages": final_msgs, "stream": False}).encode(), 
+                    is_subrequest=True, request_id=req_id, model=target_model_str, sender=admin_user.username
+                )
 
-                return {"id": new_report.id, "report": report_text, "timestamp": new_report.timestamp.strftime("%Y-%m-%d %H:%M"), "type": "system"}
-                
-        except HTTPException as he:
-            # Re-raise FastAPIs own HTTP exceptions to be handled by the middleware
-            raise he
-        except Exception as inner_e:
-            logger.error(f"Report Proxy Logic Failed: {inner_e}")
-            return JSONResponse({"error": f"Failed to reach model: {str(inner_e)}"}, status_code=500)
+                resp, _ = proxy_result
+                if hasattr(resp, 'body'):
+                    data = json.loads(resp.body.decode())
+                    if resp.status_code >= 400:
+                        yield (json.dumps({"error": data.get("error", "Backend Error")}) + "\n").encode()
+                        return
+                    report_text = data.get("message", {}).get("content", "Failed.")
+                else:
+                    yield (json.dumps({"error": "Empty response from AI."}) + "\n").encode()
+                    return
 
-    except Exception as e:
-        logger.error(f"Generate System Report Failed: {e}")
-        return JSONResponse({"error": str(e)}, status_code=500)
+            # 2. Persist to History Database (Synchronous commit)
+            async with AsyncSessionLocal() as bg_db:
+                new_rep = LogAnalysis(content=f"SYSTEM_AUDIT_REPORT\n{report_text}")
+                bg_db.add(new_rep)
+                await bg_db.commit()
+                await bg_db.refresh(new_rep)
+
+                # Assign finalized data for yielding
+                final_report_id = new_rep.id
+                final_report_ts = new_rep.timestamp.strftime("%Y-%m-%d %H:%M")
+
+            # 3. Final Packet Yield
+            yield (json.dumps({
+                "id": final_report_id,
+                "report": report_text, 
+                "timestamp": final_report_ts, 
+                "type": "system",
+                "done": True
+            }) + "\n").encode()
+        except Exception as e:
+            yield (json.dumps({"error": str(e)}) + "\n").encode()
+
+    return StreamingResponse(report_generator(), media_type="application/x-ndjson")
 
 @router.post("/system/eco-report", name="admin_generate_eco_report")
 async def generate_eco_report(request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
@@ -3169,16 +3266,23 @@ async def generate_eco_report(request: Request, db: AsyncSession = Depends(get_d
 
     try:
         req_id = f"sys_eco_{secrets.token_hex(4)}"
-        # Wrap the call to ensure we don't crash on unpacking if proxy logic fails
+        # Resolve the agent to a physical model (handles candidate lists)
         real_model, final_msgs = await _resolve_target(db, target_agent,[{"role": "user", "content": report_prompt}], request=request, request_id=req_id, sender=admin_user.username)
         
-        servers = await server_crud.get_servers_with_model(db, real_model)
-        if not servers: return JSONResponse({"error": "No backend available to run report generation."}, status_code=503)
+        # Robust handling for list vs string from resolve_target
+        target_model_str = real_model[0] if isinstance(real_model, list) and real_model else real_model
+        
+        servers = await server_crud.get_servers_with_model(db, target_model_str)
+        if not servers:
+            return JSONResponse({
+                "error": f"Compute node for model '{target_model_str}' is offline or not found.",
+                "suggestion": "Go to 'Models Manager' and ensure your models are tagged correctly, or click 'Sync Metadata' to auto-configure."
+            }, status_code=503)
 
         proxy_result = await _reverse_proxy(
             request, "chat", servers, 
-            json.dumps({"model": real_model, "messages": final_msgs, "stream": False}).encode(), 
-            is_subrequest=True, request_id=req_id, model=real_model, sender=admin_user.username
+            json.dumps({"model": target_model_str, "messages": final_msgs, "stream": False}).encode(), 
+            is_subrequest=True, request_id=req_id, model=target_model_str, sender=admin_user.username
         )
         
         if not proxy_result or not isinstance(proxy_result, tuple):
@@ -3205,7 +3309,11 @@ async def generate_eco_report(request: Request, db: AsyncSession = Depends(get_d
             
     except Exception as e:
         logger.error(f"Generate Eco Report Failed: {e}")
-        return JSONResponse({"error": str(e)}, status_code=500)
+        error_data = {"error": str(e)}
+        if getattr(request.app.state.settings, "enable_debug_mode", False):
+            import traceback
+            error_data["traceback"] = traceback.format_exc()
+        return JSONResponse(error_data, status_code=500)
 
 @router.get("/system/eco-report/latest", name="admin_get_latest_eco_report")
 async def get_latest_eco_report(db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):

@@ -18,9 +18,11 @@ from sqlalchemy import event
 @event.listens_for(engine.sync_engine, "connect")
 def set_sqlite_pragma(dbapi_connection, connection_record):
     cursor = dbapi_connection.cursor()
-    # Limit journal size to 2MB to prevent disk exhaustion during big transactions
+    # WAL mode allows concurrent reads and writes without locking
+    cursor.execute("PRAGMA journal_mode = WAL")
+    # Limit journal size to 2MB to prevent disk exhaustion
     cursor.execute("PRAGMA journal_size_limit = 2097152")
-    # Synchronous NORMAL is faster and uses less disk IO/journaling
+    # Synchronous NORMAL is safe and much faster in WAL mode
     cursor.execute("PRAGMA synchronous = NORMAL")
     cursor.close()
 

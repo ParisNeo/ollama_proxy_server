@@ -382,12 +382,12 @@
                 input.value = data.context_length;
                 input.classList.add('ring-2', 'ring-green-500');
                 setTimeout(() => input.classList.remove('ring-2', 'ring-green-500'), 2000);
+                window.showToast(`Context for ${modelName} updated.`, 'success');
             } else {
-                // Show the specific reason why it failed (e.g. key not found)
-                alert(data.error);
+                window.showErrorModal("Sync Failed", data);
             }
         } catch (e) {
-            alert("Connection error: " + e.message);
+            window.showErrorModal("Connection Fault", { error: e.message });
         } finally {
             btn.classList.remove('animate-spin', 'text-indigo-400');
         }
@@ -476,17 +476,18 @@
                 if (data.new_state) {
                     btn.className = "server-badge px-2 py-1 rounded-full border transition-all hover:scale-105 active:scale-95 bg-emerald-500/10 text-emerald-400 border-emerald-500/30";
                     btn.title = "Active: Click to Deactivate on " + btn.innerText;
+                    window.showToast(`${modelName} enabled on server.`, 'success');
                 } else {
                     btn.className = "server-badge px-2 py-1 rounded-full border transition-all hover:scale-105 active:scale-95 bg-red-500/10 text-red-400 border-red-500/30";
                     btn.title = "Blocked: Click to Activate on " + btn.innerText;
+                    window.showToast(`${modelName} blocked on server.`, 'info');
                 }
             } else {
-                alert("Error: " + (data.error || "Toggle failed"));
+                window.showErrorModal("Toggle Failed", data);
                 btn.className = originalClasses;
             }
         } catch (e) {
-            console.error("Server toggle error:", e);
-            alert("Connection error.");
+            window.showErrorModal("Network Fault", { error: e.message });
             btn.className = originalClasses;
         } finally {
             btn.classList.remove('opacity-50', 'animate-pulse');

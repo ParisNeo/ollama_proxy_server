@@ -1,0 +1,122 @@
+{% extends "admin/base.html" %}
+{% block title %}Initial Setup Wizard{% endblock %}
+
+{% block content %}
+<div class="max-w-4xl mx-auto py-12">
+    <div class="card-style bg-indigo-900/5 border-indigo-500/30 p-8 shadow-2xl">
+        <div class="text-center mb-10">
+            <div class="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-indigo-600 text-white shadow-xl mb-4">
+                <svg class="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+            </div>
+            <h1 class="text-3xl font-black text-white uppercase tracking-tighter">Fortress Initialization</h1>
+            <p class="text-gray-400 mt-2">Finalize your system security and legal compliance.</p>
+        </div>
+
+        <form action="{{ url_for('admin_setup_wizard_post') }}" method="post" class="space-y-12">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+
+            <!-- Step 1: Security -->
+            <section class="space-y-6">
+                <div class="flex items-center gap-4">
+                    <span class="flex items-center justify-center w-8 h-8 rounded-full bg-indigo-600 text-xs font-black">01</span>
+                    <h2 class="text-lg font-bold text-white uppercase tracking-widest">Security Enforcement</h2>
+                </div>
+                
+                {% if is_default_password %}
+                <div class="p-4 bg-red-900/20 border border-red-500/50 rounded-xl">
+                    <label class="block text-xs font-black text-red-400 uppercase tracking-widest mb-2">New Admin Password</label>
+                    <input type="password" name="new_password" required placeholder="Choose a strong password..." class="w-full bg-black/40 border border-white/10 rounded-lg p-3 text-white focus:border-indigo-500 outline-none">
+                    <p class="mt-2 text-[10px] text-gray-500 italic">Default 'changeme' password detected. A new password is required to unlock the hub.</p>
+                </div>
+                {% else %}
+                <div class="p-4 bg-emerald-900/10 border border-emerald-500/30 rounded-xl text-emerald-400 text-xs font-bold flex items-center gap-3">
+                    <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path></svg>
+                    Account is already secured with a non-default password.
+                </div>
+                {% endif %}
+            </section>
+
+            <!-- Step 2: Legal / CoC -->
+            <section class="space-y-6">
+                <div class="flex items-center gap-4">
+                    <span class="flex items-center justify-center w-8 h-8 rounded-full bg-indigo-600 text-xs font-black">02</span>
+                    <h2 class="text-lg font-bold text-white uppercase tracking-widest">Code of Conduct & Compliance</h2>
+                </div>
+                
+                <div class="bg-black/40 border border-white/10 rounded-xl p-6 h-64 overflow-y-auto custom-scrollbar text-xs text-gray-300 space-y-4 leading-relaxed">
+                    <h3 class="font-black text-indigo-400 uppercase">Grounded Legal Mandate (France/EU Context)</h3>
+                    <p>As the administrator of this AI Hub, you acknowledge and agree to comply with <b>Regulation (EU) 2024/1689 (EU AI Act)</b> and the finalized <b>CNIL recommendations (2026)</b> for the development and use of AI systems in France.</p>
+                    
+                    <ul class="list-disc list-inside space-y-2">
+                        <li><b>Transparency:</b> You must ensure that users are clearly informed when interacting with an AI system.</li>
+                        <li><b>Data Protection:</b> In accordance with the GDPR, you must implement technical filters to prevent the unauthorized processing of personal data within the Hub.</li>
+                        <li><b>Prohibited Practices:</b> You agree NOT to deploy models for subliminal manipulation, social scoring, or biometric categorization that deduces protected characteristics (Race, Religion, etc.), as prohibited since February 2025.</li>
+                        <li><b>Security:</b> You are responsible for the physical and digital security of the compute nodes connected to this gateway.</li>
+                    </ul>
+                    <p class="pt-4 border-t border-white/5">By checking the box below, you take full responsibility for the ethical use of this software within your jurisdiction.</p>
+                </div>
+                
+                <label class="flex items-center gap-3 cursor-pointer group">
+                    <input type="checkbox" name="signed_coc" required value="true" class="h-5 w-5 rounded text-indigo-600 bg-black border-white/20">
+                    <span class="text-sm font-bold text-gray-400 group-hover:text-white transition-colors">I accept the LoLLMs Hub Code of Conduct and local AI regulations.</span>
+                </label>
+            </section>
+
+            <!-- Step 3: First Infrastructure -->
+            <section class="space-y-6">
+                <div class="flex items-center gap-4">
+                    <span class="flex items-center justify-center w-8 h-8 rounded-full bg-indigo-600 text-xs font-black">03</span>
+                    <h2 class="text-lg font-bold text-white uppercase tracking-widest">Initial Compute Node</h2>
+                </div>
+                
+                <div class="space-y-4">
+                    <p class="text-xs text-gray-500">The Fortress needs at least one backend server to function. We've scanned your local environment:</p>
+                    
+                    <div id="discovered-servers" class="grid grid-cols-1 gap-3">
+                        {% for found in discovered_instances %}
+                        <div class="p-4 bg-indigo-600/10 border border-indigo-500/30 rounded-xl flex justify-between items-center group hover:bg-indigo-600/20 transition-all">
+                            <div>
+                                <span class="text-[10px] font-black text-indigo-400 uppercase tracking-widest">Ollama Detected</span>
+                                <div class="text-white font-bold">Local Server on Port {{ found.port }}</div>
+                            </div>
+                            <button type="button" onclick="selectServer('http://127.0.0.1:{{ found.port }}', 'Local Ollama')" class="px-4 py-1.5 bg-indigo-600 rounded-lg text-[10px] font-black uppercase text-white shadow-lg transition-all transform active:scale-95">Use This Node</button>
+                        </div>
+                        {% endfor %}
+                        
+                        <div id="manual-server-box" class="p-4 bg-white/5 border border-white/10 rounded-xl space-y-4">
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-[9px] font-black text-gray-500 uppercase mb-1">Server Name</label>
+                                    <input type="text" id="wiz-server-name" name="first_server_name" placeholder="Primary Node" class="w-full bg-black/40 border border-white/10 rounded p-2 text-xs text-white">
+                                </div>
+                                <div>
+                                    <label class="block text-[9px] font-black text-gray-500 uppercase mb-1">Endpoint URL</label>
+                                    <input type="text" id="wiz-server-url" name="first_server_url" placeholder="http://127.0.0.1:11434" class="w-full bg-black/40 border border-white/10 rounded p-2 text-xs text-white">
+                                </div>
+                            </div>
+                            <p class="text-[9px] text-gray-600 italic">If no server is selected, the Hub will remain in "Empty State" until you add one manually in Settings.</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <div class="pt-10 border-t border-white/10 flex justify-end">
+                <button type="submit" class="bg-indigo-600 hover:bg-indigo-500 text-white px-12 py-4 rounded-2xl font-black uppercase text-sm tracking-widest shadow-2xl shadow-indigo-500/40 transition-all transform hover:scale-105 active:scale-95">
+                    Complete Initialization
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+    function selectServer(url, name) {
+        document.getElementById('wiz-server-url').value = url;
+        document.getElementById('wiz-server-name').value = name;
+        
+        // Visual feedback
+        document.querySelectorAll('.group').forEach(el => el.classList.remove('ring-2', 'ring-indigo-500', 'bg-indigo-600/30'));
+        event.target.closest('.group').classList.add('ring-2', 'ring-indigo-500', 'bg-indigo-600/30');
+    }
+</script>
+{% endblock %}

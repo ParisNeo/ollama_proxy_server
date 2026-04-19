@@ -20,7 +20,7 @@
 
 
     <style>
-        {% set theme_colors = request.app.state.settings.available_themes[request.app.state.settings.selected_theme] %}
+        {% set theme_colors = settings.available_themes[settings.selected_theme] %}
         :root {
             --color-primary-500: {{ theme_colors['500'] }};
             --color-primary-600: {{ theme_colors['600'] }};
@@ -29,7 +29,7 @@
         }
     </style>
 </head>
-<body class="font-sans leading-normal tracking-normal ui-{{ request.app.state.settings.ui_style }}">
+<body class="font-sans leading-normal tracking-normal ui-{{ settings.ui_style }}">
 
     <button id="sidebar-open-btn" class="fixed top-4 left-4 z-50 p-2 text-white rounded-md hover:opacity-80 shadow-lg">
         <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path></svg>
@@ -40,14 +40,14 @@
             <div>
                 <div class="flex items-center justify-between p-4 border-b border-white/10 h-16">
                     <a href="{{ url_for('admin_dashboard') }}" class="flex items-center text-2xl font-bold whitespace-nowrap overflow-hidden">
-                        {% if request.app.state.settings.branding_logo_url %}
-                        <img src="{{ request.app.state.settings.branding_logo_url }}" alt="Logo" class="h-8 w-8 mr-2 object-contain flex-shrink-0">
+                        {% if settings.branding_logo_url %}
+                        <img src="{{ settings.branding_logo_url }}" alt="Logo" class="h-8 w-8 mr-2 object-contain flex-shrink-0">
                         {% endif %}
-                        <span class="truncate">{{ request.app.state.settings.branding_title }}</span>
+                        <span class="truncate">{{ settings.branding_title }}</span>
                     </a>
                     <button id="sidebar-close-btn" class="ml-2 flex-shrink-0">
                         <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path>
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
                         </svg>
                     </button>
                 </div>
@@ -68,7 +68,7 @@
                         <svg class="w-6 h-6 mr-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
                         Settings
                     </a>
-                    {% if request.app.state.settings.enable_bot_mode %}
+                    {% if settings.enable_bot_mode %}
                     <a href="{{ url_for('admin_bots') }}" class="flex items-center px-4 py-3 whitespace-nowrap {% if 'bots' in request.url.path %}active{% endif %}">
                         <svg class="w-6 h-6 mr-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path></svg>
                         Bot Connectors
@@ -139,7 +139,7 @@
                         Live System Flow
                     </a>
                     <a href="{{ url_for('admin_stats') }}" class="flex items-center px-4 py-3 whitespace-nowrap {% if 'stats' in request.url.path %}active{% endif %}">
-                         <svg class="w-6 h-6 mr-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path></svg>
+                         <svg class="w-6 h-6 mr-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012-2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path></svg>
                         Usage Statistics
                     </a>
                     <a href="{{ url_for('admin_logs') }}" class="flex items-center px-4 py-3 whitespace-nowrap {% if 'logs' in request.url.path %}active{% endif %}">
@@ -160,7 +160,7 @@
                 {% if request.state.user %}
                 <div class="p-4 border-t border-white/10">
                     <div class="pb-3 mb-3 border-b border-white/10 text-xs text-gray-400">
-                        <p>{{ request.app.state.settings.branding_title }} v{{ request.app.version }}</p>
+                        <p>{{ settings.branding_title }} v{{ request.app.version }}</p>
                         <p class="truncate">Powered by ParisNeo's LoLLMs Hub Fortress</p>
                     </div>
                     <p class="text-sm whitespace-nowrap">Welcome, <span class="font-semibold">{{ request.state.user.username }}</span></p>
@@ -273,12 +273,21 @@
             </div>
         </div>
 
+        <!-- Attachment Previews -->
+        <div id="agent-previews" class="px-3 py-1 flex flex-wrap gap-2 bg-black/20"></div>
+
         <div class="p-3 border-t border-white/10 bg-black/40">
-            <div class="flex gap-2">
-                <input type="text" id="agent-input" placeholder="Ask anything about the system..." class="flex-grow bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-xs text-white outline-none focus:border-indigo-500">
-                <button id="agent-send" class="bg-indigo-600 hover:bg-indigo-500 px-3 py-2 rounded-lg text-white transition-all">
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"></path></svg>
-                </button>
+            <div class="flex flex-col gap-2">
+                <div class="flex gap-2">
+                    <button id="agent-attach-img" class="p-2 rounded hover:bg-white/5 text-gray-400" title="Attach Image"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg></button>
+                    <button id="agent-attach-doc" class="p-2 rounded hover:bg-white/5 text-gray-400" title="Attach Document"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg></button>
+                    <input type="text" id="agent-input" placeholder="Ask Lollms..." class="flex-grow bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-xs text-white outline-none focus:border-indigo-500">
+                    <button id="agent-send" class="bg-indigo-600 hover:bg-indigo-500 px-3 py-2 rounded-lg text-white transition-all">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"></path></svg>
+                    </button>
+                </div>
+                <input type="file" id="agent-file-img" class="hidden" multiple accept="image/*">
+                <input type="file" id="agent-file-doc" class="hidden" multiple accept=".txt,.md,.pdf,.csv,.py,.json">
             </div>
         </div>
     </div>
@@ -293,7 +302,7 @@
                 <div class="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">System Task Update</div>
                 <div id="notif-text" class="text-xs text-white font-bold leading-tight">Task completed successfully.</div>
             </div>
-            <button onclick="hideNotification()" class="text-gray-600 hover:text-white">&times;</button>
+            <button onclick="window.hideNotification()" class="text-gray-600 hover:text-white">&times;</button>
         </div>
     </div>
 
@@ -301,8 +310,8 @@
     <div id="modal-backdrop" class="fixed inset-0 bg-black bg-opacity-70 z-50 hidden"></div>
     <div id="modal" class="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50 card-style w-11/12 max-w-2xl hidden">
         <div class="p-6">
-            <h3 id="modal-title" class="text-xl font-bold mb-4">Modal Title</h3>
-            <div id="modal-body">
+            <h3 id="modal-title" class="text-xl font-bold mb-4 truncate pr-8">Modal Title</h3>
+            <div id="modal-body" class="max-h-[70vh] overflow-y-auto custom-scrollbar pr-2">
                 <p>Modal content goes here.</p>
             </div>
         </div>
@@ -312,6 +321,80 @@
     </div>
 
     <script>
+        // --- GLOBAL NOTIFICATION ENGINE ---
+        window.showToast = (message, type = 'info') => {
+            const toast = document.getElementById('global-notification');
+            const textEl = document.getElementById('notif-text');
+            const iconEl = toast.querySelector('.bg-indigo-600\\/20');
+            
+            // Set Color Scheme
+            const colors = {
+                success: { border: 'border-emerald-500', text: 'text-emerald-400', bg: 'bg-emerald-600/20' },
+                error: { border: 'border-red-500', text: 'text-red-400', bg: 'bg-red-600/20' },
+                info: { border: 'border-indigo-500', text: 'text-indigo-400', bg: 'bg-indigo-600/20' }
+            };
+            const theme = colors[type] || colors.info;
+
+            toast.firstElementChild.className = `bg-[#0f111a] border-l-4 ${theme.border} shadow-2xl rounded-r-xl p-4 flex items-start gap-4 pointer-events-auto`;
+            iconEl.className = `p-2 ${theme.bg} rounded-lg ${theme.text}`;
+            textEl.innerText = message;
+            
+            toast.classList.remove('translate-x-full');
+            setTimeout(window.hideNotification, 5000);
+        };
+
+        window.hideNotification = () => {
+            document.getElementById('global-notification').classList.add('translate-x-full');
+        };
+
+        window.showErrorModal = (title, data) => {
+            const hasTrace = data.traceback && {{ settings.enable_debug_mode | tojson }};
+            const modalBody = `
+                <div class="space-y-4">
+                    <div class="p-4 bg-red-900/20 border border-red-500/50 rounded-xl flex items-start gap-4">
+                        <div class="p-2 bg-red-600 rounded-lg text-white">
+                            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
+                        </div>
+                        <div>
+                            <div class="text-xs font-black text-red-400 uppercase tracking-widest mb-1">Execution Error</div>
+                            <p class="text-sm text-white font-bold">${data.error || data.detail || "An unknown error occurred."}</p>
+                            ${data.suggestion ? `<p class="text-xs text-red-300/70 mt-2 italic">${data.suggestion}</p>` : ''}
+                        </div>
+                    </div>
+
+                    ${hasTrace ? `
+                    <div class="border-t border-white/5 pt-4">
+                        <details class="group">
+                            <summary class="flex items-center gap-2 text-[10px] font-black text-gray-500 uppercase cursor-pointer hover:text-white transition-colors">
+                                <svg class="w-3 h-3 transition-transform group-open:rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
+                                Technical Debug Trace
+                            </summary>
+                            <div class="mt-3 relative">
+                                <pre id="debug-trace-box" class="bg-black/60 p-4 rounded-lg font-mono text-[10px] text-red-300/80 overflow-x-auto custom-scrollbar border border-white/5 max-h-64">${data.traceback}</pre>
+                                <button onclick="window.copyTraceToClipboard()" class="absolute top-2 right-2 bg-white/5 hover:bg-white/10 border border-white/10 px-2 py-1 rounded text-[9px] font-bold text-gray-400 uppercase">Copy Trace</button>
+                            </div>
+                        </details>
+                    </div>
+                    ` : ''}
+
+                    <div class="flex justify-end pt-4">
+                        <button onclick="document.getElementById('modal-close-btn').click()" class="bg-white/5 hover:bg-white/10 px-8 py-2 rounded-xl text-xs font-black uppercase text-gray-400 transition-all">Dismiss</button>
+                    </div>
+                </div>
+            `;
+            window.showModal(title, modalBody);
+        };
+
+        window.copyTraceToClipboard = () => {
+            const text = document.getElementById('debug-trace-box').innerText;
+            navigator.clipboard.writeText(text).then(() => {
+                const btn = event.target;
+                const original = btn.innerText;
+                btn.innerText = "COPIED ✓";
+                setTimeout(() => btn.innerText = original, 2000);
+            });
+        };
+
         window.openKnowledgeImporter = (targetCallback) => {
             const modalBody = `
                 <div class="space-y-6 text-left" id="k-importer-root">
@@ -348,16 +431,16 @@
                         <div class="grid grid-cols-1 gap-4">
                             <div>
                                 <label class="block text-xs font-bold text-gray-400 uppercase mb-1">Search Query</label>
-                                <input type="text" id="imp-arxiv-query" placeholder="Topic keywords..." class="w-full p-2 bg-black/40 border border-white/10 rounded-lg text-sm">
+                                <input type="text" id="imp-arxiv-query" placeholder="Topic keywords..." class="w-full p-2.5 bg-black/40 border border-white/10 rounded-lg text-sm">
                             </div>
                             <div class="grid grid-cols-2 gap-4">
                                 <div>
                                     <label class="block text-xs font-bold text-gray-400 uppercase mb-1">Author</label>
-                                    <input type="text" id="imp-arxiv-author" placeholder="Einstein" class="w-full p-2 bg-black/40 border border-white/10 rounded-lg text-sm">
+                                    <input type="text" id="imp-arxiv-author" placeholder="Einstein" class="w-full p-2.5 bg-black/40 border border-white/10 rounded-lg text-sm">
                                 </div>
                                 <div>
                                     <label class="block text-xs font-bold text-gray-400 uppercase mb-1">Year</label>
-                                    <input type="text" id="imp-arxiv-year" placeholder="2024" class="w-full p-2 bg-black/40 border border-white/10 rounded-lg text-sm">
+                                    <input type="text" id="imp-arxiv-year" placeholder="2024" class="w-full p-2.5 bg-black/40 border border-white/10 rounded-lg text-sm">
                                 </div>
                             </div>
                             <div class="flex justify-between items-center">
@@ -1084,15 +1167,82 @@
                 }
             };
 
+            // --- MULTIMODAL AGENT LOGIC ---
+            let agentFiles = []; // Array of {type: 'img'|'doc', name, data/content}
+
+            const renderAgentPreviews = () => {
+                const container = document.getElementById('agent-previews');
+                container.innerHTML = '';
+                agentFiles.forEach((f, i) => {
+                    const div = document.createElement('div');
+                    div.className = "flex items-center gap-2 bg-indigo-600/20 border border-indigo-500/30 px-2 py-1 rounded text-[9px] text-indigo-300 max-w-[120px]";
+                    div.innerHTML = `
+                        <span class="truncate">${f.type === 'img' ? '📷' : '📄'} ${f.name}</span>
+                        <button onclick="removeAgentFile(${i})" class="text-red-400 font-black">&times;</button>
+                    `;
+                    container.appendChild(div);
+                });
+            };
+
+            window.removeAgentFile = (idx) => {
+                agentFiles.splice(idx, 1);
+                renderAgentPreviews();
+            };
+
+            document.getElementById('agent-attach-img').onclick = () => document.getElementById('agent-file-img').click();
+            document.getElementById('agent-attach-doc').onclick = () => document.getElementById('agent-file-doc').click();
+
+            document.getElementById('agent-file-img').onchange = (e) => {
+                for (let f of e.target.files) {
+                    const reader = new FileReader();
+                    reader.onload = (ev) => {
+                        agentFiles.push({ type: 'img', name: f.name, data: ev.target.result });
+                        renderAgentPreviews();
+                    };
+                    reader.readAsDataURL(f);
+                }
+            };
+
+            document.getElementById('agent-file-doc').onchange = async (e) => {
+                // We use our existing knowledge_importer backend for consistency if possible,
+                // but for the side panel, we'll do client-side extraction for speed.
+                for (let f of e.target.files) {
+                    const reader = new FileReader();
+                    reader.onload = (ev) => {
+                        agentFiles.push({ type: 'doc', name: f.name, content: ev.target.result });
+                        renderAgentPreviews();
+                    };
+                    reader.readAsText(f);
+                }
+            };
+
             const runAgentSummon = async (forcedPrompt = null) => {
                 const text = forcedPrompt || agentInput.value.trim();
-                if (!text) return;
+                if (!text && agentFiles.length === 0) return;
 
                 if (!forcedPrompt) {
                     agentInput.value = '';
-                    agentHistory.push({role: 'user', content: text});
+                    
+                    let content = [];
+                    if (text) content.push({ type: 'text', text: text });
+                    
+                    // Attach Document Contents
+                    const docContents = agentFiles.filter(f => f.type === 'doc').map(f => `FILE: ${f.name}\n\`\`\`\n${f.content}\n\`\`\``).join('\n\n');
+                    if (docContents) {
+                        if (content.length > 0) content[0].text = docContents + "\n\n" + content[0].text;
+                        else content.push({ type: 'text', text: docContents });
+                    }
+
+                    // Attach Images
+                    agentFiles.filter(f => f.type === 'img').forEach(f => {
+                        content.push({ type: 'image_url', image_url: { url: f.data } });
+                    });
+
+                    agentHistory.push({role: 'user', content: content});
                 }
                 
+                agentFiles = [];
+                renderAgentPreviews();
                 renderCoreChat();
 
                 const loadingDiv = document.createElement('div');

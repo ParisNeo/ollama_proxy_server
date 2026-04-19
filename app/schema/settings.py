@@ -88,6 +88,7 @@ class AppSettingsModel(BaseModel):
     google_search_api_key: Optional[str] = Field(default=None, description="SerpApi or Google Custom Search Key")
 
     # --- GATEWAY SETTINGS ---
+    wizard_completed: bool = False
     enable_tours: bool = True
     tour_dashboard: bool = True
     tour_models: bool = True

@@ -278,11 +278,10 @@
             if (resp.ok && data.success) {
                 logToConsole(data.message, "text-amber-400");
             } else {
-                const errMsg = data.detail || data.message || `Server error ${resp.status}`;
-                logToConsole("Failed to start task: " + errMsg, "text-red-500");
+                window.showErrorModal("System Task Failed", data);
             }
         } catch (e) {
-            logToConsole("Connection error: " + e.message, "text-red-500");
+            window.showErrorModal("Connection Fault", { error: e.message });
         }
     }
 
@@ -422,7 +421,10 @@
 
     window.startHFDownload = async () => {
         const checked = Array.from(document.querySelectorAll('input[name="hf_files"]:checked')).map(c => c.value);
-        if (checked.length === 0) return alert("Select at least one file.");
+        if (checked.length === 0) {
+            window.showToast("Select at least one file to download.", "error");
+            return;
+        }
         
         const btn = document.getElementById('hf-start-dl-btn');
         btn.disabled = true;
@@ -440,11 +442,15 @@
                 taskPanel.classList.remove('hidden');
                 logToConsole(`Initiating background download for ${currentHFRepo}...`, "text-sky-400 font-bold");
             } else {
-                alert(data.error);
+                window.showErrorModal("Download Task Rejected", data);
                 btn.disabled = false;
                 btn.innerText = "Start Download";
             }
-        } catch(e) { alert(e.message); btn.disabled = false; }
+        } catch(e) { 
+            window.showErrorModal("Network Fault", { error: e.message });
+            btn.disabled = false; 
+            btn.innerText = "Start Download";
+        }
     };
 
     // Connect to SSE for real-time logs

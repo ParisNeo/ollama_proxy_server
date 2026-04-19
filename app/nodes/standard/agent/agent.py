@@ -102,5 +102,9 @@ class AgentReasonerNode(BaseNode):
                     # Extract tags, save to DB, and return clean text to user
                     content = await CognitiveMemoryManager.process_tags(engine.db, engine.sender, memory_system, content)
                 
+                # REPAIR MISSION: Ensure we emit a final completion trace before returning
+                if cb:
+                    await cb(f'* Task finalized by {rm_str}.\n')
+                
                 return content if output_slot_idx == 0 else scratchpad
         return "Agent finished."

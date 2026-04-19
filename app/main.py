@@ -9,6 +9,7 @@ import os
 import sys
 import secrets
 import bcrypt
+import asyncio
 
 # --- Passlib/Bcrypt 4.0.0 Compatibility Patch ---
 # Passlib requires bcrypt.__about__, which was removed in bcrypt 4.0.0.
@@ -64,30 +65,41 @@ setup_logging(settings.LOG_LEVEL)
 logger = logging.getLogger(__name__)
 os.environ.setdefault("PASSLIB_DISABLE_WARNINGS", "1")
 
-# Global locks to prevent multiple starts when running on dual ports
-_db_initialized = False
-_bots_initialized = False
+# Global Shared State Container
+class SharedState:
+    def __init__(self):
+        self.settings = None
+        self.http_client = None
+        self.redis = None
+        self.vectorizer = None
+        self.bot_manager = None
+        self.db_ready = False
+        self.initialized = False
+        self.tasks_started = False
+        self.init_lock = asyncio.Lock()
+
+shared_state = SharedState()
+
 async def init_db():
     """
     Creates all database tables based on the SQLAlchemy models.
     Runs migrations first to ensure backward compatibility with older database schemas.
-    This function is designed to run only once.
+    This function is designed to run only once per process.
     """
-    global _db_initialized
-    if _db_initialized:
+    if shared_state.db_ready:
         logger.debug("Database already initialized, skipping.")
         return
 
     logger.info("Initializing database schema...")
-
-    # Run migrations first to add any missing columns to existing tables
+    
+    # Run standard migrations for schema drift
     await run_all_migrations(engine)
 
     # Then create any missing tables
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     
-    _db_initialized = True
+    shared_state.db_ready = True
     logger.info("Database schema is ready.")
 
 from sqlalchemy.exc import IntegrityError
@@ -115,6 +127,7 @@ async def bootstrap_lollms_agent() -> None:
             "### TRUTH & GROUNDING PROTOCOL\n"
             "- If you are provided with system context or RAG data, you MUST prioritize it over your internal weights.\n"
             "- **Anti-Hallucination**: If an answer is not present in provided data, explicitly state what is missing instead of guessing.\n"
+            "- **Multi-Step Audit**: For System Reports, you MUST first 'THINK' about the health metrics, then 'ACT' to commit significant findings to memory, and finally provide the report.\n"
             "- Use 'According to the provided data...' when summarizing search results.\n\n"
             "### UI INTERACTION PROTOCOL\n"
             "You can control the user's interface using these tags:\n"
@@ -281,145 +294,90 @@ async def periodic_model_refresh(app: FastAPI) -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # ---------- Startup ----------
-    logger.info("Starting up lollms hub…")
-    await ensure_local_assets()
+    """
+    Lifespan manager that guarantees singleton state across multiple ports.
+    Only the first port to boot performs heavy initialization.
+    """
+    # Fast-path for secondary ports: check if already initialized without locking
+    if not shared_state.initialized:
+        async with shared_state.init_lock:
+            # Double-check inside lock
+            if not shared_state.initialized:
+                logger.info("--- STARTING PRIMARY HUB INITIALIZATION ---")
+                
+                # 1. Directories
+                for d in ["app/static/uploads", ".ssl", "benchmarks"]:
+                    Path(d).mkdir(exist_ok=True)
+
+                # 2. Database & Settings
+                await init_db()
+                async with AsyncSessionLocal() as db:
+                    db_settings_obj = await settings_crud.create_initial_settings(db)
+                    shared_state.settings = AppSettingsModel.model_validate(db_settings_obj.settings_data)
+
+                # 3. Network Clients
+                timeout = httpx.Timeout(read=None, write=None, connect=5.0, pool=60.0)
+                limits = httpx.Limits(max_keepalive_connections=200, max_connections=1000, keepalive_expiry=10.0)
+                shared_state.http_client = httpx.AsyncClient(timeout=timeout, limits=limits)
+                
+                try:
+                    s = shared_state.settings
+                    cred = f"{s.redis_username}:{s.redis_password}@" if s.redis_username and s.redis_password else (f"{s.redis_username}@" if s.redis_username else "")
+                    shared_state.redis = redis.from_url(f"redis://{cred}{s.redis_host}:{s.redis_port}/0", decode_responses=True)
+                    await shared_state.redis.ping()
+                except:
+                    shared_state.redis = None
+
+                # 4. Heavy Assets & Admin
+                await create_initial_admin_user()
+                await bootstrap_lollms_agent()
+                await ensure_system_service_key(app)
+                await ensure_local_assets()
+
+                # 5. Pre-warm Vectorizer (THE HEAVY PART)
+                if shared_state.settings.enable_sb_mra:
+                    from app.api.v1.routes.proxy import _get_shared_vectorizer
+                    shared_state.vectorizer = await _get_shared_vectorizer(shared_state.settings)
+
+                # 6. Global Background Tasks (Shared across ports)
+                from app.core.bot_manager import BotManager
+                shared_state.bot_manager = BotManager(app)
+                
+                asyncio.create_task(server_crud.refresh_all_server_models())
+                app.state.refresh_task = asyncio.create_task(periodic_model_refresh(app))
+                
+                # Defer Bot Manager until ports are ready
+                shared_state.initialized = True
+                logger.info("--- HUB INITIALIZATION COMPLETE ---")
+
+    # Every "app" instance (per port) needs these locally to work in dependencies
+    app.state.settings = shared_state.settings
+    app.state.http_client = shared_state.http_client
+    app.state.redis = shared_state.redis
+    app.state.bot_manager = shared_state.bot_manager
+
+    # Start background services ONLY once
+    async with shared_state.init_lock:
+        if not shared_state.tasks_started:
+             asyncio.create_task(shared_state.bot_manager.start_all_active_bots())
+             shared_state.tasks_started = True
     
-    # Ensure all JS/CSS dependencies are local
-    await ensure_local_assets()
-    
-    # Ensure directories exist
-    uploads_dir = Path("app/static/uploads")
-    uploads_dir.mkdir(exist_ok=True)
-    logger.info(f"Uploads directory is at: {uploads_dir.resolve()}")
-    
-    ssl_dir = Path(".ssl")
-    ssl_dir.mkdir(exist_ok=True)
-    logger.info(f"SSL storage directory is at: {ssl_dir.resolve()}")
-
-    benchmarks_dir = Path("benchmarks")
-    benchmarks_dir.mkdir(exist_ok=True)
-    logger.info(f"Benchmarks directory is at: {benchmarks_dir.resolve()}")
-
-    if settings.ADMIN_PASSWORD == "changeme":
-        logger.critical("FATAL: The admin password is set to the default value 'changeme'.")
-        logger.critical("Please change ADMIN_PASSWORD in your .env file or run the setup wizard and restart.")
-        sys.exit(1)
-
-    await init_db()
-    # Explicitly call bootstrap every startup to ensure ROM presence
-    await bootstrap_lollms_agent()
-    
-    # --- NEW: Load settings from DB ---
-    async with AsyncSessionLocal() as db:
-        db_settings_obj = await settings_crud.create_initial_settings(db)
-        current_data = db_settings_obj.settings_data
-        
-        # AUTO-BUMP: If user has old very low timeouts, upgrade them to the new gateway defaults
-        needs_update = False
-        if current_data.get("retry_total_timeout_seconds", 0) < 60.0:
-            current_data["retry_total_timeout_seconds"] = 600.0
-            current_data["max_retries"] = 10
-            needs_update = True
-        
-        if needs_update:
-            logger.info("Migrating settings to high-resilience gateway defaults...")
-            await settings_crud.update_app_settings(db, AppSettingsModel.model_validate(current_data))
-
-        app.state.settings = AppSettingsModel.model_validate(current_data)
-
-    await create_initial_admin_user()
-    await ensure_system_service_key(app)
-
-    # Patient HTTP client: Connect fast, but read/write can take forever
-    # None for read/write means we wait infinitely for the model to finish.
-    timeout = httpx.Timeout(read=None, write=None, connect=5.0, pool=60.0)
-    # AGGRESSIVE LIMITS: Support high-frequency loops and agentic tool-calling.
-    # We increase max_connections and decrease keepalive_expiry to prevent stale socket accumulation.
-    limits = httpx.Limits(
-        max_keepalive_connections=200, 
-        max_connections=1000, 
-        keepalive_expiry=10.0 # Faster rotation for high-frequency loops
-    )
-    app.state.http_client = httpx.AsyncClient(timeout=timeout, limits=limits)
-
-    try:
-        db_settings: AppSettingsModel = app.state.settings
-        if db_settings.redis_username and db_settings.redis_password:
-            credentials = f"{db_settings.redis_username}:{db_settings.redis_password}@"
-        elif db_settings.redis_username:
-            credentials = f"{db_settings.redis_username}@"
-        else:
-            credentials = ""
-        redis_url = f"redis://{credentials}{db_settings.redis_host}:{db_settings.redis_port}/0"
-
-        app.state.redis = redis.from_url(redis_url, encoding="utf-8", decode_responses=True)
-        await app.state.redis.ping()
-        logger.info("Redis connected: Advanced rate limiting enabled.")
-    except Exception as exc:
-        logger.info(f"Redis not detected. System is running in Essential Mode (Rate limiting disabled).")
-        app.state.redis = None
-
-    from app.core.bot_manager import BotManager
-    app.state.bot_manager = BotManager(app)
-    
-    # Dummy request for internal sub-calls
-    from starlette.requests import Request as StarletteRequest
-    app.state.dummy_request = StarletteRequest({
-        "type": "http",
-        "method": "POST",
-        "path": "/internal-bot-proxy",
-        "headers": [],
-        "app": app,
-        "query_string": b"",
-        "client": ("127.0.0.1", 0),
-        "server": ("127.0.0.1", 8080),
-    })
-
-    import asyncio
-    # --- BOT SINGLETON STARTUP ---
-    # We only start the bots once, even if the Hub is listening on multiple ports.
-    global _bots_initialized
-    if not _bots_initialized:
-        logger.info("Initializing Bot Orchestration Manager...")
-        asyncio.create_task(app.state.bot_manager.start_all_active_bots())
-        _bots_initialized = True
-    else:
-        logger.debug("Bot Manager already running in this process; skipping duplicate startup.")
-    
-    refresh_task = asyncio.create_task(periodic_model_refresh(app))
-    app.state.refresh_task = refresh_task
-
-    # Do initial model refresh on startup
-    logger.info("Performing initial model refresh on startup...")
-    initial_results = await server_crud.refresh_all_server_models()
-    logger.info(f"Initial model refresh: {initial_results['success']}/{initial_results['total']} servers updated")
+    # Critical for internal routing logic to find the same vectorizer
+    if shared_state.vectorizer:
+        from app.api.v1.routes import proxy
+        proxy._shared_routing_vectorizer = shared_state.vectorizer
 
     yield
 
-    # ---------- Shutdown ----------
-    logger.info("Shutting down…")
-    
-    # 1. Stop known background tasks
-    if hasattr(app.state, 'refresh_task'):
-        app.state.refresh_task.cancel()
-
-    # 2. Gracefully handle all pending background tasks (logging, memory, etc.)
-    # This prevents SAWarning: non-checked-in connection
-    pending = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
-    if pending:
-        logger.info(f"Waiting for {len(pending)} background tasks to settle...")
-        # Shield tasks from immediate destruction and give them 2 seconds to close sessions
-        await asyncio.wait(pending, timeout=2.0)
-
-    # 3. Close network clients
-    await app.state.http_client.aclose()
-    if app.state.redis:
-        await app.state.redis.close()
-
-    # 4. Explicitly dispose of the Database Engine
-    logger.info("Closing database connections...")
-    await engine.dispose()
+    # Clean up (Only once)
+    if shared_state.initialized:
+        async with shared_state.init_lock:
+            if shared_state.initialized:
+                if shared_state.http_client:
+                    await shared_state.http_client.aclose()
+                if shared_state.redis:
+                    await shared_state.redis.close()
+                shared_state.initialized = False
 
 app = FastAPI(
     title=settings.APP_NAME,

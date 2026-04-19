@@ -33,7 +33,9 @@ def _estimate_max_context(name: str) -> int:
     
     # 2. Check LUT
     base_name = name_lower.split(':')[0].split('-')[0]
-    return MODEL_CONTEXT_LUT.get(base_name, 8192) # Default Ollama context
+    # Modern standard is 32k; older Ollama default was 2k/4k. 
+    # We default to 32k for unmatched models to prevent aggressive filtering.
+    return MODEL_CONTEXT_LUT.get(base_name, 32768) 
 
 def _estimate_model_size(name: str) -> float:
     """Heuristic to extract parameter count from name or LUT."""

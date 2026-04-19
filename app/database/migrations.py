@@ -363,6 +363,7 @@ async def migrate_app_settings_data(engine: AsyncEngine) -> None:
 
         # Default values for new retry and SB-MRA settings
         default_new_settings = {
+            "wizard_completed": False,
             "max_retries": 10,
             "retry_total_timeout_seconds": 600.0,
             "retry_base_delay_ms": 10,

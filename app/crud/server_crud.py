@@ -572,7 +572,8 @@ async def get_servers_with_model(db: AsyncSession, model_name: str) -> list[Olla
                     is_match = (
                         available_model_name == model_name or
                         norm_avail == norm_req or
-                        # Allow "model" to match "model:latest" and vice versa
+                        # Deep fuzzy match for Ollama tag variations
+                        available_model_name.split(':')[0] == model_name.split(':')[0] or
                         available_model_name == f"{model_name}:latest" or
                         model_name == f"{available_model_name}:latest" or
                         (is_ollama and available_model_name.startswith(f"{model_name}:")) or
@@ -915,12 +916,28 @@ async def check_server_health(http_client: httpx.AsyncClient, server: OllamaServ
 
 
 async def check_all_servers_health(db: AsyncSession, http_client: httpx.AsyncClient) -> List[Dict[str, Any]]:
-    """Checks the health of all configured servers."""
+    """Checks the health of all configured servers. Skips network calls for deactivated nodes."""
     servers = await get_servers(db)
     if not servers:
         return []
 
-    tasks = [check_server_health(http_client, server) for server in servers]
+    tasks = []
+    for server in servers:
+        if server.is_active:
+            # Only initiate network traffic for active servers
+            tasks.append(check_server_health(http_client, server))
+        else:
+            # Return a static result for deactivated servers to prevent unnecessary network 'pokes'
+            async def get_disabled_status(s):
+                return {
+                    "server_id": s.id, 
+                    "name": s.name[:128], 
+                    "url": s.url[:256], 
+                    "status": "Disabled", 
+                    "reason": "Administratively Deactivated"
+                }
+            tasks.append(get_disabled_status(server))
+
     results = await asyncio.gather(*tasks)
     return results
 

@@ -46,36 +46,40 @@ _bayesian_stats: Dict[str, Dict[str, float]] = {}
 
 # --- SB-MRA SHARED VECTORIZER ---
 _shared_routing_vectorizer = None
+
 async def _get_shared_vectorizer(settings: AppSettingsModel):
     global _shared_routing_vectorizer
     if _shared_routing_vectorizer is not None:
         return _shared_routing_vectorizer
     
-    try:
+    from fastapi.concurrency import run_in_threadpool
+
+    def _load():
         import pipmaster as pm
         pm.ensure_packages(["safe-store", "numpy"])
         from safe_store.vectorization.manager import VectorizationManager
         
         v_name = settings.routing_vectorizer_name
-        # Map internal keys: 'sentense_transformer' -> 'st'
         v_key = "st" if "sentense" in v_name else v_name
         
-        # Hard safety: block tf_idf for routing as it requires a fitted corpus
         if v_key == "tf_idf":
-            logger.warning("SB-MRA: TF-IDF is not supported for dynamic routing. Falling back to SentenceTransformers.")
             v_key = "st"
 
         v_config = {}
-        # Ensure we have a model for ST
         if v_key == "st":
             v_config["model"] = settings.routing_vectorizer_model or "sentence-transformers/all-MiniLM-L6-v2"
         elif settings.routing_vectorizer_model:
             v_config["model"] = settings.routing_vectorizer_model
+            
         if settings.routing_vectorizer_base_url: 
             v_config["host" if v_key == "ollama" else "base_url"] = settings.routing_vectorizer_base_url
             
-        _shared_routing_vectorizer = VectorizationManager().get_vectorizer(v_key, v_config)
-        logger.info(f"SB-MRA: Shared vectorizer '{v_name}' initialized.")
+        return VectorizationManager().get_vectorizer(v_key, v_config)
+
+    try:
+        # CRITICAL: Run in threadpool to prevent freezing the server during 40s model load
+        _shared_routing_vectorizer = await run_in_threadpool(_load)
+        logger.info(f"SB-MRA: Shared vectorizer initialized in background thread.")
         return _shared_routing_vectorizer
     except Exception as e:
         logger.error(f"SB-MRA: Failed to initialize vectorizer: {e}")
@@ -1513,15 +1517,22 @@ async def _select_auto_model(db: AsyncSession, body: Dict[str, Any], overrides: 
     debug = settings.enable_debug_mode if settings else False
 
     if debug:
-        ASCIIColors.info("\n" + "="*40)
-        ASCIIColors.info("🚀 SB-MRA: STARTING AUTO-SELECTION")
-        ASCIIColors.info("="*40)
+        ASCIIColors.rich_print("\n[red]" + "="*40 + "[/red]")
+        ASCIIColors.rich_print("[bold]🚀 SB-MRA:[/bold] STARTING AUTO-SELECTION")
+        ASCIIColors.rich_print("[red]" + "="*40 + "[/red]")
 
     if overrides is None: overrides = {}
     if exclude_models is None: exclude_models = []
     
-    has_images = overrides.get("require_vision", False) or ("images" in body and body["images"])
+    # Determine if there is ACTUAL image data in this specific request
+    has_image_data = ("images" in body and body["images"]) or any(
+        isinstance(msg.get("content"), list) and any(p.get("type") == "image_url" for p in msg["content"])
+        for msg in body.get("messages", [])
+    )
     
+    # Vision is only REQUIRED if data is present or explicitly requested via override
+    requires_vision = overrides.get("require_vision", False) or has_image_data
+
     # 1. Extract and Analyze Content
     full_history_text = ""
     last_user_prompt = ""
@@ -1551,9 +1562,46 @@ async def _select_auto_model(db: AsyncSession, body: Dict[str, Any], overrides: 
 
     # 2. Filter Candidates
     all_metadata = await model_metadata_crud.get_all_metadata(db)
-    
+
+    # HARD FUNCTIONAL FIREWALL: 
+    # Logic dictates that Chat requests cannot use Embedding models and vice-versa.
+    is_chat_path = True
+    if request and hasattr(request, "url"):
+        path = request.url.path.lower()
+        if "embed" in path:
+            is_chat_path = False
+
+    if is_chat_path:
+        # Purge all embedding models from Chat/Audit selection
+        # FIX: Ensure we only purge if it's strictly an embedding model AND not a chat model
+        all_metadata = [m for m in all_metadata if not (m.is_embedding_model and not m.is_chat_model)]
+    else:
+        # Purge all chat models from Embedding selection
+        all_metadata = [m for m in all_metadata if m.is_embedding_model]
+
     # NEW: Filter available models by checking if their hosting servers are healthy
     active_servers = await server_crud.get_servers(db)
+
+    if debug:
+        from ascii_colors import ASCIIColors
+        ASCIIColors.rich_print("[yellow]--- Infrastructure Audit ---[/yellow]")
+        for s in active_servers:
+            is_p = _is_server_penalized(s.id)
+            is_h = _is_server_healthy_cached(s.id)
+            is_a = s.is_active
+            
+            if is_a and is_h and not is_p:
+                status_color = "green"
+                status_text = "ACTIVE & HEALTHY"
+            elif is_p:
+                status_color = "yellow"
+                status_text = "QUARANTINED"
+            else:
+                status_color = "red"
+                status_text = "DOWN or DEACTIVATED"
+            
+            ASCIIColors.rich_print(f"Node: [cyan]{s.name:20}[/cyan] Status: [{status_color}]{status_text}[/{status_color}] URL: [white]{s.url}[/white]")
+
     # Exclude Quarantined nodes from the candidate pool for 'auto'
     healthy_servers =[s for s in active_servers if s.is_active and not _is_server_penalized(s.id)]
     
@@ -1587,7 +1635,33 @@ async def _select_auto_model(db: AsyncSession, body: Dict[str, Any], overrides: 
                         
                 available_on_healthy.add(m_name)
 
-    available_metadata =[m for m in all_metadata if m.model_name in available_on_healthy]
+    # STRICT FILTER: Only consider models physically present on healthy/active servers.
+    # This prevents the 'Ghost Model' issue where deactivated servers leave stale metadata.
+    available_metadata = []
+    for m in all_metadata:
+        m_norm = m.model_name.replace(':latest', '')
+        if m.model_name in available_on_healthy or m_norm in available_on_healthy:
+            available_metadata.append(m)
+
+    if debug:
+        from ascii_colors import ASCIIColors
+        ASCIIColors.rich_print(f"[yellow]--- Discovered Model Pool ({len(available_metadata)}) ---[/yellow]")
+        for m in available_metadata:
+            # Format attributes into high-visibility tags
+            vision_tag = "[green]VISION[/green]" if m.supports_images else "[red]TEXT[/red]"
+            think_tag = "[green]THINK[/green]" if m.supports_thinking else "[red]DIRECT[/red]"
+            type_tag = "<magenta>EMBED</magenta>" if m.is_embedding_model else "[blue]CHAT[/blue]"
+            
+            # Context size color coding
+            ctx_color = "green" if m.max_context >= 32768 else ("yellow" if m.max_context >= 8192 else "red")
+            
+            ASCIIColors.rich_print(
+                f"ID: [cyan]{m.model_name:25}[/cyan] | "
+                f"Ctx: [{ctx_color}]{m.max_context:7}[/{ctx_color}] | "
+                f"Mode: {type_tag} | "
+                f"Cap: {vision_tag} {think_tag} | "
+                f"Prio: [white]{m.priority}[/white]"
+            )
 
     # 3. Multifactorial Scoring (SB-MRA)
     settings = request.app.state.settings
@@ -1609,14 +1683,17 @@ async def _select_auto_model(db: AsyncSession, body: Dict[str, Any], overrides: 
         # HARD FILTER 1: Context Size
         new_pool = []
         for m in available_metadata:
-            if m.max_context >= required_context:
+            # If the model has a very low context (like the default 2048/4096), 
+            # and the request is only slightly over, we allow it to proceed 
+            # and let the backend handle truncation to avoid "No Models Found" errors.
+            if m.max_context >= required_context or m.max_context <= 4096:
                 new_pool.append(m)
             elif debug:
                 ASCIIColors.warning(f"❌ Dropping '{m.model_name}': Context limit {m.max_context} < required {required_context}")
         available_metadata = new_pool
         
         # HARD FILTER 2: Capability matching
-        if has_images:
+        if requires_vision:
             new_pool = []
             for m in available_metadata:
                 if m.supports_images: new_pool.append(m)
@@ -1624,11 +1701,13 @@ async def _select_auto_model(db: AsyncSession, body: Dict[str, Any], overrides: 
             available_metadata = new_pool
 
         if is_reasoning_task:
-            # We treat this as a preference, not a hard-drop unless other models exist
+            # We treat this as a preference. 
             reasoners = [m for m in available_metadata if m.is_reasoning_model]
             if reasoners:
                 available_metadata = reasoners
                 if debug: ASCIIColors.cyan(f"🎯 Focusing on {len(reasoners)} reasoning specialists.")
+            else:
+                if debug: ASCIIColors.warning("⚠️ Reasoning task detected, but no models are tagged as 'Reasoning' in Models Manager. Using general pool.")
 
     else:
         if debug: ASCIIColors.cyan(f"⚡ System Task '{request.state.request_id}': Bypassing hard context constraints.")
@@ -1651,53 +1730,37 @@ async def _select_auto_model(db: AsyncSession, body: Dict[str, Any], overrides: 
             logger.warning(f"SB-MRA: Semantic vectorization failed: {e}")
 
     if not available_metadata:
-        logger.warning("Auto-routing failed: No models with metadata are available on active servers.")
-        return None
+        logger.warning("SB-MRA: No metadata-tagged models found. Falling back to physical model list.")
+        # FALLBACK: Use all physically present models from healthy servers
+        # Rank by simple name length (shorter names often = base models)
+        return sorted(list(available_on_healthy), key=len)
 
-    # STRICT FILTER: Exclude embedding models for any non-embedding task.
-    # This must be the foundation of our fallback pool to prevent catastrophic logic leaks.
-    is_chat_request = True
-    if request and hasattr(request, "url"):
-        path = request.url.path.lower()
-        # If the endpoint is /api/embeddings or similar, we ARE looking for embedding models
-        if "embed" in path:
-            is_chat_request = False
-        
-    if is_chat_request:
-        # ABSOLUTE EXCLUSION: If it's a chat request, the model MUST NOT be an embedding model
-        safe_fallback_pool = [
-            m for m in available_metadata 
-            if not getattr(m, 'is_embedding_model', False) and 
-            not any(kw in m.model_name.lower() for kw in ["embed", "embedding", "bge", "gte", "nomic", "snowflake"])
-        ]
-        if len(safe_fallback_pool) < len(available_metadata):
-            logger.debug(f"SB-MRA: Purged {len(available_metadata) - len(safe_fallback_pool)} embedding model(s) from chat candidate pool.")
-    else:
-        # If it IS an embedding request, only include embedding models
-        safe_fallback_pool = [
-            m for m in available_metadata 
-            if getattr(m, 'is_embedding_model', False) or 
-            any(kw in m.model_name.lower() for kw in ["embed", "embedding", "bge", "gte", "nomic", "snowflake"])
-        ]
-
-    available_metadata = safe_fallback_pool
-
-    candidate_models = safe_fallback_pool
+    # The pool is now strictly filtered by functional domain (Chat vs Embed)
+    safe_fallback_pool = available_metadata
+    candidate_models = available_metadata
 
     # Tier 1: Capability Matching
-    if has_images:
-        # Strict filter: ONLY models that support images
-        candidate_models =[m for m in candidate_models if m.supports_images]
-    else:
-        # Soft filter: If it's a text task, prioritize text-only models
-        text_only =[m for m in candidate_models if not m.supports_images]
-        if text_only:
-            candidate_models = text_only
+    if requires_vision:
+        # If we HAVE images, we MUST use a vision model
+        vision_models = [m for m in candidate_models if m.supports_images]
+        if vision_models:
+            candidate_models = vision_models
+        elif not is_system_task:
+            # Only fail hard for users. System tasks try to proceed with text.
+            if debug: ASCIIColors.error("❌ No vision models found for image-based request.")
+            return None
 
     if is_reasoning_task:
-        reasoning_models =[m for m in candidate_models if m.is_reasoning_model]
+        reasoning_models = [m for m in candidate_models if m.is_reasoning_model]
         if reasoning_models:
-            candidate_models = reasoning_models
+            # Only narrow the pool if we aren't in a system task
+            # or if we have plenty of reasoning models.
+            if not is_system_task:
+                candidate_models = reasoning_models
+            elif debug:
+                ASCIIColors.cyan(f"🎯 System: Preferring {len(reasoning_models)} reasoning specialists.")
+        elif debug:
+            ASCIIColors.warning("⚠️ Reasoning requested but no specialists tagged. Using general pool.")
 
     if contains_code:
         code_models =[m for m in candidate_models if m.is_code_model]
@@ -1771,8 +1834,32 @@ async def _select_auto_model(db: AsyncSession, body: Dict[str, Any], overrides: 
             (settings.routing_weight_semantic * d_score * 20)
         )
         
-        # Health Penalty
-        servers = await server_crud.get_servers_with_model(db, m.model_name)
+        # Health Penalty & Physical Availability Check
+        # REPAIR MISSION: For system tasks (Audit Reports), we check physical presence 
+        # bypassing the admin whitelist to ensure the Hub can always reach its nodes.
+        if is_system_task:
+            servers = []
+            active_nodes = [s for s in active_servers if s.is_active]
+            for s in active_nodes:
+                m_list = s.available_models
+                if isinstance(m_list, str):
+                    try: m_list = json.loads(m_list)
+                    except: m_list = []
+                
+                # Check physical presence by name or base name
+                if any(m_info.get("name") == m.model_name or m_info.get("name", "").split(':')[0] == m.model_name.split(':')[0] for m_info in m_list):
+                    servers.append(s)
+        else:
+            servers = await server_crud.get_servers_with_model(db, m.model_name)
+        
+        # CRITICAL FIX: If a model has zero online/active servers, it's a "ghost" 
+        # and must be removed from the pool entirely.
+        if not servers:
+            if debug:
+                from ascii_colors import ASCIIColors
+                ASCIIColors.error(f"🚫 Removing '{m.model_name}' from pool: No active compute nodes found.")
+            continue
+
         is_quarantined = any(_is_server_penalized(s.id) for s in servers)
         if is_quarantined:
             score += 1000 

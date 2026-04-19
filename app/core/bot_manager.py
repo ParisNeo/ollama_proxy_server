@@ -20,7 +20,15 @@ class BotManager:
 
     async def start_all_active_bots(self):
         """Initial check and start of bots marked as active."""
-        if not self.app.state.settings.enable_bot_mode:
+        # REPAIR MISSION: Use a more robust settings lookup to prevent race conditions
+        # during singleton initialization.
+        settings = getattr(self.app.state, 'settings', None)
+        if not settings:
+            from app.main import shared_state
+            settings = shared_state.settings
+            
+        if not settings or not settings.enable_bot_mode:
+            logger.debug("Bot Manager: enable_bot_mode is disabled. Skipping startup.")
             return
 
         async with AsyncSessionLocal() as db:
