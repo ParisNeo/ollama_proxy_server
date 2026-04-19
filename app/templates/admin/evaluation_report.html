@@ -60,6 +60,13 @@
         Comprehensive metrics across all participants. Accuracy is normalized as a percentage of the reference benchmark.
     </div>
 
+    {% if ai_analysis_html %}
+    <h2>2. Qualitative Analysis</h2>
+    <div class="section-content card" style="background-color: #f0f4ff; border-left: 4pt solid #4f46e5;">
+        {{ ai_analysis_html | safe }}
+    </div>
+    {% endif %}
+
     {% if static_plot %}
     <div class="figure-box">
         <img src="data:image/png;base64,{{ static_plot }}" style="width: 100%;">
@@ -88,7 +95,8 @@
         </tbody>
     </table>
 
-    <h2>2. Qualitative Comparison</h2>
+    {% if report_format == 'full' %}
+    <h2>{{ '3' if ai_analysis_html else '2' }}. Qualitative Comparison</h2>
     {% set first_model = stats.keys() | list | first %}
     {% for i in range(stats[first_model].count) %}
     <div class="comparison-grid">
@@ -130,6 +138,7 @@
         <div style="page-break-after:always;"></div>
     {% endif %}
     {% endfor %}
+    {% endif %}
 </div>
 
 {% else %}
@@ -146,10 +155,16 @@
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"></path></svg>
                 AI Insights
             </button>
-            <a href="{{ url_for('admin_export_run_pdf', run_id=run.id) }}" class="bg-white/5 hover:bg-white/10 text-indigo-400 border border-indigo-500/30 px-6 py-2 rounded-xl font-black text-xs uppercase tracking-widest transition-all flex items-center gap-2">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
-                Download PDF
-            </a>
+            <div class="relative group">
+                <button class="bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-2 rounded-xl font-black text-xs uppercase tracking-widest shadow-lg transition-all flex items-center gap-2">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                    Export Report
+                </button>
+                <div class="absolute right-0 mt-2 w-48 bg-[#0a0a0f] border border-white/10 rounded-xl shadow-2xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50 overflow-hidden">
+                    <a href="{{ url_for('admin_export_run_pdf', run_id=run.id) }}?format=full" class="block px-4 py-3 text-[10px] font-black uppercase text-gray-400 hover:bg-indigo-600 hover:text-white transition-colors">📄 Full Scientific Paper</a>
+                    <a href="{{ url_for('admin_export_run_pdf', run_id=run.id) }}?format=summary" class="block px-4 py-3 text-[10px] font-black uppercase text-gray-400 hover:bg-indigo-600 hover:text-white transition-colors border-t border-white/5">📊 Executive Summary</a>
+                </div>
+            </div>
         </div>
     </div>
 

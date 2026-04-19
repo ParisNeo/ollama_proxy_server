@@ -660,7 +660,13 @@ async def admin_evaluation_report(run_id: int, request: Request, db: AsyncSessio
     return templates.TemplateResponse("admin/evaluation_report.html", context)
 
 @router.get("/evaluations/runs/{run_id}/export-pdf", name="admin_export_run_pdf")
-async def admin_export_run_pdf(run_id: int, request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
+async def admin_export_run_pdf(
+    run_id: int, 
+    request: Request, 
+    format: str = "full",
+    db: AsyncSession = Depends(get_db), 
+    admin_user: User = Depends(require_admin_user)
+):
     from xhtml2pdf import pisa
     import io
     import os
@@ -669,9 +675,23 @@ async def admin_export_run_pdf(run_id: int, request: Request, db: AsyncSession =
     # 1. Get raw context
     context = await _prepare_report_context(run_id, request, db)
     if not context: raise HTTPException(status_code=404)
+
+    # 1.1 Try to find the associated AI analysis for this run (if any exists)
+    # Benchmark analysis reports are saved as LogAnalysis entries with a specific format
+    # We look for the most recent one containing this run's ID or relevant summary
+    # Since they aren't explicitly linked by FK, we rely on the preparation or a fresh fetch.
+    from app.database.models import LogAnalysis
+    stmt = select(LogAnalysis).filter(LogAnalysis.content.like(f"%Benchmark Report: {context['run'].name}%")).order_by(LogAnalysis.timestamp.desc())
+    res = await db.execute(stmt)
+    latest_analysis = res.scalars().first()
+    if latest_analysis:
+        import markdown
+        md = markdown.Markdown(extensions=['fenced_code', 'tables'])
+        context["ai_analysis_html"] = md.convert(latest_analysis.content)
     
-    # 2. Add PDF-specific flags
+    # 2. Add PDF-specific flags and format choice
     context["is_pdf"] = True
+    context["report_format"] = format # 'full' or 'summary'
     
     # 3. Pre-parse Markdown content for results (PDF engine needs pre-rendered HTML)
     import markdown
