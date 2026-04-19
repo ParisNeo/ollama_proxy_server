@@ -1,27 +1,141 @@
-{% extends "admin/base.html" if not is_pdf else "admin/base.html" %}
-{# For simplicity we keep extends, but we will block modern UI parts #}
+{% extends "admin/base.html" %}
 
 {% block title %}Benchmark Report: {{ run.name }}{% endblock %}
 
 {% block content %}
 {% if is_pdf %}
 <style>
-    /* Inline PDF-safe CSS for xhtml2pdf */
-    @page { size: a4 portrait; margin: 2cm; }
-    body { font-family: Helvetica, Arial, sans-serif; background: white !important; color: black !important; }
-    h1 { font-size: 24pt; color: #4f46e5; margin-bottom: 20pt; }
-    h2 { font-size: 18pt; border-bottom: 1pt solid #ccc; margin-top: 20pt; }
-    table { width: 100%; border-collapse: collapse; margin-top: 10pt; }
-    th { background-color: #f3f4f6; text-align: left; padding: 8pt; font-size: 10pt; }
-    td { padding: 8pt; border-bottom: 0.5pt solid #eee; font-size: 9pt; }
-    .card { border: 1pt solid #eee; padding: 10pt; margin-bottom: 10pt; }
-    .hidden-in-pdf { display: none !important; }
-</style>
-{% endif %}
+    @page { 
+        size: a4 portrait; 
+        margin: 2cm; 
+    }
+    body { font-family: "Times New Roman", Times, serif; line-height: 1.5; color: #1a1a1a; background: white !important; }
+    .paper-header { text-align: center; margin-bottom: 30pt; }
+    .paper-title { font-size: 22pt; font-weight: bold; margin-bottom: 5pt; color: #000; }
+    .paper-metadata { font-size: 10pt; color: #666; margin-bottom: 20pt; font-style: italic; }
+    
+    h2 { font-size: 14pt; border-bottom: 1pt solid #333; margin-top: 20pt; margin-bottom: 10pt; }
+    h3 { font-size: 12pt; font-weight: bold; margin-top: 15pt; color: #2563eb; }
+    
+    /* Markdown Element Styling for PDF */
+    pre { background-color: #f8f8f8; border: 0.5pt solid #ddd; padding: 8px; margin: 10px 0; font-family: Courier, monospace; font-size: 8pt; }
+    code { font-family: Courier, monospace; background-color: #f0f0f0; padding: 1pt 3pt; font-size: 8.5pt; }
+    blockquote { border-left: 3pt solid #ddd; padding-left: 10pt; color: #555; font-style: italic; margin: 10pt 0; }
+    ul, ol { margin-left: 20pt; }
+    li { margin-bottom: 3pt; }
 
-<div class="space-y-8 pb-20 {% if is_pdf %}bg-white text-black{% endif %}">
-    <!-- Header Summary -->
-    <div class="flex justify-between items-end border-b border-white/10 pb-6 {% if is_pdf %}hidden-in-pdf{% endif %}">
+    .abstract { font-style: italic; margin: 20pt 40pt; text-align: justify; border: 0.5pt solid #ccc; padding: 15pt; background: #f9f9f9; }
+    .section-content { text-align: justify; font-size: 10.5pt; }
+    
+    .figure-box { text-align: center; margin: 20pt 0; padding: 10pt; border: 0.5pt solid #eee; }
+    .figure-caption { font-size: 9pt; font-weight: bold; margin-top: 8pt; color: #444; }
+    
+    table { width: 100%; border-collapse: collapse; margin: 15pt 0; }
+    th { border-top: 1.5pt solid #000; border-bottom: 1pt solid #000; padding: 8pt; font-size: 9pt; text-align: left; background: #f2f2f2; }
+    td { border-bottom: 0.5pt solid #ddd; padding: 6pt; font-size: 9pt; vertical-align: top; }
+    
+
+    .comparison-grid { margin-top: 10pt; }
+    .comparison-label { font-weight: bold; font-size: 8pt; color: #4f46e5; margin-bottom: 2pt; }
+    .comparison-text { background: #fcfcfc; border: 1px solid #eee; padding: 5px; font-size: 8.5pt; margin-bottom: 10pt; }
+</style>
+
+<div class="paper-body">
+    <div class="paper-header">
+        <div class="paper-title">{{ run.name }}</div>
+        <div class="paper-metadata">
+            LoLLMs Hub Automated Research Report • Generated: {{ run.created_at.strftime('%Y-%m-%d %H:%M') }}<br>
+            Evaluator: {{ run.evaluator_config.type | upper }} Protocol
+        </div>
+    </div>
+
+    <div class="abstract">
+        <strong>Abstract:</strong> This document presents a comparative performance analysis of {{ run.models|length }} Large Language Models 
+        evaluated against a curated benchmark dataset. Testing parameters utilized a temperature of 0.0 to ensure deterministic output 
+        consistency. Scores were calculated using {{ run.evaluator_config.type }} verification.
+    </div>
+
+    <h2>1. Statistical Overview</h2>
+    <div class="section-content">
+        Comprehensive metrics across all participants. Accuracy is normalized as a percentage of the reference benchmark.
+    </div>
+
+    {% if static_plot %}
+    <div class="figure-box">
+        <img src="data:image/png;base64,{{ static_plot }}" style="width: 100%;">
+        <div class="figure-caption">Figure 1: Mean performance accuracy across the target model cluster.</div>
+    </div>
+    {% endif %}
+
+    <table>
+        <thead>
+            <tr>
+                <th>Model Identifier</th>
+                <th>Avg. Accuracy</th>
+                <th>Max Score</th>
+                <th>Standard Deviation</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for model, s in stats.items() %}
+            <tr>
+                <td><strong>{{ model }}</strong></td>
+                <td>{{ (s.avg * 100) | round(1) }}%</td>
+                <td>{{ (s.max * 100) | round(1) }}%</td>
+                <td>±{{ s.std | round(3) }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <h2>2. Qualitative Comparison</h2>
+    {% set first_model = stats.keys() | list | first %}
+    {% for i in range(stats[first_model].count) %}
+    <div class="comparison-grid">
+        <div style="font-weight: bold; margin-bottom: 5pt; border-left: 3pt solid #333; padding-left: 10pt;">
+            Experimental Task #{{ i + 1 }} ({{ run.results[first_model][i].category }})
+        </div>
+        <div class="comparison-text"><strong>Input Prompt:</strong> {{ run.results[first_model][i].prompt }}</div>
+        
+        <table style="border: 0.2pt solid #eee;">
+            <thead>
+                <tr>
+                    <th width="25%">Model & Score</th>
+                    <th>Response Output</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for model in run.results.keys() %}
+                <tr>
+                    <td style="background: #fcfcfc;">
+                        <strong>{{ model }}</strong><br>
+                        <span style="color: #2563eb; font-size: 8pt;">SCORE: {{ (run.results[model][i].score * 100) | round(1) }}%</span>
+                    </td>
+                    <td>
+                        <div class="markdown-content">
+                            {{ run.results[model][i].model_answer_html | safe }}
+                        </div>
+                        {% if run.results[model][i].reasoning_html %}
+                        <div style="margin-top: 8pt; padding-top: 5pt; border-top: 0.1pt solid #eee; font-size: 8pt; color: #666;">
+                            <strong>Critique:</strong> {{ run.results[model][i].reasoning_html | safe }}
+                        </div>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% if not loop.last and i % 2 == 0 %}
+        <div style="page-break-after:always;"></div>
+    {% endif %}
+    {% endfor %}
+</div>
+
+{% else %}
+<!-- WEB VIEW SECTION -->
+<div class="space-y-8 pb-20">
+    <div class="flex justify-between items-end border-b border-white/10 pb-6">
         <div>
             <div class="text-[10px] font-black text-fuchsia-500 uppercase tracking-widest mb-1">Execution ID: #{{ run.id }}</div>
             <h1 class="text-4xl font-black text-white tracking-tighter">{{ run.name }}</h1>
@@ -39,7 +153,6 @@
         </div>
     </div>
 
-    <!-- AI Analysis Section (Dynamic) -->
     <div id="ai-analysis-container" class="hidden card-style border-purple-500/50 bg-purple-500/5 animate-pulse">
         <div class="flex items-center gap-3 mb-4">
             <div class="w-2 h-2 bg-purple-500 rounded-full animate-ping"></div>
@@ -51,16 +164,11 @@
         <div id="ai-analysis-content" class="prose prose-invert prose-purple max-w-none text-sm leading-relaxed"></div>
     </div>
 
-    <!-- Main Statistics Grid -->
     <div class="grid grid-cols-1 lg:grid-cols-4 gap-6">
         {% for model, s in stats.items() %}
         <div class="card-style bg-black/40 border-white/5 relative overflow-hidden group">
-            <div class="absolute -right-4 -bottom-4 opacity-5 group-hover:scale-110 transition-transform">
-                <svg class="w-24 h-24" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2l4.5 20.29L12 18l-4.5 4.29L12 2z"/></svg>
-            </div>
             <div class="text-[9px] font-black text-gray-600 uppercase mb-2">Model Performance</div>
             <h3 class="text-lg font-black text-indigo-400 truncate mb-4">{{ model }}</h3>
-            
             <div class="space-y-4">
                 <div>
                     <div class="flex justify-between items-end mb-1">
@@ -71,115 +179,64 @@
                         <div class="h-full bg-indigo-500" style="width: {{ s.avg * 100 }}%"></div>
                     </div>
                 </div>
-                <div class="grid grid-cols-2 gap-4 pt-2 border-t border-white/5">
-                    <div>
-                        <span class="text-[8px] text-gray-600 uppercase font-bold">Consistency (Std)</span>
-                        <div class="text-xs text-indigo-300 font-mono">±{{ s.std | round(3) }}</div>
-                    </div>
-                    <div class="text-right">
-                        <span class="text-[8px] text-gray-600 uppercase font-bold">Variance Range</span>
-                        <div class="text-xs text-amber-500 font-mono">{{ (s.max - s.min) | round(2) }}</div>
-                    </div>
-                </div>
             </div>
         </div>
         {% endfor %}
     </div>
 
-    <!-- Comparative Visuals -->
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 {% if is_pdf %}hidden-in-pdf{% endif %}">
-        <!-- Chart: Category Comparison -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div class="card-style h-[400px] flex flex-col">
-            <div class="flex justify-between items-center mb-6">
-                <h3 class="text-xs font-black text-gray-400 uppercase tracking-widest">Semantic Category Breakdown</h3>
-                <span class="text-[9px] text-gray-600 italic">Scores normalized 0.0 - 1.0</span>
-            </div>
+            <h3 class="text-xs font-black text-gray-400 uppercase tracking-widest mb-4">Category Breakdown</h3>
             <div class="flex-grow relative">
                 <canvas id="categoryCompareChart"></canvas>
             </div>
         </div>
-
-        <!-- Chart: Global Score Distribution -->
         <div class="card-style h-[400px] flex flex-col">
-            <div class="flex justify-between items-center mb-6">
-                <h3 class="text-xs font-black text-gray-400 uppercase tracking-widest">Global Ranking Curve</h3>
-                <span class="text-[9px] text-gray-600 italic">Density of performance clusters</span>
-            </div>
+            <h3 class="text-xs font-black text-gray-400 uppercase tracking-widest mb-4">Global Ranking</h3>
             <div class="flex-grow relative">
                 <canvas id="rankingChart"></canvas>
             </div>
         </div>
     </div>
-    
-    {% if is_pdf %}
-    <div>
-        <h2>Summary Statistics</h2>
-        <table>
-            <thead>
-                <tr>
-                    <th>Model</th>
-                    <th>Average Score</th>
-                    <th>Count</th>
-                    <th>Std Dev</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for model, s in stats.items() %}
-                <tr>
-                    <td><b>{{ model }}</b></td>
-                    <td>{{ (s.avg * 100) | round(1) }}%</td>
-                    <td>{{ s.count }} tasks</td>
-                    <td>±{{ s.std | round(3) }}</td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
-    {% endif %}
 
-    <!-- Task Explorer -->
     <div class="card-style">
         <h3 class="card-header text-xl font-bold mb-6 pb-2">Individual Task Audit</h3>
         <div class="space-y-6">
             {% set first_model = stats.keys() | list | first %}
             {% for i in range(stats[first_model].count) %}
-            <div class="p-4 bg-white/5 border border-white/10 rounded-2xl hover:border-indigo-500/40 transition-all group">
+            <div class="p-4 bg-white/5 border border-white/10 rounded-2xl hover:border-indigo-500/40 transition-all">
                 <div class="flex justify-between items-start mb-4 border-b border-white/5 pb-2">
-                    <div class="flex items-center gap-3">
-                        <span class="text-[10px] font-black bg-indigo-600 text-white px-2 py-0.5 rounded-md">TASK #{{ i + 1 }}</span>
-                        <span class="text-[10px] font-bold text-gray-500 uppercase">{{ run.results[first_model][i].category }}</span>
-                    </div>
+                    <span class="text-[10px] font-black bg-indigo-600 text-white px-2 py-0.5 rounded-md">TASK #{{ i + 1 }}</span>
                     <div class="flex gap-4">
                         {% for model in run.results.keys() %}
                         <div class="flex flex-col items-end">
                             <span class="text-[8px] text-gray-600 uppercase font-black">{{ model }}</span>
-                            <span class="text-xs font-black {% if run.results[model][i].score > 0.8 %}text-emerald-400{% elif run.results[model][i].score > 0.5 %}text-amber-400{% else %}text-red-400{% endif %}">
-                                {{ (run.results[model][i].score * 100) | round(1) }}%
-                            </span>
+                            <span class="text-xs font-black">{{ (run.results[model][i].score * 100) | round(1) }}%</span>
                         </div>
                         {% endfor %}
                     </div>
                 </div>
-                
-                <div class="mb-4">
-                    <p class="text-sm font-bold text-white leading-relaxed">{{ run.results[first_model][i].prompt }}</p>
-                </div>
-
-                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    <div class="p-3 bg-black/40 rounded-xl border border-white/5">
-                        <span class="text-[8px] font-black text-gray-600 uppercase block mb-1">Ground Truth Reference</span>
-                        <p class="text-[11px] text-gray-400 italic line-clamp-4">{{ run.results[first_model][i].reference_answer }}</p>
+                <div class="mb-4 text-sm font-bold text-white">{{ run.results[first_model][i].prompt }}</div>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div class="p-3 bg-black/40 rounded-xl border border-white/5 text-[11px] text-gray-400 italic">
+                        <strong>Reference:</strong> {{ run.results[first_model][i].reference_answer }}
                     </div>
                     {% for model in run.results.keys() %}
-                    <div class="p-3 bg-indigo-900/10 border border-indigo-500/10 rounded-xl">
-                        <span class="text-[8px] font-black text-indigo-400 uppercase block mb-1">{{ model }} Response</span>
-                        <div class="text-[11px] text-indigo-100 line-clamp-4">
-                            {% if is_pdf %}
-                                {{ run.results[model][i].model_answer_html | safe }}
-                            {% else %}
-                                {{ run.results[model][i].model_answer }}
-                            {% endif %}
+                    <div class="p-4 bg-indigo-900/10 border border-indigo-500/10 rounded-xl space-y-2">
+                        <div class="flex justify-between items-center border-b border-indigo-500/10 pb-1 mb-2">
+                            <span class="text-[10px] font-black text-indigo-400 uppercase tracking-widest">{{ model }} Output</span>
                         </div>
+                        <div class="prose prose-invert prose-indigo max-w-none text-[11px] leading-relaxed markdown-render">
+                            {{ run.results[model][i].model_answer }}
+                        </div>
+                        {% if run.results[model][i].reasoning %}
+                        <details class="mt-2 group">
+                            <summary class="text-[9px] font-bold text-gray-500 uppercase cursor-pointer hover:text-indigo-400 transition-colors">View Audit Reasoning</summary>
+                            <div class="mt-2 p-2 bg-black/40 rounded border border-white/5 italic text-gray-400 text-[10px] markdown-render">
+                                {{ run.results[model][i].reasoning }}
+                            </div>
+                        </details>
+                        {% endif %}
                     </div>
                     {% endfor %}
                 </div>
@@ -190,18 +247,21 @@
 </div>
 
 <script src="{{ url_for('static', path='vendor/chart.js') }}"></script>
+<script src="{{ url_for('static', path='vendor/marked.min.js') }}"></script>
 <script>
     document.addEventListener('DOMContentLoaded', () => {
-        // --- DATA PREP ---
+        // Render all markdown blocks in the web view
+        document.querySelectorAll('.markdown-render').forEach(el => {
+            el.innerHTML = marked.parse(el.innerText.trim());
+        });
         const catSummary = {{ cat_summary | tojson | safe }};
         const stats = {{ stats | tojson | safe }};
         const categories = Object.keys(catSummary);
         const models = Object.keys(stats);
         const palette = ['#6366f1', '#d946ef', '#10b981', '#f59e0b', '#ef4444'];
 
-        // --- CHART 1: Category Comparison (Radar or Bar) ---
-        const catCtx = document.getElementById('categoryCompareChart').getContext('2d');
-        new Chart(catCtx, {
+        const catCtx = document.getElementById('categoryCompareChart')?.getContext('2d');
+        if(catCtx) new Chart(catCtx, {
             type: 'radar',
             data: {
                 labels: categories,
@@ -209,52 +269,20 @@
                     label: m,
                     data: categories.map(c => catSummary[c][m] || 0),
                     borderColor: palette[i % palette.length],
-                    backgroundColor: palette[i % palette.length] + '22',
-                    borderWidth: 3,
-                    pointBackgroundColor: palette[i % palette.length]
+                    backgroundColor: palette[i % palette.length] + '22'
                 }))
             },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                scales: {
-                    r: {
-                        grid: { color: 'rgba(255,255,255,0.05)' },
-                        angleLines: { color: 'rgba(255,255,255,0.1)' },
-                        pointLabels: { color: '#9ca3af', font: { size: 10, weight: 'bold' } },
-                        ticks: { display: false },
-                        suggestedMin: 0,
-                        suggestedMax: 1
-                    }
-                },
-                plugins: {
-                    legend: { position: 'bottom', labels: { color: '#e5e7eb', usePointStyle: true, font: { size: 11, weight: '900' } } }
-                }
-            }
+            options: { responsive: true, maintainAspectRatio: false, scales: { r: { grid: { color: 'rgba(255,255,255,0.05)' }, angleLines: { color: 'rgba(255,255,255,0.1)' }, ticks: { display: false } } } }
         });
 
-        // --- CHART 2: Global Ranking Curve ---
-        const rankCtx = document.getElementById('rankingChart').getContext('2d');
-        new Chart(rankCtx, {
+        const rankCtx = document.getElementById('rankingChart')?.getContext('2d');
+        if(rankCtx) new Chart(rankCtx, {
             type: 'bar',
             data: {
                 labels: models,
-                datasets: [{
-                    label: 'Global Score',
-                    data: models.map(m => stats[m].avg * 100),
-                    backgroundColor: palette,
-                    borderRadius: 12
-                }]
+                datasets: [{ label: 'Global Score', data: models.map(m => stats[m].avg * 100), backgroundColor: palette, borderRadius: 12 }]
             },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                scales: {
-                    y: { beginAtZero: true, max: 100, grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#6b7280' } },
-                    x: { grid: { display: false }, ticks: { color: '#e5e7eb', font: { weight: 'bold' } } }
-                },
-                plugins: { legend: { display: false } }
-            }
+            options: { responsive: true, maintainAspectRatio: false }
         });
     });
 
@@ -263,40 +291,17 @@
         const container = document.getElementById('ai-analysis-container');
         const result = document.getElementById('ai-analysis-result');
         const content = document.getElementById('ai-analysis-content');
-
-        btn.disabled = true;
-        container.classList.remove('hidden');
-        result.classList.add('hidden');
-
+        btn.disabled = true; container.classList.remove('hidden'); result.classList.add('hidden');
         try {
-            const resp = await fetch("{{ url_for('api_eval_analyze_run', run_id=run.id) }}", {
-                method: 'POST',
-                headers: { 'X-CSRF-Token': '{{ csrf_token }}' }
-            });
+            const resp = await fetch("{{ url_for('api_eval_analyze_run', run_id=run.id) }}", { method: 'POST', headers: { 'X-CSRF-Token': '{{ csrf_token }}' } });
             const data = await resp.json();
-            
             if (data.analysis) {
-                // Pre-process for math symbols models might output (e.g. \$)
-                let processedText = data.analysis.replace(/\\\$/g, '$');
-                
-                content.innerHTML = marked.parse(processedText);
-                container.classList.add('hidden');
-                result.classList.remove('hidden');
-                
-                // Trigger code highlighting on the new content
-                content.querySelectorAll('pre code').forEach((block) => {
-                    hljs.highlightElement(block);
-                });
-            } else {
-                alert("AI Analysis failed to generate a response.");
-                container.classList.add('hidden');
+                content.innerHTML = marked.parse(data.analysis);
+                container.classList.add('hidden'); result.classList.remove('hidden');
             }
-        } catch(e) {
-            alert("Connection error: " + e.message);
-            container.classList.add('hidden');
-        } finally {
-            btn.disabled = false;
-        }
+        } catch(e) { alert("Analysis failed: " + e.message); container.classList.add('hidden'); }
+        finally { btn.disabled = false; }
     }
 </script>
+{% endif %}
 {% endblock %}

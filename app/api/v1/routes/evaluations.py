@@ -293,25 +293,42 @@ async def _generate_dataset_task_multi(request: Request, ds_ids: list, texts: li
                                                 error_message=f"Batch Processing: Analyzing context chunks ({idx+1}/{total_chunks})..."))
 
                 prompt = (
-                    "Given the following knowledge chunk, generate 2 diverse, complex tasks (e.g., Q&A, coding, analysis) "
-                    "that can be COMPLETELY answered using ONLY this chunk. Output ONLY a JSON list of objects with keys "
-                    "'category', 'prompt', and 'reference_answer'. Do not use markdown backticks.\n\n"
-                    f"CHUNK:\n{chunk_text[:4000]}"
+                    "### INSTRUCTION:\n"
+                    "Act as a Dataset Architect. Read the provided text chunk and generate 2 highly distinct evaluation tasks.\n"
+                    "Each task must be solvable using the information in the chunk. \n\n"
+                    "### OUTPUT FORMAT (MANDATORY):\n"
+                    "Return ONLY a raw JSON array. No preamble, no explanation, no markdown blocks. \n"
+                    "Format: [{\"category\": \"string\", \"prompt\": \"string\", \"reference_answer\": \"string\"}]\n\n"
+                    f"### CONTEXT CHUNK:\n{chunk_text[:4000]}"
                 )
                 
                 try:
                     # We need a fresh session per concurrent branch to avoid SQLite threading errors
                     async with AsyncSessionLocal() as sub_db:
-                        real_model, msgs = await _resolve_target(sub_db, agent, [{"role": "user", "content": prompt}], request=request, request_id=sub_id, sender=admin_username)
-                        servers = await server_crud.get_servers_with_model(sub_db, real_model)
-                        if not servers: return
+                        # Ensure real_model is a string for the proxy call
+                        resolution = await _resolve_target(sub_db, agent, [{"role": "user", "content": prompt}], request=request, request_id=sub_id, sender=admin_username)
+                        real_model, msgs = resolution
+                        target_model_str = real_model[0] if isinstance(real_model, list) else real_model
 
-                        resp, chosen_srv = await _reverse_proxy(request, "chat", servers, json.dumps({"model": real_model, "messages": msgs, "stream": False, "options": {"temperature": 0.2}}).encode(), 
-                                                              is_subrequest=True, request_id=sub_id, model=real_model, sender=admin_username)
+                        servers = await server_crud.get_servers_with_model(sub_db, target_model_str)
+                        if not servers: 
+                            logger.error(f"Evaluator: No servers found for model {target_model_str}")
+                            return
+
+                        # Fix: Pass target_model_str to 'model' parameter so it shows up in logs instead of 'unknown'
+                        resp, chosen_srv = await _reverse_proxy(
+                            request, "chat", servers, 
+                            json.dumps({"model": target_model_str, "messages": msgs, "stream": False, "options": {"temperature": 0.1}}).encode(), 
+                            is_subrequest=True, 
+                            request_id=sub_id, 
+                            model=target_model_str, 
+                            sender=admin_username
+                        )
                         
                         if hasattr(resp, 'body'):
                             data = json.loads(resp.body.decode())
                             raw = data.get("message", {}).get("content", "").strip()
+                            # Improved cleaning: Remove markdown fences and find first '['
                             clean_json = re.sub(r'```(?:json)?\s*([\s\S]*?)```', r'\1', raw).strip()
                             
                             start = clean_json.find('[')
@@ -574,9 +591,13 @@ async def api_delete_run(run_id: int, request: Request, db: AsyncSession = Depen
     return {"success": True}
 
 async def _prepare_report_context(run_id: int, request: Request, db: AsyncSession):
-    """Internal helper to calculate stats for both web and PDF views."""
+    """Internal helper to calculate stats and generate static plots for reports."""
     run = await db.get(BenchmarkRun, run_id)
     if not run: return None
+    
+    import matplotlib.pyplot as plt
+    import io
+    import base64
     
     stats = {}
     category_scores = {}
@@ -602,11 +623,32 @@ async def _prepare_report_context(run_id: int, request: Request, db: AsyncSessio
             if cat not in cat_summary: cat_summary[cat] = {}
             cat_summary[cat][model] = sum(scores) / len(scores)
 
+    # --- Generate Static Plot for PDF ---
+    plot_url = None
+    try:
+        plt.figure(figsize=(10, 5))
+        model_names = list(stats.keys())
+        avg_scores = [s["avg"] * 100 for s in stats.values()]
+        
+        plt.bar(model_names, avg_scores, color=['#4f46e5', '#10b981', '#f59e0b', '#ef4444'])
+        plt.ylabel('Accuracy Score (%)')
+        plt.title('Cross-Model Performance Comparison')
+        plt.ylim(0, 100)
+        plt.grid(axis='y', linestyle='--', alpha=0.7)
+        
+        buf = io.BytesIO()
+        plt.savefig(buf, format='png', bbox_inches='tight')
+        plt.close()
+        plot_url = base64.b64encode(buf.getvalue()).decode('utf-8')
+    except Exception as pe:
+        logger.error(f"Plot generation failed: {pe}")
+
     context = get_template_context(request)
     context.update({
         "run": run,
         "stats": stats,
         "cat_summary": cat_summary,
+        "static_plot": plot_url,
         "csrf_token": await get_csrf_token(request)
     })
     return context
@@ -631,36 +673,20 @@ async def admin_export_run_pdf(run_id: int, request: Request, db: AsyncSession =
     # 2. Add PDF-specific flags
     context["is_pdf"] = True
     
-    # PDF Blueprints - CSS for the PDF engine
-    pdf_css = """
-    <style>
-        @page { size: a4 portrait; margin: 2cm; }
-        body { font-family: Helvetica, Arial, sans-serif; font-size: 10pt; line-height: 1.5; color: #333; }
-        h1 { font-size: 24pt; font-weight: bold; color: #4f46e5; margin-bottom: 15pt; border-bottom: 1pt solid #eee; padding-bottom: 5pt; }
-        h2 { font-size: 18pt; font-weight: bold; color: #1e1b4b; margin-top: 20pt; margin-bottom: 10pt; }
-        h3 { font-size: 14pt; font-weight: bold; color: #4b5563; margin-top: 15pt; }
-        p { margin-bottom: 10pt; }
-        strong, b { font-weight: bold; color: #000; }
-        ul { margin-left: 20pt; margin-bottom: 10pt; }
-        li { margin-bottom: 5pt; }
-        table { width: 100%; border-collapse: collapse; margin-top: 15pt; margin-bottom: 15pt; }
-        th { background-color: #f3f4f6; padding: 8pt; border: 0.5pt solid #ccc; font-weight: bold; }
-        td { padding: 8pt; border-bottom: 0.5pt solid #eee; }
-        .card { border: 0.5pt solid #ddd; padding: 10pt; margin-bottom: 15pt; background-color: #fafafa; }
-        
-        /* Markdown Code Rendering for PDF */
-        pre { background-color: #f0f0f0; border: 1pt solid #ccc; padding: 10pt; font-family: Courier; font-size: 8pt; line-height: 1.2; }
-        code { font-family: Courier; background-color: #f7f7f7; font-size: 9pt; }
-    </style>
-    """
-
-    # 3. Pre-parse Markdown content
+    # 3. Pre-parse Markdown content for results (PDF engine needs pre-rendered HTML)
     import markdown
-    md = markdown.Markdown(extensions=['fenced_code', 'tables', 'codehilite'])
+    # We use a comprehensive set of extensions for scientific/technical rendering
+    md = markdown.Markdown(extensions=['fenced_code', 'tables', 'admonition', 'nl2br'])
     
-    # If this is the System Report, the 'html_content' passed in is likely raw Markdown from the AI
-    if html_content:
-        html_content = md.convert(html_content)
+    # Process results to provide HTML versions of model answers and reasoning for the template
+    if "run" in context and context["run"].results:
+        for model_results in context["run"].results.values():
+            for result in model_results:
+                # Render the model's actual answer
+                result["model_answer_html"] = md.convert(result.get("model_answer", ""))
+                # Render the judge's reasoning if it exists
+                if result.get("reasoning"):
+                    result["reasoning_html"] = md.convert(result["reasoning"])
 
     # 4. Manually render template to string
     template = templates.get_template("admin/evaluation_report.html")
