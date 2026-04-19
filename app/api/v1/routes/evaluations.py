@@ -645,14 +645,26 @@ async def admin_export_run_pdf(run_id: int, request: Request, db: AsyncSession =
         li { margin-bottom: 5pt; }
         table { width: 100%; border-collapse: collapse; margin-top: 15pt; margin-bottom: 15pt; }
         th { background-color: #f3f4f6; padding: 8pt; border: 0.5pt solid #ccc; font-weight: bold; }
-        td { padding: 8pt; border: 0.5pt solid #eee; }
+        td { padding: 8pt; border-bottom: 0.5pt solid #eee; }
         .card { border: 0.5pt solid #ddd; padding: 10pt; margin-bottom: 15pt; background-color: #fafafa; }
+        
+        /* Markdown Code Rendering for PDF */
+        pre { background-color: #f0f0f0; border: 1pt solid #ccc; padding: 10pt; font-family: Courier; font-size: 8pt; line-height: 1.2; }
+        code { font-family: Courier; background-color: #f7f7f7; font-size: 9pt; }
     </style>
     """
 
-    # 3. Manually render template to string
+    # 3. Pre-parse Markdown content
+    import markdown
+    md = markdown.Markdown(extensions=['fenced_code', 'tables', 'codehilite'])
+    
+    # If this is the System Report, the 'html_content' passed in is likely raw Markdown from the AI
+    if html_content:
+        html_content = md.convert(html_content)
+
+    # 4. Manually render template to string
     template = templates.get_template("admin/evaluation_report.html")
-    html_content = pdf_css + template.render(context)
+    html_content = template.render(context)
 
     def link_callback(uri, rel):
         # Handle static assets for the PDF generator

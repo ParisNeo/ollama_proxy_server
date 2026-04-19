@@ -173,7 +173,13 @@
                     {% for model in run.results.keys() %}
                     <div class="p-3 bg-indigo-900/10 border border-indigo-500/10 rounded-xl">
                         <span class="text-[8px] font-black text-indigo-400 uppercase block mb-1">{{ model }} Response</span>
-                        <p class="text-[11px] text-indigo-100 line-clamp-4">{{ run.results[model][i].model_answer }}</p>
+                        <div class="text-[11px] text-indigo-100 line-clamp-4">
+                            {% if is_pdf %}
+                                {{ run.results[model][i].model_answer_html | safe }}
+                            {% else %}
+                                {{ run.results[model][i].model_answer }}
+                            {% endif %}
+                        </div>
                     </div>
                     {% endfor %}
                 </div>
@@ -270,9 +276,17 @@
             const data = await resp.json();
             
             if (data.analysis) {
-                content.innerHTML = marked.parse(data.analysis);
+                // Pre-process for math symbols models might output (e.g. \$)
+                let processedText = data.analysis.replace(/\\\$/g, '$');
+                
+                content.innerHTML = marked.parse(processedText);
                 container.classList.add('hidden');
                 result.classList.remove('hidden');
+                
+                // Trigger code highlighting on the new content
+                content.querySelectorAll('pre code').forEach((block) => {
+                    hljs.highlightElement(block);
+                });
             } else {
                 alert("AI Analysis failed to generate a response.");
                 container.classList.add('hidden');

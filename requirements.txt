@@ -19,6 +19,7 @@ SQLAlchemy==2.0.31
 uvicorn==0.30.1
 ascii_colors>=0.11.21
 xhtml2pdf>=0.2.17
+markdown>=3.6
 pipmaster>=1.1.4
 youtube-transcript-api
 safe-store>=0.2.1

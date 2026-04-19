@@ -378,11 +378,21 @@ details > summary::-webkit-details-marker { display: none; }
 .prose h3 { font-size: 1.25rem; font-weight: 700; margin-top: 1rem; margin-bottom: 0.5rem; color: #e5e7eb; }
 .prose p { margin-bottom: 1rem; line-height: 1.6; }
 .prose strong, .prose b { font-weight: 800; color: white; }
-.prose em, .prose i { font-style: italic; opacity: 0.9; }
+.prose em, .prose i { font-style: italic; opacity: 0.9; color: #cbd5e1; } /* Improved contrast for italics */
 .prose ul { list-style-type: disc; margin-left: 1.5rem; margin-bottom: 1rem; }
 .prose ol { list-style-type: decimal; margin-left: 1.5rem; margin-bottom: 1rem; }
 .prose li { margin-bottom: 0.25rem; }
-.prose code { background-color: rgba(255,255,255,0.1); padding: 0.1rem 0.3rem; border-radius: 0.25rem; font-family: monospace; font-size: 0.9em; color: #fbbf24; }
+/* Inline code blocks (backticks) styling */
+.prose code { 
+    background-color: rgba(99, 102, 241, 0.2); 
+    border: 1px solid rgba(99, 102, 241, 0.3);
+    padding: 0.1rem 0.4rem; 
+    border-radius: 0.375rem; 
+    font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace; 
+    font-size: 0.85em; 
+    color: #818cf8; 
+    white-space: nowrap;
+}
 .prose blockquote { border-left: 4px solid var(--color-primary-500); padding-left: 1rem; font-style: italic; color: #9ca3af; margin: 1rem 0; }
 
 /* --- Global Animations --- */
