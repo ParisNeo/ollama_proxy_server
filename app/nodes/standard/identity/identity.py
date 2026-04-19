@@ -43,20 +43,30 @@ class PersonalityNode(BaseNode):
 
     async def execute(self, engine, node, output_slot_idx):
         from app.core.personalities_manager import PersonalityManager
+        from app.core.skills_manager import SkillsManager
         import datetime
+        
         p_name = node["properties"].get("name")
         p = next((x for x in PersonalityManager.get_all_personalities() if x["name"] == p_name), None)
-        if not p: return ""
+        if not p: return "" if output_slot_idx == 0 else {}
         
+        # Slot 1: Export YAML Metadata as Settings
+        if output_slot_idx == 1:
+            meta = SkillsManager.parse_frontmatter(p["raw"])
+            hints = meta.get("model_hints", {})
+            # Map LoLLMs internal keys to Ollama protocol keys for consistency
+            return {
+                "temperature": float(hints.get("temperature", 0.7)),
+                "num_predict": int(hints.get("max_tokens", 2048)),
+                "top_p": float(hints.get("top_p", 0.9)),
+                "repeat_penalty": float(hints.get("repeat_penalty", 1.1))
+            }
+
+        # Slot 0: System Prompt String
         raw_text = re.sub(r'^---\n.*?\n---\n', '', p["raw"], flags=re.DOTALL).strip()
-        
-        # Template Variable Substitution
-        raw_text = raw_text.replace("{{user_name}}", engine.sender)
-        raw_text = raw_text.replace("{{display_name}}", p_name)
-        
+        raw_text = raw_text.replace("{{user_name}}", engine.sender).replace("{{display_name}}", p_name)
         now = datetime.datetime.now()
-        raw_text = raw_text.replace("{{date}}", now.strftime("%Y-%m-%d"))
-        raw_text = raw_text.replace("{{time}}", now.strftime("%H:%M:%S"))
+        raw_text = raw_text.replace("{{date}}", now.strftime("%Y-%m-%d")).replace("{{time}}", now.strftime("%H:%M:%S"))
         
         return raw_text
 

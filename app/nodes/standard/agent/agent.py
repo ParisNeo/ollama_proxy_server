@@ -3,7 +3,9 @@ import copy
 from typing import Dict, Any
 from app.nodes.base import BaseNode
 from app.crud import server_crud
+from app.core.tools_manager import ToolsManager
 from app.core.events import event_manager, ProxyEvent
+from fastapi.concurrency import run_in_threadpool
 import logging
 logger = logging.getLogger("Agent")
 
@@ -15,11 +17,46 @@ class AgentReasonerNode(BaseNode):
 
     async def execute(self, engine, node: Dict[str, Any], output_slot_idx: int) -> Any:
         from app.core.memory_manager import CognitiveMemoryManager
-        
+        from app.core.skills_manager import SkillsManager
+        from app.core.personalities_manager import PersonalityManager
+        import datetime
+
         props = node.get("properties", {})
         msgs = await engine._resolve_input(node, 0) or engine.initial_messages
+        input_settings = await engine._resolve_input(node, 1) or {}
+        
         scratchpad = copy.deepcopy(list(msgs))
-        model = props.get("model", "auto")
+        final_settings = copy.deepcopy(input_settings)
+
+        # 0. Handle Direct Persona Inheritance
+        persona_name = props.get("persona")
+        if persona_name:
+            p = next((x for x in PersonalityManager.get_all_personalities() if x["name"] == persona_name), None)
+            if p:
+                # Extract prompt logic
+                raw_text = re.sub(r'^---\n.*?\n---\n', '', p["raw"], flags=re.DOTALL).strip()
+                raw_text = raw_text.replace("{{user_name}}", engine.sender).replace("{{display_name}}", persona_name)
+                now = datetime.datetime.now()
+                raw_text = raw_text.replace("{{date}}", now.strftime("%Y-%m-%d")).replace("{{time}}", now.strftime("%H:%M:%S"))
+
+                # Inject System Prompt
+                if scratchpad and scratchpad[0].get("role") == "system":
+                    scratchpad[0]["content"] = f"{raw_text}\n\n{scratchpad[0]['content']}"
+                else:
+                    scratchpad.insert(0, {"role": "system", "content": raw_text})
+                
+                # Inherit Settings (Metadata)
+                meta = SkillsManager.parse_frontmatter(p["raw"])
+                # Merge: Input Slot < Persona Metadata < Node Defaults
+                if "model_hints" in meta and isinstance(meta["model_hints"], dict):
+                    hints = meta["model_hints"]
+                    if "temperature" in hints and "temperature" not in final_settings:
+                        final_settings["temperature"] = float(hints["temperature"])
+                    if "max_tokens" in hints and "num_predict" not in final_settings:
+                        final_settings["num_predict"] = int(hints["max_tokens"])
+        # 1. Resolve Model (Property < Priority Input)
+        model_override = await engine._resolve_input(node, 2)
+        model = str(model_override).strip() if model_override else props.get("model", "auto")
         max_turns = int(props.get("max_turns", 10))
         
         # --- UNIVERSAL COGNITIVE MEMORY INJECTION ---
@@ -59,7 +96,7 @@ class AgentReasonerNode(BaseNode):
             
             cb = getattr(engine.request.state, "stream_callback", None)
             if cb:
-                await cb(f'<processing type="tool_execution" title="Agent Loop" round="{turn}">\n* Agent is thinking (Turn {turn}/{max_turns})...\n')
+                await cb(f'<processing type="tool_execution" title="Agent Loop" round="{turn}">\n')
 
             for rm in candidates:
                 rm_str = str(rm)
@@ -71,7 +108,13 @@ class AgentReasonerNode(BaseNode):
                     logger.warning(f"Agent candidate '{rm_str}' offline. Falling back...")
                     continue
 
-                payload = {"model": rm_str, "messages": turn_msgs, "stream": False, "tools":[t for t in tools if t]}
+                payload = {
+                    "model": rm_str, 
+                    "messages": turn_msgs, 
+                    "stream": False, 
+                    "tools":[t for t in tools if t],
+                    "options": final_settings # Pass inherited settings
+                }
                 try:
                     resp, _ = await engine.reverse_proxy_fn(engine.request, "chat", servers, json.dumps(payload).encode(), is_subrequest=True, sender="autonomous-agent")
                     if hasattr(resp, 'body'):
@@ -92,8 +135,68 @@ class AgentReasonerNode(BaseNode):
             scratchpad.append(ai_msg)
             
             if cb:
-                await cb(f'* Turn {turn} complete.\n</processing>\n')
+                await cb('</processing>\n')
             
+            if ai_msg.get("tool_calls"):
+                # --- PRETTY TOOL TELEMETRY (LTP Protocol) ---
+                if cb:
+                    for call in ai_msg["tool_calls"]:
+                        fn_name = call.get("function", {}).get("name", "unknown")
+                        args = call.get("function", {}).get("arguments", {})
+                        if isinstance(args, str):
+                            try: args = json.loads(args)
+                            except: pass
+                        
+                        tool_def = next((t for t in tools if t.get("function", {}).get("name") == fn_name), {})
+                        pretty_text = tool_def.get("pretty_name")
+                        
+                        if not pretty_text:
+                            pretty_text = "🛠️ " + fn_name.replace("tool_", "").replace("_", " ").title()
+                        
+                        preview = str(args.get('query') or args.get('path') or args.get('command') or args.get('url') or "")
+                        if len(preview) > 60: preview = preview[:57] + "..."
+                        
+                        await cb(f'{pretty_text}: "{preview}"\n')
+
+                # --- LTP TOOL EXECUTION LOOP ---
+                for call in ai_msg["tool_calls"]:
+                    fn_name = call.get("function", {}).get("name")
+                    args = call.get("function", {}).get("arguments", {})
+                    if isinstance(args, str):
+                        try: args = json.loads(args)
+                        except: args = {}
+
+                    tool_def = next((t for t in tools if t.get("function", {}).get("name") == fn_name), None)
+                    if not tool_def:
+                        scratchpad.append({"role": "tool", "tool_call_id": call.get("id"), "name": fn_name, "content": "Error: Tool schema not found in this node's context."})
+                        continue
+
+                    try:
+                        if tool_def.get("is_mcp"):
+                            result = await tool_def["mcp_client"].call_tool(fn_name, args)
+                        else:
+                            from app.api.v1.routes.tools import execute_tool_universally
+                            lib_name = tool_def.get("library")
+                            all_libs = ToolsManager.get_all_tools()
+                            lib = next((l for l in all_libs if l["filename"] == lib_name), None)
+                            
+                            if lib:
+                                # Use current user context if available, otherwise anonymous system user
+                                active_user = getattr(engine.request.state, 'user', None)
+                                if not active_user:
+                                    from app.database.models import User as DBUser
+                                    active_user = DBUser(id=0, username="system_anon", is_admin=True)
+
+                                result, logs = await run_in_threadpool(execute_tool_universally, lib["raw"], fn_name, args, active_user, lib_name)
+                            else:
+                                result = f"Error: Tool library '{lib_name}' not found on disk."
+                        
+                        scratchpad.append({"role": "tool", "tool_call_id": call.get("id"), "name": fn_name, "content": str(result)})
+                    except Exception as e:
+                        scratchpad.append({"role": "tool", "tool_call_id": call.get("id"), "name": fn_name, "content": f"Error: {str(e)}"})
+                
+                continue # RE-RUN AI LOOP WITH RESULTS
+
             if not ai_msg.get("tool_calls"):
                 content = ai_msg.get("content", "")
                 

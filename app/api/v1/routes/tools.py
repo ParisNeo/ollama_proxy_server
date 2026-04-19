@@ -152,10 +152,17 @@ def execute_tool_universally(code: str, fn_name: str, args: Any, user: User, lib
         if not func:
             return f"Error: {fn_name} not found."
 
-        # Fetch stored settings for this specific tool library and user
-        # In a real impl, we'd query UserToolData where is_persistent=True
-        # For this example, we initialize the host system with the settings context
-        lollms_sys = LollmsSystem(user, library_name, settings_override=getattr(user, 'tool_settings', {}).get(library_name))
+        # Prepare settings: Combine User-Global settings with Node-Instance settings
+        combined_settings = {}
+        # 1. Global user settings for this library
+        combined_settings.update(getattr(user, 'tool_settings', {}).get(library_name, {}))
+        # 2. Node-level overrides (highest priority)
+        if isinstance(args, dict) and "_node_settings" in args:
+            node_overrides = args.pop("_node_settings")
+            if isinstance(node_overrides, dict):
+                combined_settings.update(node_overrides)
+
+        lollms_sys = LollmsSystem(user, library_name, settings_override=combined_settings)
         
         # Determine if we should inject the host interface
         sig = inspect.signature(func)
@@ -187,13 +194,19 @@ def execute_tool_universally(code: str, fn_name: str, args: Any, user: User, lib
     finally:
         if os.path.exists(temp_path): os.remove(temp_path)
 
-async def _execute_tool_call_local(code: str, call: dict, user: User, library_name: str) -> Any:
-    """Refactored to use the universal executor."""
+async def _execute_tool_call_local(code: str, call: dict, user: User, library_name: str, node_settings: dict = None) -> Any:
+    """Refactored to use the universal executor with instance settings."""
     fn_name = call.get("function", {}).get("name")
     args = call.get("function", {}).get("arguments", {})
     if isinstance(args, str):
         try: args = json.loads(args)
         except: pass
+    
+    if not isinstance(args, dict): args = {}
+    
+    # Inject node settings into args for the executor to pick up (prefixed to avoid collision)
+    if node_settings:
+        args["_node_settings"] = node_settings
     
     return await run_in_threadpool(execute_tool_universally, code, fn_name, args, user, library_name)
 

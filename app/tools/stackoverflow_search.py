@@ -2,6 +2,10 @@ TOOL_LIBRARY_NAME = 'StackOverflow Search'
 TOOL_LIBRARY_DESC = 'Search StackOverflow for programming answers and solutions.'
 TOOL_LIBRARY_ICON = '🥞'
 
+TOOL_TITLES = {
+    "tool_search_stackoverflow": "🥞 StackOverflow Search"
+}
+
 def init_tool_library() -> None:
     import pipmaster as pm
     pm.ensure_packages({'requests': '>=2.0.0'})

@@ -7,6 +7,13 @@ TOOL_LIBRARY_NAME = 'LoLLMs Bot Tools'
 TOOL_LIBRARY_DESC = 'Core filesystem and execution primitives for the LoLLMs Bot Agent.'
 TOOL_LIBRARY_ICON = '🤖'
 
+TOOL_TITLES = {
+    "tool_read_file": "📂 Reading Local File",
+    "tool_write_file": "✍️ Writing to Workspace",
+    "tool_send_artifact_to_user": "🎁 Preparing Artifact for User",
+    "tool_execute_command": "💻 System Terminal"
+}
+
 WORKSPACE_DIR = Path("app/static/uploads/workspace")
 
 def init_tool_library() -> None:

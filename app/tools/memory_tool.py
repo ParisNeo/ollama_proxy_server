@@ -2,6 +2,11 @@ TOOL_LIBRARY_NAME = 'Memory Manager'
 TOOL_LIBRARY_DESC = 'Save and retrieve persistent user information or facts.'
 TOOL_LIBRARY_ICON = '🧠'
 
+TOOL_TITLES = {
+    "tool_save_memory": "💾 Storing User Preference",
+    "tool_get_memory": "🔍 Recalling User Information"
+}
+
 def tool_save_memory(args: dict, lollms=None):
     '''
     Store a piece of information persistently for the user.

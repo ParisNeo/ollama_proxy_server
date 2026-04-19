@@ -1643,6 +1643,25 @@
             });
         });
 
+        // --- KEYBOARD SHORTCUTS (Undo/Redo) ---
+        window.addEventListener('keydown', (e) => {
+            const isZ = e.key.toLowerCase() === 'z';
+            const isY = e.key.toLowerCase() === 'y';
+            const cmdOrCtrl = e.ctrlKey || e.metaKey;
+
+            if (cmdOrCtrl && isZ) {
+                e.preventDefault();
+                if (e.shiftKey) {
+                    window.redo(); // Ctrl+Shift+Z
+                } else {
+                    window.undo(); // Ctrl+Z
+                }
+            } else if (cmdOrCtrl && isY) {
+                e.preventDefault();
+                window.redo(); // Ctrl+Y
+            }
+        });
+
         // Initialize Core
         graph = new LGraph();
 
@@ -1651,6 +1670,10 @@
             limit_to_container: false,
             align_to_grid: true
         };
+        
+        // --- UX POLISH: Prevent messy link segments and snapping noise ---
+        LGraphCanvas.link_type = LiteGraph.STRAIGHT_LINK;
+        LGraphCanvas.snap_distance = 15;
 
         // 2. Bind History
         graph.onNodeAdded = pushHistoryState;

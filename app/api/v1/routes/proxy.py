@@ -88,6 +88,16 @@ async def _get_shared_vectorizer(settings: AppSettingsModel):
 # Cache for model description embeddings to avoid re-calculating
 _model_latent_profiles: Dict[str, Any] = {}
 
+def reset_routing_engine():
+    """
+    Invalidates the shared vectorizer and model latent profiles.
+    Triggered when the administrator changes vectorizer settings.
+    """
+    global _shared_routing_vectorizer, _model_latent_profiles
+    _shared_routing_vectorizer = None
+    _model_latent_profiles.clear()
+    logger.info("SB-MRA: Routing engine and vector cache have been reset.")
+
 BAYESIAN_PRIOR_ALPHA = 10.0
 BAYESIAN_PRIOR_BETA = 1.0
 BAYESIAN_DECAY = 0.95

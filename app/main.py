@@ -311,10 +311,14 @@ async def lifespan(app: FastAPI):
                     Path(d).mkdir(exist_ok=True)
 
                 # 2. Database & Settings
-                await init_db()
-                async with AsyncSessionLocal() as db:
-                    db_settings_obj = await settings_crud.create_initial_settings(db)
-                    shared_state.settings = AppSettingsModel.model_validate(db_settings_obj.settings_data)
+                try:
+                    await init_db()
+                    async with AsyncSessionLocal() as db:
+                        db_settings_obj = await settings_crud.create_initial_settings(db)
+                        shared_state.settings = AppSettingsModel.model_validate(db_settings_obj.settings_data)
+                except Exception as db_err:
+                    logger.critical(f"FATAL: Database Initialization Failed: {db_err}")
+                    raise
 
                 # 3. Network Clients
                 timeout = httpx.Timeout(read=None, write=None, connect=5.0, pool=60.0)
@@ -329,29 +333,50 @@ async def lifespan(app: FastAPI):
                 except:
                     shared_state.redis = None
 
-                # 4. Heavy Assets & Admin
+                # 4. Mandatory Identity Setup
                 await create_initial_admin_user()
                 await bootstrap_lollms_agent()
                 await ensure_system_service_key(app)
-                await ensure_local_assets()
+                
+                # 5. Asset Preparation (Non-critical, don't block boot)
+                try:
+                    await ensure_local_assets()
+                except Exception as asset_err:
+                    logger.warning(f"Non-critical assets sync failed: {asset_err}")
 
-                # 5. Pre-warm Vectorizer (THE HEAVY PART)
-                if shared_state.settings.enable_sb_mra:
-                    from app.api.v1.routes.proxy import _get_shared_vectorizer
-                    shared_state.vectorizer = await _get_shared_vectorizer(shared_state.settings)
-
-                # 6. Global Background Tasks (Shared across ports)
                 from app.core.bot_manager import BotManager
                 shared_state.bot_manager = BotManager(app)
+
+                # --- BOT INFRASTRUCTURE: MOCK REQUEST ---
+                class MockRequest:
+                    def __init__(self):
+                        self.state = type('State', (), {})()
+                        self.app = app
+                        self.state.enforce_strict_context = False
+                        self.state.processing_depth = 0
+                        self.state.is_managed_agent = False
+                        self.state.source_platform = "Bot"
+                        self.url = type('URL', (), {'path': '/api/bot'})()
+                        # --- INTERFACE COMPATIBILITY FIX ---
+                        self.headers = {}
+                        self.method = "POST"
+                        self.query_params = {}
+                    
+                app.state.dummy_request = MockRequest()
                 
-                asyncio.create_task(server_crud.refresh_all_server_models())
-                app.state.refresh_task = asyncio.create_task(periodic_model_refresh(app))
-                
-                # Defer Bot Manager until ports are ready
+                # 6. Pre-warm Vectorizer (Heavy Task)
+                if shared_state.settings.enable_sb_mra:
+                    try:
+                        from app.api.v1.routes.proxy import _get_shared_vectorizer
+                        shared_state.vectorizer = await _get_shared_vectorizer(shared_state.settings)
+                    except Exception as vec_err:
+                        logger.warning(f"Vectorizer pre-warm failed: {vec_err}")
+
                 shared_state.initialized = True
                 logger.info("--- HUB INITIALIZATION COMPLETE ---")
 
-    # Every "app" instance (per port) needs these locally to work in dependencies
+    # --- PORT-SPECIFIC ASSIGNMENT ---
+    # Populate state BEFORE background tasks start
     app.state.settings = shared_state.settings
     app.state.http_client = shared_state.http_client
     app.state.redis = shared_state.redis
@@ -360,6 +385,8 @@ async def lifespan(app: FastAPI):
     # Start background services ONLY once
     async with shared_state.init_lock:
         if not shared_state.tasks_started:
+             asyncio.create_task(server_crud.refresh_all_server_models())
+             app.state.refresh_task = asyncio.create_task(periodic_model_refresh(app))
              asyncio.create_task(shared_state.bot_manager.start_all_active_bots())
              shared_state.tasks_started = True
     

@@ -80,7 +80,11 @@ class LollmsSystem:
             return default
 
     def get_setting(self, key: str, default: Any = None) -> Any:
-        """Retrieves a configuration setting (e.g. API key) for this tool."""
+        """
+        Retrieves a configuration setting. 
+        Prioritizes node-level settings (design time) over global tool settings.
+        """
+        # _settings contains everything passed during execution (including node-level config)
         return self._settings.get(key, default)
 
     def delete(self, key: str):

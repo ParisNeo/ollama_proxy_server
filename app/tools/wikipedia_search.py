@@ -1,32 +1,34 @@
-TOOL_LIBRARY_NAME = 'Wikipedia Search'
-TOOL_LIBRARY_DESC = 'Search and retrieve article summaries from Wikipedia.'
-TOOL_LIBRARY_ICON = '📖'
+language:python
+TOOL_LIBRARY_NAME = 'Wikipedia Encyclopedia'
+TOOL_LIBRARY_DESC = 'Retrieve deep factual summaries from Wikipedia.'
+TOOL_LIBRARY_ICON = '📚'
+
+TOOL_TITLES = {
+    "tool_search_wikipedia": "📖 consulting Wikipedia"
+}
 
 def init_tool_library() -> None:
-    '''Initialize dependencies using pipmaster'''
     import pipmaster as pm
     pm.ensure_packages({'wikipedia': '>=1.4.0'})
 
-def tool_search_wikipedia(args: dict):
+def tool_search_wikipedia(args: dict, lollms=None):
     '''
-    Search Wikipedia for articles matching a query and return summaries.
+    Search Wikipedia for verified information.
     
     Args:
         args: dict with keys:
-            - query (str): The search term or phrase
-            - max_results (int, optional): Maximum number of results to return (default: 3)
+            - query (str): The search term.
     '''
     import wikipedia
     try:
         query = args.get('query')
-        limit = args.get('max_results', 3)
-        search_results = wikipedia.search(query)
-        output = []
-        for title in search_results[:limit]:
-            try:
-                page = wikipedia.summary(title, sentences=5)
-                output.append(f"--- {title} ---\n{page}")
-            except: continue
-        return "\n\n".join(output) if output else "No results found."
+        # We try to get a direct summary
+        try:
+            return wikipedia.summary(query, sentences=10)
+        except wikipedia.DisambiguationError as e:
+            # If ambiguous, pick the first option
+            return wikipedia.summary(e.options[0], sentences=10)
+        except wikipedia.PageError:
+            return f"Error: No Wikipedia page found for '{query}'."
     except Exception as e:
         return f"Error: {str(e)}"

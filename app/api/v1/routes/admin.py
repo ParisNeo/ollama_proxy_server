@@ -1813,6 +1813,13 @@ async def admin_settings_post(
         update_data["redis_password"] = new_redis_password
         
     try:
+        # Check if vectorizer settings are changing to trigger cache invalidation
+        vectorizer_changed = (
+            update_data.get("routing_vectorizer_name") != current_settings.routing_vectorizer_name or
+            update_data.get("routing_vectorizer_model") != current_settings.routing_vectorizer_model or
+            update_data.get("routing_vectorizer_base_url") != current_settings.routing_vectorizer_base_url
+        )
+
         # Apply the validated update_data to our fresh DB-sourced model
         updated_settings_data = current_settings.model_copy(update=update_data)
         
@@ -1821,10 +1828,13 @@ async def admin_settings_post(
         
         # Update local memory (for this worker only)
         request.app.state.settings = updated_settings_data
-        # Ensure the authoritative state is updated for the whole app
-        request.app.state.settings = updated_settings_data
         
-        flash(request, "Settings updated successfully.", "success")
+        if vectorizer_changed:
+            from app.api.v1.routes.proxy import reset_routing_engine
+            reset_routing_engine()
+            flash(request, "Settings saved. Vectorizer cache was reset to match new configuration.", "success")
+        else:
+            flash(request, "Settings updated successfully.", "success")
     except (ValueError, TypeError) as e:
         logger.error(f"Invalid form data for settings: {e}")
         flash(request, "Error: Invalid data provided for a setting.", "error")

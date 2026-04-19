@@ -62,7 +62,7 @@ class BotManager:
             except asyncio.CancelledError:
                 pass
 
-    async def _process_bot_request(self, user_text, username, platform_name, target_workflow, attachments=None):
+    async def _process_bot_request(self, user_text, username, platform_name, target_workflow, attachments=None, notify_cb=None):
         """Shared logic to route bot messages through the workflow engine."""
         import json, secrets, re, copy
         import base64
@@ -73,9 +73,23 @@ class BotManager:
 
         async with AsyncSessionLocal() as db:
             req_id = f"bot_{platform_name}_{secrets.token_hex(4)}"
-            # Set platform context for the agent
-            self.app.state.dummy_request.state.source_platform = platform_name
             
+            # SECURITY FIX: Create a localized MockRequest instance for this specific message
+            # to prevent state leakage (source_platform, depth) between concurrent bot threads.
+            local_request = self.app.state.dummy_request.__class__()
+            local_request.app = self.app
+            local_request.state.source_platform = platform_name
+            
+            # Bridge the engine's stream_callback to the platform's notify_cb
+            if notify_cb:
+                async def bridge_cb(text):
+                    # Strip XML tags used for Web UI and pass raw text to bot notification
+                    clean_text = re.sub(r'<[^>]*>', '', text).strip()
+                    if clean_text:
+                        # Prepend prefix to distinguish from final answer
+                        await notify_cb(f"_{clean_text}_")
+                local_request.state.stream_callback = bridge_cb
+
             # --- CROSS-PLATFORM IDENTITY RESOLUTION ---
             # Try to find a Hub user that matches the bot handle
             hub_user = await user_crud.get_user_by_username(db, username)
@@ -140,7 +154,8 @@ class BotManager:
                     db, 
                     target_workflow, 
                     messages, 
-                    request=self.app.state.dummy_request, 
+                    request=local_request, 
+                    request_id=req_id,
                     sender=username
                 )
                 real_model, final_msgs = resolution
@@ -169,7 +184,7 @@ class BotManager:
                     return f"❌ Error: Compute nodes offline for '{real_model}'."
 
                 resp, _ = await _reverse_proxy(
-                    self.app.state.dummy_request, "chat", servers, 
+                    local_request, "chat", servers, 
                     json.dumps({"model": real_model, "messages": final_msgs, "stream": False}).encode(),
                     is_subrequest=True, request_id=req_id, model=target_workflow, sender=username
                 )
@@ -280,7 +295,29 @@ class BotManager:
                 logger.error(f"Unexpected error in typing indicator: {e}")
 
             try:
-                response = await self._process_bot_request(message.content, message.author.name, "discord", config.target_workflow, attachments)
+                # PROGRESS TRACKER: Use a single message and update it
+                status_msg = None
+                status_history = []
+
+                async def discord_notifier(text):
+                    nonlocal status_msg, status_history
+                    try:
+                        # Strip technical finalized messages from bot stream
+                        if "Task finalized" in text: return
+                        
+                        status_history.append(text)
+                        content = "\n".join(status_history)
+                        
+                        if not status_msg:
+                            status_msg = await message.channel.send(content)
+                        else:
+                            await status_msg.edit(content=content)
+                    except: pass
+
+                response = await self._process_bot_request(
+                    message.content, message.author.name, "discord", 
+                    config.target_workflow, attachments, notify_cb=discord_notifier
+                )
                 
                 import re, os
                 artifacts = re.findall(r'<artifact\s+.*?path=["\'](.*?)["\'].*?>', response)
@@ -297,6 +334,11 @@ class BotManager:
 
                 if not clean_response and discord_files:
                     clean_response = "Here are your files:"
+
+                # Cleanup status message before final answer
+                if status_msg:
+                    try: await status_msg.delete()
+                    except: pass
 
                 # CHUNKING LOGIC: Prevent Discord API 'Content too long' errors
                 message_parts = split_message(clean_response)

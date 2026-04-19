@@ -1,14 +1,26 @@
 function NodeAgent() {
     this.addInput("In Messages", "messages");
     this.addInput("Settings", "object");
+    this.addInput("Model Override", "string");
     this.addOutput("Final Answer", "string");
     this.addOutput("Out Messages", "messages");
-    this.properties = { model: "auto", max_turns: 10, memory_system: "none" };
+    this.properties = { 
+        model: "auto", 
+        persona: "",
+        max_turns: 10, 
+        memory_system: "none",
+        auto_skills: false 
+    };
     
     this.mWidget = this.addWidget("combo", "Model", this.properties.model, (v) => { 
         this.properties.model = v; 
         if(window.pushHistoryState) window.pushHistoryState();
     }, { values: window.available_models || ["auto"] });
+
+    this.pWidget = this.addWidget("combo", "Inherit Persona", this.properties.persona, (v) => {
+        this.properties.persona = v;
+        if(window.pushHistoryState) window.pushHistoryState();
+    }, { values: [""].concat(window.logic_blocks || []) });
     
     this.tWidget = this.addWidget("number", "Max Turns", this.properties.max_turns, (v) => { 
         this.properties.max_turns = v; 
@@ -20,11 +32,33 @@ function NodeAgent() {
         if(window.pushHistoryState) window.pushHistoryState();
     }, { values: ["none"].concat(window.memory_systems_list ||["default"]) });
     
+    this.addWidget("toggle", "Auto-Discover Skills", this.properties.auto_skills, (v) => {
+        this.properties.auto_skills = v;
+        if(window.pushHistoryState) window.pushHistoryState();
+    });
+
     this.addWidget("button", "+ Add Tool Slot", null, () => {
-        this.addInput("Tool " + (this.inputs.length - 1), "tool,mcp");
+        this.addInput("Tool " + (this.inputs.length - 2), "tool,mcp");
         this.size = this.computeSize();
         if(this.setDirtyCanvas) this.setDirtyCanvas(true, true);
         if(window.pushHistoryState) window.pushHistoryState();
+    });
+
+    this.addWidget("button", "+ Add Skill Slot", null, () => {
+        this.addInput("Skill " + (this.inputs.length - 2), "skill,string");
+        this.size = this.computeSize();
+        if(this.setDirtyCanvas) this.setDirtyCanvas(true, true);
+        if(window.pushHistoryState) window.pushHistoryState();
+    });
+
+    this.addWidget("button", "🗑️ Remove Last Slot", null, () => {
+        // We only remove if there are dynamic slots (index > 2)
+        if (this.inputs.length > 3) {
+            this.removeInput(this.inputs.length - 1);
+            this.size = this.computeSize();
+            if(this.setDirtyCanvas) this.setDirtyCanvas(true, true);
+            if(window.pushHistoryState) window.pushHistoryState();
+        }
     });
     
     this.addWidget("button", "ℹ️ Documentation", null, () => { showNodeHelp(this.type); });
@@ -37,6 +71,7 @@ function NodeAgent() {
 NodeAgent.title = "🧠 AUTONOMOUS AGENT";
 NodeAgent.prototype.onConfigure = function() {
     if (this.mWidget) this.mWidget.value = this.properties.model;
+    if (this.pWidget) this.pWidget.value = this.properties.persona;
     if (this.tWidget) this.tWidget.value = this.properties.max_turns;
     if (this.msWidget) this.msWidget.value = this.properties.memory_system;
     if (!this.title || this.title === "NodeAgent") this.title = "🧠 AUTONOMOUS AGENT";

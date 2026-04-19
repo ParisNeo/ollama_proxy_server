@@ -318,7 +318,7 @@ class SkillsManager:
             return SkillsManager.save_skill(safe_filename, content)
     @staticmethod
     def save_skill_folder(name: str, md_content: str, assets: Dict[str, bytes]):
-        path = SKILLS_DIR / name
+        path = SYSTEM_SKILLS_DIR / name
         path.mkdir(exist_ok=True)
         (path / "SKILL.md").write_text(md_content, encoding="utf-8")
         
@@ -327,3 +327,45 @@ class SkillsManager:
         assets_dir.mkdir(exist_ok=True)
         for fname, data in assets.items():
             (assets_dir / fname).write_bytes(data)
+
+    @staticmethod
+    async def search_skills(query: str, limit: int = 3, vectorizer=None) -> List[Dict[str, Any]]:
+        """Finds skills via keyword matching or vector similarity."""
+        all_skills = SkillsManager.get_all_skills()
+        if not query: return []
+
+        # 1. Vector Search Path
+        if vectorizer:
+            try:
+                import numpy as np
+                from safe_store.search.similarity import cosine_similarity
+                
+                # Combine name and description for embedding
+                texts = [f"{s['name']}: {s['description']}" for s in all_skills]
+                embeddings = vectorizer.vectorize(texts + [query])
+                
+                query_vec = np.array(embeddings[-1])
+                skill_vecs = np.array(embeddings[:-1])
+                
+                similarities = cosine_similarity(query_vec, skill_vecs)
+                
+                # Map back to skill objects with scores
+                scored = []
+                for i, score in enumerate(similarities):
+                    s = all_skills[i].copy()
+                    s['score'] = float(score)
+                    scored.append(s)
+                
+                scored.sort(key=lambda x: x['score'], reverse=True)
+                return scored[:limit]
+            except Exception as e:
+                logger.warning(f"Skill vector search failed, falling back to keyword: {e}")
+
+        # 2. Keyword Fallback
+        q = query.lower()
+        matches = []
+        for s in all_skills:
+            if q in s['name'].lower() or q in s['description'].lower():
+                matches.append(s)
+        
+        return matches[:limit]

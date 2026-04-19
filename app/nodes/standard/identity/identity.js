@@ -38,10 +38,11 @@ NodeExpert.prototype.onAction = function() {
 };
 
 LiteGraph.registerNodeType("hub/expert", NodeExpert);
-
 function NodePersonality() {
     this.addOutput("System Prompt", "string");
+    this.addOutput("Settings", "object");
     this.properties = { name: "" };
+    this.size = [300, 110]; // Increased height for second slot
     this.pWidget = this.addWidget("combo", "Persona", this.properties.name, (v) => { 
         this.properties.name = v; 
         if(window.pushHistoryState) window.pushHistoryState();

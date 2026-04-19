@@ -42,9 +42,6 @@ class RAGDatastoreNode(BaseNode):
 
         raw_results = await run_in_threadpool(_query)
         context_parts = [f"[[SOURCE {i+1}: {r.get('document_title')}]]\n{r.get('chunk_text')}" for i, r in enumerate(raw_results)]
-        
-        if cb:
-            await cb(f'  - found {len(raw_results)} matches.\n')
             
         return "\n\n---\n\n".join(context_parts)
 
@@ -68,9 +65,6 @@ class WebSearchNode(BaseNode):
         elif service == "arxiv": res = await run_in_threadpool(kit.search_arxiv_sync, str(query), max_results=count)
         elif service == "google": res = await run_in_threadpool(kit.search_google_sync, str(query))
         else: res =[]
-
-        if cb:
-            await cb(f'  - found {len(res)} external links.\n')
 
         parts = [f"[[WEB: {r['title']}]]\n{r['content']}" for r in res[:count]]
         return "\n\n---\n\n".join(parts)

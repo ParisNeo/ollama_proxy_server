@@ -232,10 +232,7 @@ class WorkflowEngine:
                 error_message=f"Step: {display_title}"
             ))
             
-            cb = getattr(self.request.state, "stream_callback", None)
-            if cb:
-                # UI FIX: Append to the unified block instead of opening a new one
-                await cb(f'* Processing: {display_title}...\n')
+            # Removed technical node processing trace from user stream to reduce noise
 
         # 1. Plugin Execution
         node_cls = NodeRegistry.get_node(ntype)

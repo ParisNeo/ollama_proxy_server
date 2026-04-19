@@ -2,6 +2,10 @@ TOOL_LIBRARY_NAME = 'YouTube Transcript'
 TOOL_LIBRARY_DESC = 'Extract transcripts and subtitles from YouTube videos.'
 TOOL_LIBRARY_ICON = '▶️'
 
+TOOL_TITLES = {
+    "tool_get_youtube_transcript": "▶️ YouTube Transcript"
+}
+
 def init_tool_library() -> None:
     import pipmaster as pm
     pm.ensure_packages({'youtube-transcript-api': '>=0.6.2'})

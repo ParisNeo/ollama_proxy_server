@@ -133,12 +133,20 @@ class ToolsManager:
         return meta
 
     @staticmethod
-    @staticmethod
     def get_tool_definitions(content: str) -> List[Dict[str, Any]]:
-        """Parses docstrings using AST to build OpenAI-compatible tool definitions."""
+        """Parses docstrings and TOOL_TITLES using AST to build enriched tool definitions."""
         tools = []
+        titles = {}
         try:
             tree = ast.parse(content)
+            # First pass: Find TOOL_TITLES metadata
+            for node in tree.body:
+                if isinstance(node, ast.Assign):
+                    for target in node.targets:
+                        if isinstance(target, ast.Name) and target.id == "TOOL_TITLES":
+                            titles = ast.literal_eval(node.value)
+
+            # Second pass: Process functions
             for node in tree.body:
                 if isinstance(node, ast.FunctionDef) and node.name.startswith("tool_"):
                     docstring = ast.get_docstring(node) or "No description provided."
@@ -167,6 +175,7 @@ class ToolsManager:
 
                     tools.append({
                         "type": "function",
+                        "pretty_name": titles.get(node.name), # Custom LoLLMs metadata
                         "function": {
                             "name": node.name,
                             "description": docstring.split('\n\n')[0].strip(),
