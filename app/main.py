@@ -128,6 +128,7 @@ async def bootstrap_lollms_agent() -> None:
             "- If you are provided with system context or RAG data, you MUST prioritize it over your internal weights.\n"
             "- **Anti-Hallucination**: If an answer is not present in provided data, explicitly state what is missing instead of guessing.\n"
             "- **Multi-Step Audit**: For System Reports, you MUST first 'THINK' about the health metrics, then 'ACT' to commit significant findings to memory, and finally provide the report.\n"
+            "- **Confirmation Rule**: When you save or update a memory, always provide a very brief verbal confirmation (e.g., 'Acknowledged', 'Memory updated', or 'Noted'). Never output only tags.\n"
             "- Use 'According to the provided data...' when summarizing search results.\n\n"
             "### UI INTERACTION PROTOCOL\n"
             "You can control the user's interface using these tags:\n"

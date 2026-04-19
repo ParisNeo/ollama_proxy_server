@@ -139,6 +139,8 @@ class CognitiveMemoryManager:
     @staticmethod
     async def process_tags(db, user_identifier: str, agent_name: str, text: str) -> str:
         """Parses and executes memory operations, returns text with tags removed."""
+        # Standardize ID to string
+        user_identifier = str(user_identifier)
         logger.info(f"🧠 [Memory Manager] Parsing text for User: '{user_identifier}', Agent: '{agent_name}'")
         
         # --- AFFECTIVE UPDATE TAG ---

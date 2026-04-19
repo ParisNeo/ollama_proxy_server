@@ -3514,15 +3514,17 @@ async def admin_memory_systems(request: Request, db: AsyncSession = Depends(get_
     res_users = await db.execute(select(User).order_by(User.username))
     real_users = res_users.scalars().all()
     
-    active_users_list =[{"id": "system", "display": "System (Global/ROM)"}]
+    active_users_list = []
     for u in real_users:
-        active_users_list.append({"id": str(u.id), "display": f"{u.username}"})
+        # Map IDs to strings for the frontend value
+        active_users_list.append({"id": str(u.id), "display": str(u.username)})
 
     context["active_users"] = active_users_list
     
     # 2. Cleanup Ghost Users from Database
-    # This purges any memory entry whose user_identifier is not 'system', 'anonymous', or a real user ID.
-    valid_ids = ["system", "anonymous"] + [str(u.id) for u in real_users]
+    # This purges any memory entry whose user_identifier is not 'system', 'anonymous', 'shared_knowledge' or a real user ID.
+    # FIX: Added 'shared_knowledge' to prevent the system from nuking the Global Collective!
+    valid_ids = ["system", "anonymous", "shared_knowledge"] + [str(u.id) for u in real_users]
     await db.execute(delete(MemoryEntry).filter(MemoryEntry.user_identifier.notin_(valid_ids)))
     await db.execute(delete(DreamLog).filter(DreamLog.user_identifier.notin_(valid_ids)))
     await db.commit()
@@ -3607,10 +3609,19 @@ async def api_memory_data(system: str, user: str, db: AsyncSession = Depends(get
             MemoryEntry.user_identifier == "system",
             MemoryEntry.category != 'affective'
         ).order_by(MemoryEntry.is_immutable.desc(), MemoryEntry.importance.desc())
-    else:
+    elif user == "shared_knowledge":
+        # Global Collective view: we show shared data regardless of which specific core saved it
         stmt = select(MemoryEntry).filter(
-            MemoryEntry.agent_name == system,
-            MemoryEntry.user_identifier == user,
+            MemoryEntry.user_identifier == "shared_knowledge",
+            MemoryEntry.category != 'affective'
+        ).order_by(MemoryEntry.importance.desc())
+    else:
+        # Per-user view
+        # REPAIR MISSION: We remove the 'agent_name == system' restriction for users.
+        # This allows the dashboard to show all memories belonging to the user, 
+        # regardless of which model/agent created them.
+        stmt = select(MemoryEntry).filter(
+            MemoryEntry.user_identifier == str(user),
             MemoryEntry.category != 'affective'
         ).order_by(MemoryEntry.importance.desc())
 

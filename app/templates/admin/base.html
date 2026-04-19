@@ -1133,9 +1133,24 @@
                 agentHistory.forEach((msg, idx) => {
                     const div = document.createElement('div');
                     div.className = `relative group/msg ${msg.role === 'user' ? 'bg-white/5 border border-white/10 p-3 rounded-xl ml-8 text-right text-gray-300' : 'bg-indigo-600/10 border border-indigo-500/20 p-3 rounded-xl mr-8 text-indigo-200'}`;
+                    
+                    // --- MULTIMODAL RENDERING LOGIC ---
+                    let displayContent = "";
+                    if (Array.isArray(msg.content)) {
+                        msg.content.forEach(part => {
+                            if (part.type === 'text') {
+                                displayContent += marked.parse(part.text);
+                            } else if (part.type === 'image_url') {
+                                displayContent += `<img src="${part.image_url.url}" class="max-w-full h-auto rounded-lg my-2 border border-white/10 shadow-lg">`;
+                            }
+                        });
+                    } else {
+                        displayContent = marked.parse(msg.content || "");
+                    }
+
                     div.innerHTML = `
-                        ${marked.parse(msg.content)}
-                        <div class="absolute -top-2 ${msg.role === 'user' ? 'left-0' : 'right-0'} opacity-0 group-hover/msg:opacity-100 flex gap-1 bg-black border border-white/10 rounded px-1 py-0.5 transition-opacity">
+                        <div class="message-body">${displayContent}</div>
+                        <div class="absolute -top-2 ${msg.role === 'user' ? 'left-0' : 'right-0'} opacity-0 group-hover/msg:opacity-100 flex gap-1 bg-black border border-white/10 rounded px-1 py-0.5 transition-opacity z-10">
                             <button onclick="deleteCoreMsg(${idx})" class="text-[8px] font-black hover:text-red-400 uppercase">Del</button>
                             ${msg.role === 'assistant' ? `<button onclick="regenCoreMsg(${idx})" class="text-[8px] font-black hover:text-indigo-400 uppercase">Regen</button>` : ''}
                         </div>
@@ -1263,10 +1278,15 @@
                             stream: false
                         })
                     });
+                    
                     const data = await resp.json();
                     loadingDiv.remove();
 
-                    let answer = data.message?.content || "Connection lost to ROM.";
+                    if (!resp.ok) {
+                        throw new Error(data.error || data.detail || `HTTP ${resp.status}`);
+                    }
+
+                    let answer = data.message?.content || data.response || "The agent processed the request but returned no text.";
                     
                     // --- UI REMOTE CONTROL INTERCEPTION ---
                     if (answer.includes('<ui_move_to')) {

@@ -28,9 +28,12 @@
                                 <option value="shared_knowledge">Global Collective (Shared)</option>
                             </optgroup>
                             <optgroup label="User Identities">
-                                {% for u in active_users %}{% if u.id != 'system' %}
-                                <option value="{{ u.id }}">{{ u.display }}</option>
-                                {% endif %}{% endfor %}
+                                {% for u in active_users %}
+                                    {% if u.id != 'system' %}
+                                        {# Ensure value is the string representation of the ID #}
+                                        <option value="{{ u.id }}">{{ u.display | upper }}</option>
+                                    {% endif %}
+                                {% endfor %}
                             </optgroup>
                         </select>
                     </div>

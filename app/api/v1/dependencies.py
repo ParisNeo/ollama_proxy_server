@@ -123,10 +123,20 @@ async def get_valid_api_key(
     target_key = settings.SECRET_KEY.strip().strip('"').strip("'")
     
     if raw_token == target_key:
-        # Return a synthetic system key object with a mock user to prevent AttributeErrors in proxy logic
+        # Return a synthetic system key object
+        # REPAIR MISSION: Try to associate with the actual session user if available
+        # to ensure side-panel memories save to the admin profile.
         from app.database.models import User
-        mock_user = User(id=0, username="system_internal", is_admin=True)
-        return APIKey(id=0, key_name="Internal System", key_prefix="sys_internal", is_active=True, is_revoked=False, user_id=0, user=mock_user)
+        session_user_id = request.session.get("user_id")
+        
+        if session_user_id:
+            from app.crud import user_crud
+            # We use a sync-safe check or just rely on the ID
+            user = User(id=int(session_user_id), username="admin", is_admin=True)
+        else:
+            user = User(id=0, username="system_internal", is_admin=True)
+            
+        return APIKey(id=0, key_name="Internal System", key_prefix="sys_internal", is_active=True, is_revoked=False, user_id=user.id, user=user)
 
     # --- STANDARD KEY ENFORCEMENT ---
     if not auth_header.lower().startswith("bearer "):
