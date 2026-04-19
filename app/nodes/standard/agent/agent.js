@@ -9,7 +9,8 @@ function NodeAgent() {
         persona: "",
         max_turns: 10, 
         memory_system: "none",
-        auto_skills: false 
+        auto_skills: false,
+        generate_artifacts: true
     };
     
     this.mWidget = this.addWidget("combo", "Model", this.properties.model, (v) => { 
@@ -34,6 +35,11 @@ function NodeAgent() {
     
     this.addWidget("toggle", "Auto-Discover Skills", this.properties.auto_skills, (v) => {
         this.properties.auto_skills = v;
+        if(window.pushHistoryState) window.pushHistoryState();
+    });
+
+    this.addWidget("toggle", "Enable Artifacts", this.properties.generate_artifacts, (v) => {
+        this.properties.generate_artifacts = v;
         if(window.pushHistoryState) window.pushHistoryState();
     });
 

@@ -46,8 +46,11 @@ class WorkflowEngine:
         
         # UI FIX: Open a single unified block for the entire workflow execution
         cb = getattr(self.request.state, "stream_callback", None)
-        if cb and self.depth == 0:
+        # REPAIR MISSION: Only open the processing block if we are at the root level 
+        # AND haven't opened one for this specific request ID yet to prevent "Nested Block" log spam.
+        if cb and self.depth == 0 and not getattr(self.request.state, "processing_block_open", False):
             await cb(f'<processing type="workflow" title="ORCHESTRATING: {self.name.upper()}">\n')
+            self.request.state.processing_block_open = True
 
         try:
             exit_node = next((n for n in self.nodes.values() if n["type"] == "hub/output"), None)

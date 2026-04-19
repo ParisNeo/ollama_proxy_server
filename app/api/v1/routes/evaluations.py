@@ -6,7 +6,7 @@ import secrets
 import re
 import numpy as np 
 from typing import List, Optional, Dict, Any
-from fastapi import APIRouter, Depends, Request, Form, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, Request, Form, HTTPException, BackgroundTasks, Response
 from fastapi.responses import HTMLResponse, JSONResponse
 from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -287,8 +287,10 @@ async def _generate_dataset_task_multi(request: Request, ds_ids: list, texts: li
                 nonlocal dataset_items
                 sub_id = f"{task_id}_gen_{idx}"
                 
-                event_manager.emit(ProxyEvent("active", task_id, "Evaluator", agent, admin_username, 
-                                            error_message=f"Chunk {idx+1}/{total_chunks}: Prompting AI..."))
+                # Emit detailed progress only for significant milestones (every 5 chunks) or if it's the last one
+                if idx % 5 == 0 or idx == total_chunks - 1:
+                    event_manager.emit(ProxyEvent("active", task_id, "Evaluator", agent, admin_username, 
+                                                error_message=f"Batch Processing: Analyzing context chunks ({idx+1}/{total_chunks})..."))
 
                 prompt = (
                     "Given the following knowledge chunk, generate 2 diverse, complex tasks (e.g., Q&A, coding, analysis) "
@@ -491,25 +493,36 @@ async def api_generate_dataset(
     files: Optional[List[UploadFile]] = File(None),
     admin_user: User = Depends(require_admin_user)
 ):
+    """
+    Standard Forge Ingestion:
+    Accepts Datastores, Web Snippets, YouTube Transcripts, and direct File uploads.
+    """
     try:
         ds_ids = json.loads(datastores)
         texts = json.loads(raw_texts)
         
-        # We must process UploadFile objects synchronously before passing to the background task,
-        # as FastAPI closes file descriptors when the HTTP response is returned.
-        valid_files = [f for f in files if f and f.filename] if files else[]
+        # Immediate Extraction: Pass raw data to task as file handles close immediately on response return.
+        valid_files = [f for f in files if f and f.filename] if files else []
         if valid_files:
-            # Reusing the existing extractor which parses PDFs, Docx, etc.
+            # kit.extract_local_file_content handles the heavy lifting of PDF/Docx/Image parsing
             content = await kit.extract_local_file_content(valid_files)
-            texts.append({"title": "Uploaded Files Bundle", "content": content})
+            texts.append({"title": "Direct File Uploads", "content": content})
 
         task_id = f"sys_eval_ds_{secrets.token_hex(4)}"
+        
+        # Offload to background worker
         background_tasks.add_task(
             _generate_dataset_task_multi, 
             request, ds_ids, texts, name, description, chunks_per_source, admin_user.username, task_id
         )
-        return {"success": True, "task_id": task_id, "message": "Dataset generation started in background."}
+        
+        return {
+            "success": True, 
+            "task_id": task_id, 
+            "message": "Orchestration accepted. Generation started in background."
+        }
     except Exception as e:
+        logger.error(f"Dataset generation start failed: {e}")
         return JSONResponse({"error": str(e)}, status_code=400)
 
 @router.post("/api/evaluations/run", name="api_eval_run_benchmark")
@@ -560,14 +573,13 @@ async def api_delete_run(run_id: int, request: Request, db: AsyncSession = Depen
         await db.commit()
     return {"success": True}
 
-@router.get("/evaluations/runs/{run_id}/report", response_class=HTMLResponse, name="admin_evaluation_report")
-async def admin_evaluation_report(run_id: int, request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
+async def _prepare_report_context(run_id: int, request: Request, db: AsyncSession):
+    """Internal helper to calculate stats for both web and PDF views."""
     run = await db.get(BenchmarkRun, run_id)
-    if not run: raise HTTPException(status_code=404)
+    if not run: return None
     
-    # 1. Advanced Statistics Aggregation
     stats = {}
-    category_scores = {} # {model: {cat: [scores]}}
+    category_scores = {}
     
     for model, results in run.results.items():
         scores = [r["score"] for r in results]
@@ -578,15 +590,13 @@ async def admin_evaluation_report(run_id: int, request: Request, db: AsyncSessio
             "std": float(np.std(scores)) if scores else 0,
             "count": len(scores)
         }
-        
         category_scores[model] = {}
         for r in results:
             cat = r.get("category", "General")
             if cat not in category_scores[model]: category_scores[model][cat] = []
             category_scores[model][cat].append(r["score"])
 
-    # Calculate average per category
-    cat_summary = {} # {cat: {model: avg}}
+    cat_summary = {}
     for model, cats in category_scores.items():
         for cat, scores in cats.items():
             if cat not in cat_summary: cat_summary[cat] = {}
@@ -599,6 +609,12 @@ async def admin_evaluation_report(run_id: int, request: Request, db: AsyncSessio
         "cat_summary": cat_summary,
         "csrf_token": await get_csrf_token(request)
     })
+    return context
+
+@router.get("/evaluations/runs/{run_id}/report", response_class=HTMLResponse, name="admin_evaluation_report")
+async def admin_evaluation_report(run_id: int, request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
+    context = await _prepare_report_context(run_id, request, db)
+    if not context: raise HTTPException(status_code=404)
     return templates.TemplateResponse("admin/evaluation_report.html", context)
 
 @router.get("/evaluations/runs/{run_id}/export-pdf", name="admin_export_run_pdf")
@@ -608,46 +624,64 @@ async def admin_export_run_pdf(run_id: int, request: Request, db: AsyncSession =
     import os
     from fastapi.concurrency import run_in_threadpool
 
-    # Reuse the report logic to get the HTML
-    response = await admin_evaluation_report(run_id, request, db, admin_user)
-    html_content = response.body.decode()
+    # 1. Get raw context
+    context = await _prepare_report_context(run_id, request, db)
+    if not context: raise HTTPException(status_code=404)
+    
+    # 2. Add PDF-specific flags
+    context["is_pdf"] = True
+    
+    # PDF Blueprints - CSS for the PDF engine
+    pdf_css = """
+    <style>
+        @page { size: a4 portrait; margin: 2cm; }
+        body { font-family: Helvetica, Arial, sans-serif; font-size: 10pt; line-height: 1.5; color: #333; }
+        h1 { font-size: 24pt; font-weight: bold; color: #4f46e5; margin-bottom: 15pt; border-bottom: 1pt solid #eee; padding-bottom: 5pt; }
+        h2 { font-size: 18pt; font-weight: bold; color: #1e1b4b; margin-top: 20pt; margin-bottom: 10pt; }
+        h3 { font-size: 14pt; font-weight: bold; color: #4b5563; margin-top: 15pt; }
+        p { margin-bottom: 10pt; }
+        strong, b { font-weight: bold; color: #000; }
+        ul { margin-left: 20pt; margin-bottom: 10pt; }
+        li { margin-bottom: 5pt; }
+        table { width: 100%; border-collapse: collapse; margin-top: 15pt; margin-bottom: 15pt; }
+        th { background-color: #f3f4f6; padding: 8pt; border: 0.5pt solid #ccc; font-weight: bold; }
+        td { padding: 8pt; border: 0.5pt solid #eee; }
+        .card { border: 0.5pt solid #ddd; padding: 10pt; margin-bottom: 15pt; background-color: #fafafa; }
+    </style>
+    """
+
+    # 3. Manually render template to string
+    template = templates.get_template("admin/evaluation_report.html")
+    html_content = pdf_css + template.render(context)
 
     def link_callback(uri, rel):
-        """
-        Convert HTML URIs to local filesystem paths so xhtml2pdf can access them
-        without making internal HTTP requests.
-        """
-        # handle /static/ and /uploads/
+        # Handle static assets for the PDF generator
         if uri.startswith('/static/'):
             path = os.path.join("app", uri.lstrip('/'))
-        elif uri.startswith('/static/uploads/'):
-            path = os.path.join("app", uri.lstrip('/'))
-        else:
-            return uri
-
-        if not os.path.isfile(path):
-            logger.warning(f"PDF Export: Asset not found at {path}")
-            return uri
-        return path
+            if os.path.isfile(path): return path
+        return uri
 
     def generate_pdf(content):
         pdf_buffer = io.BytesIO()
-        # Create PDF using local file access
+        # Create PDF - note: modern Tailwind will still be ignored, but content will show.
         pisa_status = pisa.CreatePDF(content, dest=pdf_buffer, link_callback=link_callback)
         if pisa_status.err:
+            logger.error(f"Pisa Error: {pisa_status.err}")
             return None
         return pdf_buffer.getvalue()
 
-    # Execute CPU-bound PDF generation in a separate thread
     pdf_data = await run_in_threadpool(generate_pdf, html_content)
     
     if pdf_data is None:
-        raise HTTPException(status_code=500, detail="PDF Generation Failed (Internal Engine Error)")
+        raise HTTPException(status_code=500, detail="PDF engine failed to render the document.")
         
     return Response(
         pdf_data, 
         media_type="application/pdf", 
-        headers={"Content-Disposition": f"attachment; filename=Benchmark_Report_{run_id}.pdf"}
+        headers={
+            "Content-Disposition": f"attachment; filename=Benchmark_{run_id}.pdf",
+            "Content-Type": "application/pdf"
+        }
     )
 
 @router.post("/api/evaluations/runs/{run_id}/analyze", name="api_eval_analyze_run")
@@ -686,13 +720,33 @@ async def api_eval_analyze_run(run_id: int, request: Request, db: AsyncSession =
     )
     
     try:
-        real_model, msgs = await _resolve_target(db, agent, [{"role": "user", "content": prompt}], request=request)
-        servers = await server_crud.get_servers_with_model(db, real_model)
-        if not servers: return JSONResponse({"error": "Compute offline"}, status_code=503)
+        # Resolve the agent to a physical model
+        resolution = await _resolve_target(db, agent, [{"role": "user", "content": prompt}], request=request)
+        real_model, msgs = resolution
+        
+        if real_model == "__result__":
+            analysis = msgs[-1]["content"] if msgs else "Analysis failed."
+            return {"analysis": analysis}
 
-        resp, _ = await _reverse_proxy(request, "chat", servers, json.dumps({"model": real_model, "messages": msgs, "stream": False}).encode(), is_subrequest=True)
-        analysis = json.loads(resp.body.decode()).get("message", {}).get("content", "Analysis failed.")
-        return {"analysis": analysis}
+        servers = await server_crud.get_servers_with_model(db, real_model)
+        if not servers: return JSONResponse({"error": f"Compute node for model '{real_model}' is offline."}, status_code=503)
+
+        # Surgical Fix: Set is_subrequest=True and ensure enough time for long report generation/parsing
+        # The 503 usually happens if the internal loop times out.
+        resp, _ = await _reverse_proxy(
+            request, "chat", servers, 
+            json.dumps({"model": real_model, "messages": msgs, "stream": False}).encode(), 
+            is_subrequest=True,
+            model=real_model,
+            sender=admin_user.username
+        )
+        
+        if hasattr(resp, 'body'):
+            data = json.loads(resp.body.decode())
+            analysis = data.get("message", {}).get("content", "Analysis failed.")
+            return {"analysis": analysis}
+        
+        return JSONResponse({"error": "Empty response from AI engine."}, status_code=502)
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 

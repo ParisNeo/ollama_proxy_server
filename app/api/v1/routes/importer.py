@@ -1,6 +1,6 @@
 import logging
 from typing import List, Optional
-from fastapi import APIRouter, Depends, Request, Form, HTTPException
+from fastapi import APIRouter, Depends, File, Request, Form, UploadFile
 from fastapi.responses import JSONResponse
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
@@ -63,5 +63,14 @@ async def api_importer_search(request_data: SearchRequest, admin_user: User = De
 async def api_importer_scrape(url: str = Form(...), depth: int = Form(0), admin_user: User = Depends(require_admin_user)):
     try:
         return await kit.scrape_url(url, depth)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+@router.post("/extract_file", name="api_importer_extract_file")
+async def api_importer_extract_file(file: UploadFile = File(...), admin_user: User = Depends(require_admin_user)):
+    """Deep extraction of text and images from documents using backend parsers."""
+    try:
+        content = await kit.extract_local_file_content([file])
+        return {"filename": file.filename, "content": content}
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)

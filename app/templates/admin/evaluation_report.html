@@ -1,11 +1,27 @@
-{% extends "admin/base.html" %}
+{% extends "admin/base.html" if not is_pdf else "admin/base.html" %}
+{# For simplicity we keep extends, but we will block modern UI parts #}
+
 {% block title %}Benchmark Report: {{ run.name }}{% endblock %}
-{% block header_title %}Benchmark Analysis Report{% endblock %}
 
 {% block content %}
-<div class="space-y-8 pb-20">
+{% if is_pdf %}
+<style>
+    /* Inline PDF-safe CSS for xhtml2pdf */
+    @page { size: a4 portrait; margin: 2cm; }
+    body { font-family: Helvetica, Arial, sans-serif; background: white !important; color: black !important; }
+    h1 { font-size: 24pt; color: #4f46e5; margin-bottom: 20pt; }
+    h2 { font-size: 18pt; border-bottom: 1pt solid #ccc; margin-top: 20pt; }
+    table { width: 100%; border-collapse: collapse; margin-top: 10pt; }
+    th { background-color: #f3f4f6; text-align: left; padding: 8pt; font-size: 10pt; }
+    td { padding: 8pt; border-bottom: 0.5pt solid #eee; font-size: 9pt; }
+    .card { border: 1pt solid #eee; padding: 10pt; margin-bottom: 10pt; }
+    .hidden-in-pdf { display: none !important; }
+</style>
+{% endif %}
+
+<div class="space-y-8 pb-20 {% if is_pdf %}bg-white text-black{% endif %}">
     <!-- Header Summary -->
-    <div class="flex justify-between items-end border-b border-white/10 pb-6">
+    <div class="flex justify-between items-end border-b border-white/10 pb-6 {% if is_pdf %}hidden-in-pdf{% endif %}">
         <div>
             <div class="text-[10px] font-black text-fuchsia-500 uppercase tracking-widest mb-1">Execution ID: #{{ run.id }}</div>
             <h1 class="text-4xl font-black text-white tracking-tighter">{{ run.name }}</h1>
@@ -71,7 +87,7 @@
     </div>
 
     <!-- Comparative Visuals -->
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 {% if is_pdf %}hidden-in-pdf{% endif %}">
         <!-- Chart: Category Comparison -->
         <div class="card-style h-[400px] flex flex-col">
             <div class="flex justify-between items-center mb-6">
@@ -94,6 +110,32 @@
             </div>
         </div>
     </div>
+    
+    {% if is_pdf %}
+    <div>
+        <h2>Summary Statistics</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Model</th>
+                    <th>Average Score</th>
+                    <th>Count</th>
+                    <th>Std Dev</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for model, s in stats.items() %}
+                <tr>
+                    <td><b>{{ model }}</b></td>
+                    <td>{{ (s.avg * 100) | round(1) }}%</td>
+                    <td>{{ s.count }} tasks</td>
+                    <td>±{{ s.std | round(3) }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
 
     <!-- Task Explorer -->
     <div class="card-style">

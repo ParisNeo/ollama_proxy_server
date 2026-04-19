@@ -245,7 +245,43 @@
         </div>
     </div>
 
-    <div id="agent-chat-panel" class="fixed bottom-24 right-6 w-96 h-[500px] bg-[#0a0a0f]/95 backdrop-blur-xl border border-indigo-500/30 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.5)] z-[160] flex flex-col hidden overflow-hidden transition-all duration-300 transform translate-y-4 opacity-0">
+    <!-- Drawing Board UI (Canvas) -->
+    <div id="core-paint-panel" class="fixed inset-0 z-[250] bg-black/80 backdrop-blur-md flex items-center justify-center hidden">
+        <div class="bg-[#0f111a] border border-indigo-500/30 rounded-3xl p-6 shadow-2xl w-full max-w-2xl flex flex-col gap-4">
+            <div class="flex justify-between items-center border-b border-white/10 pb-4">
+                <h3 class="text-xs font-black text-indigo-400 uppercase tracking-widest" id="paint-title">Neural Sketchpad</h3>
+                <div class="flex items-center gap-1 bg-black/20 p-1 rounded-xl border border-white/5">
+                    <button onclick="undoCorePaint()" class="p-2 hover:bg-white/5 rounded-lg text-gray-400" title="Undo (Ctrl+Z)"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"></path></svg></button>
+                    <button onclick="redoCorePaint()" class="p-2 hover:bg-white/5 rounded-lg text-gray-400" title="Redo (Ctrl+Y)"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 10h-10a8 8 0 00-8 8v2M21 10l-6 6m6-6l-6-6"></path></svg></button>
+                    <div class="w-px h-4 bg-white/10 mx-1"></div>
+                    <button id="btn-paint-select" onclick="setPaintMode('select')" class="p-2 hover:bg-white/5 rounded-lg text-gray-400" title="Select Area"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"></path></svg></button>
+                    <button onclick="copyPaintSelection()" class="p-2 hover:bg-white/5 rounded-lg text-gray-400" title="Copy (Ctrl+C)"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2M8 7H6a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2v-2"></path></svg></button>
+                    <button onclick="pastePaintSelection()" class="p-2 hover:bg-white/5 rounded-lg text-gray-400" title="Paste (Ctrl+V)"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"></path></svg></button>
+                    <div class="w-px h-4 bg-white/10 mx-1"></div>
+                    <button onclick="document.getElementById('paint-insert-img').click()" class="p-2 hover:bg-white/5 rounded-lg text-indigo-400" title="Insert Image"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg></button>
+                    <input type="file" id="paint-insert-img" class="hidden" accept="image/*" onchange="insertImageToPaint(event)">
+                </div>
+                <div class="flex gap-2">
+                    <button onclick="clearCoreCanvas()" class="p-2 hover:bg-white/5 rounded-lg text-gray-500" title="Clear Canvas"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg></button>
+                    <button onclick="closeCorePaint()" class="p-2 hover:bg-white/5 rounded-lg text-gray-400">&times;</button>
+                </div>
+            </div>
+            
+            <div class="relative bg-white rounded-xl overflow-hidden cursor-crosshair h-[400px]">
+                <canvas id="core-drawing-canvas"></canvas>
+            </div>
+
+            <div class="flex justify-between items-center">
+                <div class="flex gap-4 items-center">
+                    <input type="color" id="paint-color" value="#4f46e5" class="h-8 w-8 bg-transparent border-none cursor-pointer">
+                    <input type="range" id="paint-size" min="1" max="50" value="5" class="w-32 h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-indigo-500">
+                </div>
+                <button onclick="saveCorePaint()" class="bg-indigo-600 hover:bg-indigo-500 text-white px-8 py-2 rounded-xl font-black text-xs uppercase tracking-widest shadow-lg shadow-indigo-900/40 transition-all">Submit to Lollms</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="agent-chat-panel" class="fixed bottom-24 right-6 w-96 h-[600px] bg-[#0a0a0f]/95 backdrop-blur-xl border border-indigo-500/30 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.5)] z-[160] flex flex-col hidden overflow-hidden transition-all duration-300 transform translate-y-4 opacity-0">
         <div class="p-4 border-b border-white/10 bg-indigo-600/10 flex justify-between items-center">
             <div class="flex items-center gap-3">
                 <div class="h-8 w-8 rounded-lg bg-indigo-600 flex items-center justify-center text-white font-black text-xs">L</div>
@@ -280,8 +316,12 @@
             <div class="flex flex-col gap-2">
                 <div class="flex gap-2">
                     <button id="agent-attach-img" class="p-2 rounded hover:bg-white/5 text-gray-400" title="Attach Image"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg></button>
+                    <button onclick="openCorePaint()" class="p-2 rounded hover:bg-white/5 text-indigo-400" title="Sketch something"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.5L15.232 5.232z"></path></svg></button>
                     <button id="agent-attach-doc" class="p-2 rounded hover:bg-white/5 text-gray-400" title="Attach Document"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg></button>
                     <input type="text" id="agent-input" placeholder="Ask Lollms..." class="flex-grow bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-xs text-white outline-none focus:border-indigo-500">
+                    <button id="agent-stop" class="hidden bg-red-600 hover:bg-red-500 px-3 py-2 rounded-lg text-white transition-all" title="Stop Generation">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                    </button>
                     <button id="agent-send" class="bg-indigo-600 hover:bg-indigo-500 px-3 py-2 rounded-lg text-white transition-all">
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"></path></svg>
                     </button>
@@ -1125,39 +1165,146 @@
             });
             agentClose.addEventListener('click', toggleAgent);
 
-            const renderCoreChat = () => {
+            window.renderCoreChat = () => {
                 agentMessages.innerHTML = '';
                 if (agentHistory.length === 0) {
                     agentMessages.innerHTML = `<div class="bg-indigo-600/10 border border-indigo-500/20 p-3 rounded-xl text-indigo-200 leading-relaxed">Greetings, Architect. I am <b>Lollms</b>. I am grounded in the Hub ROM. How can I assist with your cluster today?</div>`;
                 }
                 agentHistory.forEach((msg, idx) => {
                     const div = document.createElement('div');
-                    div.className = `relative group/msg ${msg.role === 'user' ? 'bg-white/5 border border-white/10 p-3 rounded-xl ml-8 text-right text-gray-300' : 'bg-indigo-600/10 border border-indigo-500/20 p-3 rounded-xl mr-8 text-indigo-200'}`;
+                    div.className = `relative group/msg mb-4 ${msg.role === 'user' ? 'bg-white/5 border border-white/10 p-3 rounded-xl ml-12 text-right text-gray-300' : 'bg-indigo-600/10 border border-indigo-500/20 p-3 rounded-xl mr-12 text-indigo-200'}`;
                     
-                    // --- MULTIMODAL RENDERING LOGIC ---
-                    let displayContent = "";
+                    let rawContent = "";
+                    let hasImage = false;
+                    let lastImageUrl = "";
+
                     if (Array.isArray(msg.content)) {
                         msg.content.forEach(part => {
-                            if (part.type === 'text') {
-                                displayContent += marked.parse(part.text);
-                            } else if (part.type === 'image_url') {
-                                displayContent += `<img src="${part.image_url.url}" class="max-w-full h-auto rounded-lg my-2 border border-white/10 shadow-lg">`;
+                            if (part.type === 'text') rawContent += part.text;
+                            else if (part.type === 'image_url') {
+                                hasImage = true;
+                                lastImageUrl = part.image_url.url;
+                                rawContent += `\n<image_artifact src="${lastImageUrl}" index="${idx}"/>\n`;
                             }
                         });
                     } else {
-                        displayContent = marked.parse(msg.content || "");
+                        rawContent = msg.content || "";
+                    }
+
+                    // --- LCP PROTOCOL PARSER ---
+                    let finalHtml = '';
+                    const lcpRegex = /(<(?:think|thought)>[\s\S]*?<\/(?:think|thought)>|<processing\b[^>]*>[\s\S]*?(?:<\/processing>|$)|<memory[^>]*>[\s\S]*?<\/memory>|<image_artifact[^>]*\/>)/g;
+                    const parts = rawContent.split(lcpRegex).filter(Boolean);
+
+                    for (const part of parts) {
+                        if (part.startsWith('<think') || part.startsWith('<thought')) {
+                            const isClosed = part.endsWith('</think>') || part.endsWith('</thought>');
+                            const tagLen = part.startsWith('<thought') ? 9 : 7;
+                            const endTagLen = part.endsWith('>') ? (part.endsWith('</thought>') ? 10 : 8) : 0;
+                            const inner = isClosed ? part.slice(tagLen, -endTagLen) : part.slice(tagLen);
+                            
+                            finalHtml += `<details class="think-block my-2" ${isClosed ? '' : 'open'}><summary class="text-[10px] font-black uppercase text-indigo-400 cursor-pointer hover:text-indigo-300">Internal Reasoning</summary><div class="p-3 bg-black/20 rounded-lg mt-1 border-l-2 border-indigo-500/30 text-[11px] italic text-gray-400">${marked.parse(inner.trim())}</div></details>`;
+                        } 
+                        else if (part.startsWith('<processing')) {
+                            const isClosed = part.includes('</processing>');
+                            const tagEnd = part.indexOf('>');
+                            let title = "System Processing";
+                            
+                            if (tagEnd !== -1) {
+                                const openTag = part.slice(0, tagEnd + 1);
+                                const titleMatch = openTag.match(/title=["'](.*?)["']/);
+                                if (titleMatch) title = titleMatch[1];
+                            }
+
+                            const blockContent = isClosed 
+                                ? part.slice(tagEnd + 1, part.lastIndexOf('</processing>')) 
+                                : part.slice(tagEnd + 1);
+
+                            const lines = blockContent.split('\n').filter(l => l.trim());
+                            // Use last active step as subtitle if lines exist
+                            const statusText = lines.length > 0 ? lines[lines.length - 1].replace(/^\*\s*/, '').trim() : (isClosed ? "Task Finished" : "Working...");
+                            
+                            const timelineHtml = lines.map(l => `<div class="flex items-start gap-2 mb-1 opacity-80"><div class="mt-1.5 w-1 h-1 rounded-full bg-indigo-500"></div><span>${l.replace(/^\*\s*/, '')}</span></div>`).join('');
+                            
+                            finalHtml += `
+                                <div class="my-3 bg-indigo-600/5 border border-indigo-500/20 rounded-xl overflow-hidden shadow-sm max-w-sm">
+                                    <div class="bg-indigo-600/10 px-3 py-1.5 flex justify-between items-center border-b border-indigo-500/10">
+                                        <div class="flex flex-col min-w-0">
+                                            <span class="text-[8px] font-black text-indigo-400 uppercase tracking-widest opacity-60">${title}</span>
+                                            <span class="text-[10px] font-bold text-white truncate">${statusText}</span>
+                                        </div>
+                                        ${isClosed ? '<span class="text-[8px] text-emerald-500 font-bold ml-2">DONE</span>' : '<span class="text-[8px] text-amber-500 animate-pulse font-bold ml-2">ACTIVE</span>'}
+                                    </div>
+                                    ${timelineHtml ? `<div class="p-2 px-3 font-mono text-[9px] text-gray-400 space-y-1 bg-black/20">${timelineHtml}</div>` : ''}
+                                </div>`;
+                        }
+                        else if (part.startsWith('<memory')) {
+                            const op = part.match(/operation=["'](.*?)["']/)?.at(1) || "update";
+                            const title = part.match(/title=["'](.*?)["']/)?.at(1) || "Fact";
+                            finalHtml += `<div class="inline-flex items-center gap-2 px-2 py-1 bg-fuchsia-600/10 border border-fuchsia-500/30 rounded-lg text-[9px] font-black text-fuchsia-400 uppercase tracking-tighter my-1" title="Memory ${op}: ${title}">
+                                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                                Neural Link: ${title}
+                            </div>`;
+                        }
+                        else if (part.startsWith('<image_artifact')) {
+                            const src = part.match(/src=["'](.*?)["']/)?.at(1);
+                            const mIdx = part.match(/index=["'](.*?)["']/)?.at(1);
+                            finalHtml += `<img src="${src}" class="max-w-full h-auto rounded-lg my-2 border border-white/10 shadow-lg cursor-pointer hover:ring-2 ring-indigo-500 transition-all" onclick="openCorePaint('${src}', ${mIdx})">`;
+                        }
+                        else {
+                            finalHtml += marked.parse(part);
+                        }
                     }
 
                     div.innerHTML = `
-                        <div class="message-body">${displayContent}</div>
-                        <div class="absolute -top-2 ${msg.role === 'user' ? 'left-0' : 'right-0'} opacity-0 group-hover/msg:opacity-100 flex gap-1 bg-black border border-white/10 rounded px-1 py-0.5 transition-opacity z-10">
-                            <button onclick="deleteCoreMsg(${idx})" class="text-[8px] font-black hover:text-red-400 uppercase">Del</button>
-                            ${msg.role === 'assistant' ? `<button onclick="regenCoreMsg(${idx})" class="text-[8px] font-black hover:text-indigo-400 uppercase">Regen</button>` : ''}
+                        <div class="message-body text-left whitespace-pre-wrap">${finalHtml}</div>
+                        <div class="absolute -top-3 ${msg.role === 'user' ? 'right-2' : 'left-2'} opacity-0 group-hover/msg:opacity-100 flex gap-1 bg-[#0a0a0f] border border-white/10 rounded-lg p-1 transition-opacity z-20 shadow-xl">
+                            <button onclick="copyCoreMsg(${idx})" class="p-1 hover:text-white text-gray-500" title="Copy Text"><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg></button>
+                            <button onclick="editCoreMsg(${idx}, this)" class="p-1 hover:text-indigo-400 text-gray-500" title="Edit"><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.5L15.232 5.232z"></path></svg></button>
+                            ${hasImage ? `<button onclick="openCorePaint('${lastImageUrl}')" class="p-1 hover:text-teal-400 text-gray-500" title="Edit Image"><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg></button>` : ''}
+                            <button onclick="regenCoreMsg(${idx})" class="p-1 hover:text-amber-400 text-gray-500" title="Regenerate from here"><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg></button>
+                            <button onclick="deleteCoreMsg(${idx})" class="p-1 hover:text-red-400 text-gray-500" title="Delete"><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg></button>
                         </div>
                     `;
                     agentMessages.appendChild(div);
                 });
                 agentMessages.scrollTop = agentMessages.scrollHeight;
+            };
+
+            window.copyCoreMsg = (idx) => {
+                const msg = agentHistory[idx];
+                let text = Array.isArray(msg.content) ? msg.content.find(p => p.type === 'text')?.text : msg.content;
+                navigator.clipboard.writeText(text || "");
+                window.showToast("Copied to clipboard", "info");
+            };
+
+            window.editCoreMsg = (idx, btn) => {
+                const msg = agentHistory[idx];
+                const bubble = btn.closest('.group\\/msg');
+                const body = bubble.querySelector('.message-body');
+                
+                let originalText = Array.isArray(msg.content) ? msg.content.find(p => p.type === 'text')?.text : msg.content;
+                
+                body.innerHTML = `
+                    <textarea class="w-full bg-black/40 border border-indigo-500/30 rounded-lg p-2 text-xs text-white outline-none focus:ring-1 ring-indigo-500 custom-scrollbar" rows="5">${originalText}</textarea>
+                    <div class="flex justify-end gap-2 mt-2">
+                        <button onclick="renderCoreChat()" class="text-[9px] font-bold text-gray-500 uppercase">Cancel</button>
+                        <button onclick="saveCoreEdit(${idx}, this)" class="text-[9px] font-black text-indigo-400 uppercase">Save Changes</button>
+                    </div>
+                `;
+                body.querySelector('textarea').focus();
+            };
+
+            window.saveCoreEdit = (idx, btn) => {
+                const newText = btn.parentElement.parentElement.querySelector('textarea').value;
+                if (Array.isArray(agentHistory[idx].content)) {
+                    const textPart = agentHistory[idx].content.find(p => p.type === 'text');
+                    if (textPart) textPart.text = newText;
+                } else {
+                    agentHistory[idx].content = newText;
+                }
+                localStorage.setItem(CORE_HISTORY_KEY, JSON.stringify(agentHistory));
+                renderCoreChat();
             };
 
             window.deleteCoreMsg = (idx) => {
@@ -1219,16 +1366,236 @@
             };
 
             document.getElementById('agent-file-doc').onchange = async (e) => {
-                // We use our existing knowledge_importer backend for consistency if possible,
-                // but for the side panel, we'll do client-side extraction for speed.
                 for (let f of e.target.files) {
-                    const reader = new FileReader();
-                    reader.onload = (ev) => {
-                        agentFiles.push({ type: 'doc', name: f.name, content: ev.target.result });
-                        renderAgentPreviews();
-                    };
-                    reader.readAsText(f);
+                    if (f.name.toLowerCase().endsWith('.pdf') || f.name.toLowerCase().endsWith('.docx')) {
+                        // DEEP EXTRACTION: Use backend for binary documents
+                        window.showToast(`Extracting ${f.name}...`, 'info');
+                        const formData = new FormData();
+                        formData.append('file', f);
+                        formData.append('csrf_token', '{{ csrf_token }}');
+                        
+                        try {
+                            const resp = await fetch("{{ url_for('api_importer_extract_file') }}", { method: 'POST', body: formData });
+                            const data = await resp.json();
+                            if (data.content) {
+                                agentFiles.push({ type: 'doc', name: f.name, content: data.content });
+                                renderAgentPreviews();
+                            }
+                        } catch (err) { window.showToast("Extraction failed", "error"); }
+                    } else {
+                        // Standard text-based files handled locally
+                        const reader = new FileReader();
+                        reader.onload = (ev) => {
+                            agentFiles.push({ type: 'doc', name: f.name, content: ev.target.result });
+                            renderAgentPreviews();
+                        };
+                        reader.readAsText(f);
+                    }
                 }
+                e.target.value = ""; // Reset for re-selection
+            };
+
+            let agentAbortController = null;
+            document.getElementById('agent-stop').onclick = () => {
+                if (agentAbortController) agentAbortController.abort();
+            };
+
+            // --- PAINT CORE LOGIC ---
+            let isDrawing = false;
+            let currentEditingImageIndex = null;
+            let paintMode = 'draw'; // 'draw' or 'select'
+            let paintHistory = [];
+            let paintHistoryIndex = -1;
+            let selectionRect = null; // {x, y, w, h}
+            let paintClipboard = null; // ImageData
+
+            const coreCanvas = document.getElementById('core-drawing-canvas');
+            const coreCtx = coreCanvas.getContext('2d');
+            const corePaintPanel = document.getElementById('core-paint-panel');
+
+            function pushPaintHistory() {
+                // Truncate redo stack
+                paintHistory = paintHistory.slice(0, paintHistoryIndex + 1);
+                paintHistory.push(coreCtx.getImageData(0, 0, coreCanvas.width, coreCanvas.height));
+                if (paintHistory.length > 20) paintHistory.shift();
+                else paintHistoryIndex++;
+            }
+
+            window.undoCorePaint = () => {
+                if (paintHistoryIndex > 0) {
+                    paintHistoryIndex--;
+                    coreCtx.putImageData(paintHistory[paintHistoryIndex], 0, 0);
+                }
+            };
+
+            window.redoCorePaint = () => {
+                if (paintHistoryIndex < paintHistory.length - 1) {
+                    paintHistoryIndex++;
+                    coreCtx.putImageData(paintHistory[paintHistoryIndex], 0, 0);
+                }
+            };
+
+            window.setPaintMode = (mode) => {
+                paintMode = mode;
+                document.getElementById('btn-paint-select').classList.toggle('bg-indigo-600/20', mode === 'select');
+                document.getElementById('btn-paint-select').classList.toggle('text-indigo-400', mode === 'select');
+                if (mode === 'draw') selectionRect = null;
+            };
+
+            window.openCorePaint = (bgUrl = null, msgIndex = null) => {
+                paintHistory = [];
+                paintHistoryIndex = -1;
+                currentEditingImageIndex = msgIndex;
+                corePaintPanel.classList.remove('hidden');
+                // Set size based on container
+                coreCanvas.width = coreCanvas.parentElement.clientWidth;
+                coreCanvas.height = coreCanvas.parentElement.clientHeight;
+                
+                coreCtx.fillStyle = "white";
+                coreCtx.fillRect(0, 0, coreCanvas.width, coreCanvas.height);
+
+                if (bgUrl) {
+                    document.getElementById('paint-title').innerText = "Editing Image Artifact";
+                    const img = new Image();
+                    img.onload = () => {
+                        const scale = Math.min(coreCanvas.width / img.width, coreCanvas.height / img.height);
+                        const x = (coreCanvas.width / 2) - (img.width / 2) * scale;
+                        const y = (coreCanvas.height / 2) - (img.height / 2) * scale;
+                        coreCtx.drawImage(img, x, y, img.width * scale, img.height * scale);
+                        pushPaintHistory();
+                    };
+                    img.src = bgUrl;
+                } else {
+                    document.getElementById('paint-title').innerText = "Neural Sketchpad";
+                    pushPaintHistory();
+                }
+            };
+
+            let startX, startY;
+            coreCanvas.addEventListener('mousedown', (e) => { 
+                const rect = coreCanvas.getBoundingClientRect();
+                startX = e.clientX - rect.left;
+                startY = e.clientY - rect.top;
+                isDrawing = true; 
+                if (paintMode === 'draw') draw(e); 
+            });
+
+            coreCanvas.addEventListener('mousemove', (e) => {
+                if (!isDrawing) return;
+                if (paintMode === 'draw') draw(e);
+                else {
+                    // Draw selection marquee
+                    const rect = coreCanvas.getBoundingClientRect();
+                    const curX = e.clientX - rect.left;
+                    const curY = e.clientY - rect.top;
+                    
+                    // Refresh from last state before drawing box
+                    coreCtx.putImageData(paintHistory[paintHistoryIndex], 0, 0);
+                    coreCtx.setLineDash([5, 5]);
+                    coreCtx.strokeStyle = "#4f46e5";
+                    coreCtx.lineWidth = 1;
+                    coreCtx.strokeRect(startX, startY, curX - startX, curY - startY);
+                    coreCtx.setLineDash([]);
+                }
+            });
+
+            coreCanvas.addEventListener('mouseup', (e) => { 
+                if (paintMode === 'select') {
+                    const rect = coreCanvas.getBoundingClientRect();
+                    selectionRect = { x: startX, y: startY, w: (e.clientX - rect.left) - startX, h: (e.clientY - rect.top) - startY };
+                } else {
+                    pushPaintHistory();
+                }
+                isDrawing = false; 
+                coreCtx.beginPath(); 
+            });
+
+            function draw(e) {
+                const rect = coreCanvas.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+                const y = e.clientY - rect.top;
+                coreCtx.lineWidth = document.getElementById('paint-size').value;
+                coreCtx.lineCap = "round";
+                coreCtx.strokeStyle = document.getElementById('paint-color').value;
+                coreCtx.lineTo(x, y);
+                coreCtx.stroke();
+                coreCtx.beginPath();
+                coreCtx.moveTo(x, y);
+            }
+
+            window.copyPaintSelection = () => {
+                if (!selectionRect) return;
+                paintClipboard = coreCtx.getImageData(selectionRect.x, selectionRect.y, selectionRect.w, selectionRect.h);
+                window.showToast("Area copied to local clipboard", "info");
+            };
+
+            window.pastePaintSelection = () => {
+                if (!paintClipboard) return;
+                coreCtx.putImageData(paintClipboard, 10, 10);
+                pushPaintHistory();
+                window.showToast("Stamping clipboard at 10,10", "info");
+            };
+
+            window.insertImageToPaint = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = (ev) => {
+                    const img = new Image();
+                    img.onload = () => {
+                        coreCtx.drawImage(img, 0, 0, 150, 150); // Small stamp
+                        pushPaintHistory();
+                        // Clear the input so the same image can be inserted again
+                        e.target.value = "";
+                    };
+                    img.src = ev.target.result;
+                };
+                reader.readAsDataURL(file);
+            };
+
+            // Keyboard Shortcuts for Paint
+            window.addEventListener('keydown', (e) => {
+                if (corePaintPanel.classList.contains('hidden')) return;
+                const ctrl = e.ctrlKey || e.metaKey;
+                if (ctrl) {
+                    if (e.key === 'z') { e.preventDefault(); undoCorePaint(); }
+                    if (e.key === 'y') { e.preventDefault(); redoCorePaint(); }
+                    if (e.key === 'c') { e.preventDefault(); copyPaintSelection(); }
+                    if (e.key === 'v') { e.preventDefault(); pastePaintSelection(); }
+                }
+            });
+
+            window.clearCoreCanvas = () => coreCtx.fillRect(0, 0, coreCanvas.width, coreCanvas.height);
+            window.closeCorePaint = () => corePaintPanel.classList.add('hidden');
+            
+            // Default Save Handler (Lollms Core Side-Panel)
+            window.handleCorePaintSave = (dataUrl, msgIndex) => {
+                if (msgIndex !== null) {
+                    const msg = agentHistory[msgIndex];
+                    if (Array.isArray(msg.content)) {
+                        const imgPart = msg.content.find(p => p.type === 'image_url');
+                        if (imgPart) imgPart.image_url.url = dataUrl;
+                    }
+                    localStorage.setItem(CORE_HISTORY_KEY, JSON.stringify(agentHistory));
+                    renderCoreChat();
+                } else {
+                    agentFiles.push({ type: 'img', name: 'sketch.jpg', data: dataUrl });
+                    renderAgentPreviews();
+                }
+            };
+
+            window.saveCorePaint = () => {
+                const dataUrl = coreCanvas.toDataURL('image/jpeg', 0.8);
+                
+                // Allow pages (like Playground) to intercept the save event
+                if (window.customPaintSaveHandler) {
+                    window.customPaintSaveHandler(dataUrl, currentEditingImageIndex);
+                } else {
+                    window.handleCorePaintSave(dataUrl, currentEditingImageIndex);
+                }
+                
+                window.showToast("Sketch processed", "success");
+                closeCorePaint();
             };
 
             const runAgentSummon = async (forcedPrompt = null) => {
@@ -1238,6 +1605,10 @@
                 if (!forcedPrompt) {
                     agentInput.value = '';
                     
+                    // --- UX FIX: Reset physical file inputs ---
+                    document.getElementById('agent-file-img').value = "";
+                    document.getElementById('agent-file-doc').value = "";
+
                     let content = [];
                     if (text) content.push({ type: 'text', text: text });
                     
@@ -1264,6 +1635,10 @@
                 loadingDiv.className = 'text-[9px] font-black text-indigo-400 uppercase animate-pulse px-2';
                 loadingDiv.innerText = 'Consulting ROM...';
                 agentMessages.appendChild(loadingDiv);
+                
+                agentAbortController = new AbortController();
+                agentSend.classList.add('hidden');
+                document.getElementById('agent-stop').classList.remove('hidden');
 
                 try {
                     const resp = await fetch("/api/chat", {
@@ -1276,7 +1651,8 @@
                             model: 'lollms',
                             messages: agentHistory,
                             stream: false
-                        })
+                        }),
+                        signal: agentAbortController.signal
                     });
                     
                     const data = await resp.json();
@@ -1310,7 +1686,15 @@
                     localStorage.setItem(CORE_HISTORY_KEY, JSON.stringify(agentHistory));
                     renderCoreChat();
                 } catch (e) {
-                    loadingDiv.innerText = "ERROR: ROM OFFLINE";
+                    if (e.name === 'AbortController') {
+                         loadingDiv.innerText = "GENERATION STOPPED";
+                    } else {
+                         loadingDiv.innerText = "ERROR: ROM OFFLINE";
+                    }
+                } finally {
+                    agentAbortController = null;
+                    agentSend.classList.remove('hidden');
+                    document.getElementById('agent-stop').classList.add('hidden');
                 }
             };
 

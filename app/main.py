@@ -142,22 +142,30 @@ async def bootstrap_lollms_agent() -> None:
         )
         
         # 2. Create or Update the Master Workflow Graph
-        # We explicitly use a System Modifier node to inject the Soul into the Agent.
+        # SIMPLIFIED: Removed useless system_modifier. 
+        # The agent now inherits the 'lollms' persona directly.
         lollms_graph = {
             "nodes": [
-                {"id": 1, "type": "hub/input", "pos":[50, 200], "outputs": [{"name": "Messages", "links": [1]}, {"name": "Settings", "links": [2]}]},
-                {"id": 2, "type": "hub/system_modifier", "pos": [450, 50], "inputs":[{"name": "Messages", "link": 1}], "outputs": [{"name": "Updated Messages", "links": [3]}], "properties": {
-                    "replace_all": True,
-                    "system_prompt": system_prompt
-                }},
-                {"id": 3, "type": "hub/agent", "pos":[850, 200], "inputs":[{"name": "In Messages", "link": 3}, {"name": "Settings", "link": 2}], "outputs": [{"name": "Final Answer", "links": [4]}], "properties": {
+                {"id": 1, "type": "hub/input", "pos":[50, 200], "outputs": [
+                    {"name": "Messages", "links": [1]}, 
+                    {"name": "Settings", "links": [2]}
+                ]},
+                {"id": 2, "type": "hub/agent", "pos":[550, 200], "inputs":[
+                    {"name": "In Messages", "link": 1}, 
+                    {"name": "Settings", "link": 2}
+                ], "outputs": [{"name": "Final Answer", "links": [3]}], "properties": {
                     "model": "auto", 
+                    "persona": "lollms", # Native Persona Inheritance
                     "max_turns": 10,
-                    "memory_system": "lollms" # Points to its own RLM ROM
+                    "memory_system": "lollms" 
                 }},
-                {"id": 4, "type": "hub/output", "pos": [1250, 200], "inputs": [{"name": "Content", "link": 4}]}
+                {"id": 3, "type": "hub/output", "pos": [1050, 200], "inputs": [{"name": "Content", "link": 3}]}
             ],
-            "links": [[1, 1, 0, 2, 0, "messages"],[2, 1, 1, 3, 1, "object"], [3, 2, 0, 3, 0, "messages"],[4, 3, 0, 4, 0, "string"]]
+            "links": [
+                [1, 1, 0, 2, 0, "messages"],
+                [2, 1, 1, 2, 1, "object"],
+                [3, 2, 0, 3, 0, "string"]
+            ]
         }
 
         existing = await db.execute(select(Workflow).filter_by(name="lollms"))

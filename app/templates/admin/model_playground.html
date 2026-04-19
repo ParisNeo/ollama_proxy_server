@@ -128,6 +128,9 @@
             <button type="button" id="attach-img-btn" class="p-2 rounded-md hover:bg-white/10 flex-shrink-0" title="Attach Image">
                 <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
             </button>
+            <button type="button" onclick="openPlaygroundPaint()" class="p-2 rounded-md hover:bg-white/10 text-indigo-400 flex-shrink-0" title="Sketch/Annotate">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.5L15.232 5.232z"></path></svg>
+            </button>
             <input type="file" id="image-input" class="hidden" multiple accept="image/*">
             <button type="button" id="attach-doc-btn" class="p-2 rounded-md hover:bg-white/10 flex-shrink-0" title="Attach Document">
                 <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
@@ -895,6 +898,11 @@ SUPPORTED ANNOTATION SCHEMAS:
         messageInput.style.height = 'auto';
         attachedImages = [];
         attachedDocs = [];
+        
+        // --- UX FIX: Reset physical file inputs to allow re-selection of same files ---
+        imageInput.value = "";
+        docInput.value = "";
+        
         renderImagePreviews();
         renderDocPreviews();
 
@@ -907,14 +915,16 @@ SUPPORTED ANNOTATION SCHEMAS:
 
         let finalHtml = '';
 
-        const regex = /(<think>[\s\S]*?<\/think>|<processing[^>]*>[\s\S]*?(?:<\/processing>|$)|<annotate>[\s\S]*?<\/annotate>|<artifact\s+[^>]*\/>|<artifact\s+[^>]*>.*?<\/artifact>)/g;
+            const regex = /(<(?:think|thought)>[\s\S]*?<\/(?:think|thought)>|<processing[^>]*>[\s\S]*?(?:<\/processing>|$)|<annotate>[\s\S]*?<\/annotate>|<artifact\s+[^>]*\/>|<artifact\s+[^>]*>.*?<\/artifact>)/g;
 
         const parts = contentString.split(regex).filter(Boolean);
 
         for (const part of parts) {
-            if (part.startsWith('<think>')) {
-                const isClosed = part.endsWith('</think>');
-                const blockContent = isClosed ? part.slice(7, -8) : part.slice(7);
+            if (part.startsWith('<think>') || part.startsWith('<thought>')) {
+                const isClosed = part.endsWith('</think>') || part.endsWith('</thought>');
+                const tagLen = part.startsWith('<thought>') ? 9 : 7;
+                const endTagLen = part.endsWith('</thought>') ? 10 : 8;
+                const blockContent = isClosed ? part.slice(tagLen, -endTagLen) : part.slice(tagLen);
                 const summaryTitle = 'Thoughts';
 
                 if (isClosed) {
@@ -1126,7 +1136,7 @@ SUPPORTED ANNOTATION SCHEMAS:
                         } else if (part.type === 'image_url') {
                             const imageContainer = document.createElement('div');
                             imageContainer.className = 'image-message-container';
-                            imageContainer.innerHTML = `<img src="${part.image_url.url}" class="block max-w-full h-auto rounded-md mt-2">`;
+                            imageContainer.innerHTML = `<img src="${part.image_url.url}" class="block max-w-full h-auto rounded-md mt-2 cursor-pointer hover:ring-2 ring-indigo-500 transition-all" onclick="openPlaygroundPaint('${part.image_url.url}', ${messageIndex})">`;
                             contentDiv.appendChild(imageContainer);
                         }
                     });
@@ -1561,6 +1571,32 @@ SUPPORTED ANNOTATION SCHEMAS:
         }
     }
 
+
+    // --- Playground Paint Bridge ---
+    window.openPlaygroundPaint = (url = null, idx = null) => {
+        // Register the Playground-specific save behavior
+        window.customPaintSaveHandler = (dataUrl, msgIndex) => {
+            if (msgIndex !== null) {
+                // Edit existing message in history
+                const msg = messages[msgIndex];
+                if (Array.isArray(msg.content)) {
+                    const imgPart = msg.content.find(p => p.type === 'image_url');
+                    if (imgPart) imgPart.image_url.url = dataUrl;
+                }
+                updateCurrentChat();
+                renderChat();
+            } else {
+                // New attachment to draft
+                attachedImages.push(dataUrl);
+                renderImagePreviews();
+            }
+            // Reset handler after use
+            window.customPaintSaveHandler = null;
+        };
+
+        // Open the global paint tool
+        if (window.openCorePaint) window.openCorePaint(url, idx);
+    };
 
     // --- Event Listeners & Init ---
     messageInput.addEventListener('input', () => { messageInput.style.height = 'auto'; messageInput.style.height = `${Math.min(messageInput.scrollHeight, 200)}px`; });

@@ -1,0 +1,393 @@
+{% extends "admin/base.html" %}
+{% block title %}Model Evaluations{% endblock %}
+{% block header_title %}Capabilities Evaluation & Benchmarking{% endblock %}
+
+{% block content %}
+<div class="space-y-8">
+    <!-- Header Strategy Info -->
+    <div class="card-style bg-purple-500/10 border border-purple-500/30">
+        <div class="flex items-start gap-4">
+            <div class="p-2 bg-purple-600 rounded-lg flex-shrink-0">
+                <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012-2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path></svg>
+            </div>
+            <div class="text-sm text-gray-300">
+                <p class="font-bold text-white mb-2">Scientific Performance Verification</p>
+                <p>Deploy specialized datasets to test your cluster's reasoning, coding, and factual accuracy. Benchmarks allow you to compare different hardware/model combinations side-by-side using quantitative metrics.</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Active Task Console -->
+    <div id="eval-console-container" class="hidden card-style border-l-4 border-purple-500 bg-purple-500/5 mb-8">
+        <div class="flex justify-between items-center mb-3">
+            <div class="flex items-center gap-2">
+                <div class="w-2 h-2 bg-purple-500 rounded-full animate-ping"></div>
+                <span class="text-[10px] font-black uppercase tracking-widest text-purple-400">Evaluator Stream</span>
+            </div>
+            <button onclick="document.getElementById('eval-console-container').classList.add('hidden')" class="text-gray-500 hover:text-white">×</button>
+        </div>
+        <div id="eval-console" class="h-32 overflow-y-auto bg-black/60 rounded-lg p-3 font-mono text-[10px] text-purple-200 space-y-1 custom-scrollbar">
+            <div class="text-gray-600 italic">Connecting to evaluation engine...</div>
+        </div>
+    </div>
+
+    <!-- Main View Tabs -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        
+        <!-- SECTION: DATASETS -->
+        <div class="space-y-6">
+            <div class="flex justify-between items-center border-b border-white/5 pb-2">
+                <h2 class="text-lg font-black text-white uppercase tracking-widest flex items-center gap-2">
+                    <svg class="w-4 h-4 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"></path></svg>
+                    Benchmark Datasets
+                </h2>
+                <button onclick="openDatasetGenerator()" class="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-1.5 rounded-lg font-black text-[10px] uppercase tracking-widest transition-all shadow-lg">+ Create Dataset</button>
+            </div>
+
+            <div class="space-y-3">
+                {% for ds in datasets %}
+                <div class="card-style bg-black/40 border-white/5 group hover:border-indigo-500/40 transition-all">
+                    <div class="flex justify-between items-start">
+                        <div class="min-w-0">
+                            <h3 class="font-bold text-white truncate">{{ ds.name }}</h3>
+                            <p class="text-[10px] text-gray-500 truncate">{{ ds.description or 'No description' }}</p>
+                            <div class="flex gap-4 mt-2">
+                                <span class="text-[9px] font-black text-indigo-400 uppercase tracking-tighter">{{ ds.content|length }} Tasks</span>
+                                <span class="text-[9px] font-black text-gray-600 uppercase tracking-tighter">Gen: {{ ds.created_at.strftime('%Y-%m-%d') }}</span>
+                            </div>
+                        </div>
+                        <div class="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <a href="{{ url_for('admin_explore_dataset', ds_id=ds.id) }}" class="p-1.5 bg-white/5 hover:bg-indigo-500/20 rounded text-indigo-400" title="Explore/Edit Items">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
+                            </a>
+                            <button onclick="runBenchmarkOnDataset({{ ds.id }}, '{{ ds.name }}')" class="p-1.5 bg-white/5 hover:bg-emerald-500/20 rounded text-emerald-400" title="Run Benchmark">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                            </button>
+                            <button onclick="deleteDataset({{ ds.id }})" class="p-1.5 bg-white/5 hover:bg-red-500/20 rounded text-red-500" title="Delete">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                {% else %}
+                <div class="p-10 text-center border-2 border-dashed border-white/5 rounded-2xl">
+                    <p class="text-xs text-gray-600 italic">No datasets found. Generate one to start benchmarking.</p>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+
+        <!-- SECTION: PREVIOUS RUNS -->
+        <div class="space-y-6">
+            <h2 class="text-lg font-black text-white uppercase tracking-widest flex items-center gap-2 border-b border-white/5 pb-2">
+                <svg class="w-4 h-4 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"></path></svg>
+                Benchmark Reports
+            </h2>
+            
+            <div class="space-y-3">
+                {% for run in runs %}
+                <div class="card-style bg-black/40 border-white/5 flex justify-between items-center group hover:border-purple-500/40 transition-all">
+                    <div class="min-w-0">
+                        <h3 class="font-bold text-white truncate">{{ run.name }}</h3>
+                        <div class="flex flex-wrap gap-2 mt-1">
+                            {% for model in run.models %}
+                            <span class="text-[8px] bg-white/5 px-1.5 py-0.5 rounded text-gray-400 font-mono">{{ model }}</span>
+                            {% endfor %}
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-3">
+                        <div class="text-right mr-2">
+                            <div class="text-[9px] font-black text-gray-600 uppercase">Timestamp</div>
+                            <div class="text-[10px] text-gray-500 font-mono">{{ run.created_at.strftime('%m-%d %H:%M') }}</div>
+                        </div>
+                        <div class="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <a href="{{ url_for('admin_evaluation_report', run_id=run.id) }}" class="bg-purple-600 hover:bg-purple-500 text-white px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all">Report</a>
+                            <button onclick="deleteRun({{ run.id }})" class="p-1.5 bg-red-900/20 text-red-500 rounded hover:bg-red-900/40">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                {% else %}
+                <div class="p-10 text-center border-2 border-dashed border-white/5 rounded-2xl">
+                    <p class="text-xs text-gray-600 italic">No reports archived.</p>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // --- DATASET GENERATOR MODAL ---
+    window.openDatasetGenerator = () => {
+        // Reset Architect context for fresh generation
+        window.Architect.reset();
+        
+        const body = `
+            <div class="space-y-6 text-left" id="gen-ds-root">
+                <div class="p-3 bg-indigo-500/10 border border-indigo-500/30 rounded-xl mb-4">
+                    <p class="text-[11px] text-gray-400 leading-relaxed">The **Forge** extracts logic patterns from your sources and generates factual, reasoning, or coding tasks with expert reference answers.</p>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div class="space-y-4">
+                        <div>
+                            <label class="block text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1 px-1">Dataset Name</label>
+                            <input type="text" id="gen-ds-name" placeholder="e.g. Logic Audit v1" class="w-full bg-black/40 border border-white/10 rounded-lg p-2.5 text-sm outline-none focus:border-indigo-500">
+                        </div>
+                        <div>
+                            <label class="block text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1 px-1">Source: Static Datastores</label>
+                            <div class="max-h-32 overflow-y-auto custom-scrollbar bg-black/20 p-2 rounded-lg border border-white/5 space-y-1">
+                                {% for ds in datastores %}
+                                <label class="flex items-center gap-3 p-1.5 rounded hover:bg-white/5 cursor-pointer">
+                                    <input type="checkbox" name="ds-choice" value="{{ ds.id }}" class="rounded text-indigo-600 bg-black border-white/20">
+                                    <span class="text-xs text-gray-300 font-bold">${{ ds.name }}</span>
+                                </label>
+                                {% endfor %}
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="space-y-4">
+                        <div>
+                            <label class="block text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1 px-1">Tasks Density (per source chunk)</label>
+                            <input type="number" id="gen-ds-chunks" value="5" min="1" max="50" class="w-full bg-black/40 border border-white/10 rounded-lg p-2.5 text-sm">
+                        </div>
+                        <div>
+                             <label class="block text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1 px-1">Description/Objective</label>
+                             <textarea id="gen-ds-manual" rows="3" placeholder="Describe the goal of this evaluation..." class="w-full bg-black/40 border border-white/10 rounded-lg p-2 text-xs outline-none focus:border-indigo-500"></textarea>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="space-y-3">
+                    <label class="block text-[10px] font-black text-indigo-400 uppercase tracking-widest px-1">Fresh Sources (External Knowledge)</label>
+                    <div id="eval-gen-previews" class="flex flex-wrap gap-2 min-h-[32px] p-3 bg-black/20 border border-white/5 rounded-xl"></div>
+                    <div class="flex gap-2">
+                        <button onclick="document.getElementById('eval-gen-files').click()" class="bg-white/5 hover:bg-white/10 border border-white/10 px-4 py-1.5 rounded-lg text-[10px] font-black uppercase text-gray-400">📄 Files</button>
+                        <button onclick="window.triggerEvalWebImport()" class="bg-indigo-600/20 hover:bg-indigo-600/40 text-indigo-400 px-4 py-1.5 rounded-lg text-[10px] font-black uppercase border border-indigo-500/30">🌍 Import Web/Media</button>
+                        <input type="file" id="eval-gen-files" class="hidden" multiple accept=".pdf,.docx,.txt,.py,.md">
+                    </div>
+                </div>
+
+                <div class="flex justify-end pt-4 border-t border-white/5">
+                    <button onclick="executeDatasetGeneration()" id="btn-gen-ds-run" class="bg-indigo-600 hover:bg-indigo-500 text-white px-12 py-4 rounded-2xl font-black text-xs uppercase tracking-widest shadow-2xl shadow-indigo-900/40 transition-all transform active:scale-95">Generate Dataset</button>
+                </div>
+            </div>
+        `;
+        window.showModal("Construct Evaluation Dataset", body);
+        
+        // Re-bind file inputs to Architect logic
+        setTimeout(() => {
+            const files = document.getElementById('eval-gen-files');
+            if(files) files.onchange = (e) => window.Architect.handleFiles(e.target.files, () => window.Architect.renderPreviews('eval-gen-previews'));
+        }, 100);
+    };
+
+    window.triggerEvalWebImport = () => {
+        window.openKnowledgeImporter((title, content) => {
+            window.Architect.context.push({ type: 'web', name: title, content: content });
+            window.Architect.renderPreviews('eval-gen-previews');
+        });
+    };
+
+    window.executeDatasetGeneration = async () => {
+        const btn = document.getElementById('btn-gen-ds-run');
+        const name = document.getElementById('gen-ds-name').value;
+        const desc = document.getElementById('gen-ds-manual').value;
+        const datastores = Array.from(document.querySelectorAll('input[name="ds-choice"]:checked')).map(cb => parseInt(cb.value));
+
+        if (!name) return alert("Dataset name required.");
+        
+        btn.disabled = true;
+        btn.innerHTML = '<svg class="animate-spin h-4 w-4 mr-2 inline" viewBox="0 0 24 24">...</svg> PREPARING FORGE...';
+
+        const formData = new FormData();
+        formData.append('name', name);
+        formData.append('description', desc);
+        formData.append('chunks_per_source', document.getElementById('gen-ds-chunks').value);
+        formData.append('datastores', JSON.stringify(datastores));
+        formData.append('csrf_token', '{{ csrf_token }}');
+
+        // Add Manual sources from Architect context (Web, ArXiv, etc.)
+        const rawTexts = [];
+        window.Architect.context.forEach(it => {
+            if (it.type === 'web') rawTexts.push({ title: it.name, content: it.content });
+            else if (it.type === 'file') formData.append('files', it.data);
+        });
+        formData.append('raw_texts', JSON.stringify(rawTexts));
+
+        try {
+            const resp = await fetch("{{ url_for('api_eval_generate_dataset') }}", { method: 'POST', body: formData });
+            const data = await resp.json();
+            if(data.success) {
+                document.getElementById('modal-close-btn').click();
+                logToConsole(`Architect: Commencing dataset generation for '${name}'...`, 'text-indigo-400 font-bold');
+            } else {
+                alert(data.error);
+                btn.disabled = false;
+                btn.innerText = "Generate Dataset";
+            }
+        } catch(e) { 
+            alert("Network Error: " + e.message); 
+            btn.disabled = false; 
+            btn.innerText = "Generate Dataset";
+        }
+    };
+
+    // --- BENCHMARK RUN MODAL ---
+    window.runBenchmarkOnDataset = (dsId, dsName) => {
+        const body = `
+            <div class="space-y-6 text-left">
+                <div class="flex items-center gap-3 border-b border-white/5 pb-4">
+                    <div class="text-[10px] font-black text-gray-500 uppercase tracking-widest">Active Dataset:</div>
+                    <div class="text-emerald-400 font-black uppercase text-sm">${dsName}</div>
+                </div>
+
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1 px-1">Run Name</label>
+                        <input type="text" id="run-name" value="Benchmark ${new Date().toLocaleDateString()}" class="w-full bg-black/40 border border-white/10 rounded-lg p-2.5 text-sm">
+                    </div>
+                    
+                    <div>
+                        <label class="block text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1 px-1">Models to Compare</label>
+                        <div class="max-h-48 overflow-y-auto custom-scrollbar bg-black/20 p-3 rounded-xl border border-white/5 grid grid-cols-1 md:grid-cols-2 gap-2">
+                            {% for m in all_models %}
+                            <label class="flex items-center gap-3 p-1.5 rounded hover:bg-white/5 cursor-pointer group">
+                                <input type="checkbox" name="model-choice" value="{{ m }}" class="rounded text-purple-600 bg-black border-white/20">
+                                <span class="text-[10px] text-gray-400 group-hover:text-white font-mono">${{ m }}</span>
+                            </label>
+                            {% endfor %}
+                            {% for w in workflows %}
+                            <label class="flex items-center gap-3 p-1.5 rounded hover:bg-purple-500/10 cursor-pointer group border border-purple-500/10">
+                                <input type="checkbox" name="model-choice" value="{{ w }}" class="rounded text-purple-600 bg-black border-white/20">
+                                <span class="text-[10px] text-purple-400 group-hover:text-white font-black uppercase tracking-tighter">${{ w }} (Workflow)</span>
+                            </label>
+                            {% endfor %}
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div class="space-y-4">
+                            <label class="block text-[10px] font-black text-gray-500 uppercase tracking-widest px-1">Evaluation Method</label>
+                            <select id="eval-type" class="w-full bg-black/40 border border-white/10 rounded-lg p-2.5 text-xs text-indigo-400 font-bold" onchange="toggleEvalConfig()">
+                                <option value="vectorizer">Semantic Similarity (Vectorizer)</option>
+                                <option value="llm">AI Agent Judge (High Fidelity)</option>
+                            </select>
+                        </div>
+                        <div id="eval-method-config" class="space-y-4">
+                            <!-- Configured by JS -->
+                        </div>
+                    </div>
+                </div>
+
+                <div class="flex justify-end pt-4 border-t border-white/5">
+                    <button onclick="executeBenchmark(${dsId})" id="btn-run-eval" class="bg-purple-600 hover:bg-purple-500 text-white px-10 py-3 rounded-xl font-black text-xs uppercase tracking-widest shadow-xl transition-all transform active:scale-95">Launch Multi-Model Audit</button>
+                </div>
+            </div>
+        `;
+        window.showModal("Run Competitive Benchmark", body);
+        toggleEvalConfig();
+    };
+
+    window.toggleEvalConfig = () => {
+        const type = document.getElementById('eval-type').value;
+        const container = document.getElementById('eval-method-config');
+        
+        if (type === 'vectorizer') {
+            container.innerHTML = `
+                <label class="block text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">Vectorizer Binding</label>
+                <select id="eval-vec-method" class="w-full bg-black/40 border border-white/10 rounded-lg p-2 text-xs mb-2">
+                    <option value="ollama">Hub/Ollama Embeddings</option>
+                    <option value="st">Local SentenceTransformer</option>
+                </select>
+                <label class="block text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">Embedding Model</label>
+                <select id="eval-vec-model" class="w-full bg-black/40 border border-white/10 rounded-lg p-2 text-xs">
+                    {% for m in embed_models %}<option value="{{ m }}">{{ m }}</option>{% endfor %}
+                </select>
+            `;
+        } else {
+            container.innerHTML = `
+                <label class="block text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">Selection of Judge</label>
+                <select id="eval-judge-model" class="w-full bg-black/40 border border-white/10 rounded-lg p-2 text-xs text-purple-300 font-bold">
+                    <option value="{{ settings.admin_agent_name }}">{{ settings.admin_agent_name }} (Current Architect)</option>
+                    {% for m in all_models %}<option value="{{ m }}">{{ m }}</option>{% endfor %}
+                </select>
+                <p class="text-[9px] text-gray-500 italic mt-1">Judge will compare model outputs against ground truth and provide reasoning.</p>
+            `;
+        }
+    };
+
+    window.executeBenchmark = async (dsId) => {
+        const btn = document.getElementById('btn-run-eval');
+        const models = Array.from(document.querySelectorAll('input[name="model-choice"]:checked')).map(cb => cb.value);
+        
+        if (models.length === 0) return alert("Select at least one model to test.");
+
+        btn.disabled = true;
+        btn.innerText = "QUEUEING EVALUATIONS...";
+
+        const formData = new FormData();
+        formData.append('dataset_id', dsId);
+        formData.append('name', document.getElementById('run-name').value);
+        formData.append('models', models.join(','));
+        formData.append('evaluator_type', document.getElementById('eval-type').value);
+        
+        if (document.getElementById('eval-type').value === 'vectorizer') {
+             formData.append('vectorizer_method', document.getElementById('eval-vec-method').value);
+             formData.append('vectorizer_model', document.getElementById('eval-vec-model').value);
+        } else {
+             formData.append('judge_model', document.getElementById('eval-judge-model').value);
+        }
+        
+        formData.append('csrf_token', '{{ csrf_token }}');
+
+        try {
+            const resp = await fetch("{{ url_for('api_eval_run_benchmark') }}", { method: 'POST', body: formData });
+            if (resp.ok) {
+                document.getElementById('modal-close-btn').click();
+                logToConsole("Benchmark run scheduled. Processing tasks in sequence...", "text-purple-400 font-bold");
+            }
+        } catch(e) { alert(e.message); btn.disabled = false; }
+    };
+
+    // --- SYSTEM CONSOLE HELPERS ---
+    const consoleEl = document.getElementById('eval-console');
+    const containerEl = document.getElementById('eval-console-container');
+
+    function logToConsole(text, color = 'text-purple-200') {
+        containerEl.classList.remove('hidden');
+        const entry = document.createElement('div');
+        entry.className = color + " flex gap-2";
+        entry.innerHTML = `<span class="opacity-40">[${new Date().toLocaleTimeString()}]</span> <span>${text}</span>`;
+        consoleEl.appendChild(entry);
+        consoleEl.scrollTop = consoleEl.scrollHeight;
+    }
+
+    const evtSource = new EventSource("{{ url_for('sse_events') }}");
+    evtSource.onmessage = (e) => {
+        const msg = JSON.parse(e.data);
+        if (msg.id && (msg.id.startsWith('sys_eval_'))) {
+            let color = (msg.type === 'error') ? 'text-red-400 font-bold' : (msg.type === 'completed' ? 'text-green-400 font-bold' : 'text-purple-200');
+            if (msg.error) logToConsole(msg.error, color);
+            if (msg.type === 'completed') {
+                setTimeout(() => window.location.reload(), 2000);
+            }
+        }
+    };
+
+    window.deleteDataset = async (id) => {
+        if(!confirm("Permanently delete this evaluation dataset? Previous results will be preserved.")) return;
+        await apiCall(`/admin/api/evaluations/datasets/${id}`, { method: 'DELETE' });
+        window.location.reload();
+    };
+
+    window.deleteRun = async (id) => {
+        if(!confirm("Delete this benchmark report?")) return;
+        await apiCall(`/admin/api/evaluations/runs/${id}`, { method: 'DELETE' });
+        window.location.reload();
+    };
+</script>
+{% endblock %}

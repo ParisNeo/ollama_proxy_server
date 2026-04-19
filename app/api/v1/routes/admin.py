@@ -3385,15 +3385,18 @@ async def export_report_pdf_post(
     
     full_html = f"""
     <html><head><style>
-        @page {{ margin: 2cm; }}
-        body {{ font-family: Helvetica, Arial, sans-serif; color: #333; line-height: 1.5; font-size: 12px; }}
-        h1, h2, h3 {{ color: #4f46e5; margin-bottom: 10px; margin-top: 20px; }}
-        p {{ margin-bottom: 10px; }}
-        code {{ background-color: #f3f4f6; padding: 2px 4px; border-radius: 4px; font-family: Courier, monospace; font-size: 10px; }}
-        pre {{ background-color: #f3f4f6; padding: 10px; border-radius: 8px; font-family: Courier, monospace; font-size: 10px; white-space: pre-wrap; }}
-        ul, ol {{ margin-bottom: 10px; margin-left: 20px; }}
-        li {{ margin-bottom: 5px; }}
-        hr {{ border: 0; border-top: 1px solid #e5e7eb; margin: 20px 0; }}
+        @page {{ size: a4 portrait; margin: 2cm; }}
+        body {{ font-family: Helvetica, Arial, sans-serif; color: #333; line-height: 1.5; font-size: 10pt; }}
+        h1 {{ font-size: 22pt; font-weight: bold; color: #4f46e5; border-bottom: 1pt solid #eee; padding-bottom: 5pt; margin-bottom: 15pt; }}
+        h2 {{ font-size: 18pt; font-weight: bold; color: #1e1b4b; margin-top: 20pt; margin-bottom: 10pt; }}
+        h3 {{ font-size: 14pt; font-weight: bold; color: #4338ca; margin-top: 15pt; }}
+        p {{ margin-bottom: 10pt; }}
+        strong, b {{ font-weight: bold; color: #000; }}
+        code {{ background-color: #f3f4f6; padding: 2pt 4pt; border-radius: 4pt; font-family: Courier, monospace; font-size: 9pt; }}
+        pre {{ background-color: #f3f4f6; padding: 10pt; border-radius: 8pt; font-family: Courier, monospace; font-size: 9pt; white-space: pre-wrap; }}
+        ul, ol {{ margin-bottom: 10pt; margin-left: 20pt; }}
+        li {{ margin-bottom: 5pt; }}
+        hr {{ border: 0; border-top: 1pt solid #e5e7eb; margin: 20pt 0; }}
     </style></head><body>
     <h1>{title}</h1>
     <p style="color: #6b7280; font-size: 10px;">Generated on: {timestamp}</p>

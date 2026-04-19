@@ -615,7 +615,7 @@ async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer
         logger.info(f"Server attempt {server_attempt + 1}/{len(candidate_servers)}: selected '{chosen_server.name}' (Limit: {model_limit})")
         
         from ascii_colors import ASCIIColors
-        ASCIIColors.rich_print(f"--- Model is Generating [{model}] on [{chosen_server.name}] ---")
+        ASCIIColors.rich_print(f"--- [bold]Model is Generating[/bold] [cyan]{model}[/cyan] on [green]{chosen_server.name}[/green] ---")
 
         servers_tried.append(chosen_server.name)
 

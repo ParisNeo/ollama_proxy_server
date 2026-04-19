@@ -88,6 +88,7 @@ class AgentReasonerNode(BaseNode):
                 else:
                     tools.extend(t_data if isinstance(t_data, list) else [t_data])
 
+        last_emitted_turn = 0
         for turn in range(1, max_turns + 1):
             real_model, turn_msgs = await engine.resolve_target_fn(engine.db, model, scratchpad, engine.depth + 1, engine.request, engine.request_id, engine.sender)
             
@@ -97,12 +98,14 @@ class AgentReasonerNode(BaseNode):
             error_msg = ""
             
             cb = getattr(engine.request.state, "stream_callback", None)
-            if cb:
+            if cb and turn > last_emitted_turn:
                 await cb(f'<processing type="tool_execution" title="Agent Loop" round="{turn}">\n')
+                last_emitted_turn = turn
 
             for rm in candidates:
                 rm_str = str(rm)
-                event_manager.emit(ProxyEvent("active", engine.request_id, f"Agent Turn {turn}", rm_str, engine.sender, error_message=f"Thinking... ({turn}/{max_turns})"))
+                # Only emit to Live Flow if it's the start of a new turn to reduce pulse noise
+                event_manager.emit(ProxyEvent("active", engine.request_id, f"Agent", rm_str, engine.sender, error_message=f"Reasoning Turn {turn}/{max_turns}"))
                 
                 servers = await server_crud.get_servers_with_model(engine.db, rm_str)
                 if not servers:
