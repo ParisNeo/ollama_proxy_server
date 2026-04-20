@@ -2695,6 +2695,11 @@ async def install_vllm_endpoint(request: Request, background_tasks: BackgroundTa
     background_tasks.add_task(supervisor.install_vllm, False)
     return JSONResponse({"success": True, "message": "vLLM installation task started."})
 
+@router.post("/instances/install-openllm", name="admin_install_openllm", dependencies=[Depends(validate_csrf_token_header)])
+async def install_openllm_endpoint(request: Request, background_tasks: BackgroundTasks, admin_user: User = Depends(require_admin_user)):
+    background_tasks.add_task(supervisor.install_openllm, False)
+    return JSONResponse({"success": True, "message": "OpenLLM installation task started."})
+
 @router.post("/instances/update-vllm", name="admin_update_vllm", dependencies=[Depends(validate_csrf_token_header)])
 async def update_vllm_endpoint(request: Request, background_tasks: BackgroundTasks, admin_user: User = Depends(require_admin_user)):
     background_tasks.add_task(supervisor.install_vllm, True)
