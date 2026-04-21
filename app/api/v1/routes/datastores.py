@@ -301,6 +301,12 @@ async def _ingest_document_logic(request, db, ds, file_path, use_ai, admin_user,
 
     # 3. Synchronous Indexing (Threadpool)
     def _sync_store_op():
+        pca_file = Path(ds.db_path).with_suffix(".pca.json")
+        if pca_file.exists():
+            try:
+                os.remove(pca_file)
+            except: pass
+
         import pipmaster as pm
         pm.ensure_packages(["safe-store"])
         from safe_store import SafeStore
@@ -533,6 +539,53 @@ async def admin_build_datastore_graph(
     flash(request, "Graph extraction started in background. Monitor the Live Flow or wait for the tab to refresh.", "info")
     return RedirectResponse(url=request.url_for("admin_manage_datastore", ds_id=ds.id), status_code=303)
 
+@router.get("/datastores/{ds_id}/map_data", name="admin_get_datastore_map")
+async def admin_get_datastore_map(ds_id: int, force: str = "0", db: AsyncSession = Depends(get_db)):
+    ds = await db.get(DataStore, ds_id)
+    if not ds: raise HTTPException(status_code=404)
+    
+    pca_file = Path(ds.db_path).with_suffix(".pca.json")
+
+    def _fetch_map():
+        if force == "1" and pca_file.exists():
+            try: os.remove(pca_file)
+            except: pass
+
+        if pca_file.exists():
+            try:
+                with open(pca_file, "r") as f:
+                    return json.load(f)
+            except:
+                pass
+        
+        import pipmaster as pm
+        pm.ensure_packages(["safe-store"])
+        from safe_store import SafeStore
+        v_key = VECTORIZER_MAP.get(ds.vectorizer_name, ds.vectorizer_name)
+        s = SafeStore(db_path=ds.db_path, vectorizer_name=v_key, vectorizer_config=ds.vectorizer_config or {})
+        
+        points =[]
+        try:
+            with s:
+                all_points = s.export_point_cloud(output_format='dict')
+                for p in all_points:
+                    points.append({
+                        "x": p['x'],
+                        "y": p['y'],
+                        "document_title": p.get('document_title', 'Unknown'),
+                        "chunk_text": p.get('chunk_text', '')
+                    })
+                    
+            with open(pca_file, "w") as f:
+                json.dump(points, f)
+        except Exception as e:
+            logger.error(f"Error exporting point cloud: {e}")
+            
+        return points
+
+    data = await run_in_threadpool(_fetch_map)
+    return {"points": data}
+
 @router.get("/datastores/{ds_id}/graph_data", name="admin_get_datastore_graph")
 async def admin_get_datastore_graph(ds_id: int, db: AsyncSession = Depends(get_db)):
     ds = await db.get(DataStore, ds_id)
@@ -566,6 +619,12 @@ async def admin_delete_datastore_doc(ds_id: int, request: Request, file_path: st
     if not ds: raise HTTPException(status_code=404)
     
     def _del_doc():
+        pca_file = Path(ds.db_path).with_suffix(".pca.json")
+        if pca_file.exists():
+            try:
+                os.remove(pca_file)
+            except: pass
+
         import pipmaster as pm
         pm.ensure_packages(["safe-store"])
         from safe_store import SafeStore

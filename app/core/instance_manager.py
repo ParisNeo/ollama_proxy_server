@@ -1,5 +1,6 @@
 import subprocess
 import os
+import sys
 import signal
 import logging
 import platform
@@ -67,11 +68,13 @@ class InstanceSupervisor:
         from fastapi.concurrency import run_in_threadpool
         return await run_in_threadpool(probe)
 
-    async def start_instance(self, instance):
-        state, _ = await self.get_instance_state(instance)
+    async def start_instance(self, instance) -> Tuple[bool, str]:
+        """
+        Starts the managed instance and returns (success, message).
+        """
+        state, pid = await self.get_instance_state(instance)
         if state in ("RUNNING", "SYSTEM", "CONFLICT"):
-            logger.warning(f"Cannot start instance {instance.name}: Port {instance.port} is {state}")
-            return False
+            return False, f"Port {instance.port} is already occupied ({state})."
 
         env = os.environ.copy()
         if instance.gpu_ids:
@@ -105,9 +108,15 @@ class InstanceSupervisor:
             ]
 
         elif instance.backend_type == "vllm":
-            # vLLM usually runs via python module or 'vllm' entrypoint
+            # JIT Dependency Check via PipMaster
+            if not self.is_vllm_installed():
+                logger.info(f"Instance '{instance.name}' requires vLLM. Installing...")
+                success, msg = await self.install_vllm()
+                if not success:
+                    return False, f"Dependency Error: Failed to install vLLM automatically. {msg}"
+
             cmd = [
-                "python", "-m", "vllm.entrypoints.openai.api_server",
+                sys.executable, "-m", "vllm.entrypoints.openai.api_server",
                 "--model", str(instance.model_path),
                 "--port", str(instance.port),
                 "--tensor-parallel-size", str(instance.tensor_parallel_size or 1),
@@ -116,36 +125,46 @@ class InstanceSupervisor:
 
         try:
             logger.info(f"Launching {instance.backend_type} instance '{instance.name}' on port {instance.port}")
+            # We use PIPE for stderr to capture immediate crashes
             proc = subprocess.Popen(
                 cmd,
                 env=env,
                 stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                text=True,
                 creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if is_win else 0
             )
             self.processes[instance.id] = proc
             
             # Wait for the instance to actually start listening on the port
-            # This prevents the UI from showing "OFFLINE" immediately after starting
-            for attempt in range(30):  # Wait up to 30 seconds
+            for attempt in range(30):
                 await asyncio.sleep(1)
-                if await self._is_ollama_responding(instance.port):
-                    logger.info(f"Instance '{instance.name}' is ready on port {instance.port}")
-                    return True
+                
+                # Check for premature exit
                 if proc.poll() is not None:
-                    # Process exited prematurely
-                    logger.error(f"Instance '{instance.name}' process exited unexpectedly")
+                    stderr_output = proc.stderr.read()
+                    logger.error(f"Instance '{instance.name}' crashed on startup:\n{stderr_output}")
                     if instance.id in self.processes:
                         del self.processes[instance.id]
-                    return False
+                    
+                    # Distinguish common errors
+                    if "FileNotFoundError" in stderr_output or "No such file" in stderr_output:
+                        return False, f"Model Error: File not found at '{instance.model_path}'"
+                    if "address already in use" in stderr_output.lower():
+                        return False, f"Network Error: Port {instance.port} is blocked."
+                    
+                    return False, f"Crash Log: {stderr_output[:200]}..."
+
+                if await self._is_ollama_responding(instance.port):
+                    logger.info(f"Instance '{instance.name}' is ready on port {instance.port}")
+                    return True, "Started successfully."
             
-            # Timeout reached but process still running - assume it's starting up
-            logger.warning(f"Instance '{instance.name}' started but not responding within 30s (likely loading large model)")
-            return True
+            logger.warning(f"Instance '{instance.name}' slow to respond. Proceeding as background task.")
+            return True, "Instance started but still initializing."
             
         except Exception as e:
-            logger.error(f"Failed to launch {instance.backend_type} binary: {e}")
-            return False
+            logger.error(f"Supervisor Fault: {e}")
+            return False, f"System Error: {str(e)}"
 
     async def stop_instance(self, instance_id: int):
         proc = self.processes.get(instance_id)

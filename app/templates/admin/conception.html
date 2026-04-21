@@ -5,7 +5,7 @@
 <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
 <!-- Core LiteGraph Dependencies -->
 <link rel="stylesheet" type="text/css" href="/static/vendor/litegraph.css">
-<script type="text/javascript" src="/static/vendor/gl-matrix.js"d></script>
+<script type="text/javascript" src="/static/vendor/gl-matrix.js"></script>
 <script type="text/javascript" src="/static/vendor/litegraph.js"></script>
 <script src="{{ url_for('static', path='vendor/marked.min.js') }}"></script>
 <!-- CodeMirror for Node Studio -->
@@ -1626,10 +1626,17 @@
     // --- STARTUP ---   
     document.addEventListener('DOMContentLoaded', function() {
         // 2. Build Sidebar from Registered Nodes
-        const regNodes = {{ registered_nodes | tojson | safe }};
+        const regNodes = {{ (registered_nodes or []) | tojson | safe }};
         const sidebar = document.getElementById('sidebar-node-list');
+        
+        if (!sidebar) {
+            console.error("Architect Error: sidebar-node-list element not found.");
+            return;
+        }
+
         const cats = {};
         regNodes.forEach(n => {
+            if(!n || !n.category) return;
             if(!cats[n.category]) cats[n.category] = [];
             cats[n.category].push(n);
         });

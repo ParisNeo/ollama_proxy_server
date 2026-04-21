@@ -60,7 +60,13 @@
                 </div>
             </div>
             <div class="h-64">
-                {% if daily_data %}<canvas id="dailyUsageChart"></canvas>{% else %}<div class="flex items-center justify-center h-full text-gray-500 italic">No request data available.</div>{% endif %}
+                {% if is_pdf %}
+                    {% if static_plots and static_plots.daily %}
+                        <img src="data:image/png;base64,{{ static_plots.daily }}" style="width: 100%;">
+                    {% endif %}
+                {% else %}
+                    {% if daily_data %}<canvas id="dailyUsageChart"></canvas>{% else %}<div class="flex items-center justify-center h-full text-gray-500 italic">No request data available.</div>{% endif %}
+                {% endif %}
             </div>
         </div>
 
@@ -82,12 +88,20 @@
             <div class="card-style">
                 <div class="flex justify-between items-center mb-4">
                     <h2 class="text-lg font-bold">Model Usage (Requests)</h2>
+                    {% if not is_pdf %}
                     <div class="flex gap-2">
                         <button onclick="exportChartToPNG('modelUsageChart', 'model-usage.png')" class="text-[10px] bg-white/10 px-3 py-1 rounded hover:bg-white/20 uppercase font-bold">PNG</button>
                     </div>
+                    {% endif %}
                 </div>
                 <div class="h-64">
-                    {% if model_data %}<canvas id="modelUsageChart"></canvas>{% else %}<div class="flex items-center justify-center h-full text-gray-500 italic">No model data.</div>{% endif %}
+                    {% if is_pdf %}
+                        {% if static_plots and static_plots.models %}
+                            <img src="data:image/png;base64,{{ static_plots.models }}" style="width: 100%;">
+                        {% endif %}
+                    {% else %}
+                        {% if model_data %}<canvas id="modelUsageChart"></canvas>{% else %}<div class="flex items-center justify-center h-full text-gray-500 italic">No usage data.</div>{% endif %}
+                    {% endif %}
                 </div>
             </div>
         </div>

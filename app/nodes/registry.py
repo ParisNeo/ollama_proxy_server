@@ -78,7 +78,9 @@ class NodeRegistry:
         cls._loaded = True
         cls._nodes = {}
         
-        base_pkg = Path("app/nodes")
+        # Robust path discovery relative to this file's location
+        base_pkg = Path(__file__).parent
+        
         # Recursively find all python files in standard and custom
         for py_path in base_pkg.rglob("*.py"):
             if py_path.name == "__init__.py":
@@ -89,8 +91,15 @@ class NodeRegistry:
                 continue
 
             # Convert Path to dot-notation for import
-            # e.g., app/nodes/standard/io/io.py -> app.nodes.standard.io.io
-            module_name = ".".join(py_path.with_suffix("").parts)
+            # We must ensure the path starts with 'app.nodes' regardless of where we are launched
+            parts = list(py_path.with_suffix("").parts)
+            try:
+                # Find the 'app' index to normalize the module path
+                idx = parts.index("app")
+                module_name = ".".join(parts[idx:])
+            except ValueError:
+                # Fallback: manually prepend if 'app' isn't in parts (local dev scenario)
+                module_name = "app.nodes." + ".".join(py_path.relative_to(base_pkg).with_suffix("").parts)
             
             try:
                 if module_name in sys.modules:

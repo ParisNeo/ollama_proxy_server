@@ -2886,26 +2886,24 @@ async def toggle_instance(instance_id: int, request: Request, db: AsyncSession =
     # Check instance state using supervisor's get_instance_state method
     state, pid = await supervisor.get_instance_state(inst)
     
-    if state == "running" or state == "started":
+    if state == "running" or state == "started" or state == "RUNNING":
         await supervisor.stop_instance(instance_id)
         flash(request, f"Instance '{inst_name}' stopped.")
     else:
-        success = await supervisor.start_instance(inst)
+        success, message = await supervisor.start_instance(inst)
         if success:
             # Auto-add to server list if not exists
-            # Construct normalized URL (with slash) to check against DB records
             server_url = f"http://127.0.0.1:{inst_port}/"
             existing = await server_crud.get_server_by_url(db, server_url)
             if not existing:
                 existing = await server_crud.get_server_by_url(db, server_url.rstrip('/'))
 
             if not existing:
-                # Map llamacpp and vllm to the 'vllm' server type (OpenAI-compatible)
                 s_type = "vllm" if inst_backend in ("vllm", "llamacpp") else "ollama"
                 await server_crud.create_server(db, ServerCreate(name=f"[{inst_backend.upper()}] {inst_name}", url=server_url, server_type=s_type))
-            flash(request, f"Instance '{inst_name}' started successfully.", "success")
+            flash(request, f"Instance '{inst_name}' is now online.", "success")
         else:
-            flash(request, f"Failed to start '{inst_name}'. Check if port {inst_port} is free and binaries are configured.", "error")
+            flash(request, f"Deployment Failed: {message}", "error")
             
     return RedirectResponse(url=request.url_for("admin_instances"), status_code=303)
 

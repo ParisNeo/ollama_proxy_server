@@ -15,6 +15,7 @@
         <div class="flex bg-black/40 p-1 rounded-xl border border-white/10">
             <button onclick="switchDSTab('files')" id="tab-btn-files" class="px-6 py-2 rounded-lg text-xs font-black uppercase transition-all bg-indigo-600 text-white">🗄️ File Manager</button>
             <button onclick="switchDSTab('graph')" id="tab-btn-graph" class="px-6 py-2 rounded-lg text-xs font-black uppercase transition-all text-gray-500 hover:text-white">🕸️ Knowledge Graph</button>
+            <button onclick="switchDSTab('map')" id="tab-btn-map" class="px-6 py-2 rounded-lg text-xs font-black uppercase transition-all text-gray-500 hover:text-white">🗺️ Semantic Map</button>
         </div>
     </div>
 
@@ -146,26 +147,61 @@
 
         <div class="card-style">
             <h2 class="card-header text-xl font-bold mb-4">Indexed Documents</h2>
-        <div class="overflow-x-auto min-h-[300px] relative">
-            <!-- Spinner -->
-            <div id="docs-loading-spinner" class="absolute inset-0 bg-black/40 backdrop-blur-sm z-10 flex flex-col items-center justify-center gap-3">
-                <div class="w-12 h-12 border-4 border-teal-500/20 border-t-teal-500 rounded-full animate-spin"></div>
-                <span class="text-xs font-black text-teal-400 uppercase tracking-widest animate-pulse">Initializing SafeStore Engine...</span>
-                <p class="text-[10px] text-gray-500">Loading vectorizer and database connections</p>
-            </div>
+            <div class="overflow-x-auto min-h-[300px] relative">
+                <!-- Spinner -->
+                <div id="docs-loading-spinner" class="absolute inset-0 bg-black/40 backdrop-blur-sm z-10 flex flex-col items-center justify-center gap-3">
+                    <div class="w-12 h-12 border-4 border-teal-500/20 border-t-teal-500 rounded-full animate-spin"></div>
+                    <span class="text-xs font-black text-teal-400 uppercase tracking-widest animate-pulse">Initializing SafeStore Engine...</span>
+                    <p class="text-[10px] text-gray-500">Loading vectorizer and database connections</p>
+                </div>
 
-            <table class="w-full text-left">
-                <thead>
-                    <tr class="text-gray-500 text-xs uppercase border-b border-white/10">
-                        <th class="p-3">File ID / Path</th>
-                        <th class="p-3">Total Chunks</th>
-                        <th class="p-3 text-right">Actions</th>
-                    </tr>
-                </thead>
-                <tbody id="docs-tbody" class="divide-y divide-white/5">
-                    <!-- Populated via boot AJAX -->
-                </tbody>
-            </table>
+                <table class="w-full text-left">
+                    <thead>
+                        <tr class="text-gray-500 text-xs uppercase border-b border-white/10">
+                            <th class="p-3">File ID / Path</th>
+                            <th class="p-3">Total Chunks</th>
+                            <th class="p-3 text-right">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="docs-tbody" class="divide-y divide-white/5">
+                        <!-- Populated via boot AJAX -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- VIEW: KNOWLEDGE GRAPH -->
+    <div id="ds-view-graph" class="hidden space-y-8">
+        <div class="card-style h-[600px] flex flex-col">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-xs font-black text-gray-400 uppercase tracking-widest">Entity Relationship Graph</h3>
+                <form action="{{ url_for('admin_build_datastore_graph', ds_id=datastore.id) }}" method="post" class="flex gap-2">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                    <input type="hidden" name="ontology_json" value="{}">
+                    <button type="submit" class="bg-fuchsia-600 hover:bg-fuchsia-500 px-4 py-2 rounded-lg text-[10px] font-bold uppercase text-white transition-colors">Extract Graph (AI)</button>
+                </form>
+            </div>
+            <div id="kg-empty-state" class="hidden absolute inset-0 flex flex-col items-center justify-center bg-black/40 z-10 backdrop-blur-sm">
+                <p class="text-gray-400 italic">No graph data extracted yet. Click 'Extract Graph' to process documents.</p>
+            </div>
+            <div id="kg-viz-container" class="flex-grow bg-black/20 rounded-xl border border-white/5"></div>
+        </div>
+    </div>
+
+    <!-- VIEW: SEMANTIC MAP -->
+    <div id="ds-view-map" class="hidden space-y-8">
+        <div class="card-style h-[600px] flex flex-col">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-xs font-black text-gray-400 uppercase tracking-widest">Semantic Topology (PCA 2D)</h3>
+                <button onclick="refreshMap(true)" class="bg-sky-600 hover:bg-sky-500 px-4 py-2 rounded-lg text-[10px] font-bold uppercase text-white transition-colors">Regenerate Map</button>
+            </div>
+            <div id="map-empty-state" class="hidden absolute inset-0 flex flex-col items-center justify-center bg-black/40 z-10 backdrop-blur-sm">
+                <p class="text-gray-400 italic">No chunks found to map.</p>
+            </div>
+            <div class="flex-grow relative">
+                <canvas id="ds-map-canvas"></canvas>
+            </div>
         </div>
     </div>
 </div>
@@ -201,33 +237,81 @@
             return Array.from(document.querySelectorAll('.master-ext-cb:checked')).map(cb => cb.value);
         };
 
-        // Hook into forms to inject the filter
-        document.querySelectorAll('form').forEach(form => {
-            form.addEventListener('submit', (e) => {
-                const filter = window.getIngestionFilter();
-                // Add hidden input if missing
-                let hidden = form.querySelector('input[name="extensions"]');
-                if(!hidden) {
-                    hidden = document.createElement('input');
-                    hidden.type = 'hidden';
-                    hidden.name = 'extensions';
-                    form.appendChild(hidden);
-                }
-                hidden.value = filter.join(',');
+        // --- SURGICAL INGESTION FILTERING ---
+        // We intercept the submission to ensure ONLY valid files reach the server.
+        document.querySelectorAll('form[action*="upload"]').forEach(form => {
+            form.addEventListener('submit', async (e) => {
+                e.preventDefault();
                 
-                // If it's a file upload, we can't truly filter the FormData after the fact,
-                // but we can warn or prevent upload of non-matched items.
+                const filter = window.getIngestionFilter();
                 const fileInput = form.querySelector('input[type="file"]');
-                if(fileInput && fileInput.files.length > 0) {
-                    const invalidFiles = Array.from(fileInput.files).filter(f => {
-                        const ext = '.' + f.name.split('.').pop().toLowerCase();
-                        return !filter.includes(ext);
-                    });
-                    if(invalidFiles.length > 0) {
-                        if(!confirm(`Warning: ${invalidFiles.length} file(s) do not match your filter. They will be uploaded but might be skipped by the indexer. Continue?`)) {
-                            e.preventDefault();
+                
+                if (!fileInput || fileInput.files.length === 0) return;
+
+                const allFiles = Array.from(fileInput.files);
+                const validFiles = allFiles.filter(f => {
+                    const ext = '.' + f.name.split('.').pop().toLowerCase();
+                    return filter.includes(ext);
+                });
+
+                const skippedCount = allFiles.length - validFiles.length;
+
+                if (validFiles.length === 0) {
+                    window.showToast(`Zero valid files found for the active filter: ${filter.join(', ')}`, "error");
+                    return;
+                }
+
+                if (skippedCount > 0) {
+                    logToConsole(`Surgical Filter: Ignoring ${skippedCount} file(s) with invalid extensions locally.`, 'text-amber-400');
+                }
+
+                // --- Build Clean Payload ---
+                const formData = new FormData();
+                // Transfer standard form fields
+                form.querySelectorAll('input:not([type="file"]), select, textarea').forEach(input => {
+                    if (input.name) {
+                        if (input.type === 'checkbox' || input.type === 'radio') {
+                            if (input.checked) formData.append(input.name, input.value);
+                        } else {
+                            formData.append(input.name, input.value);
                         }
                     }
+                });
+                
+                // Inject the extension list
+                formData.set('extensions', filter.join(','));
+
+                // Add ONLY valid files
+                validFiles.forEach(file => formData.append('files', file));
+
+                // --- Visual Execution ---
+                const btn = form.querySelector('button[type="submit"]');
+                const originalText = btn.innerText;
+                btn.disabled = true;
+                btn.innerHTML = `<svg class="animate-spin -ml-1 mr-2 h-3 w-3 text-white inline" viewBox="0 0 24 24">...</svg> STREAMING VALID DATA...`;
+                
+                document.getElementById('ds-console-container').classList.remove('hidden');
+
+                try {
+                    const response = await fetch(form.action, {
+                        method: 'POST',
+                        body: formData,
+                        headers: { 'X-CSRF-Token': '{{ csrf_token }}' }
+                    });
+
+                    if (response.ok) {
+                        window.showToast(`Successfully dispatched ${validFiles.length} files. Indexing started.`, "success");
+                        // Clear input so user doesn't accidentally double-upload
+                        fileInput.value = "";
+                    } else {
+                        const errData = await response.json();
+                        window.showErrorModal("Ingestion Fault", errData);
+                    }
+                } catch (err) {
+                    window.showErrorModal("Network Interruption", { error: err.message });
+                } finally {
+                    btn.disabled = false;
+                    btn.innerText = originalText;
                 }
             });
         });
@@ -239,20 +323,151 @@
         window.switchDSTab = (tab) => {
             const fileView = document.getElementById('ds-view-files');
             const graphView = document.getElementById('ds-view-graph');
+            const mapView = document.getElementById('ds-view-map');
             const fileBtn = document.getElementById('tab-btn-files');
             const graphBtn = document.getElementById('tab-btn-graph');
+            const mapBtn = document.getElementById('tab-btn-map');
+
+            if(fileView) fileView.classList.add('hidden');
+            if(graphView) graphView.classList.add('hidden');
+            if(mapView) mapView.classList.add('hidden');
+            
+            if(fileBtn) fileBtn.className = "px-6 py-2 rounded-lg text-xs font-black uppercase transition-all text-gray-500 hover:text-white";
+            if(graphBtn) graphBtn.className = "px-6 py-2 rounded-lg text-xs font-black uppercase transition-all text-gray-500 hover:text-white";
+            if(mapBtn) mapBtn.className = "px-6 py-2 rounded-lg text-xs font-black uppercase transition-all text-gray-500 hover:text-white";
 
             if (tab === 'files') {
-                fileView.classList.remove('hidden');
-                graphView.classList.add('hidden');
-                fileBtn.className = "px-6 py-2 rounded-lg text-xs font-black uppercase transition-all bg-indigo-600 text-white";
-                graphBtn.className = "px-6 py-2 rounded-lg text-xs font-black uppercase transition-all text-gray-500 hover:text-white";
-            } else {
-                fileView.classList.add('hidden');
-                graphView.classList.remove('hidden');
-                graphBtn.className = "px-6 py-2 rounded-lg text-xs font-black uppercase transition-all bg-fuchsia-600 text-white";
-                fileBtn.className = "px-6 py-2 rounded-lg text-xs font-black uppercase transition-all text-gray-500 hover:text-white";
+                if(fileView) fileView.classList.remove('hidden');
+                if(fileBtn) fileBtn.className = "px-6 py-2 rounded-lg text-xs font-black uppercase transition-all bg-indigo-600 text-white";
+            } else if (tab === 'graph') {
+                if(graphView) graphView.classList.remove('hidden');
+                if(graphBtn) graphBtn.className = "px-6 py-2 rounded-lg text-xs font-black uppercase transition-all bg-fuchsia-600 text-white";
                 refreshGraph();
+            } else if (tab === 'map') {
+                if(mapView) mapView.classList.remove('hidden');
+                if(mapBtn) mapBtn.className = "px-6 py-2 rounded-lg text-xs font-black uppercase transition-all bg-sky-600 text-white";
+                refreshMap();
+            }
+        };
+
+        let mapChart = null;
+
+        window.refreshMap = async (forceRegenerate = false) => {
+            const emptyState = document.getElementById('map-empty-state');
+            const canvas = document.getElementById('ds-map-canvas');
+            
+            if (!canvas) return;
+            
+            try {
+                let url = `/admin/datastores/${currentDsId}/map_data`;
+                if (forceRegenerate) {
+                    url += `?force=1`;
+                }
+
+                const resp = await fetch(url);
+                const data = await resp.json();
+                
+                if (!data.points || data.points.length === 0) {
+                    if (emptyState) emptyState.classList.remove('hidden');
+                    return;
+                }
+                
+                if (emptyState) emptyState.classList.add('hidden');
+
+                // Group points by document
+                const datasets =[];
+                const docs = [...new Set(data.points.map(p => p.document_title))];
+                
+                docs.forEach((doc, i) => {
+                    const hue = (i / docs.length) * 360;
+                    datasets.push({
+                        label: doc,
+                        data: data.points.filter(p => p.document_title === doc).map(p => ({
+                            x: p.x, y: p.y, preview: p.chunk_text, doc: p.document_title
+                        })),
+                        backgroundColor: `hsla(${hue}, 70%, 60%, 0.7)`,
+                        borderColor: 'white',
+                        borderWidth: 1,
+                        pointRadius: 6,
+                        pointHoverRadius: 9
+                    });
+                });
+
+                if (mapChart) mapChart.destroy();
+                
+                const ctx = canvas.getContext('2d');
+                mapChart = new Chart(ctx, {
+                    type: 'scatter',
+                    data: { datasets },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        onClick: (e, elements) => {
+                            if (elements.length > 0) {
+                                const element = elements[0];
+                                const dataPoint = datasets[element.datasetIndex].data[element.index];
+                                window.showChunkModal(dataPoint);
+                            }
+                        },
+                        plugins: {
+                            legend: { 
+                                display: true,
+                                position: 'right',
+                                labels: { color: '#9ca3af' }
+                            },
+                            tooltip: {
+                                callbacks: {
+                                    title: (context) => context[0].raw.cluster,
+                                    label: (context) => {
+                                        const p = context.raw;
+                                        return [
+                                            `📄 ${p.doc}`,
+                                            `📝 ${p.preview.substring(0, 80)}...`
+                                        ];
+                                    }
+                                }
+                            }
+                        },
+                        scales: {
+                            x: { display: false },
+                            y: { display: false }
+                        }
+                    }
+                });
+
+                // Global helper for showing the specific chunk
+                window.showChunkModal = (point) => {
+                    const htmlContent = marked.parse(point.preview || "*No text content available.*");
+                    const modalBody = `
+                        <div class="space-y-6 flex flex-col max-h-[80vh]">
+                            <div class="flex justify-between items-center bg-black/40 p-3 rounded-xl border border-white/5">
+                                <div class="flex flex-col">
+                                    <span class="text-[9px] font-black text-gray-500 uppercase tracking-widest">Source Document</span>
+                                    <span class="text-xs font-mono text-indigo-300 truncate max-w-sm" title="${point.doc}">${point.doc}</span>
+                                </div>
+                                <div class="text-right">
+                                    <span class="text-[9px] font-black text-sky-500 uppercase tracking-widest">Coordinates</span>
+                                    <div class="text-xs font-mono text-gray-500">${point.x.toFixed(3)}, ${point.y.toFixed(3)}</div>
+                                </div>
+                            </div>
+
+                            <div class="flex-grow overflow-hidden flex flex-col border border-white/5 rounded-xl bg-black/20">
+                                <div class="p-2 px-4 bg-white/5 border-b border-white/5 text-[10px] font-black text-gray-500 uppercase tracking-widest">Chunk Content</div>
+                                <div class="flex-grow overflow-y-auto custom-scrollbar p-4 prose prose-invert max-w-none text-sm text-gray-300 leading-relaxed">
+                                    ${htmlContent}
+                                </div>
+                            </div>
+
+                            <div class="flex justify-end pt-2">
+                                <button onclick="document.getElementById('modal-close-btn').click()" class="bg-indigo-600 hover:bg-indigo-500 px-10 py-2 rounded-xl text-xs font-black uppercase text-white shadow-lg transition-all">Close</button>
+                            </div>
+                        </div>`;
+                    
+                    window.showModal("Semantic Point Inspection", modalBody);
+                    document.querySelectorAll('#modal pre code').forEach(b => { if(window.hljs) hljs.highlightElement(b); });
+                };
+            } catch(e) {
+                console.error("Map visualization error:", e);
             }
         };
 

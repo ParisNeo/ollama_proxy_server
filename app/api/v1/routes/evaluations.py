@@ -623,32 +623,48 @@ async def _prepare_report_context(run_id: int, request: Request, db: AsyncSessio
             if cat not in cat_summary: cat_summary[cat] = {}
             cat_summary[cat][model] = sum(scores) / len(scores)
 
-    # --- Generate Static Plot for PDF ---
-    plot_url = None
+    # --- Generate Static Plots for PDF ---
+    static_plots = {}
+    plt.style.use('ggplot')
+    
     try:
+        # 1. Ranking Bar Chart
         plt.figure(figsize=(10, 5))
         model_names = list(stats.keys())
         avg_scores = [s["avg"] * 100 for s in stats.values()]
-        
         plt.bar(model_names, avg_scores, color=['#4f46e5', '#10b981', '#f59e0b', '#ef4444'])
         plt.ylabel('Accuracy Score (%)')
         plt.title('Cross-Model Performance Comparison')
         plt.ylim(0, 100)
-        plt.grid(axis='y', linestyle='--', alpha=0.7)
-        
         buf = io.BytesIO()
         plt.savefig(buf, format='png', bbox_inches='tight')
         plt.close()
-        plot_url = base64.b64encode(buf.getvalue()).decode('utf-8')
+        static_plots['ranking'] = base64.b64encode(buf.getvalue()).decode('utf-8')
+
+        # 2. Category Radar/Multi-bar chart (Simplified for PDF)
+        plt.figure(figsize=(10, 6))
+        for model in model_names:
+            cats = list(cat_summary.keys())
+            scores = [cat_summary[c].get(model, 0) * 100 for c in cats]
+            plt.plot(cats, scores, marker='o', label=model)
+        
+        plt.title('Category Performance Breakdown')
+        plt.ylabel('Score (%)')
+        plt.legend()
+        buf = io.BytesIO()
+        plt.savefig(buf, format='png', bbox_inches='tight')
+        plt.close()
+        static_plots['categories'] = base64.b64encode(buf.getvalue()).decode('utf-8')
+
     except Exception as pe:
-        logger.error(f"Plot generation failed: {pe}")
+        logger.error(f"Matplotlib generation failed: {pe}")
 
     context = get_template_context(request)
     context.update({
         "run": run,
         "stats": stats,
         "cat_summary": cat_summary,
-        "static_plot": plot_url,
+        "static_plots": static_plots,
         "csrf_token": await get_csrf_token(request)
     })
     return context
