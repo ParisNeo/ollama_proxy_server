@@ -207,12 +207,19 @@ The built-in Help page is now a rich document with a sticky table of contents th
 
 If you prefer a container-based workflow, we've got you covered.
 
-**1. Build the Docker image:**
+**Option A. Pull the published GHCR image:**
+```bash
+docker pull ghcr.io/parisneo/lollms-hub:latest
+```
+
+If you're using a fork, replace `parisneo` with your GitHub owner name.
+
+**Option B. Build the Docker image locally:**
 ```bash
 docker build -t lollms-hub .
 ```
 
-**2. Run the container:**
+**Run the container:**
 Create a `.env` file on your host machine, then run:
 ```bash
 docker run -d --name lollms-hub \
@@ -221,8 +228,10 @@ docker run -d --name lollms-hub \
   -v ./lollms_hub.db:/home/app/lollms_hub.db \
   -v ./.ssl:/home/app/.ssl \
   -v ./app/static/uploads:/home/app/app/static/uploads \
-  lollms-hub
+  ghcr.io/parisneo/lollms-hub:latest
 ```
+If you built the image locally instead, replace the final image reference with `lollms-hub`.
+
 *Note the extra volume mounts for the database, SSL files, and user uploads to persist data outside the container.*
 
 ---
