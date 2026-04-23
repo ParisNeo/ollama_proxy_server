@@ -189,6 +189,38 @@
             <a href="{{ url_for('admin_settings') }}" class="w-full text-center bg-white/5 hover:bg-white/10 text-emerald-400 py-3 rounded-xl font-black text-xs uppercase tracking-widest transition-all mt-auto">Configure Agent</a>
             {% endif %}
         </div>
+
+        <!-- NEW: Main Agent & Services Card -->
+        <div class="card-style border-l-4 border-indigo-600 bg-indigo-600/5 flex flex-col">
+            <div class="flex items-center gap-4 mb-4">
+                <div class="p-2 bg-indigo-600 rounded-xl shadow-lg">
+                    <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path></svg>
+                </div>
+                <div class="min-w-0">
+                    <h2 class="text-lg font-black text-white uppercase tracking-tighter truncate">Main Architect</h2>
+                    <p id="agent-status-text" class="text-[10px] font-bold uppercase tracking-widest text-indigo-300">Loading State...</p>
+                </div>
+            </div>
+            
+            <div class="space-y-3 mb-4">
+                <div class="flex justify-between items-center border-b border-white/5 pb-1">
+                    <span class="text-[10px] text-gray-500 font-black uppercase">Model</span>
+                    <span id="agent-model-val" class="text-xs font-mono text-white">--</span>
+                </div>
+                <div class="flex justify-between items-center border-b border-white/5 pb-1">
+                    <span class="text-[10px] text-gray-500 font-black uppercase">Capabilities</span>
+                    <span class="text-xs text-indigo-400 font-bold">LTP + Recursive ROM</span>
+                </div>
+                <div>
+                    <span class="text-[10px] text-gray-500 font-black uppercase block mb-1">External Links</span>
+                    <div id="active-services-list" class="flex flex-wrap gap-2 min-h-[20px]">
+                        <span class="text-[9px] text-gray-600 italic">No active listeners</span>
+                    </div>
+                </div>
+            </div>
+
+            <a href="{{ url_for('admin_conception') }}{% if settings.admin_agent_name %}?name={{ settings.admin_agent_name }}{% endif %}" class="mt-auto w-full text-center py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg font-black text-[10px] uppercase tracking-widest transition-all">Configure Architect</a>
+        </div>
     </div>
     
     <!-- GPU Cluster View -->
@@ -307,6 +339,34 @@ document.addEventListener('DOMContentLoaded', () => {
     function updateSystemInfo(data) {
         try {
             if (!data || !data.health) return;
+
+            // --- UPDATE AGENT CARD ---
+            const agent = data.agent;
+            if (agent) {
+                const statusEl = document.getElementById('agent-status-text');
+                const modelEl = document.getElementById('agent-model-val');
+                const servicesEl = document.getElementById('active-services-list');
+
+                if (statusEl) {
+                    statusEl.innerText = agent.status;
+                    statusEl.className = `text-[10px] font-bold uppercase tracking-widest ${agent.status === 'Online' ? 'text-emerald-400 animate-pulse' : 'text-red-400'}`;
+                }
+                if (modelEl) modelEl.innerText = agent.model;
+                
+                if (servicesEl) {
+                    if (agent.active_services && agent.active_services.length > 0) {
+                        servicesEl.innerHTML = agent.active_services.map(s => `
+                            <span class="px-2 py-0.5 rounded bg-indigo-500/20 border border-indigo-500/30 text-[9px] font-black text-indigo-300 uppercase flex items-center gap-1">
+                                <span class="w-1 h-1 rounded-full bg-indigo-400 animate-ping"></span>
+                                ${s.platform}
+                            </span>
+                        `).join('');
+                    } else {
+                        servicesEl.innerHTML = '<span class="text-[9px] text-gray-600 italic">No active listeners</span>';
+                    }
+                }
+            }
+
             const health = data.health;
 
             const scoreEl = document.getElementById('health-score');

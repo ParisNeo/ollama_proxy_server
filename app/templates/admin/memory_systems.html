@@ -24,14 +24,14 @@
                         <label class="block text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1 px-1">1. Select Subject (Scope)</label>
                         <select id="user-selector" onchange="loadMemoryData()" class="w-full p-2.5 rounded-lg bg-indigo-600/10 border border-indigo-500/30 text-indigo-400 font-black uppercase text-[10px] tracking-widest outline-none transition-all focus:border-indigo-400">
                             <optgroup label="System Scopes">
-                                <option value="system">System (Immutable ROM)</option>
-                                <option value="shared_knowledge">Global Collective (Shared)</option>
+                                <option value="system">System (Immutable ROM) ({{ counts.get('system', 0) }})</option>
+                                <option value="shared_knowledge">Global Collective (Shared) ({{ counts.get('shared_knowledge', 0) }})</option>
                             </optgroup>
                             <optgroup label="User Identities">
                                 {% for u in active_users %}
                                     {% if u.id != 'system' %}
                                         {# Ensure value is the string representation of the ID #}
-                                        <option value="{{ u.id }}">{{ u.display | upper }}</option>
+                                        <option value="{{ u.id }}">{{ u.display | upper }} ({{ u.count }})</option>
                                     {% endif %}
                                 {% endfor %}
                             </optgroup>
@@ -303,7 +303,13 @@
             }
 
             // 2. Render Engrams (Active & Deep)
-            const renderRow = m => `
+            const renderRow = m => {
+                // Escape strings for JS function call
+                const safeTitle = (m.title || "").replace(/'/g, "\\'");
+                const safeContent = (m.content || "").replace(/'/g, "\\'");
+                const safeCat = (m.cat || "").replace(/'/g, "\\'");
+
+                return `
                 <tr class="group/row">
                     <td class="p-3 text-[9px] font-bold text-indigo-500 uppercase">
                         ${m.is_immutable ? '<span class="text-amber-500">[ROM]</span> ' : (m.user_id === 'shared_knowledge' ? '<span class="text-emerald-400">[SHARED]</span> ' : '')}${m.cat}
@@ -322,13 +328,15 @@
                         </div>
                     </td>
                     <td class="p-3 text-right whitespace-nowrap">
-                        <div class="flex justify-end gap-2 opacity-0 group-hover/row:opacity-100 transition-opacity">
+                        <div class="flex justify-end gap-3 opacity-0 group-hover/row:opacity-100 transition-opacity">
+                            <button onclick="openEditEngram(${m.id}, '${safeCat}', '${safeTitle}', '${safeContent}')" class="text-[9px] font-black text-indigo-400 hover:text-white uppercase tracking-widest">Edit</button>
                             ${m.imp >= 25 ? `<button onclick="updateImportance(${m.id}, 10)" class="text-[9px] font-black text-gray-500 hover:text-indigo-400 uppercase tracking-widest">Archive</button>` : ''}
                             <button onclick="deleteEntry(${m.id})" class="text-red-500 hover:text-red-400 font-black text-sm">&times;</button>
                         </div>
                     </td>
                 </tr>
             `;
+            };
 
             const engramsBody = document.getElementById('engrams-tbody');
             const deepBody = document.getElementById('deep-tbody');
@@ -411,6 +419,45 @@
         fd.append('csrf_token', '{{ csrf_token }}');
         await fetch('/admin/api/memory/import', { method: 'POST', body: fd });
         loadMemoryData();
+    }
+
+    function openEditEngram(id, cat, title, content) {
+        const body = `
+            <div class="space-y-4 text-left">
+                <div>
+                    <label class="block text-[10px] font-black text-gray-500 uppercase mb-1">Category</label>
+                    <input type="text" id="edit-m-cat" value="${cat}" class="w-full bg-black/40 p-2 rounded-lg border border-white/10 text-sm">
+                </div>
+                <div>
+                    <label class="block text-[10px] font-black text-gray-500 uppercase mb-1">Engram Title</label>
+                    <input type="text" id="edit-m-title" value="${title}" class="w-full bg-black/40 p-2 rounded-lg border border-white/10 text-sm">
+                </div>
+                <div>
+                    <label class="block text-[10px] font-black text-gray-500 uppercase mb-1">Content</label>
+                    <textarea id="edit-m-content" class="w-full bg-black/40 p-2 rounded-lg border border-white/10 text-sm h-32 leading-relaxed">${content}</textarea>
+                </div>
+                <div class="flex justify-end pt-4 border-t border-white/5">
+                    <button onclick="submitEditEngram(${id})" class="bg-indigo-600 hover:bg-indigo-500 px-10 py-2 rounded-xl text-xs font-black uppercase text-white shadow-lg transition-all">Apply Sculpting</button>
+                </div>
+            </div>
+        `;
+        window.showModal("Sculpt Existing Engram", body);
+    }
+
+    async function submitEditEngram(id) {
+        const fd = new FormData();
+        fd.append('m_id', id);
+        fd.append('category', document.getElementById('edit-m-cat').value);
+        fd.append('title', document.getElementById('edit-m-title').value);
+        fd.append('content', document.getElementById('edit-m-content').value);
+        fd.append('csrf_token', '{{ csrf_token }}');
+        
+        const resp = await fetch('/admin/api/memory/entry/update', { method: 'POST', body: fd });
+        if (resp.ok) {
+            document.getElementById('modal-close-btn').click();
+            loadMemoryData();
+            window.showToast("Engram successfully sculpted.", "success");
+        }
     }
 
     function openAddEngram() {

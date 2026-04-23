@@ -41,6 +41,9 @@ _health_cache_ttl_seconds = 5
 # Penalization storage: server_id -> timestamp until penalty ends
 _server_penalties: Dict[int, float] = {}
 
+# Granular Path Blacklist: (server_id, model_name) -> timestamp until expiry
+_path_blacklist: Dict[Tuple[int, str], float] = {}
+
 # Bayesian IRRA (Model Success Tracker)
 _bayesian_stats: Dict[str, Dict[str, float]] = {}
 
@@ -102,7 +105,7 @@ BAYESIAN_PRIOR_ALPHA = 10.0
 BAYESIAN_PRIOR_BETA = 1.0
 BAYESIAN_DECAY = 0.95
 
-def _update_bayesian_stats(model_name: str, success: bool, reward: float = 1.0):
+def _update_bayesian_stats(model_name: str, success: bool, reward: float = 1.0, weight: float = 1.0):
     """
     Updates the Beta distribution parameters for a model using Fractional Rewards.
     
@@ -110,6 +113,7 @@ def _update_bayesian_stats(model_name: str, success: bool, reward: float = 1.0):
         model_name: The target model.
         success: Whether the request completed without error.
         reward: A performance factor [0.0, 1.0]. 1.0 is peak performance.
+        weight: Importance of this update (use high weights for hard errors).
     """
     stats = _bayesian_stats.get(model_name, {"alpha": BAYESIAN_PRIOR_ALPHA, "beta": BAYESIAN_PRIOR_BETA})
     
@@ -119,14 +123,17 @@ def _update_bayesian_stats(model_name: str, success: bool, reward: float = 1.0):
     
     if success:
         # SOTA: Fractional update. High performance boosts alpha, low performance increases beta (uncertainty)
-        stats["alpha"] += reward
-        stats["beta"] += (1.0 - reward)
+        stats["alpha"] += (reward * weight)
+        stats["beta"] += ((1.0 - reward) * weight)
     else:
-        stats["beta"] += 1.0
+        # For hard errors, we add a heavy penalty to the failure prior
+        stats["beta"] += (1.0 * weight)
         
     _bayesian_stats[model_name] = stats
 
 # Constants for cooldown durations (in seconds)
+PENALTY_FORBIDDEN = 3600  # 1 hour for 403 (Subscription/Billing)
+PENALTY_AUTH_ERROR = 3600 # 1 hour for 401 (Invalid Backend Key)
 PENALTY_RATE_LIMIT = 300  # 5 minutes for 429 errors
 PENALTY_OVERLOADED = 60   # 1 minute for 503 errors
 PENALTY_GENERAL_ERR = 30  # 30 seconds for 500/502 errors
@@ -773,8 +780,25 @@ async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer
 
             elif status_code == 503:
                 _apply_server_penalty(chosen_server.id, chosen_server.name, PENALTY_OVERLOADED, "Server Overloaded (503)")
+            elif status_code == 403:
+                # PATH-SPECIFIC BLACKLIST: Don't try this model on THIS server for 1 hour
+                import time
+                _path_blacklist[(chosen_server.id, model)] = time.time() + PENALTY_FORBIDDEN
+                logger.warning(f"🚫 PATH BLACKLISTED: '{model}' on '{chosen_server.name}' requires subscription. Avoiding this specific path.")
+                _apply_server_penalty(chosen_server.id, chosen_server.name, PENALTY_AUTH_ERROR, "Invalid Backend API Key")
             elif status_code in (500, 502, 504):
                 _apply_server_penalty(chosen_server.id, chosen_server.name, PENALTY_GENERAL_ERR, f"Backend error ({status_code})")
+
+            # --- HARD ERROR CIRCUIT BREAKER ---
+            # If the error is deterministic (Auth or Subscription), skip retries and failover immediately.
+            if status_code in (401, 403):
+                logger.error(f"Deterministic failure (HTTP {status_code}) from {chosen_server.name}. Skipping retries and moving to next node.")
+                # HEAVY PENALTY: Bury this model in future rankings
+                # Check request state to see if this was part of an 'auto' selection process
+                is_auto = getattr(request.state, "is_auto_selection", False)
+                if is_auto: 
+                    _update_bayesian_stats(model, success=False, weight=50.0)
+                continue
 
             is_busy = status_code in (429, 503)
             is_server_error = status_code == 500
@@ -1813,15 +1837,22 @@ async def _select_auto_model(db: AsyncSession, body: Dict[str, Any], overrides: 
         sampled_success_prob = random.betavariate(stats["alpha"], stats["beta"])
         r_score = 1.0 - sampled_success_prob
 
-        # 3. Elastic Pertinence Penalty (EPP)
+        # 3. Elastic Pertinence Penalty (EPP) - Overkill Protection
         e_score = 0.0
+        # Determine Logical Scale (sigma)
         if m.model_size > 0:
-            sigma = 1.0 if m.model_size <= 8.5 else (2.0 if m.model_size <= 32.0 else 3.5)
+            # 1: Tiny, 2: Small, 3: Medium, 4: Large, 5: Colossal (100B+)
+            sigma = 1 if m.model_size < 4 else (2 if m.model_size < 14 else (3 if m.model_size < 40 else (4 if m.model_size < 100 else 5)))
         else:
             sigma = float(m.model_scale)
-            
-        if sigma > (3.0 * c):
-            e_score = (sigma - (3.0 * c)) ** 2
+
+        # Calculate Overkill
+        # If model scale is much higher than prompt complexity, apply heavy exponential penalty
+        # Threshold: complexity of 0.1 (typical short query) allows up to sigma 2 (small models)
+        mismatch = sigma - (10.0 * c)
+        if mismatch > 0:
+            # Exponential growth makes 1000B+ models virtually impossible for "Hello"
+            e_score = 2 ** (mismatch * 2)
 
         # 4. Latent Space Alignment (Dm)
         d_score = 0.5 
@@ -3192,7 +3223,21 @@ async def _process_proxy_logic(
                         candidate_servers.append(s)
         else:
             # Regular users must respect the whitelist
-            candidate_servers = await server_crud.get_servers_with_model(db, choice_str)
+            all_candidate_servers = await server_crud.get_servers_with_model(db, choice_str)
+            
+            # STRICT FILTER: Exclude quarantined nodes AND specific failing paths
+            import time
+            now = time.time()
+            candidate_servers = [
+                s for s in all_candidate_servers 
+                if not _is_server_penalized(s.id) and _path_blacklist.get((s.id, choice_str), 0) < now
+            ]
+
+            # FAIL-SAFE: If the model ONLY exists on quarantined nodes, we allow it to proceed 
+            # (the retry logic will handle it), but usually the heavy Bayesian hit 
+            # from Step 1 will have already moved this model to the end of the candidates list anyway.
+            if not candidate_servers and all_candidate_servers:
+                candidate_servers = all_candidate_servers
 
         if not candidate_servers:
             # Check if it was blocked by the whitelist vs just not existing

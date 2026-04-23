@@ -35,7 +35,7 @@ from app.database.models import ManagedInstance
 from app.schema.user import UserCreate
 from app.schema.server import ServerCreate, ServerUpdate
 from app.schema.settings import AppSettingsModel
-from app.api.v1.dependencies import get_csrf_token, validate_csrf_token, validate_csrf_token_header, login_rate_limiter
+from app.api.v1.dependencies import get_settings, get_csrf_token, validate_csrf_token, validate_csrf_token_header, login_rate_limiter
 
 from app.database.models import BotConfig, UsageLog
 from app.core.encryption import encrypt_data
@@ -283,13 +283,16 @@ async def get_current_user_from_cookie(request: Request, db: AsyncSession = Depe
             db.expunge(user) # Detach the user object from the session to prevent lazy loading errors in templates.
         return user
     return None
-async def require_admin_user(request: Request, current_user: Union[User, None] = Depends(get_current_user_from_cookie)) -> User:
+async def require_admin_user(
+    request: Request, 
+    current_user: Union[User, None] = Depends(get_current_user_from_cookie),
+    settings: AppSettingsModel = Depends(get_settings) # Use authoritative settings provider
+) -> User:
     if not current_user or not current_user.is_admin:
         raise HTTPException(status_code=status.HTTP_303_SEE_OTHER, detail="Not authorized", headers={"Location": str(request.url_for("admin_login"))})
     
-    # Check if wizard is required
-    app_settings = getattr(request.app.state, 'settings', None)
-    if app_settings and not app_settings.wizard_completed and not request.url.path.startswith("/admin/setup-wizard"):
+    # Check if wizard is required using the DB-synced settings
+    if settings and not settings.wizard_completed and not request.url.path.startswith("/admin/setup-wizard"):
         raise HTTPException(status_code=status.HTTP_303_SEE_OTHER, detail="Setup Required", headers={"Location": str(request.url_for("admin_setup_wizard"))})
         
     request.state.user = current_user
@@ -551,11 +554,39 @@ async def get_system_and_ollama_info(
     total_users_res = await db.execute(select(sqlalchemy.func.count(User.id)))
     total_users_count = total_users_res.scalar() or 1
     
+    # --- AGENT & BOT TELEMETRY ---
+    agent_name = app_settings.admin_agent_name
+    agent_status = "Not Configured"
+    agent_model = "None"
+    
+    if agent_name:
+        # Check if the model/agent is physically reachable
+        agent_servers = await server_crud.get_servers_with_model(db, agent_name)
+        agent_model = agent_name
+        if any(s['status'] == 'Online' for s in server_health if s['server_id'] in [srv.id for srv in agent_servers]):
+            agent_status = "Online"
+        else:
+            agent_status = "Compute Offline"
+
+    # Summary of external bot services
+    bot_manager = request.app.state.bot_manager
+    active_bots = []
+    if bot_manager:
+        async with AsyncSessionLocal() as b_db:
+            res = await b_db.execute(select(BotConfig).filter(BotConfig.id.in_(bot_manager.active_tasks.keys())))
+            active_bots = [{"platform": b.platform, "name": b.name} for b in res.scalars().all()]
+
     # Calculate System Health Assessment
     health = await calculate_system_health(db, server_health)
 
     return {
         "health": health,
+        "agent": {
+            "name": agent_name,
+            "model": agent_model,
+            "status": agent_status,
+            "active_services": active_bots
+        },
         "system_info": system_info, 
         "running_models": running_models,
         "gpu_stats": {
@@ -3529,20 +3560,46 @@ async def admin_memory_systems(request: Request, db: AsyncSession = Depends(get_
     # 1. Fetch Real Users
     res_users = await db.execute(select(User).order_by(User.username))
     real_users = res_users.scalars().all()
+
+    # 2. Map Identifiers (Support both ID and Username for legacy/agent compatibility)
+    # We must protect both "1" and "admin"
+    id_to_name = {str(u.id): u.username for u in real_users}
+    name_to_id = {u.username: str(u.id) for u in real_users}
+    
+    # 3. Fetch and Aggregate Entry Counts
+    from sqlalchemy import func
+    from app.database.models import MemoryEntry
+    
+    count_stmt = select(MemoryEntry.user_identifier, func.count(MemoryEntry.id)).group_by(MemoryEntry.user_identifier)
+    counts_res = await db.execute(count_stmt)
+    raw_counts = {row[0]: row[1] for row in counts_res.all()}
+    
+    # Aggregate: sum counts for "1" and "admin" together
+    context["counts"] = raw_counts # Pass raw for system scopes
     
     active_users_list = []
     for u in real_users:
-        # Map IDs to strings for the frontend value
-        active_users_list.append({"id": str(u.id), "display": str(u.username)})
+        uid = str(u.id)
+        uname = u.username
+        # Sum both identity formats
+        total_count = raw_counts.get(uid, 0) + raw_counts.get(uname, 0)
+        active_users_list.append({
+            "id": uid, 
+            "display": uname,
+            "count": total_count
+        })
 
     context["active_users"] = active_users_list
     
-    # 2. Cleanup Ghost Users from Database
-    # This purges any memory entry whose user_identifier is not 'system', 'anonymous', 'shared_knowledge' or a real user ID.
-    # FIX: Added 'shared_knowledge' to prevent the system from nuking the Global Collective!
-    valid_ids = ["system", "anonymous", "shared_knowledge"] + [str(u.id) for u in real_users]
-    await db.execute(delete(MemoryEntry).filter(MemoryEntry.user_identifier.notin_(valid_ids)))
-    await db.execute(delete(DreamLog).filter(DreamLog.user_identifier.notin_(valid_ids)))
+    # 4. Cleanup Protection (Ghost Purge)
+    # Protect ID, Username, and System Tags
+    protected_ids = ["system", "anonymous", "shared_knowledge"]
+    for u in real_users:
+        protected_ids.append(str(u.id))
+        protected_ids.append(u.username)
+        
+    await db.execute(delete(MemoryEntry).filter(MemoryEntry.user_identifier.notin_(protected_ids)))
+    await db.execute(delete(DreamLog).filter(DreamLog.user_identifier.notin_(protected_ids)))
     await db.commit()
     
     context["csrf_token"] = await get_csrf_token(request)
@@ -3609,6 +3666,26 @@ async def api_memory_update_importance(
         return {"success": True}
     return JSONResponse({"error": "Entry not found"}, status_code=404)
 
+@router.post("/api/memory/entry/update", name="api_memory_update_entry", dependencies=[Depends(validate_csrf_token)])
+async def api_memory_update_entry(
+    m_id: int = Form(...),
+    category: str = Form(...),
+    title: str = Form(...),
+    content: str = Form(...),
+    db: AsyncSession = Depends(get_db),
+    admin_user: User = Depends(require_admin_user)
+):
+    from app.database.models import MemoryEntry
+    entry = await db.get(MemoryEntry, m_id)
+    if entry:
+        entry.category = category
+        entry.title = title
+        entry.content = content
+        entry.last_accessed = datetime.datetime.utcnow()
+        await db.commit()
+        return {"success": True}
+    return JSONResponse({"error": "Entry not found"}, status_code=404)
+
 @router.get("/api/memory/data", name="api_memory_data")
 async def api_memory_data(system: str, user: str, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
     from app.database.models import MemoryEntry, DreamLog, MemorySystem
@@ -3632,12 +3709,18 @@ async def api_memory_data(system: str, user: str, db: AsyncSession = Depends(get
             MemoryEntry.category != 'affective'
         ).order_by(MemoryEntry.importance.desc())
     else:
-        # Per-user view
-        # REPAIR MISSION: We remove the 'agent_name == system' restriction for users.
-        # This allows the dashboard to show all memories belonging to the user, 
-        # regardless of which model/agent created them.
+        # Synonymous Identity Retrieval: 
+        # If 'user' is "1", we also search for "admin".
+        from app.crud import user_crud
+        identities = [str(user)]
+        try:
+            target_user = await user_crud.get_user_by_id(db, int(user))
+            if target_user:
+                identities.append(target_user.username)
+        except: pass
+
         stmt = select(MemoryEntry).filter(
-            MemoryEntry.user_identifier == str(user),
+            MemoryEntry.user_identifier.in_(identities),
             MemoryEntry.category != 'affective'
         ).order_by(MemoryEntry.importance.desc())
 
@@ -3707,9 +3790,18 @@ async def api_memory_add_entry(
 @router.post("/api/memory/wipe", name="api_memory_wipe", dependencies=[Depends(validate_csrf_token)])
 async def api_memory_wipe(system: str = Form(...), user: str = Form(...), db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
     from app.database.models import MemoryEntry, DreamLog
-    from sqlalchemy import delete
-    await db.execute(delete(MemoryEntry).filter_by(user_identifier=user, agent_name=system))
-    await db.execute(delete(DreamLog).filter_by(user_identifier=user, memory_system=system))
+    from sqlalchemy import delete, or_
+    
+    # Resolve synonymous identities for full wipe
+    identities = [str(user)]
+    from app.crud import user_crud
+    try:
+        u_obj = await user_crud.get_user_by_id(db, int(user))
+        if u_obj: identities.append(u_obj.username)
+    except: pass
+
+    await db.execute(delete(MemoryEntry).filter(MemoryEntry.user_identifier.in_(identities)))
+    await db.execute(delete(DreamLog).filter(DreamLog.user_identifier.in_(identities)))
     await db.commit()
     return {"success": True}
 

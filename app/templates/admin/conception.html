@@ -60,6 +60,16 @@
         position: relative;
     }
 
+    /* --- Layout Management --- */
+    #library-view, #designer-view, #studio-view {
+        display: none;
+    }
+
+    /* Use flex display when NOT hidden for proper structural growth */
+    #library-view:not(.hidden) { display: flex !important; }
+    #designer-view:not(.hidden) { display: flex !important; }
+    #studio-view:not(.hidden) { display: flex !important; }
+
     /* --- VIEW 1: Library Overlay --- */
     #library-view {
         position: absolute;
@@ -67,12 +77,9 @@
         background: #030305;
         z-index: 100;
         padding: 2rem;
-        display: flex;
         flex-direction: column;
         overflow-y: auto;
     }
-    
-    #library-view.hidden { display: none !important; }
 
     .workflow-grid {
         display: grid;
@@ -967,30 +974,38 @@
         });
     };
 
-    window.toggleLibrary = function(forceShowLibrary = false) {
-        const lib = document.getElementById('library-view');
-        const designer = document.getElementById('designer-view');
-        
-        if (forceShowLibrary || lib.classList.contains('hidden')) {
-            // Force Show Library
-            lib.classList.remove('hidden');
-            designer.classList.add('hidden');
-            loadLibrary();
-        } else {
-            // Force Show Designer
-            lib.classList.add('hidden');
-            designer.classList.remove('hidden');
-            setTimeout(() => { if(window.resizeCanvas) window.resizeCanvas(); }, 100);
+    // --- Unified View Controller ---
+    window.switchArchitectView = function(viewName) {
+        const views = {
+            library: document.getElementById('library-view'),
+            designer: document.getElementById('designer-view'),
+            studio: document.getElementById('studio-view')
+        };
+
+        Object.keys(views).forEach(v => {
+            if (v === viewName) {
+                views[v].classList.remove('hidden');
+            } else {
+                views[v].classList.add('hidden');
+            }
+        });
+
+        if (viewName === 'designer') {
+            setTimeout(() => { if(window.resizeCanvas) window.resizeCanvas(); }, 50);
         }
+        if (viewName === 'library') loadLibrary();
+    };
+
+    window.toggleLibrary = function(forceShowLibrary = false) {
+        window.switchArchitectView(forceShowLibrary ? 'library' : 'designer');
     };
 
     window.createNewWorkflow = function(templateType = 'blank') {
         clearGraph();
         
-        if (templateType !== 'blank' && TEMPLATES[templateType]) {
+        if (templateType !== 'blank' && typeof TEMPLATES !== 'undefined' && TEMPLATES[templateType]) {
             try {
                 graph.configure(TEMPLATES[templateType]);
-                // Set a default project name if using template
                 document.getElementById('workflow-name').value = "New " + templateType.charAt(0).toUpperCase() + templateType.slice(1) + " Project";
                 historyStack = [JSON.stringify(graph.serialize())];
             } catch(e) {
@@ -999,9 +1014,7 @@
         }
         
         document.getElementById('new-project-menu').classList.add('hidden');
-        document.getElementById('library-view').classList.add('hidden');
-        document.getElementById('designer-view').classList.remove('hidden');
-        setTimeout(() => { if(window.resizeCanvas) window.resizeCanvas(); }, 100);
+        window.switchArchitectView('designer');
     };
 
     document.addEventListener('click', (e) => {
@@ -1122,17 +1135,8 @@
     window.restoreWorkflowByIndex = (index) => {
         const w = loadedWorkflows[index];
         if (w) {
-            // 1. Load the data
             loadGraph(w.graph, w.name);
-            
-            // 2. Switch Views
-            document.getElementById('library-view').classList.add('hidden');
-            document.getElementById('designer-view').classList.remove('hidden');
-            
-            // 3. Force canvas resize after transition
-            setTimeout(() => {
-                if (window.resizeCanvas) window.resizeCanvas();
-            }, 100);
+            window.switchArchitectView('designer');
         }
     };
 
@@ -1358,20 +1362,12 @@
     };
 
     window.toggleStudio = (show) => {
-        const studio = document.getElementById('studio-view');
-        const designer = document.getElementById('designer-view');
-        const library = document.getElementById('library-view');
-        
         if (show) {
-            studio.classList.remove('hidden');
-            designer.classList.add('hidden');
-            library.classList.add('hidden');
+            window.switchArchitectView('studio');
             if (!jsEditor) initEditors();
             loadCustomNodes();
         } else {
-            studio.classList.add('hidden');
-            designer.classList.remove('hidden');
-            setTimeout(() => { if(window.resizeCanvas) window.resizeCanvas(); }, 100);
+            window.switchArchitectView('designer');
         }
     };
 
@@ -1706,14 +1702,31 @@
         canvas.show_info = false;
         canvas.allow_dragnode_stack = true;
 
-        // 5. Force Initial Size & Ensure Library View
+        // 5. Force Initial Size & Route Injection
         setTimeout(async () => {
             await fetchLibraries();
             await fetchServerTools();
             resizeCanvas();
-            loadWorkflows();
+            
+            // Wait for workflows to load from DB
+            await loadWorkflows();
             loadTemplates();
             fetchServerSkills();
+
+            // Check if we should jump straight to a specific graph
+            const urlParams = new URLSearchParams(window.location.search);
+            const targetName = urlParams.get('name');
+
+            if (targetName) {
+                const w = loadedWorkflows.find(x => x.name === targetName);
+                if (w) {
+                    loadGraph(w.graph, w.name);
+                    window.toggleLibrary(false); // Show designer
+                    return;
+                }
+            }
+            
+            // Default to library if nothing specific requested or found
             window.toggleLibrary(true);
         }, 150);
 

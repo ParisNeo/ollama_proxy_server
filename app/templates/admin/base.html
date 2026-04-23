@@ -1165,6 +1165,193 @@
             });
             agentClose.addEventListener('click', toggleAgent);
 
+            // --- Lollms Universal LCP & Artifact Engine ---
+            window.ArtifactRegistry = {
+                items: new Map(), // key: filename -> {versions: [], type: '', currentIdx: 0}
+                
+                register: function(tag) {
+                    const match = tag.match(/name=["'](.*?)["']/) || tag.match(/title=["'](.*?)["']/);
+                    const name = match ? match[1] : `artifact_${Date.now()}`;
+                    const type = tag.match(/type=["'](.*?)["']/)?.at(1) || 'file';
+                    const path = tag.match(/path=["'](.*?)["']/)?.at(1);
+                    const content = tag.match(/>([\s\S]*?)<\/artifact>/)?.at(1);
+
+                    if (!this.items.has(name)) {
+                        this.items.set(name, { name, type, versions: [], currentIdx: 0 });
+                    }
+                    
+                    const item = this.items.get(name);
+                    const versionData = { 
+                        ts: new Date().toLocaleTimeString(), 
+                        path: path || null, 
+                        content: content || null 
+                    };
+
+                    // Only add if content/path is different from last version (Dedup)
+                    const last = item.versions[item.versions.length - 1];
+                    if (!last || last.content !== versionData.content || last.path !== versionData.path) {
+                        item.versions.push(versionData);
+                        item.currentIdx = item.versions.length - 1;
+                        if (window.showToast) window.showToast(`Artifact Managed: ${name} (v${item.versions.length})`, 'success');
+                    }
+                    return name;
+                },
+
+                getHtml: function(name) {
+                    const item = this.items.get(name);
+                    if (!item) return `<div class="text-red-400">[Artifact ${name} missing]</div>`;
+                    
+                    const ver = item.versions[item.currentIdx];
+                    const vCount = item.versions.length;
+                    
+                    let contentHtml = '';
+                    if (item.type.startsWith('image') && ver.path) {
+                        contentHtml = `<img src="${ver.path}" class="max-w-full rounded-lg border border-white/10 shadow-lg">`;
+                    } else if (ver.path) {
+                        contentHtml = `<div class="flex items-center gap-3 bg-black/40 p-3 rounded-xl border border-white/5">
+                            <svg class="w-8 h-8 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                            <div class="flex-grow min-w-0">
+                                <div class="text-[10px] font-black text-gray-500 uppercase tracking-widest">Linked Asset</div>
+                                <div class="text-xs font-bold text-white truncate">${name}</div>
+                            </div>
+                            <a href="${ver.path}" download class="p-2 bg-indigo-600 rounded-lg text-white hover:bg-indigo-500 transition-all"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg></a>
+                        </div>`;
+                    } else {
+                        contentHtml = `<div class="bg-black/40 p-3 rounded-xl border border-white/5 max-h-40 overflow-y-auto custom-scrollbar font-mono text-[10px] text-emerald-400 whitespace-pre-wrap">${ver.content || '[Empty]'}</div>`;
+                    }
+
+                    return `
+                        <div class="artifact-card my-4 bg-indigo-600/5 border border-indigo-500/20 rounded-2xl overflow-hidden shadow-2xl">
+                            <div class="bg-indigo-600/10 px-4 py-2 flex justify-between items-center border-b border-indigo-500/10">
+                                <div class="flex items-center gap-2">
+                                    <span class="text-[10px] font-black text-indigo-400 uppercase tracking-widest">Artifact: ${item.type}</span>
+                                    ${vCount > 1 ? `<span class="bg-indigo-500 text-white text-[8px] font-black px-1.5 py-0.5 rounded-full">v${item.currentIdx + 1}/${vCount}</span>` : ''}
+                                </div>
+                                <div class="flex gap-2">
+                                    ${vCount > 1 ? `<button onclick="window.ArtifactRegistry.cycle('${name}', -1)" class="p-1 hover:text-white text-gray-500"><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path></svg></button>` : ''}
+                                    ${vCount > 1 ? `<button onclick="window.ArtifactRegistry.cycle('${name}', 1)" class="p-1 hover:text-white text-gray-500"><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg></button>` : ''}
+                                    <button onclick="window.ArtifactRegistry.delete('${name}')" class="p-1 hover:text-red-400 text-gray-500"><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg></button>
+                                </div>
+                            </div>
+                            <div class="p-4">${contentHtml}</div>
+                        </div>`;
+                },
+
+                cycle: function(name, dir) {
+                    const item = this.items.get(name);
+                    item.currentIdx = (item.currentIdx + dir + item.versions.length) % item.versions.length;
+                    if (window.renderCoreChat) window.renderCoreChat();
+                    if (window.renderChat) window.renderChat();
+                },
+
+                delete: function(name) {
+                    if (confirm(`Purge artifact '${name}' from cluster memory?`)) {
+                        this.items.delete(name);
+                        if (window.renderCoreChat) window.renderCoreChat();
+                        if (window.renderChat) window.renderChat();
+                    }
+                }
+            };
+
+            window.LCPProcessor = {
+                langExtMap: {
+                    python: 'py', py: 'py', javascript: 'js', js: 'js', typescript: 'ts',
+                    ts: 'ts', html: 'html', css: 'css', json: 'json', markdown: 'md', md: 'md',
+                    bash: 'sh', sh: 'sh', shell: 'sh', sql: 'sql', yaml: 'yaml', yml: 'yml',
+                    dockerfile: 'Dockerfile', java: 'java', c: 'c', cpp: 'cpp', csharp: 'cs',
+                    go: 'go', rust: 'rs', ruby: 'rb', php: 'php', perl: 'pl', xml: 'xml',
+                    ini: 'ini', toml: 'toml', plaintext: 'txt', text: 'txt', txt: 'txt'
+                },
+
+                render: function(text, contextIdx = null) {
+                    if (!text) return "";
+                    
+                    const protectedBlocks = [];
+                    const placeholderPrefix = `__LCP_PROTECT_${Date.now()}_`;
+                    const protectedText = text.replace(/```[\s\S]*?```/g, (match) => {
+                        protectedBlocks.push(match);
+                        return `${placeholderPrefix}${protectedBlocks.length - 1}__`;
+                    });
+
+                    const lcpRegex = /(<(?:think|thought)>[\s\S]*?<\/(?:think|thought)>|<processing\b[^>]*>[\s\S]*?(?:<\/processing>|$)|<memory[^>]*>[\s\S]*?<\/memory>|<image_artifact[^>]*\/>|<artifact\b[^>]*>[\s\S]*?(?:<\/artifact>|\/>))/g;
+                    const parts = protectedText.split(lcpRegex).filter(Boolean);
+                    let resultHtml = '';
+
+                    for (const part of parts) {
+                        if (part.startsWith('<think') || part.startsWith('<thought')) {
+                            const isClosed = part.endsWith('>') && (part.includes('</think>') || part.includes('</thought>'));
+                            const inner = part.replace(/<\/?thought?>/g, '').trim();
+                            resultHtml += `<details class="think-block my-2" ${isClosed ? '' : 'open'}><summary class="text-[10px] font-black uppercase text-indigo-400 cursor-pointer">Internal Reasoning</summary><div class="p-3 bg-black/20 rounded-lg mt-1 border-l-2 border-indigo-500/30 text-[11px] italic text-gray-400">${marked.parse(inner)}</div></details>`;
+                        }
+                        else if (part.startsWith('<processing')) {
+                            const isClosed = part.includes('</processing>');
+                            const title = part.match(/title=["'](.*?)["']/)?.at(1) || "System Processing";
+                            const inner = part.replace(/<[^>]*>?/g, '').split('\n').filter(l => l.trim());
+                            const status = inner.length > 0 ? inner[inner.length-1].replace(/^\*\s*/, '') : (isClosed ? "Finished" : "Working...");
+                            
+                            html += `<div class="my-3 bg-indigo-600/5 border border-indigo-500/20 rounded-xl overflow-hidden max-w-sm shadow-xl">
+                                <div class="bg-indigo-600/10 px-3 py-2 flex justify-between items-center border-b border-indigo-500/10">
+                                    <div class="flex flex-col min-w-0"><span class="text-[8px] font-black text-indigo-400 uppercase tracking-widest opacity-60">${title}</span><span class="text-[10px] font-bold text-white truncate">${status}</span></div>
+                                    ${isClosed ? '<span class="text-[8px] text-emerald-500 font-bold">DONE</span>' : '<span class="text-[8px] text-amber-500 animate-pulse font-bold">ACTIVE</span>'}
+                                </div>
+                                ${inner.length > 0 ? `<div class="p-2 px-3 font-mono text-[9px] text-gray-400 space-y-1 bg-black/20">${inner.map(l => `<div>• ${l.replace(/^\*\s*/, '')}</div>`).join('')}</div>` : ''}
+                            </div>`;
+                        }
+                        else if (part.startsWith('<memory')) {
+                            const op = part.match(/operation=["'](.*?)["']/)?.at(1) || "update";
+                            const title = part.match(/title=["'](.*?)["']/)?.at(1) || "Fact";
+                            html += `<div class="inline-flex items-center gap-2 px-2 py-1 bg-fuchsia-600/10 border border-fuchsia-500/30 rounded-lg text-[9px] font-black text-fuchsia-400 uppercase tracking-tighter my-1">
+                                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                                Neural Link: ${title}
+                            </div>`;
+                        }
+                        else if (part.startsWith('<artifact')) {
+                            const name = window.ArtifactRegistry.register(part);
+                            html += window.ArtifactRegistry.getHtml(name);
+                        }
+                        else if (part.startsWith('<image_artifact')) {
+                            const src = part.match(/src=["'](.*?)["']/)?.at(1);
+                            html += `<img src="${src}" class="max-w-full h-auto rounded-lg my-2 border border-white/10 shadow-lg cursor-pointer hover:ring-2 ring-indigo-500 transition-all" onclick="openCorePaint('${src}', ${contextIdx})">`;
+                        }
+                        else {
+                            let restoredPart = part;
+                            protectedBlocks.forEach((content, i) => {
+                                restoredPart = restoredPart.replace(`${placeholderPrefix}${i}__`, content);
+                            });
+                            
+                            // Parse Markdown
+                            let parsedMd = marked.parse(restoredPart);
+                            
+                            // Post-process code blocks in the parsed string to add buttons
+                            const tempDiv = document.createElement('div');
+                            tempDiv.innerHTML = parsedMd;
+                            
+                            tempDiv.querySelectorAll('.code-block-wrapper').forEach(wrapper => {
+                                const codeEl = wrapper.querySelector('code');
+                                if (!codeEl) return;
+                                
+                                const lang = [...codeEl.classList].find(c => c.startsWith('language-'))?.replace('language-', '') || '';
+                                
+                                const actions = document.createElement('div');
+                                actions.className = 'playground-code-actions';
+                                actions.innerHTML = `
+                                    <button class="playground-code-btn copy-code-btn" title="Copy code">
+                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
+                                    </button>
+                                    <button class="playground-code-btn save-code-btn" title="Save as file">
+                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                                    </button>
+                                `;
+                                wrapper.appendChild(actions);
+                            });
+                            
+                            resultHtml += tempDiv.innerHTML;
+                        }
+                    }
+                    return resultHtml;
+                }
+            };
+
             window.renderCoreChat = () => {
                 agentMessages.innerHTML = '';
                 if (agentHistory.length === 0) {
@@ -1189,72 +1376,15 @@
                         });
                     } else {
                         rawContent = msg.content || "";
-                    }
-
-                    // --- LCP PROTOCOL PARSER ---
-                    let finalHtml = '';
-                    const lcpRegex = /(<(?:think|thought)>[\s\S]*?<\/(?:think|thought)>|<processing\b[^>]*>[\s\S]*?(?:<\/processing>|$)|<memory[^>]*>[\s\S]*?<\/memory>|<image_artifact[^>]*\/>)/g;
-                    const parts = rawContent.split(lcpRegex).filter(Boolean);
-
-                    for (const part of parts) {
-                        if (part.startsWith('<think') || part.startsWith('<thought')) {
-                            const isClosed = part.endsWith('</think>') || part.endsWith('</thought>');
-                            const tagLen = part.startsWith('<thought') ? 9 : 7;
-                            const endTagLen = part.endsWith('>') ? (part.endsWith('</thought>') ? 10 : 8) : 0;
-                            const inner = isClosed ? part.slice(tagLen, -endTagLen) : part.slice(tagLen);
-                            
-                            finalHtml += `<details class="think-block my-2" ${isClosed ? '' : 'open'}><summary class="text-[10px] font-black uppercase text-indigo-400 cursor-pointer hover:text-indigo-300">Internal Reasoning</summary><div class="p-3 bg-black/20 rounded-lg mt-1 border-l-2 border-indigo-500/30 text-[11px] italic text-gray-400">${marked.parse(inner.trim())}</div></details>`;
-                        } 
-                        else if (part.startsWith('<processing')) {
-                            const isClosed = part.includes('</processing>');
-                            const tagEnd = part.indexOf('>');
-                            let title = "System Processing";
-                            
-                            if (tagEnd !== -1) {
-                                const openTag = part.slice(0, tagEnd + 1);
-                                const titleMatch = openTag.match(/title=["'](.*?)["']/);
-                                if (titleMatch) title = titleMatch[1];
-                            }
-
-                            const blockContent = isClosed 
-                                ? part.slice(tagEnd + 1, part.lastIndexOf('</processing>')) 
-                                : part.slice(tagEnd + 1);
-
-                            const lines = blockContent.split('\n').filter(l => l.trim());
-                            // Use last active step as subtitle if lines exist
-                            const statusText = lines.length > 0 ? lines[lines.length - 1].replace(/^\*\s*/, '').trim() : (isClosed ? "Task Finished" : "Working...");
-                            
-                            const timelineHtml = lines.map(l => `<div class="flex items-start gap-2 mb-1 opacity-80"><div class="mt-1.5 w-1 h-1 rounded-full bg-indigo-500"></div><span>${l.replace(/^\*\s*/, '')}</span></div>`).join('');
-                            
-                            finalHtml += `
-                                <div class="my-3 bg-indigo-600/5 border border-indigo-500/20 rounded-xl overflow-hidden shadow-sm max-w-sm">
-                                    <div class="bg-indigo-600/10 px-3 py-1.5 flex justify-between items-center border-b border-indigo-500/10">
-                                        <div class="flex flex-col min-w-0">
-                                            <span class="text-[8px] font-black text-indigo-400 uppercase tracking-widest opacity-60">${title}</span>
-                                            <span class="text-[10px] font-bold text-white truncate">${statusText}</span>
-                                        </div>
-                                        ${isClosed ? '<span class="text-[8px] text-emerald-500 font-bold ml-2">DONE</span>' : '<span class="text-[8px] text-amber-500 animate-pulse font-bold ml-2">ACTIVE</span>'}
-                                    </div>
-                                    ${timelineHtml ? `<div class="p-2 px-3 font-mono text-[9px] text-gray-400 space-y-1 bg-black/20">${timelineHtml}</div>` : ''}
-                                </div>`;
-                        }
-                        else if (part.startsWith('<memory')) {
-                            const op = part.match(/operation=["'](.*?)["']/)?.at(1) || "update";
-                            const title = part.match(/title=["'](.*?)["']/)?.at(1) || "Fact";
-                            finalHtml += `<div class="inline-flex items-center gap-2 px-2 py-1 bg-fuchsia-600/10 border border-fuchsia-500/30 rounded-lg text-[9px] font-black text-fuchsia-400 uppercase tracking-tighter my-1" title="Memory ${op}: ${title}">
-                                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
-                                Neural Link: ${title}
-                            </div>`;
-                        }
-                        else if (part.startsWith('<image_artifact')) {
-                            const src = part.match(/src=["'](.*?)["']/)?.at(1);
-                            const mIdx = part.match(/index=["'](.*?)["']/)?.at(1);
-                            finalHtml += `<img src="${src}" class="max-w-full h-auto rounded-lg my-2 border border-white/10 shadow-lg cursor-pointer hover:ring-2 ring-indigo-500 transition-all" onclick="openCorePaint('${src}', ${mIdx})">`;
-                        }
-                        else {
-                            finalHtml += marked.parse(part);
+                        // Basic string check for artifacts that contain image URLs
+                        const imgMatch = rawContent.match(/<image_artifact src=["'](.*?)["']/);
+                        if (imgMatch) {
+                            hasImage = true;
+                            lastImageUrl = imgMatch[1];
                         }
                     }
+
+                    const finalHtml = window.LCPProcessor.render(rawContent, idx);
 
                     div.innerHTML = `
                         <div class="message-body text-left whitespace-pre-wrap">${finalHtml}</div>
@@ -1267,6 +1397,10 @@
                         </div>
                     `;
                     agentMessages.appendChild(div);
+                    // Trigger highlighting for newly injected code blocks
+                    div.querySelectorAll('pre code').forEach((block) => {
+                        if (window.hljs) hljs.highlightElement(block);
+                    });
                 });
                 agentMessages.scrollTop = agentMessages.scrollHeight;
             };

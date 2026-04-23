@@ -22,7 +22,7 @@ xhtml2pdf>=0.2.17
 markdown>=3.6
 pipmaster>=1.1.4
 youtube-transcript-api
-safe-store>=0.2.1
+safe-store>=3.4.2
 requests
 defusedxml
 scrapemaster

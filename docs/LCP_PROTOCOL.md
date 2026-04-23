@@ -9,7 +9,7 @@ Used for Chain-of-Thought (COT) or internal brainstorming.
 
 - **Frontend Action**: Renders as a collapsible "Internal Reasoning" block.
 - **Usage**:
-```xml
+```
 <think>
 1. I need to search for the current GPU prices.
 2. I will compare them with last month's data.
@@ -26,7 +26,7 @@ Used to show real-time progress of a multi-step task or node execution.
   - `title`: The name of the process (shown in the header).
 - **Frontend Action**: Renders as a "Terminal Style" timeline box.
 - **Usage**:
-```xml
+```
 <processing title="Cluster Health Audit">
 * Checking Node 1 (RTX 3090)... Online.
 * Verifying Database Integrity... Pass.
@@ -45,7 +45,7 @@ Used when an agent saves or updates information in the user's persistent memory 
   - `importance`: Integer (0-100).
 - **Frontend Action**: Renders as a subtle "Neural Link" badge.
 - **Usage**:
-```xml
+```
 User: My favorite color is indigo.
 AI: Noted. <memory operation="add" title="fav_color" importance="80">User prefers Indigo</memory>
 ```
@@ -56,15 +56,19 @@ AI: Noted. <memory operation="add" title="fav_color" importance="80">User prefer
 Used to present generated assets (images, documents) to the user.
 
 - **Attributes**:
-  - `type`: `file`, `image`, or `diagram`.
-  - `path`: Static URL, a UUID or local filesystem path.
+  - `title`: the artifact title or filename like `document.md`
+  - `type`: `text`, `image`, `video`, or some lollms specific text types: `note`, `skill`, `widget`, `form`.
+  - `path`: Static URL, a UUID or local filesystem path for artifacts that can't be returned as text.
 - **Frontend Action**: Renders as an interactive preview or download button.
 - **Usage**:
-```xml
+```
 I've generated the diagram for you:
 <artifact type="image" path="/static/uploads/diagram_1.png" />
 ```
 
+Artifacts are used for token economy and are managed by the client app or our agent panel or the playground ui. They are mostly useful with agents. Instead of placing artifacts in the core of the messages, we put them in a specific space and we only show the current version of the artifact. for example if we ask to build a document, then we ask it to update that document, the llm issues a artifact upodate tag with aider SEARCH REPLACE format, the agentic system manages updating the artifact and creating a new version. So that in consecutive steps, the llm doesn't see multiple times that document resulting in a reduction of the number of used tokens, a better attention level since we don't have multiple polluting versions and so a better reasoning quality.
+
+The llm always issues the artefacts, but it is up to the client to do the stripping and filling of the artefact in system message. In our system we recognize them but we don't do anything, we let the client manage this. we only manage them in our own  clients (the panel, and the playground)
 ---
 
 ## 5. `<affective_update>` (Relationship Tracking)
@@ -73,6 +77,8 @@ Used by agents to update their internal "emotional" or professional link with th
 - **Attributes**:
   - `value`: A short descriptive state (e.g., "Friendly", "Hostile", "Professional").
 - **Frontend Action**: Updates the Affective Matrix gauge in the dashboard.
-```xml
+```
 <affective_update value="Worship/Respect" />
 ```
+
+## 6. Specific artifacts

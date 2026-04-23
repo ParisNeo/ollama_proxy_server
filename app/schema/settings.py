@@ -105,7 +105,7 @@ class AppSettingsModel(BaseModel):
     enable_sb_mra: bool = True
     routing_weight_priority: float = 1.0
     routing_weight_reliability: float = 2.0
-    routing_weight_ecology: float = 1.5
+    routing_weight_ecology: float = 4.5  # BOOSTED: Significant penalty for resource waste
     routing_weight_semantic: float = 3.0
     
     routing_vectorizer_name: str = "sentense_transformer"

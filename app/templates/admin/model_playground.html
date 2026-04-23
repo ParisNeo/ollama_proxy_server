@@ -474,6 +474,8 @@ SUPPORTED ANNOTATION SCHEMAS:
             reader.onload = e => {
                 if (attachedImages.length < 5) {
                     attachedImages.push(e.target.result);
+                    // Treat as Input Artifact
+                    window.ArtifactRegistry.register(`<artifact name="${file.name}" type="image" path="${e.target.result}"/>`);
                     renderImagePreviews();
                 } else {
                     alert("You can attach a maximum of 5 images.");
@@ -489,6 +491,8 @@ SUPPORTED ANNOTATION SCHEMAS:
             reader.onload = e => {
                 if (attachedDocs.length < 5) {
                     attachedDocs.push({ name: file.name, content: e.target.result });
+                    // Treat as Input Artifact
+                    window.ArtifactRegistry.register(`<artifact name="${file.name}" type="file">${e.target.result}</artifact>`);
                     renderDocPreviews();
                 } else {
                     alert("You can attach a maximum of 5 documents.");
@@ -910,136 +914,24 @@ SUPPORTED ANNOTATION SCHEMAS:
     }
     
     function renderBotMessage(container, rawContent, imageUrlForAnnotation) {
-        const contentString = String(rawContent || '');
         container.dataset.rawContent = rawContent;
+        container.innerHTML = window.LCPProcessor.render(rawContent, imageUrlForAnnotation);
+    }
+    
+    function processAnnotations() {
+        const annotationJson = part.slice(10, -11);
+        const safeJson = annotationJson.replace(/'/g, "&apos;");
 
-        let finalHtml = '';
-
-            const regex = /(<(?:think|thought)>[\s\S]*?<\/(?:think|thought)>|<processing[^>]*>[\s\S]*?(?:<\/processing>|$)|<annotate>[\s\S]*?<\/annotate>|<artifact\s+[^>]*\/>|<artifact\s+[^>]*>.*?<\/artifact>)/g;
-
-        const parts = contentString.split(regex).filter(Boolean);
-
-        for (const part of parts) {
-            if (part.startsWith('<think>') || part.startsWith('<thought>')) {
-                const isClosed = part.endsWith('</think>') || part.endsWith('</thought>');
-                const tagLen = part.startsWith('<thought>') ? 9 : 7;
-                const endTagLen = part.endsWith('</thought>') ? 10 : 8;
-                const blockContent = isClosed ? part.slice(tagLen, -endTagLen) : part.slice(tagLen);
-                const summaryTitle = 'Thoughts';
-
-                if (isClosed) {
-                    finalHtml += `<details class="think-block"><summary>${summaryTitle}</summary><div>${marked.parse(blockContent.trim())}</div></details>`;
-                } else {
-                    finalHtml += `<details class="think-block" open>
-                        <summary class="flex items-center gap-2">
-                            ${summaryTitle}
-                            <svg class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
-                            </svg>
-                        </summary>
-                        <div>${marked.parse(blockContent.trim())}</div>
-                    </details>`;
-                }
-            } else if (part.startsWith('<processing')) {
-                const isClosed = part.includes('</processing>');
-                const tagEnd = part.indexOf('>');
-                let summaryTitle = 'System Processing';
-
-                let blockContent = '';
-                if (tagEnd !== -1) {
-                    const openTag = part.slice(0, tagEnd + 1);
-                    blockContent = isClosed
-                        ? part.slice(tagEnd + 1, part.lastIndexOf('</processing>'))
-                        : part.slice(tagEnd + 1);
-
-                    const titleMatch = openTag.match(/title=["'](.*?)["']/);
-                    if (titleMatch) summaryTitle = titleMatch[1];
-
-                    const lines = blockContent.split('\n').filter(l => l.trim());
-                    if (lines.length > 0) {
-                        summaryTitle = lines[lines.length - 1]
-                            .replace(/^\*\s*/, '')
-                            .replace(/<\/?processing[^>]*>/g, '')
-                            .trim();
-                    }
-                }
-
-                const spinnerSvg = `<svg class="animate-spin h-4 w-4 text-indigo-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>`;
-                const checkSvg = `<svg class="h-4 w-4 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>`;
-
-                const lines = blockContent.split('\n').filter(l => l.trim());
-                // Use the last active step as the "Status" title for the collapsed header
-                if (lines.length > 0) {
-                    summaryTitle = lines[lines.length - 1]
-                        .replace(/^\*\s*/, '')
-                        .replace(/Executing Node:\s*/i, '')
-                        .replace(/\.\.\.$/, '')
-                        .trim();
-                }
-
-                const timelineHtml = lines.map(l => {
-                    let text = l.replace(/^\*\s*/, '').replace(/<\/?processing[^>]*>/g, '').trim();
-                    return `<div class="flex items-start gap-2 mb-1 group/line">
-                        <div class="mt-1.5 w-1.5 h-1.5 rounded-full bg-indigo-500/40 group-last/line:bg-indigo-400 group-last/line:animate-pulse flex-shrink-0"></div>
-                        <span class="text-gray-300 leading-relaxed group-last/line:text-white group-last/line:font-bold">${text}</span>
-                    </div>`;
-                }).join('');
-
-                if (isClosed) {
-                    finalHtml += `<details class="processing-block bg-black/20 border border-white/10 rounded-lg my-3 shadow-sm max-w-lg">
-                        <summary class="flex items-center gap-3 p-2.5 bg-black/40 cursor-pointer hover:bg-white/5">
-                            <div>${checkSvg}</div>
-                            <div class="flex-grow text-xs font-bold text-gray-400 uppercase truncate">${summaryTitle}</div>
-                            <div class="text-[10px] text-gray-600">Done</div>
-                        </summary>
-                        <div class="p-3 text-[11px] font-mono bg-[#050507] border-t border-white/5">
-                            ${timelineHtml || '<span class="text-gray-600 italic">No details.</span>'}
-                        </div>
-                    </details>`;
-                } else {
-                    finalHtml += `<details class="processing-block bg-black/20 border border-white/10 rounded-lg my-3 shadow-sm max-w-lg" open>
-                        <summary class="flex items-center gap-3 p-2.5 bg-black/40 cursor-pointer hover:bg-white/5">
-                            <div>${spinnerSvg}</div>
-                            <div class="flex-grow text-xs font-bold text-indigo-300 uppercase truncate">${summaryTitle}</div>
-                            <div class="text-[10px] text-indigo-400/70">Working...</div>
-                        </summary>
-                        <div class="p-3 text-[11px] font-mono bg-[#050507] border-t border-white/5">
-                            ${timelineHtml || '<span class="text-gray-600 italic">Initializing...</span>'}
-                        </div>
-                    </details>`;
-                }
-            } else if (part.startsWith('<artifact')) {
-                const match = part.match(/path=['"](.*?)['"]/);
-                if (match) {
-                    const filePath = match[1];
-                    const ext = filePath.split('.').pop().toLowerCase();
-                    if (['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(ext)) {
-                        finalHtml += `<div class="mt-2"><img src="${filePath}" class="max-w-sm rounded-lg shadow-md border border-white/10"></div>`;
-                    } else {
-                        finalHtml += `<div class="mt-2"><a href="${filePath}" target="_blank" download class="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600/20 text-indigo-400 border border-indigo-500/30 rounded-lg hover:bg-indigo-600/40 transition-colors"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg> Download ${filePath.split('/').pop()}</a></div>`;
-                    }
-                }
-            } else if (part.startsWith('<annotate>')) {
-                const annotationJson = part.slice(10, -11);
-                const safeJson = annotationJson.replace(/'/g, "&apos;");
-
-                if (!imageUrlForAnnotation) {
-                    finalHtml += `<div class="text-red-400">Error: Could not find an image to annotate for this message.</div>`;
-                } else {
-                    const uniqueId = `annotation-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-                    finalHtml += `<div id="${uniqueId}" class="annotated-image-container relative mt-2 group"
-                        data-annotations='${safeJson}' data-image-url="${imageUrlForAnnotation}">
-                        <img src="${imageUrlForAnnotation}" class="block max-w-full h-auto rounded-md">
-                        <div class="annotation-overlay"></div>
-                    </div>`;
-                }
-            } else {
-                finalHtml += marked.parse(part);
-            }
+        if (!imageUrlForAnnotation) {
+            finalHtml += `<div class="text-red-400">Error: Could not find an image to annotate for this message.</div>`;
+        } else {
+            const uniqueId = `annotation-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+            finalHtml += `<div id="${uniqueId}" class="annotated-image-container relative mt-2 group"
+                data-annotations='${safeJson}' data-image-url="${imageUrlForAnnotation}">
+                <img src="${imageUrlForAnnotation}" class="block max-w-full h-auto rounded-md">
+                <div class="annotation-overlay"></div>
+            </div>`;
         }
-
-        container.innerHTML = finalHtml;
     }
 
     function renderChat() {

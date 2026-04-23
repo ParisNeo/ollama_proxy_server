@@ -391,7 +391,12 @@ details > summary::-webkit-details-marker { display: none; }
     font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace; 
     font-size: 0.85em; 
     color: #818cf8; 
-    white-space: nowrap;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+.prose pre {
+    white-space: pre-wrap;
+    word-break: break-word;
 }
 .prose blockquote { border-left: 4px solid var(--color-primary-500); padding-left: 1rem; font-style: italic; color: #9ca3af; margin: 1rem 0; }
 
@@ -523,6 +528,21 @@ details > summary::-webkit-details-marker { display: none; }
     overflow: hidden;
     line-height: 1.1;
     color: black;
+}
+
+/* --- LCP Artifact Management --- */
+.artifact-card {
+    transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.artifact-card:hover {
+    transform: translateY(-2px);
+    border-color: var(--color-primary-500);
+}
+.artifact-card a:hover {
+    transform: scale(1.1);
+}
+.artifact-card button:active {
+    transform: scale(0.9);
 }
 
 /* --- Playground Code Block Actions --- */

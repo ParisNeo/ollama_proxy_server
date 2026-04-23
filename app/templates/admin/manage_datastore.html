@@ -35,6 +35,21 @@
 
     <!-- VIEW: FILE MANAGER -->
     <div id="ds-view-files" class="space-y-8">
+        <!-- Progress Tracking Overlays -->
+        <div id="upload-progress-overlay" class="hidden card-style bg-indigo-600/5 border border-indigo-500/30 mb-8 animate-in fade-in slide-in-from-top-4">
+            <div class="flex justify-between items-center mb-2">
+                <div class="flex items-center gap-3">
+                    <div id="progress-spinner" class="w-4 h-4 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
+                    <span id="progress-title" class="text-xs font-black text-indigo-400 uppercase tracking-widest">Uploading Batch...</span>
+                </div>
+                <span id="progress-pct" class="text-xs font-mono text-white">0%</span>
+            </div>
+            <div class="h-2 w-full bg-black/40 rounded-full overflow-hidden border border-white/5">
+                <div id="progress-bar-inner" class="h-full bg-indigo-500 transition-all duration-300" style="width: 0%"></div>
+            </div>
+            <div id="progress-subtext" class="mt-2 text-[10px] text-gray-500 uppercase font-bold tracking-tighter">Preparing data packets for cluster transmission...</div>
+        </div>
+
         <!-- GLOBAL INGESTION POLICY -->
         <div class="card-style border-l-4 border-amber-500 bg-amber-500/5">
             <div class="flex justify-between items-center mb-4">
@@ -146,7 +161,16 @@
         </div>
 
         <div class="card-style">
-            <h2 class="card-header text-xl font-bold mb-4">Indexed Documents</h2>
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="card-header text-xl font-bold p-0 border-0">Indexed Documents</h2>
+                <div id="batch-action-bar" class="hidden animate-in fade-in slide-in-from-right-4 flex items-center gap-3">
+                    <span class="text-[10px] font-black text-gray-500 uppercase tracking-widest"><span id="selected-count">0</span> selected</span>
+                    <button onclick="executeBatchDelete()" class="bg-red-600 hover:bg-red-500 text-white px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest shadow-lg shadow-red-900/20 transition-all flex items-center gap-2">
+                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                        Purge Selected
+                    </button>
+                </div>
+            </div>
             <div class="overflow-x-auto min-h-[300px] relative">
                 <!-- Spinner -->
                 <div id="docs-loading-spinner" class="absolute inset-0 bg-black/40 backdrop-blur-sm z-10 flex flex-col items-center justify-center gap-3">
@@ -158,6 +182,9 @@
                 <table class="w-full text-left">
                     <thead>
                         <tr class="text-gray-500 text-xs uppercase border-b border-white/10">
+                            <th class="p-3 w-10">
+                                <input type="checkbox" id="select-all-docs" onchange="toggleSelectAll(this)" class="h-4 w-4 rounded text-indigo-600 bg-black border-white/20">
+                            </th>
                             <th class="p-3">File ID / Path</th>
                             <th class="p-3">Total Chunks</th>
                             <th class="p-3 text-right">Actions</th>
@@ -173,8 +200,8 @@
 
     <!-- VIEW: KNOWLEDGE GRAPH -->
     <div id="ds-view-graph" class="hidden space-y-8">
-        <div class="card-style h-[600px] flex flex-col">
-            <div class="flex justify-between items-center mb-4">
+        <div class="card-style h-[600px] flex flex-col relative overflow-hidden">
+            <div class="flex justify-between items-center mb-4 flex-shrink-0">
                 <h3 class="text-xs font-black text-gray-400 uppercase tracking-widest">Entity Relationship Graph</h3>
                 <form action="{{ url_for('admin_build_datastore_graph', ds_id=datastore.id) }}" method="post" class="flex gap-2">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -182,25 +209,30 @@
                     <button type="submit" class="bg-fuchsia-600 hover:bg-fuchsia-500 px-4 py-2 rounded-lg text-[10px] font-bold uppercase text-white transition-colors">Extract Graph (AI)</button>
                 </form>
             </div>
-            <div id="kg-empty-state" class="hidden absolute inset-0 flex flex-col items-center justify-center bg-black/40 z-10 backdrop-blur-sm">
-                <p class="text-gray-400 italic">No graph data extracted yet. Click 'Extract Graph' to process documents.</p>
+            <div class="flex-grow relative bg-black/20 rounded-xl border border-white/5 overflow-hidden">
+                <div id="kg-empty-state" class="hidden absolute inset-0 flex flex-col items-center justify-center bg-black/60 z-20 backdrop-blur-sm pointer-events-none">
+                    <p class="text-gray-400 italic pointer-events-auto bg-black/40 p-4 rounded-xl border border-white/5">No graph data extracted yet. Click 'Extract Graph' to process documents.</p>
+                </div>
+                <div id="kg-viz-container" class="w-full h-full"></div>
             </div>
-            <div id="kg-viz-container" class="flex-grow bg-black/20 rounded-xl border border-white/5"></div>
         </div>
     </div>
 
     <!-- VIEW: SEMANTIC MAP -->
     <div id="ds-view-map" class="hidden space-y-8">
-        <div class="card-style h-[600px] flex flex-col">
-            <div class="flex justify-between items-center mb-4">
+        <div class="card-style h-[600px] flex flex-col relative overflow-hidden">
+            <div class="flex justify-between items-center mb-4 flex-shrink-0">
                 <h3 class="text-xs font-black text-gray-400 uppercase tracking-widest">Semantic Topology (PCA 2D)</h3>
                 <button onclick="refreshMap(true)" class="bg-sky-600 hover:bg-sky-500 px-4 py-2 rounded-lg text-[10px] font-bold uppercase text-white transition-colors">Regenerate Map</button>
             </div>
-            <div id="map-empty-state" class="hidden absolute inset-0 flex flex-col items-center justify-center bg-black/40 z-10 backdrop-blur-sm">
-                <p class="text-gray-400 italic">No chunks found to map.</p>
-            </div>
             <div class="flex-grow relative">
-                <canvas id="ds-map-canvas"></canvas>
+                <div id="map-empty-state" class="hidden absolute inset-0 flex flex-col items-center justify-center bg-black/80 z-20 backdrop-blur-md pointer-events-none">
+                    <div class="bg-black/60 p-6 rounded-2xl border border-white/10 text-center pointer-events-auto shadow-2xl">
+                        <p class="text-gray-400 italic mb-4">No semantic chunks found to project.</p>
+                        <button onclick="refreshMap(true)" class="bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all shadow-lg">Force Vector Re-Scan</button>
+                    </div>
+                </div>
+                <canvas id="ds-map-canvas" class="w-full h-full"></canvas>
             </div>
         </div>
     </div>
@@ -287,32 +319,63 @@
                 // --- Visual Execution ---
                 const btn = form.querySelector('button[type="submit"]');
                 const originalText = btn.innerText;
+                const overlay = document.getElementById('upload-progress-overlay');
+                const progressBar = document.getElementById('progress-bar-inner');
+                const progressPct = document.getElementById('progress-pct');
+                const progressTitle = document.getElementById('progress-title');
+                const progressSubtext = document.getElementById('progress-subtext');
+
                 btn.disabled = true;
-                btn.innerHTML = `<svg class="animate-spin -ml-1 mr-2 h-3 w-3 text-white inline" viewBox="0 0 24 24">...</svg> STREAMING VALID DATA...`;
-                
-                document.getElementById('ds-console-container').classList.remove('hidden');
+                btn.innerHTML = `<span class="animate-pulse">STAGING...</span>`;
 
-                try {
-                    const response = await fetch(form.action, {
-                        method: 'POST',
-                        body: formData,
-                        headers: { 'X-CSRF-Token': '{{ csrf_token }}' }
-                    });
+                overlay.classList.remove('hidden');
+                progressBar.style.width = '0%';
+                progressPct.innerText = '0%';
+                progressTitle.innerText = "Uploading Batch...";
+                progressSubtext.innerText = `Transferring ${validFiles.length} files to gateway staging area...`;
 
-                    if (response.ok) {
-                        window.showToast(`Successfully dispatched ${validFiles.length} files. Indexing started.`, "success");
-                        // Clear input so user doesn't accidentally double-upload
+                const xhr = new XMLHttpRequest();
+                xhr.open('POST', form.action, true);
+                xhr.setRequestHeader('X-CSRF-Token', '{{ csrf_token }}');
+
+                // Track Physical Upload Progress
+                xhr.upload.onprogress = (ev) => {
+                    if (ev.lengthComputable) {
+                        const percent = Math.round((ev.loaded / ev.total) * 100);
+                        progressBar.style.width = percent + '%';
+                        progressPct.innerText = percent + '%';
+                    }
+                };
+
+                xhr.onload = async () => {
+                    if (xhr.status >= 200 && xhr.status < 300) {
+                        const data = JSON.parse(xhr.responseText);
+                        window.activeBatchId = data.batch_id; // Register for SSE listener
+
+                        progressTitle.innerText = "Ingesting Knowledge...";
+                        progressSubtext.innerText = "Upload complete. AI is now indexing documents in background.";
+                        progressBar.classList.replace('bg-indigo-500', 'bg-teal-500');
+                        document.getElementById('progress-spinner').classList.replace('border-indigo-500', 'border-teal-500');
+
+                        window.showToast(`Batch staged successfully. Indexing ${data.file_count} files.`, "success");
                         fileInput.value = "";
                     } else {
-                        const errData = await response.json();
-                        window.showErrorModal("Ingestion Fault", errData);
+                        const err = JSON.parse(xhr.responseText);
+                        window.showErrorModal("Ingestion Fault", err);
+                        overlay.classList.add('hidden');
                     }
-                } catch (err) {
-                    window.showErrorModal("Network Interruption", { error: err.message });
-                } finally {
                     btn.disabled = false;
                     btn.innerText = originalText;
-                }
+                };
+
+                xhr.onerror = () => {
+                    window.showErrorModal("Network Interruption", { error: "XHR Transfer failed." });
+                    overlay.classList.add('hidden');
+                    btn.disabled = false;
+                    btn.innerText = originalText;
+                };
+
+                xhr.send(formData);
             });
         });
 
@@ -420,8 +483,10 @@
                                     title: (context) => context[0].raw.cluster,
                                     label: (context) => {
                                         const p = context.raw;
+                                        const tags = (p.tags && p.tags.length > 0) ? `🏷️ ${p.tags.join(', ')}` : 'No tags';
                                         return [
                                             `📄 ${p.doc}`,
+                                            tags,
                                             `📝 ${p.preview.substring(0, 80)}...`
                                         ];
                                     }
@@ -438,6 +503,10 @@
                 // Global helper for showing the specific chunk
                 window.showChunkModal = (point) => {
                     const htmlContent = marked.parse(point.preview || "*No text content available.*");
+                    const tagsHtml = (point.tags && point.tags.length > 0) 
+                        ? point.tags.map(t => `<span class="px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 text-[9px] font-black uppercase tracking-tighter">${t}</span>`).join('')
+                        : `<span class="text-[9px] text-gray-600 italic">No tags associated</span>`;
+
                     const modalBody = `
                         <div class="space-y-6 flex flex-col max-h-[80vh]">
                             <div class="flex justify-between items-center bg-black/40 p-3 rounded-xl border border-white/5">
@@ -449,6 +518,11 @@
                                     <span class="text-[9px] font-black text-sky-500 uppercase tracking-widest">Coordinates</span>
                                     <div class="text-xs font-mono text-gray-500">${point.x.toFixed(3)}, ${point.y.toFixed(3)}</div>
                                 </div>
+                            </div>
+
+                            <div class="bg-indigo-600/5 border border-indigo-500/10 p-3 rounded-xl">
+                                <div class="text-[8px] font-black text-gray-500 uppercase tracking-widest mb-2 px-1">Semantic Associations (Tags)</div>
+                                <div class="flex flex-wrap gap-2">${tagsHtml}</div>
                             </div>
 
                             <div class="flex-grow overflow-hidden flex flex-col border border-white/5 rounded-xl bg-black/20">
@@ -543,7 +617,7 @@
         window.viewDocument = async function(filePath) {
             const url = `/admin/datastores/${currentDsId}/view_doc?file_path=${encodeURIComponent(filePath)}`;
             window.showModal("Analyzing Structure...", '<div class="p-10 text-center animate-pulse text-teal-500 font-bold">Computing semantic topology and fetching chunks...</div>');
-            
+
             try {
                 const resp = await fetch(url);
                 const data = await resp.json();
@@ -552,10 +626,34 @@
                     return;
                 }
 
-                const htmlContent = marked.parse(data.content || "*No content found.*");
-                
+                // --- AI METADATA PARSING ---
+                let mainContent = data.content || "";
+                let aiMetadata = null;
+
+                // Improved Lenient Regex to find [Context: ...] prefix
+                // Handles missing double-newlines or varying whitespace
+                const metaMatch = mainContent.match(/^\[Context:\s*(.*?)\]\s*\n*/s);
+                if (metaMatch && metaMatch[1].trim().length > 0) {
+                    aiMetadata = metaMatch[1].trim();
+                    // Strip the entire matched block from the start of the body
+                    mainContent = mainContent.substring(metaMatch[0].length).trim();
+                }
+
+                const htmlContent = marked.parse(mainContent || "*No content found.*");
+
                 const modalBody = `
                     <div class="space-y-6 flex flex-col max-h-[80vh]">
+                        <!-- AI Metadata Insight (Conditional) -->
+                        ${aiMetadata ? `
+                        <div class="bg-purple-600/10 border border-purple-500/30 rounded-xl p-4 shadow-lg animate-in fade-in slide-in-from-top-2">
+                            <div class="flex items-center gap-2 mb-2">
+                                <svg class="w-4 h-4 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"></path></svg>
+                                <span class="text-[10px] font-black text-purple-400 uppercase tracking-widest">AI Cohesion Metadata</span>
+                            </div>
+                            <p class="text-xs text-indigo-100 font-medium leading-relaxed">${aiMetadata}</p>
+                        </div>
+                        ` : ''}
+
                         <!-- Info Header -->
                         <div class="flex justify-between items-center bg-black/40 p-3 rounded-xl border border-white/5">
                             <div class="flex flex-col">
@@ -662,6 +760,28 @@
         const evtSource = new EventSource("{{ url_for('sse_events') }}");
         evtSource.onmessage = (e) => {
             const msg = JSON.parse(e.data);
+
+            // Catch Batch Upload Events
+            if (window.activeBatchId && msg.id === window.activeBatchId) {
+                const progressBar = document.getElementById('progress-bar-inner');
+                const progressPct = document.getElementById('progress-pct');
+                const progressSubtext = document.getElementById('progress-subtext');
+
+                if (msg.tokens !== undefined) {
+                    progressBar.style.width = msg.tokens + '%';
+                    progressPct.innerText = msg.tokens + '%';
+                }
+                if (msg.error) progressSubtext.innerText = msg.error;
+
+                if (msg.type === 'completed') {
+                    window.activeBatchId = null;
+                    setTimeout(() => {
+                        document.getElementById('upload-progress-overlay').classList.add('hidden');
+                        window.location.reload();
+                    }, 3000);
+                }
+            }
+
             if (msg.id === `sys_ds_${currentDsId}` || msg.id === `sys_ds_graph_${currentDsId}`) {
                 let color = (msg.type === 'error') ? 'text-red-400 font-bold' : (msg.type === 'completed' ? 'text-green-400 font-bold' : 'text-teal-200');
                 if (msg.error) logToConsole(msg.error, color);
@@ -740,18 +860,35 @@
         function renderDocuments(docs) {
             const tbody = document.getElementById('docs-tbody');
             if (!docs || docs.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="3" class="p-10 text-center text-gray-500 italic">No documents indexed in this store yet.</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="4" class="p-10 text-center text-gray-500 italic">No documents indexed in this store yet.</td></tr>';
                 return;
             }
 
             tbody.innerHTML = docs.map(doc => {
-                // Escape quotes for the data attribute
                 const safePath = doc.file_path.replace(/"/g, '&quot;');
-                
+                const ext = doc.file_path.split('.').pop().toUpperCase();
+
+                // Choose badge color based on extension
+                const colors = { 
+                    'PDF': 'red', 'PY': 'emerald', 'JS': 'amber', 'MD': 'indigo', 'TXT': 'gray', 'DOCX': 'blue' 
+                };
+                const color = colors[ext] || 'gray';
+
                 return `
-                <tr>
-                    <td class="p-3 text-xs font-mono text-indigo-300 truncate max-w-md" title="${doc.file_path}">${doc.file_path}</td>
-                    <td class="p-3 text-xs text-gray-400">${doc.chunk_count || 'N/A'}</td>
+                <tr class="group hover:bg-white/5 transition-all">
+                    <td class="p-3">
+                        <input type="checkbox" class="doc-checkbox h-4 w-4 rounded text-indigo-600 bg-black border-white/20" 
+                               onchange="updateSelectionUI()" value="${safePath}">
+                    </td>
+                    <td class="p-3">
+                        <div class="flex items-center gap-3">
+                            <span class="px-2 py-0.5 rounded bg-${color}-500/10 text-${color}-400 text-[9px] font-black border border-${color}-500/20 w-12 text-center">${ext}</span>
+                            <span class="text-xs font-mono text-indigo-300 truncate max-w-md" title="${doc.file_path}">${doc.file_path}</span>
+                        </div>
+                    </td>
+                    <td class="p-3 text-xs">
+                        <span class="px-2 py-0.5 rounded bg-black/40 text-gray-300 font-black border border-white/5 group-hover:border-teal-500/30 transition-colors">${doc.chunk_count}</span>
+                    </td>
                     <td class="p-3 text-right">
                         <div class="flex justify-end gap-3">
                             <button 
@@ -771,6 +908,52 @@
             `;
             }).join('');
         }
+
+        window.toggleSelectAll = (el) => {
+            document.querySelectorAll('.doc-checkbox').forEach(cb => cb.checked = el.checked);
+            updateSelectionUI();
+        };
+
+        window.updateSelectionUI = () => {
+            const checked = document.querySelectorAll('.doc-checkbox:checked');
+            const bar = document.getElementById('batch-action-bar');
+            const count = document.getElementById('selected-count');
+
+            if (checked.length > 0) {
+                bar.classList.remove('hidden');
+                count.innerText = checked.length;
+            } else {
+                bar.classList.add('hidden');
+                document.getElementById('select-all-docs').checked = false;
+            }
+        };
+
+        window.executeBatchDelete = async () => {
+            const selected = Array.from(document.querySelectorAll('.doc-checkbox:checked')).map(cb => cb.value);
+            if (!confirm(`Permanently purge all fragments for ${selected.length} files from the cluster index?`)) return;
+
+            const btn = document.getElementById('batch-action-bar').querySelector('button');
+            btn.disabled = true;
+            btn.innerHTML = `<svg class="animate-spin h-3 w-3 text-white inline" viewBox="0 0 24 24">...</svg> PURGING...`;
+
+            try {
+                const resp = await fetch(`/admin/datastores/${currentDsId}/batch_delete`, {
+                    method: 'POST',
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'X-CSRF-Token': '{{ csrf_token }}'
+                    },
+                    body: JSON.stringify({ file_paths: selected })
+                });
+                if (resp.ok) {
+                    window.showToast("Batch deletion successful.", "success");
+                    setTimeout(() => window.location.reload(), 1000);
+                }
+            } catch(e) { 
+                window.showErrorModal("Batch Action Failed", { error: e.message }); 
+                btn.disabled = false;
+            }
+        };
 
         bootEngine();
     })();    

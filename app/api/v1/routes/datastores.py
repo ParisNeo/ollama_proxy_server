@@ -5,7 +5,7 @@ import logging
 import asyncio
 from pathlib import Path
 from typing import List, Optional
-from fastapi import APIRouter, Depends, Request, Form, UploadFile, File, HTTPException
+from fastapi import APIRouter, Depends, Request, Form, UploadFile, File, HTTPException, BackgroundTasks
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -18,9 +18,7 @@ from app.api.v1.routes.admin import require_admin_user, get_template_context, te
 from app.api.v1.dependencies import validate_csrf_token
 from app.core.events import event_manager, ProxyEvent
 from ascii_colors import trace_exception
-from typing import List
-import asyncio
-
+import re
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -210,24 +208,52 @@ async def admin_boot_datastore(ds_id: int, request: Request, db: AsyncSession = 
 
     def _initialize_and_list():
         import pipmaster as pm
+        import sqlite3
         pm.ensure_packages(["safe-store"])
         from safe_store import SafeStore
         
         v_key = VECTORIZER_MAP.get(v_name, v_name)
-        logger.info(f"Booting SafeStore: {store_name} with binding: {v_key}")
+        s = SafeStore(db_path=db_path, vectorizer_name=v_key, vectorizer_config=v_config)
         
-        s = SafeStore(
-            db_path=db_path, 
-            vectorizer_name=v_key, 
-            vectorizer_config=v_config
-        )
-        
+        # 1. Resilient Path Signature Mapping
+        # We normalize all paths to forward-slashes and identify files by their 
+        # last two path segments to prevent collisions and handle absolute/relative mismatches.
+        def get_sig(p):
+            if not p: return ""
+            parts = p.replace('\\', '/').lower().strip('/').split('/')
+            # Use last two parts (e.g. 'folder/file.md') or just filename if root
+            return "/".join(parts[-2:]) if len(parts) >= 2 else parts[-1]
+
+        counts_map = {}
+        try:
+            conn = sqlite3.connect(db_path)
+            cursor = conn.cursor()
+            cursor.execute("SELECT document_title, COUNT(*) FROM chunks GROUP BY document_title")
+            for row in cursor.fetchall():
+                sig = get_sig(row[0])
+                counts_map[sig] = counts_map.get(sig, 0) + row[1]
+            conn.close()
+        except Exception as e:
+            logger.warning(f"SQL Count error: {e}")
+
+        # 2. Map counts back to the SafeStore registry
         with s:
             docs = s.list_documents() if hasattr(s, "list_documents") else s.get_documents()
             if not docs: return []
-            if isinstance(docs[0], str):
-                return [{"file_path": d, "chunk_count": "N/A"} for d in docs]
-            return docs
+
+            result = []
+            for d in docs:
+                path = d if isinstance(d, str) else d.get('file_path')
+                sig = get_sig(path)
+
+                # Check for match in our signature map
+                real_count = counts_map.get(sig, 0)
+
+                result.append({
+                    "file_path": path,
+                    "chunk_count": real_count
+                })
+            return result
 
     try:
         docs = await run_in_threadpool(_initialize_and_list)
@@ -239,36 +265,52 @@ async def admin_boot_datastore(ds_id: int, request: Request, db: AsyncSession = 
 async def _get_file_ai_metadata(request: Request, db: AsyncSession, content: str, agent_name: str, sender: str) -> str:
     """Uses the management agent to generate a summary for cohesion."""
     from app.api.v1.routes.proxy import _resolve_target, _reverse_proxy
-    
+
+    # Improved Prompt for better AI adherence
     prompt = (
-        "Analyze this first part of a document. Provide a very concise one-sentence contextual summary. "
-        "This summary will be added to every chunk to maintain cohesion during RAG retrieval. Output ONLY the summary text.\n\n"
-        f"CONTENT:\n{content[:2000]}"
+        "TASK: Provide a ultra-concise, one-sentence high-level summary of this document excerpt. "
+        "Goal: This summary will act as a 'cohesion anchor' for semantic search. "
+        "STRICT: Output only the summary. Do not use 'Here is a summary' or 'This document is...'.\n\n"
+        f"EXCERPT:\n{content[:3000]}"
     )
-    
+
     try:
         req_id = f"sys_ds_meta_{secrets.token_hex(4)}"
-        # Resolve to physical model
+        logger.info(f"AI Metadata: Requesting summary via agent '{agent_name}'...")
+
         resolution = await _resolve_target(db, agent_name, [{"role": "user", "content": prompt}], request_id=req_id, sender=sender)
         real_model, final_msgs = resolution
-        
+
         servers = await server_crud.get_servers_with_model(db, real_model)
-        if not servers: return ""
-        
-        resp, _ = await _reverse_proxy(request, "chat", servers, json.dumps({"model": real_model, "messages": final_msgs, "stream": False}).encode(), is_subrequest=True, request_id=req_id, model=real_model, sender=sender)
+        if not servers: 
+            logger.warning(f"AI Metadata: No compute nodes available for {real_model}")
+            return ""
+
+        # Increase timeout for complex document analysis
+        resp, _ = await _reverse_proxy(
+            request, "chat", servers, 
+            json.dumps({"model": real_model, "messages": final_msgs, "stream": False}).encode(), 
+            is_subrequest=True, request_id=req_id, model=real_model, sender=sender
+        )
+
         if hasattr(resp, 'body'):
             data = json.loads(resp.body.decode())
-            return data.get("message", {}).get("content", "").strip()
+            summary = data.get("message", {}).get("content", "").strip()
+            if summary:
+                logger.info(f"AI Metadata: Successfully generated summary: {summary[:50]}...")
+                return summary
     except Exception as e:
-        logger.warning(f"AI Metadata generation skipped: {e}")
+        logger.error(f"AI Metadata Generation Failed: {e}")
     return ""
 
-async def _ingest_document_logic(request, db, ds, file_path, use_ai, admin_user, is_upload=False):
+async def _ingest_document_logic(request, db, ds, file_path, use_ai, admin_user, is_upload=False, upload_id_override=None):
     """Internal shared logic for file ingestion with AI metadata support."""
     from app.core.events import event_manager, ProxyEvent
 
     task_id = f"sys_ds_{ds.id}"
-    fname = os.path.basename(file_path)
+    # Normalize ID to use Forward Slashes only for DB consistency
+    # This prevents Windows backslashes from breaking the signature mapping
+    doc_identifier = (upload_id_override if upload_id_override else os.path.basename(file_path)).replace('\\', '/')
 
     v_key = VECTORIZER_MAP.get(ds.vectorizer_name, "st")
     event_manager.emit(ProxyEvent("active", task_id, "Datastore", "Local", admin_user.username, error_message=f"Processing {fname}..."))
@@ -303,84 +345,155 @@ async def _ingest_document_logic(request, db, ds, file_path, use_ai, admin_user,
     def _sync_store_op():
         pca_file = Path(ds.db_path).with_suffix(".pca.json")
         if pca_file.exists():
-            try:
-                os.remove(pca_file)
+            try: os.remove(pca_file)
             except: pass
 
         import pipmaster as pm
+        import sqlite3
         pm.ensure_packages(["safe-store"])
         from safe_store import SafeStore
 
-        s = SafeStore(
-            db_path=ds.db_path,
-            vectorizer_name=v_key,
-            vectorizer_config=ds.vectorizer_config or {},
-            chunking_strategy=ds.chunking_strategy,
-            chunk_size=ds.chunk_size,
-            chunk_overlap=ds.chunk_overlap
-        )
+        try:
+            s = SafeStore(
+                db_path=ds.db_path,
+                vectorizer_name=v_key,
+                vectorizer_config=ds.vectorizer_config or {},
+                chunking_strategy=ds.chunking_strategy,
+                chunk_size=ds.chunk_size,
+                chunk_overlap=ds.chunk_overlap
+            )
 
-        with s:
-            # If we have extracted text or AI prefix, use text-based indexing (add_text)
-            # to ensure the 'unique_id' is the filename, preventing "file not found" errors
-            # after the temporary upload file is deleted.
-            if extracted_text is not None or ai_prefix:
-                full_text = ai_prefix + (extracted_text or "")
-                # API check: unique_id is the first positional or kwarg 'unique_id'
-                s.add_text(unique_id=fname, text=full_text, force_reindex=True)
+            with s:
+                if extracted_text is not None or ai_prefix:
+                    full_text = ai_prefix + (extracted_text or "")
+                    s.add_text(unique_id=doc_identifier, text=full_text, force_reindex=True)
+                else:
+                    s.add_document(file_path, force_reindex=True)
+
+            # VERIFICATION: Check if chunks were actually created
+            conn = sqlite3.connect(ds.db_path)
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM chunks WHERE document_title = ?", (doc_identifier,))
+            count = cursor.fetchone()[0]
+            conn.close()
+
+            if count == 0:
+                err = f"Failed to generate semantic fragments for '{fname}'. The file might be empty or vectorization failed."
+                logger.error(err)
+                event_manager.emit(ProxyEvent("error", task_id, "Datastore", "Local", admin_user.username, error_message=err))
             else:
-                # Direct file path indexing for local folders
-                s.add_document(file_path, force_reindex=True)
+                logger.info(f"Successfully indexed {count} chunks for {doc_identifier}")
+
+        except Exception as e:
+            err_msg = f"SafeStore Ingestion Error: {str(e)}"
+            logger.error(err_msg)
+            event_manager.emit(ProxyEvent("error", task_id, "Datastore", "Local", admin_user.username, error_message=err_msg))
+            raise
 
     await run_in_threadpool(_sync_store_op)
             
     event_manager.emit(ProxyEvent("completed", task_id, "Datastore", "Local", admin_user.username, error_message=f"Finished indexing: {fname}"))
 
-@router.post("/datastores/{ds_id}/upload", name="admin_upload_datastore", dependencies=[Depends(validate_csrf_token)])
+@router.post("/datastores/{ds_id}/upload", name="admin_upload_datastore")
 async def admin_upload_datastore(
-    ds_id: int, request: Request, 
+    ds_id: int, 
+    request: Request, 
+    background_tasks: BackgroundTasks,
     files: List[UploadFile] = File(...), 
     use_ai_metadata: bool = Form(False),
     extensions: Optional[str] = Form(None),
     db: AsyncSession = Depends(get_db),
     admin_user: User = Depends(require_admin_user)
 ):
+    """
+    Asynchronous batch upload. 
+    Saves files to a temporary staging area and delegates processing to a background task.
+    """
+    # CSRF Check for AJAX
+    from app.api.v1.dependencies import validate_csrf_token_header
+    if not await validate_csrf_token_header(request, request.headers.get("X-CSRF-Token")):
+         raise HTTPException(status_code=403, detail="CSRF mismatch")
+
     ds = await db.get(DataStore, ds_id)
     if not ds: raise HTTPException(status_code=404)
-    
-    UPLOADS_TEMP_DIR.mkdir(parents=True, exist_ok=True)
-    
+
+    batch_id = f"upload_batch_{secrets.token_hex(4)}"
+    staging_dir = UPLOADS_TEMP_DIR / batch_id
+    staging_dir.mkdir(parents=True, exist_ok=True)
+
     allowed_exts = [e.strip().lower() for e in extensions.split(",")] if extensions else []
-    
-    # Process each file in the batch
+    staged_files = []
+
+    # 1. Physical Upload Phase (Fast) - Preserving Relative Paths
     for file in files:
         if not file.filename: continue
-        
-        # Filter by master extension list
+
         ext = "." + file.filename.split(".")[-1].lower()
         if allowed_exts and ext not in allowed_exts:
-            logger.debug(f"Datastore: Skipping {file.filename} (Type {ext} not in filter)")
             continue
 
-        # Security: Clean filename to prevent path injection
-        safe_name = os.path.basename(file.filename)
-        temp_path = UPLOADS_TEMP_DIR / safe_name
-        
+        # SECURITY: Sanitize the relative path to prevent traversal
+        # We strip leading slashes and '..' sequences
+        clean_rel_path = re.sub(r'\.\.[\\/]', '', file.filename.lstrip('/\\'))
+        temp_path = staging_dir / clean_rel_path
+
+        # Create subdirectories if they exist in the upload
+        temp_path.parent.mkdir(parents=True, exist_ok=True)
+
         content = await file.read()
         with open(temp_path, "wb") as f:
             f.write(content)
-                
-        try:
-            # Flag this as an upload so basename is used as ID
-            await _ingest_document_logic(request, db, ds, str(temp_path), use_ai_metadata, admin_user, is_upload=True)
-        except Exception as e:
-            logger.error(f"Upload failed for {safe_name}: {e}")
-            flash(request, f"Error indexing {safe_name}: {e}", "error")
-        finally:
-            if temp_path.exists(): os.remove(temp_path)
-            
-    flash(request, f"Batch processing of {len(files)} items complete.", "success")
-    return RedirectResponse(url=request.url_for("admin_manage_datastore", ds_id=ds.id), status_code=303)
+
+        staged_files.append(str(temp_path))
+
+    if not staged_files:
+        return JSONResponse({"success": False, "error": "No valid files found in the batch after filtering."}, status_code=400)
+
+    # 2. Background Processing Task
+    async def process_batch_upload():
+        from app.database.session import AsyncSessionLocal
+        from app.core.events import event_manager, ProxyEvent
+
+        total = len(staged_files)
+        event_manager.emit(ProxyEvent("received", batch_id, ds.name, "Local", admin_user.username, error_message=f"Starting batch ingestion ({total} files)..."))
+
+        async with AsyncSessionLocal() as bg_db:
+            bg_ds = await bg_db.get(DataStore, ds_id)
+            for idx, file_path in enumerate(staged_files):
+                # Calculate the original relative path for the ID (e.g. 'folder/file.md')
+                # rather than just the basename.
+                rel_id = os.path.relpath(file_path, str(staging_dir))
+
+                progress = int(((idx + 1) / total) * 100)
+
+                event_manager.emit(ProxyEvent(
+                    "active", batch_id, ds.name, "Local", admin_user.username, 
+                    error_message=f"Indexing ({idx+1}/{total}): {rel_id}",
+                    token_count=progress
+                ))
+
+                try:
+                    # Pass rel_id as the override for is_upload mode
+                    await _ingest_document_logic(request, bg_db, bg_ds, file_path, use_ai_metadata, admin_user, is_upload=True, upload_id_override=rel_id)
+                except Exception as e:
+                    logger.error(f"Batch Item Failed: {fname} - {e}")
+                finally:
+                    if os.path.exists(file_path): os.remove(file_path)
+
+        # Cleanup staging dir
+        try: shutil.rmtree(str(staging_dir))
+        except: pass
+
+        event_manager.emit(ProxyEvent("completed", batch_id, ds.name, "Local", admin_user.username, error_message=f"Batch processed: {total} items indexed successfully.", token_count=100))
+
+    background_tasks.add_task(process_batch_upload)
+
+    return {
+        "success": True, 
+        "batch_id": batch_id, 
+        "file_count": len(staged_files),
+        "message": f"Successfully uploaded {len(staged_files)} files. Ingestion is running in background."
+    }
 
 
 @router.post("/datastores/{ds_id}/add_folder", name="admin_add_folder_datastore", dependencies=[Depends(validate_csrf_token)])
@@ -547,39 +660,80 @@ async def admin_get_datastore_map(ds_id: int, force: str = "0", db: AsyncSession
     pca_file = Path(ds.db_path).with_suffix(".pca.json")
 
     def _fetch_map():
-        if force == "1" and pca_file.exists():
-            try: os.remove(pca_file)
-            except: pass
-
+        # --- CACHE REPAIR LOGIC ---
         if pca_file.exists():
+            should_purge = (force == "1")
             try:
                 with open(pca_file, "r") as f:
-                    return json.load(f)
-            except:
-                pass
+                    cached_data = json.load(f)
+                    # If any point is missing text, the entire cache is corrupted/stale
+                    if not cached_data or (len(cached_data) > 0 and not cached_data[0].get('chunk_text')):
+                        logger.warning(f"Map Cache for {ds.name} is missing text. Purging.")
+                        should_purge = True
+
+                    if not should_purge:
+                        return cached_data
+            except: 
+                should_purge = True
+
+            if should_purge:
+                try: os.remove(pca_file)
+                except: pass
         
         import pipmaster as pm
+        import sqlite3
         pm.ensure_packages(["safe-store"])
         from safe_store import SafeStore
         v_key = VECTORIZER_MAP.get(ds.vectorizer_name, ds.vectorizer_name)
         s = SafeStore(db_path=ds.db_path, vectorizer_name=v_key, vectorizer_config=ds.vectorizer_config or {})
         
-        points =[]
+        points = []
         try:
             with s:
+                # 1. Get raw PCA coordinates
                 all_points = s.export_point_cloud(output_format='dict')
-                for p in all_points:
+                if not all_points: return []
+
+                # 2. Direct DB Fetch to get the text and tags
+                # We fetch by ID to ensure perfect sequence alignment with SafeStore's internal ordering
+                conn = sqlite3.connect(ds.db_path)
+                cursor = conn.cursor()
+                cursor.execute("SELECT chunk_text, metadata FROM chunks ORDER BY id ASC")
+                db_rows = cursor.fetchall()
+                conn.close()
+
+                # 3. Synchronized Merge
+                # We use the length of the coordinate set as the master loop
+                for i, p in enumerate(all_points):
+                    text_content = ""
+                    tags = []
+
+                    if i < len(db_rows):
+                        # Safely extract text from the row tuple
+                        text_content = str(db_rows[i][0]) if db_rows[i][0] else ""
+                        try:
+                            # Safely parse JSON metadata
+                            meta_json = db_rows[i][1]
+                            meta = json.loads(meta_json) if meta_json else {}
+                            tags = meta.get("tags", [])
+                        except:
+                            pass
+
+                    # Only add if we have valid coordinates AND text
+                    # If text is missing, we use a placeholder to avoid empty points
                     points.append({
-                        "x": p['x'],
-                        "y": p['y'],
-                        "document_title": p.get('document_title', 'Unknown'),
-                        "chunk_text": p.get('chunk_text', '')
+                        "x": float(p['x']),
+                        "y": float(p['y']),
+                        "document_title": str(p.get('document_title', 'Unknown')),
+                        "chunk_text": text_content or "[No Text Recovered]",
+                        "tags": tags
                     })
                     
-            with open(pca_file, "w") as f:
-                json.dump(points, f)
+            if points:
+                with open(pca_file, "w") as f:
+                    json.dump(points, f)
         except Exception as e:
-            logger.error(f"Error exporting point cloud: {e}")
+            logger.error(f"Error generating semantic map: {e}")
             
         return points
 
@@ -617,29 +771,63 @@ async def admin_get_datastore_graph(ds_id: int, db: AsyncSession = Depends(get_d
 async def admin_delete_datastore_doc(ds_id: int, request: Request, file_path: str = Form(...), db: AsyncSession = Depends(get_db)):
     ds = await db.get(DataStore, ds_id)
     if not ds: raise HTTPException(status_code=404)
-    
+
     def _del_doc():
         pca_file = Path(ds.db_path).with_suffix(".pca.json")
         if pca_file.exists():
-            try:
-                os.remove(pca_file)
+            try: os.remove(pca_file)
             except: pass
 
-        import pipmaster as pm
-        pm.ensure_packages(["safe-store"])
         from safe_store import SafeStore
         s = SafeStore(db_path=ds.db_path, vectorizer_name=ds.vectorizer_name, vectorizer_config=ds.vectorizer_config or {})
         with s:
             s.delete_document_by_path(file_path)
-                
+
     try:
         await run_in_threadpool(_del_doc)
         flash(request, "Document removed from datastore.", "success")
     except Exception as e:
         logger.error(f"Delete doc error: {e}")
         flash(request, f"Error removing document: {e}", "error")
-        
+
     return RedirectResponse(url=request.url_for("admin_manage_datastore", ds_id=ds.id), status_code=303)
+
+@router.post("/datastores/{ds_id}/batch_delete", name="admin_batch_delete_docs")
+async def admin_batch_delete_docs(
+    ds_id: int, 
+    request: Request, 
+    db: AsyncSession = Depends(get_db),
+    admin_user: User = Depends(require_admin_user)
+):
+    """Bulk deletion of indexed files."""
+    from app.api.v1.dependencies import validate_csrf_token_header
+    if not await validate_csrf_token_header(request, request.headers.get("X-CSRF-Token")):
+         return JSONResponse({"error": "CSRF mismatch"}, status_code=403)
+
+    data = await request.json()
+    file_paths = data.get("file_paths", [])
+    if not file_paths: return {"success": True, "count": 0}
+
+    ds = await db.get(DataStore, ds_id)
+    if not ds: raise HTTPException(status_code=404)
+
+    def _bulk_delete():
+        # Clear PCA cache
+        pca_file = Path(ds.db_path).with_suffix(".pca.json")
+        if pca_file.exists():
+            try: os.remove(pca_file)
+            except: pass
+
+        from safe_store import SafeStore
+        s = SafeStore(db_path=ds.db_path, vectorizer_name=ds.vectorizer_name, vectorizer_config=ds.vectorizer_config or {})
+        with s:
+            for path in file_paths:
+                try: s.delete_document_by_path(path)
+                except: pass
+        return len(file_paths)
+
+    count = await run_in_threadpool(_bulk_delete)
+    return {"success": True, "count": count}
 
 @router.get("/datastores/{ds_id}/view_doc", name="admin_view_datastore_doc")
 async def admin_view_datastore_doc(ds_id: int, file_path: str, request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
@@ -657,20 +845,15 @@ async def admin_view_datastore_doc(ds_id: int, file_path: str, request: Request,
         chunk_count = 0
         
         with s:
-            # 1. Verify existence
-            docs = s.list_documents()
-            doc_found = False
-            for d in docs:
-                d_path = d['file_path'] if isinstance(d, dict) else d
-                if d_path == file_path:
-                    doc_found = True
-                    break
-            
-            if not doc_found:
-                return {"error": f"Document '{file_path}' not found in storage index."}
-
-            # 2. Reconstruct text using official API
+            # 1. Reconstruct text using official API
             full_text = s.reconstruct_document_text(file_path)
+
+            if not full_text:
+                # Fallback: SafeStore might be using just the basename as ID
+                basename = os.path.basename(file_path)
+                full_text = s.reconstruct_document_text(basename)
+                if not full_text:
+                    return {"error": f"Document content not found for identifier: {file_path}"}
             
             # 3. Get visualization points using official export_point_cloud API
             # This method already performs PCA/Dimensionality reduction internally.
