@@ -6,6 +6,7 @@ LoLLMs Hub is a secure, high-performance orchestration layer that unifies dispar
 
 LoLLMs Hub is designed for extreme scale and flexibility. It treats different inference engines as swappable compute nodes:
 *   **Ollama**: Native support for local model management and serving.
+*   **llmman**: [llmman](https://github.com/llmmanorg/llmman) serves the Ollama API on port 17434; add it as an `Ollama (Local)` server with URL `http://127.0.0.1:17434`.
 *   **vLLM**: High-throughput serving for production-grade LLM clusters.
 *   **llama.cpp**: Lightweight, GGUF-based local serving via the internal Binary Hub.
 *   **OpenAI-Compatible APIs**: Seamlessly proxy and load-balance cloud providers.
